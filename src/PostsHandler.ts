@@ -20,6 +20,12 @@ const toApiPost = (row: typeof posts.$inferSelect) => ({
   updatedAt: row.updatedAt.getTime(),
 });
 
+// Admins can edit/delete any post; everyone else only their own.
+const canModify = (
+  currentUser: { readonly id: number; readonly role: string },
+  post: { readonly authorId: number },
+): boolean => currentUser.role === "admin" || post.authorId === currentUser.id;
+
 const getPostOr404 = (id: number) =>
   Effect.gen(function* () {
     const db = yield* Db;
@@ -101,7 +107,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const existing = yield* getPostOr404(id);
-          if (existing.authorId !== currentUser.id)
+          if (!canModify(currentUser, existing))
             return yield* Effect.fail(
               new Forbidden({ message: "You can only edit your own posts" }),
             );
@@ -129,7 +135,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const existing = yield* getPostOr404(id);
-          if (existing.authorId !== currentUser.id)
+          if (!canModify(currentUser, existing))
             return yield* Effect.fail(
               new Forbidden({
                 message: "You can only delete your own posts",

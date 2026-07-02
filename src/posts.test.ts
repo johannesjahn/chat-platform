@@ -10,6 +10,7 @@ import { BunHttpServer } from "@effect/platform-bun";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
@@ -18,6 +19,7 @@ import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import * as schema from "./db/schema.ts";
+import { users } from "./db/schema.ts";
 
 // JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
 process.env.JWT_SECRET ??= "test-secret";
@@ -29,15 +31,16 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(JwtLive),
 );
 
+// `effect` may also require `Db` directly (e.g. to promote a user to admin
+// out-of-band, the way it'd happen in production) — it shares the exact same
+// in-memory database instance as the API layer built below.
 const run = <A, E>(
-  effect: Effect.Effect<A, E, HttpClient.HttpClient>,
+  effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
 ): Promise<A> => {
-  const TestDbLive = Layer.sync(Db, () => {
-    const sqlite = new Database(":memory:");
-    const db = drizzle(sqlite, { schema });
-    migrate(db, { migrationsFolder: "./drizzle" });
-    return db;
-  });
+  const sqlite = new Database(":memory:");
+  const db = drizzle(sqlite, { schema });
+  migrate(db, { migrationsFolder: "./drizzle" });
+  const TestDbLive = Layer.succeed(Db, db);
 
   const { handler, dispose } = HttpApiBuilder.toWebHandler(
     Layer.mergeAll(
@@ -61,8 +64,11 @@ const run = <A, E>(
   );
 
   return Effect.runPromise(
-    effect.pipe(Effect.provide(TestClientLayer)),
-  ).finally(dispose);
+    effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
+  ).finally(() => {
+    dispose();
+    sqlite.close();
+  });
 };
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
@@ -88,6 +94,21 @@ const registerAndLogin = (username: string, password: string) =>
       payload: { username, password },
     });
     return { user, accessToken };
+  });
+
+// Simulates promoting a user to admin out-of-band (there's no API for it —
+// registration always creates a "user"). Role is baked into the JWT at sign
+// time, so a promoted user must log in again to get a token reflecting it.
+const promoteToAdmin = (username: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    yield* Effect.try(() =>
+      db
+        .update(users)
+        .set({ role: "admin" })
+        .where(eq(users.username, username))
+        .run(),
+    ).pipe(Effect.orDie);
   });
 
 test("createPost rejects an unauthenticated request", () =>
@@ -351,6 +372,32 @@ test("updatePost rejects edits from a user who doesn't own the post", () =>
     }),
   ));
 
+test("updatePost allows an admin to edit another user's post", () =>
+  run(
+    Effect.gen(function* () {
+      const author = yield* registerAndLogin("oscar", "pw");
+      const authorClient = yield* makeAuthedClient(author.accessToken);
+      const created = yield* authorClient.posts.createPost({
+        payload: { contentType: "text", content: "mine" },
+      });
+
+      yield* registerAndLogin("paula", "pw");
+      yield* promoteToAdmin("paula");
+      const c = yield* makeClient;
+      const { accessToken: adminToken } = yield* c.users.login({
+        payload: { username: "paula", password: "pw" },
+      });
+      const adminClient = yield* makeAuthedClient(adminToken);
+
+      const updated = yield* adminClient.posts.updatePost({
+        path: { id: created.id },
+        payload: { contentType: "text", content: "edited by admin" },
+      });
+      expect(updated.content).toBe("edited by admin");
+      expect(updated.authorId).toBe(author.user.id);
+    }),
+  ));
+
 test("updatePost returns 404 for a missing post", () =>
   run(
     Effect.gen(function* () {
@@ -406,6 +453,32 @@ test("deletePost rejects deletes from a user who doesn't own the post", () =>
       if (result._tag === "Left") {
         expect((result.left as { _tag: string })._tag).toBe("Forbidden");
       }
+    }),
+  ));
+
+test("deletePost allows an admin to delete another user's post", () =>
+  run(
+    Effect.gen(function* () {
+      const author = yield* registerAndLogin("quincy", "pw");
+      const authorClient = yield* makeAuthedClient(author.accessToken);
+      const created = yield* authorClient.posts.createPost({
+        payload: { contentType: "text", content: "mine" },
+      });
+
+      yield* registerAndLogin("rachel", "pw");
+      yield* promoteToAdmin("rachel");
+      const c = yield* makeClient;
+      const { accessToken: adminToken } = yield* c.users.login({
+        payload: { username: "rachel", password: "pw" },
+      });
+      const adminClient = yield* makeAuthedClient(adminToken);
+
+      yield* adminClient.posts.deletePost({ path: { id: created.id } });
+
+      const result = yield* c.posts
+        .getPost({ path: { id: created.id } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
     }),
   ));
 

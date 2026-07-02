@@ -123,7 +123,10 @@ export interface components {
         User: {
             id: number;
             username: string;
+            role: components["schemas"]["UserRole"];
         };
+        /** @enum {string} */
+        UserRole: "user" | "admin";
         /** @description The request did not match the expected schema */
         HttpApiDecodeError: {
             issues: components["schemas"]["Issue"][];
@@ -345,6 +348,7 @@ export interface operations {
                     "application/json": {
                         id: number;
                         username: string;
+                        role: components["schemas"]["UserRole"];
                     };
                 };
             };

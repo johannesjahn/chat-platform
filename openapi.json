@@ -122,7 +122,8 @@
                   "type": "object",
                   "required": [
                     "id",
-                    "username"
+                    "username",
+                    "role"
                   ],
                   "properties": {
                     "id": {
@@ -130,6 +131,9 @@
                     },
                     "username": {
                       "type": "string"
+                    },
+                    "role": {
+                      "$ref": "#/components/schemas/UserRole"
                     }
                   },
                   "additionalProperties": false
@@ -593,7 +597,8 @@
         "type": "object",
         "required": [
           "id",
-          "username"
+          "username",
+          "role"
         ],
         "properties": {
           "id": {
@@ -601,9 +606,19 @@
           },
           "username": {
             "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
           }
         },
         "additionalProperties": false
+      },
+      "UserRole": {
+        "type": "string",
+        "enum": [
+          "user",
+          "admin"
+        ]
       },
       "HttpApiDecodeError": {
         "type": "object",

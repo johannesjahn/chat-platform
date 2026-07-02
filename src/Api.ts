@@ -2,11 +2,19 @@ import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
 import { Schema } from "effect";
 import { Authentication } from "./Auth.ts";
 
+// "admin" can edit/delete any post; "user" can only edit/delete their own.
+// Registration always creates a "user" — admins are promoted out-of-band.
+export const UserRole = Schema.Literal("user", "admin").annotations({
+  identifier: "UserRole",
+});
+export type UserRole = typeof UserRole.Type;
+
 // Public representation of a user — never exposes the password hash.
 // `identifier` annotations surface these as named schemas in the OpenAPI spec.
 export const User = Schema.Struct({
   id: Schema.Number,
   username: Schema.String,
+  role: UserRole,
 }).annotations({ identifier: "User" });
 export type User = typeof User.Type;
 

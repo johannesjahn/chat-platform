@@ -7,9 +7,14 @@ const REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 export type TokenType = "access" | "refresh";
 
+// Kept in sync with Api.ts's `UserRole` — not imported directly, to avoid a
+// circular import (Api.ts -> Auth.ts -> Jwt.ts).
+export type UserRole = "user" | "admin";
+
 export type TokenClaims = {
   readonly sub: number;
   readonly username: string;
+  readonly role: UserRole;
   readonly type: TokenType;
   readonly iat: number;
   readonly exp: number;
@@ -18,6 +23,7 @@ export type TokenClaims = {
 export type TokenUser = {
   readonly id: number;
   readonly username: string;
+  readonly role: UserRole;
 };
 
 const encoder = new TextEncoder();
@@ -116,6 +122,7 @@ export const JwtLive = Layer.effect(
           {
             sub: user.id,
             username: user.username,
+            role: user.role,
             type,
             iat: now,
             exp: now + ttl,
@@ -138,7 +145,11 @@ export const JwtLive = Layer.effect(
             return yield* Effect.fail(
               new InvalidToken({ reason: "invalid or expired access token" }),
             );
-          return { id: claims.sub, username: claims.username };
+          return {
+            id: claims.sub,
+            username: claims.username,
+            role: claims.role,
+          };
         }),
     };
   }),

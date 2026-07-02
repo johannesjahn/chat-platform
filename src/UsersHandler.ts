@@ -41,7 +41,11 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           return yield* Effect.try(() =>
             db
-              .select({ id: users.id, username: users.username })
+              .select({
+                id: users.id,
+                username: users.username,
+                role: users.role,
+              })
               .from(users)
               .orderBy(users.id)
               .all(),
@@ -53,7 +57,11 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const rows = yield* Effect.try(() =>
             db
-              .select({ id: users.id, username: users.username })
+              .select({
+                id: users.id,
+                username: users.username,
+                role: users.role,
+              })
               .from(users)
               .where(eq(users.id, id))
               .limit(1)
@@ -90,8 +98,18 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const rows = yield* Effect.try(() =>
             db
               .insert(users)
-              .values({ username: payload.username, passwordHash })
-              .returning({ id: users.id, username: users.username })
+              // Registration always creates a "user" — admins are promoted
+              // out-of-band, never via this endpoint.
+              .values({
+                username: payload.username,
+                passwordHash,
+                role: "user",
+              })
+              .returning({
+                id: users.id,
+                username: users.username,
+                role: users.role,
+              })
               .all(),
           ).pipe(Effect.orDie);
           if (!rows[0])
@@ -124,7 +142,11 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          const publicUser = { id: user.id, username: user.username };
+          const publicUser = {
+            id: user.id,
+            username: user.username,
+            role: user.role,
+          };
           const accessToken = yield* jwt.signAccessToken(publicUser);
           const refreshToken = yield* jwt.signRefreshToken(publicUser);
           return { user: publicUser, accessToken, refreshToken };

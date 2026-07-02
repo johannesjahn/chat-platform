@@ -4,6 +4,9 @@ export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  role: text("role", { enum: ["user", "admin"] })
+    .notNull()
+    .default("user"),
 });
 
 export type DbUser = typeof users.$inferSelect;

@@ -15,6 +15,13 @@
       "when": 1782981907956,
       "tag": "0001_classy_leo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782987196263,
+      "tag": "0002_chilly_squadron_sinister",
+      "breakpoints": true
     }
   ]
 }
