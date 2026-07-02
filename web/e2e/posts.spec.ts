@@ -1,15 +1,10 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { registerViaUi } from "./helpers";
-
-// The e2e webServer boots the backend directly on this port (see
-// playwright.config.ts) — posts are seeded straight against the API to keep
-// the infinite-scroll test fast and deterministic instead of clicking
-// through the "new post" UI eight times.
-const API_URL = "http://localhost:3000";
 
 test("creating a post shows it in the feed, and infinite scroll loads more posts in batches of 5 then 3", async ({
   page,
   request,
+  apiUrl,
 }) => {
   await registerViaUi(page);
 
@@ -18,7 +13,7 @@ test("creating a post shows it in the feed, and infinite scroll loads more posts
   await page.getByRole("button", { name: "Text" }).click();
   await page.fill("#content", "My first post from the UI");
   await page.getByRole("button", { name: "Post" }).click();
-  await expect(page).toHaveURL("/posts");
+  await expect(page).toHaveURL("/");
   await expect(page.getByText("My first post from the UI")).toBeVisible();
 
   // Seed 7 more posts directly against the API — 8 total is enough to
@@ -27,7 +22,7 @@ test("creating a post shows it in the feed, and infinite scroll loads more posts
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
   );
   for (let i = 0; i < 7; i++) {
-    const response = await request.post(`${API_URL}/posts`, {
+    const response = await request.post(`${apiUrl}/posts`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
       data: { contentType: "text", content: `Seeded post ${i}` },
     });
@@ -49,23 +44,26 @@ test("creating a post shows it in the feed, and infinite scroll loads more posts
 
 test("edit is only available to a post's author, both in the UI and when navigating directly", async ({
   browser,
+  injectApiUrl,
 }) => {
   const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
   const { username: usernameA } = await registerViaUi(pageA);
 
   await pageA.goto("/posts/new");
   await pageA.fill("#content", "Only the author should be able to edit this");
   await pageA.getByRole("button", { name: "Post" }).click();
-  await expect(pageA).toHaveURL("/posts");
+  await expect(pageA).toHaveURL("/");
 
   const cardOnA = pageA.getByRole("article", { name: `Post by @${usernameA}` });
   await expect(cardOnA.getByRole("link", { name: "Edit post" })).toBeVisible();
 
   const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
   await registerViaUi(pageB);
-  await pageB.goto("/posts");
+  await pageB.goto("/");
 
   const cardOnB = pageB.getByRole("article", { name: `Post by @${usernameA}` });
   await expect(cardOnB).toBeVisible();
@@ -85,9 +83,45 @@ test("edit is only available to a post's author, both in the UI and when navigat
   await expect(pageA).toHaveURL(`/posts/${postId}/edit`);
   await pageA.fill("#content", "Edited by the author");
   await pageA.getByRole("button", { name: "Save changes" }).click();
-  await expect(pageA).toHaveURL("/posts");
+  await expect(pageA).toHaveURL("/");
   await expect(pageA.getByText("Edited by the author")).toBeVisible();
 
   await contextA.close();
   await contextB.close();
+});
+
+test("long posts are collapsed behind a Show more toggle", async ({
+  page,
+  request,
+  apiUrl,
+}) => {
+  const { username } = await registerViaUi(page);
+
+  // Longer than PostCard's 500-char collapse threshold — created directly
+  // against the API since the point is to check the feed's rendering, not
+  // the "new post" form.
+  const longContent = "Lorem ipsum dolor sit amet.".repeat(30);
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  const response = await request.post(`${apiUrl}/posts`, {
+    headers: { Authorization: `Bearer ${session.accessToken}` },
+    data: { contentType: "text", content: longContent },
+  });
+  expect(response.ok()).toBe(true);
+
+  await page.goto("/");
+  const card = page.getByRole("article", { name: `Post by @${username}` });
+  await expect(card).toBeVisible();
+
+  const showMore = card.getByRole("button", { name: "Show more" });
+  await expect(showMore).toBeVisible();
+  await expect(card.getByRole("button", { name: "Show less" })).toHaveCount(0);
+
+  await showMore.click();
+  await expect(card.getByRole("button", { name: "Show less" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Show more" })).toHaveCount(0);
+
+  await card.getByRole("button", { name: "Show less" }).click();
+  await expect(showMore).toBeVisible();
 });

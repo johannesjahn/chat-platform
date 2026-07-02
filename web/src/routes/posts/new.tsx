@@ -35,7 +35,7 @@ function NewPostPage() {
       onSubmit={async ({ contentType, content }) => {
         await createPost.mutateAsync({ body: { contentType, content } });
         await queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
-        await router.navigate({ to: "/posts" });
+        await router.navigate({ to: "/" });
       }}
     />
   );

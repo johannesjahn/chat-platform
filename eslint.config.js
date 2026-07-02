@@ -57,6 +57,21 @@ export default tseslint.config(
     },
   },
 
+  // Playwright e2e tests run under Node (not the browser) even though they
+  // live under `web/`, and Playwright's fixture API has a parameter
+  // literally named `use` — not a React hook, so skip the React-specific
+  // rules here and expose Node globals instead of browser ones.
+  {
+    files: ["web/e2e/**/*.ts"],
+    languageOptions: {
+      globals: globals.node,
+    },
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+      "no-empty-pattern": "off",
+    },
+  },
+
   // TanStack Router route files must export a `Route` alongside their
   // component, and shadcn/ui files export variant helpers next to theirs —
   // both are intentional, so the fast-refresh warning is just noise here.

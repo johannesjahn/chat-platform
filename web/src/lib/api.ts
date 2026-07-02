@@ -7,7 +7,13 @@ import createQueryClient from "openapi-react-query";
 import { clearSession, getSession } from "./auth";
 import type { components, paths } from "./api-types";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+// `__E2E_API_URL__` is injected by Playwright (see `web/e2e/fixtures.ts`) so
+// each e2e test can point the frontend at its own isolated backend instance.
+const API_URL =
+  (typeof window !== "undefined" &&
+    (window as unknown as { __E2E_API_URL__?: string }).__E2E_API_URL__) ||
+  import.meta.env.VITE_API_URL ||
+  "http://localhost:3000";
 
 export const fetchClient = createFetchClient<paths>({ baseUrl: API_URL });
 

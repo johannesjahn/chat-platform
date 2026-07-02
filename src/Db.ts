@@ -9,7 +9,7 @@ export type DrizzleDb = ReturnType<typeof drizzle<typeof schema>>;
 export class Db extends Context.Tag("Db")<Db, DrizzleDb>() {}
 
 export const DbLive = Layer.sync(Db, () => {
-  const sqlite = new Database("dev.db");
+  const sqlite = new Database(process.env.DB_PATH ?? "dev.db");
   const db = drizzle(sqlite, { schema });
   migrate(db, { migrationsFolder: "./drizzle" });
   return db;
