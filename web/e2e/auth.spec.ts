@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { randomUsername } from "./helpers";
 
 test("registers a new user and sees the user list after login", async ({

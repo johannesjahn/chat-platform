@@ -1,22 +1,10 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { registerViaUi } from "./helpers";
-
-// The e2e webServer boots the backend directly on this port (see
-// playwright.config.ts) — posts are seeded straight against the API to keep
-// the infinite-scroll test fast and deterministic instead of clicking
-// through the "new post" UI eight times.
-const API_URL = "http://localhost:3000";
-
-// The feed endpoint returns every post from every user (it isn't scoped to
-// the current user), and all tests here share one real backend/db instance.
-// Running them concurrently would let one test's seeded posts shift another
-// test's exact-count assertions (e.g. the infinite-scroll batch counts), so
-// force this file to run serially instead of relying on `fullyParallel`.
-test.describe.configure({ mode: "serial" });
 
 test("creating a post shows it in the feed, and infinite scroll loads more posts in batches of 5 then 3", async ({
   page,
   request,
+  apiUrl,
 }) => {
   await registerViaUi(page);
 
@@ -34,7 +22,7 @@ test("creating a post shows it in the feed, and infinite scroll loads more posts
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
   );
   for (let i = 0; i < 7; i++) {
-    const response = await request.post(`${API_URL}/posts`, {
+    const response = await request.post(`${apiUrl}/posts`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
       data: { contentType: "text", content: `Seeded post ${i}` },
     });
@@ -56,8 +44,10 @@ test("creating a post shows it in the feed, and infinite scroll loads more posts
 
 test("edit is only available to a post's author, both in the UI and when navigating directly", async ({
   browser,
+  injectApiUrl,
 }) => {
   const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
   const { username: usernameA } = await registerViaUi(pageA);
 
@@ -70,6 +60,7 @@ test("edit is only available to a post's author, both in the UI and when navigat
   await expect(cardOnA.getByRole("link", { name: "Edit post" })).toBeVisible();
 
   const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
   await registerViaUi(pageB);
   await pageB.goto("/");
@@ -102,6 +93,7 @@ test("edit is only available to a post's author, both in the UI and when navigat
 test("long posts are collapsed behind a Show more toggle", async ({
   page,
   request,
+  apiUrl,
 }) => {
   const { username } = await registerViaUi(page);
 
@@ -112,7 +104,7 @@ test("long posts are collapsed behind a Show more toggle", async ({
   const session = await page.evaluate(() =>
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
   );
-  const response = await request.post(`${API_URL}/posts`, {
+  const response = await request.post(`${apiUrl}/posts`, {
     headers: { Authorization: `Bearer ${session.accessToken}` },
     data: { contentType: "text", content: longContent },
   });
