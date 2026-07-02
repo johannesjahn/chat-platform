@@ -206,16 +206,10 @@ export interface components {
         };
         /** @enum {string} */
         PostContentType: "text" | "image_url";
-        PostsPageQuery: {
-            /** @description a string to be decoded into a number */
-            page?: string;
-            /** @description a string to be decoded into a number */
-            pageSize?: string;
-        };
         PostsPage: {
             posts: components["schemas"]["Post"][];
-            page: number;
-            pageSize: number;
+            offset: number;
+            limit: number;
             total: number;
         };
         CreatePostBody: {
@@ -652,7 +646,12 @@ export interface operations {
     };
     "posts.listAllPosts": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description a string to be decoded into a number */
+                offset?: string;
+                /** @description a string to be decoded into a number */
+                limit?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

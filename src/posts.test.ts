@@ -245,14 +245,14 @@ test("listAllPosts returns a default first page with total count", () =>
       }
 
       const result = yield* authed.posts.listAllPosts({ urlParams: {} });
-      expect(result.page).toBe(1);
-      expect(result.pageSize).toBe(20);
+      expect(result.offset).toBe(0);
+      expect(result.limit).toBe(20);
       expect(result.total).toBe(3);
       expect(result.posts).toHaveLength(3);
     }),
   ));
 
-test("listAllPosts paginates using page and pageSize query params", () =>
+test("listAllPosts paginates newest-first using offset and limit query params", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("pete", "pw");
@@ -265,50 +265,52 @@ test("listAllPosts paginates using page and pageSize query params", () =>
           }),
         );
       }
+      // listAllPosts orders newest-first, so pages walk `created` in reverse.
+      const newestFirst = [...created].reverse();
 
       const firstPage = yield* authed.posts.listAllPosts({
-        urlParams: { page: 1, pageSize: 2 },
+        urlParams: { offset: 0, limit: 2 },
       });
       expect(firstPage.total).toBe(5);
       expect(firstPage.posts.map((p) => p.id)).toEqual(
-        created.slice(0, 2).map((p) => p.id),
+        newestFirst.slice(0, 2).map((p) => p.id),
       );
 
       const secondPage = yield* authed.posts.listAllPosts({
-        urlParams: { page: 2, pageSize: 2 },
+        urlParams: { offset: 2, limit: 2 },
       });
       expect(secondPage.posts.map((p) => p.id)).toEqual(
-        created.slice(2, 4).map((p) => p.id),
+        newestFirst.slice(2, 4).map((p) => p.id),
       );
 
       const thirdPage = yield* authed.posts.listAllPosts({
-        urlParams: { page: 3, pageSize: 2 },
+        urlParams: { offset: 4, limit: 2 },
       });
       expect(thirdPage.posts.map((p) => p.id)).toEqual(
-        created.slice(4, 5).map((p) => p.id),
+        newestFirst.slice(4, 5).map((p) => p.id),
       );
     }),
   ));
 
-test("listAllPosts rejects a pageSize above the max", () =>
+test("listAllPosts rejects a limit above the max", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("quinn", "pw");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
-        .listAllPosts({ urlParams: { pageSize: 101 } })
+        .listAllPosts({ urlParams: { limit: 101 } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
     }),
   ));
 
-test("listAllPosts rejects a page below 1", () =>
+test("listAllPosts rejects a negative offset", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("ruth", "pw");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
-        .listAllPosts({ urlParams: { page: 0 } })
+        .listAllPosts({ urlParams: { offset: -1 } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
     }),

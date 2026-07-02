@@ -1,12 +1,7 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { count, eq } from "drizzle-orm";
+import { count, desc, eq } from "drizzle-orm";
 import { Effect } from "effect";
-import {
-  ChatApi,
-  DEFAULT_POSTS_PAGE_SIZE,
-  Forbidden,
-  NotFound,
-} from "./Api.ts";
+import { ChatApi, DEFAULT_POSTS_LIMIT, Forbidden, NotFound } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db } from "./Db.ts";
 import { posts } from "./db/schema.ts";
@@ -49,7 +44,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const rows = yield* Effect.try(() =>
-            db.select().from(posts).orderBy(posts.id).all(),
+            db.select().from(posts).orderBy(desc(posts.id)).all(),
           ).pipe(Effect.orDie);
           return rows.map(toApiPost);
         }),
@@ -63,28 +58,33 @@ export const PostsHandlerLive = HttpApiBuilder.group(
       .handle("listAllPosts", ({ urlParams }) =>
         Effect.gen(function* () {
           const db = yield* Db;
-          const page = urlParams.page ?? 1;
-          const pageSize = urlParams.pageSize ?? DEFAULT_POSTS_PAGE_SIZE;
+          const offset = urlParams.offset ?? 0;
+          const limit = urlParams.limit ?? DEFAULT_POSTS_LIMIT;
           const rows = yield* Effect.try(() =>
             db
               .select()
               .from(posts)
-              .orderBy(posts.id)
-              .limit(pageSize)
-              .offset((page - 1) * pageSize)
+              .orderBy(desc(posts.id))
+              .limit(limit)
+              .offset(offset)
               .all(),
           ).pipe(Effect.orDie);
           const totalRows = yield* Effect.try(() =>
             db.select({ total: count() }).from(posts).all(),
           ).pipe(Effect.orDie);
           const total = totalRows[0]?.total ?? 0;
-          return { posts: rows.map(toApiPost), page, pageSize, total };
+          return { posts: rows.map(toApiPost), offset, limit, total };
         }),
       )
       .handle("createPost", ({ payload }) =>
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          // Set both from a single Date rather than relying on the schema's
+          // independent per-column $defaultFn — two separate `new Date()`
+          // calls can land a millisecond apart, and a freshly created post's
+          // createdAt/updatedAt should be identical, not just close.
+          const now = new Date();
           const rows = yield* Effect.try(() =>
             db
               .insert(posts)
@@ -92,6 +92,8 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 authorId: currentUser.id,
                 contentType: payload.contentType,
                 content: payload.content,
+                createdAt: now,
+                updatedAt: now,
               })
               .returning()
               .all(),

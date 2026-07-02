@@ -1,11 +1,5 @@
-import { randomBytes } from "node:crypto";
 import { expect, test } from "@playwright/test";
-
-// A unique username per run so repeated runs never collide on the (unique)
-// username column. base64url keeps it to URL-safe, schema-valid characters.
-function randomUsername(): string {
-  return `u_${randomBytes(9).toString("base64url")}`;
-}
+import { randomUsername } from "./helpers";
 
 test("registers a new user and sees the user list after login", async ({
   page,
