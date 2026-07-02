@@ -200,7 +200,7 @@ test("createPost rejects an invalid content type", () =>
     }),
   ));
 
-test("listPosts and getPost work without authentication", () =>
+test("getPost works without authentication", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("frank", "pw");
@@ -210,10 +210,6 @@ test("listPosts and getPost work without authentication", () =>
       });
 
       const c = yield* makeClient;
-      const list = yield* c.posts.listPosts({});
-      expect(list).toHaveLength(1);
-      expect(list[0]).toEqual(created);
-
       const fetched = yield* c.posts.getPost({ path: { id: created.id } });
       expect(fetched).toEqual(created);
     }),

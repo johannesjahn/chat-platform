@@ -40,15 +40,6 @@ export const PostsHandlerLive = HttpApiBuilder.group(
   "posts",
   (handlers) =>
     handlers
-      .handle("listPosts", () =>
-        Effect.gen(function* () {
-          const db = yield* Db;
-          const rows = yield* Effect.try(() =>
-            db.select().from(posts).orderBy(desc(posts.id)).all(),
-          ).pipe(Effect.orDie);
-          return rows.map(toApiPost);
-        }),
-      )
       .handle("getPost", ({ path: { id } }) =>
         Effect.gen(function* () {
           const row = yield* getPostOr404(id);

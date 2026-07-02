@@ -68,22 +68,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/posts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["posts.listPosts"];
-        put?: never;
-        post: operations["posts.createPost"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/posts/{id}": {
         parameters: {
             query?: never;
@@ -110,6 +94,22 @@ export interface paths {
         get: operations["posts.listAllPosts"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["posts.createPost"];
         delete?: never;
         options?: never;
         head?: never;
@@ -408,84 +408,6 @@ export interface operations {
             };
         };
     };
-    "posts.listPosts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Post"][];
-                };
-            };
-            /** @description The request did not match the expected schema */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
-                };
-            };
-        };
-    };
-    "posts.createPost": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreatePostBody"];
-            };
-        };
-        responses: {
-            /** @description Success */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        id: number;
-                        authorId: number;
-                        contentType: components["schemas"]["PostContentType"];
-                        content: string;
-                        createdAt: number;
-                        updatedAt: number;
-                    };
-                };
-            };
-            /** @description The request did not match the expected schema */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Unauthorized"];
-                };
-            };
-        };
-    };
     "posts.getPost": {
         parameters: {
             query?: never;
@@ -665,6 +587,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PostsPage"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+        };
+    };
+    "posts.createPost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePostBody"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: number;
+                        authorId: number;
+                        contentType: components["schemas"]["PostContentType"];
+                        content: string;
+                        createdAt: number;
+                        updatedAt: number;
+                    };
                 };
             };
             /** @description The request did not match the expected schema */
