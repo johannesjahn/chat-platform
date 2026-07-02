@@ -153,18 +153,14 @@ const UsersGroup = HttpApiGroup.make("users")
 
 const PostsGroup = HttpApiGroup.make("posts")
   .add(
-    HttpApiEndpoint.get("listPosts", "/posts").addSuccess(Schema.Array(Post)),
-  )
-  .add(
     HttpApiEndpoint.get("getPost", "/posts/:id")
       .setPath(Schema.Struct({ id: Schema.NumberFromString }))
       .addSuccess(Post)
       .addError(NotFound, { status: 404 }),
   )
   .add(
-    // Authenticated, paginated view over all posts — distinct from the
-    // public, unpaginated `listPosts`.
-    HttpApiEndpoint.get("listAllPosts", "/posts/all")
+    // Authenticated, paginated view over all posts.
+    HttpApiEndpoint.get("listPosts", "/posts")
       .setUrlParams(PostsPageQuery)
       .addSuccess(PostsPage)
       .middleware(Authentication),

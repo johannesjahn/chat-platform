@@ -28,7 +28,7 @@ export function usePostsFeed(enabled: boolean) {
     queryFn: async ({ pageParam, signal }) => {
       const limit =
         pageParam === 0 ? INITIAL_POSTS_LIMIT : LOAD_MORE_POSTS_LIMIT;
-      const { data, error } = await fetchClient.GET("/posts/all", {
+      const { data, error } = await fetchClient.GET("/posts", {
         params: { query: { offset: String(pageParam), limit: String(limit) } },
         signal,
       });
