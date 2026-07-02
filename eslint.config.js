@@ -45,7 +45,11 @@ export default tseslint.config(
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
-    settings: { react: { version: "detect" } },
+    // Pinned rather than "detect": the lint job only installs root
+    // dependencies, so eslint-plugin-react can't resolve web/'s react
+    // package to detect its version and silently falls back to assuming
+    // latest, which is non-deterministic across environments.
+    settings: { react: { version: "19" } },
     rules: {
       ...react.configs.flat.recommended.rules,
       ...react.configs.flat["jsx-runtime"].rules,
