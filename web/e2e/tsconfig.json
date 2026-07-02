@@ -1,0 +1,9 @@
+{
+  // The e2e suite runs under Node (Playwright), not the browser, so it needs
+  // Node's types — kept separate from the app tsconfig, which is browser-only.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "@playwright/test"]
+  },
+  "include": ["."]
+}

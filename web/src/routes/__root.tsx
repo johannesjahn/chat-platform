@@ -1,0 +1,97 @@
+import {
+  createRootRoute,
+  HeadContent,
+  Link,
+  Outlet,
+  Scripts,
+  useRouter,
+} from "@tanstack/react-router";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { LogOut, MessagesSquare } from "lucide-react";
+import type { ReactNode } from "react";
+import { Button } from "@/components/ui/button";
+import { clearSession, useSession } from "../lib/auth";
+import { queryClient } from "../lib/query";
+import appCss from "../styles.css?url";
+
+export const Route = createRootRoute({
+  head: () => ({
+    meta: [
+      { charSet: "utf-8" },
+      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { title: "Chat Platform" },
+    ],
+    links: [{ rel: "stylesheet", href: appCss }],
+  }),
+  component: RootComponent,
+});
+
+function RootComponent() {
+  return (
+    <RootDocument>
+      <QueryClientProvider client={queryClient}>
+        <Nav />
+        <Outlet />
+      </QueryClientProvider>
+    </RootDocument>
+  );
+}
+
+function Nav() {
+  const session = useSession();
+  const router = useRouter();
+
+  return (
+    <nav className="sticky top-0 z-20 flex items-center gap-4 border-b border-border bg-card/70 px-5 py-3 backdrop-blur">
+      <Link
+        to="/"
+        className="flex items-center gap-2 font-semibold tracking-tight text-foreground transition-colors hover:text-primary"
+      >
+        <MessagesSquare className="size-5 text-primary" />
+        Chat Platform
+      </Link>
+      <span className="flex-1" />
+      {session ? (
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">
+            @{session.user.username}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              clearSession();
+              router.invalidate();
+            }}
+          >
+            <LogOut className="size-4" />
+            Log out
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/login">Log in</Link>
+          </Button>
+          <Button asChild size="sm">
+            <Link to="/register">Register</Link>
+          </Button>
+        </div>
+      )}
+    </nav>
+  );
+}
+
+function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
+  return (
+    <html lang="en" className="dark">
+      <head>
+        <HeadContent />
+      </head>
+      <body>
+        {children}
+        <Scripts />
+      </body>
+    </html>
+  );
+}
