@@ -539,6 +539,52 @@
           }
         }
       }
+    },
+    "/posts/all": {
+      "get": {
+        "tags": [
+          "posts"
+        ],
+        "operationId": "posts.listAllPosts",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PostsPage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -836,6 +882,48 @@
           "text",
           "image_url"
         ]
+      },
+      "PostsPageQuery": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "page": {
+            "type": "string",
+            "description": "a string to be decoded into a number"
+          },
+          "pageSize": {
+            "type": "string",
+            "description": "a string to be decoded into a number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PostsPage": {
+        "type": "object",
+        "required": [
+          "posts",
+          "page",
+          "pageSize",
+          "total"
+        ],
+        "properties": {
+          "posts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Post"
+            }
+          },
+          "page": {
+            "type": "number"
+          },
+          "pageSize": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
       },
       "CreatePostBody": {
         "type": "object",

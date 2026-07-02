@@ -1,7 +1,12 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { eq } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { ChatApi, Forbidden, NotFound } from "./Api.ts";
+import {
+  ChatApi,
+  DEFAULT_POSTS_PAGE_SIZE,
+  Forbidden,
+  NotFound,
+} from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db } from "./Db.ts";
 import { posts } from "./db/schema.ts";
@@ -47,6 +52,27 @@ export const PostsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const row = yield* getPostOr404(id);
           return toApiPost(row);
+        }),
+      )
+      .handle("listAllPosts", ({ urlParams }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const page = urlParams.page ?? 1;
+          const pageSize = urlParams.pageSize ?? DEFAULT_POSTS_PAGE_SIZE;
+          const rows = yield* Effect.try(() =>
+            db
+              .select()
+              .from(posts)
+              .orderBy(posts.id)
+              .limit(pageSize)
+              .offset((page - 1) * pageSize)
+              .all(),
+          ).pipe(Effect.orDie);
+          const totalRows = yield* Effect.try(() =>
+            db.select({ total: count() }).from(posts).all(),
+          ).pipe(Effect.orDie);
+          const total = totalRows[0]?.total ?? 0;
+          return { posts: rows.map(toApiPost), page, pageSize, total };
         }),
       )
       .handle("createPost", ({ payload }) =>

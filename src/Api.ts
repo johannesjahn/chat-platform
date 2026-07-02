@@ -80,6 +80,32 @@ export const UpdatePostBody = Schema.Struct({
   content: PostContent,
 }).annotations({ identifier: "UpdatePostBody" });
 
+export const DEFAULT_POSTS_PAGE_SIZE = 20;
+export const MAX_POSTS_PAGE_SIZE = 100;
+
+// `page`/`pageSize` are left plain-optional (rather than `optionalWith` +
+// `default`) because a schema default only fills in on *decode* — an
+// HttpApiClient caller encoding a request would otherwise be forced to pass
+// both every time. Defaults are instead applied by the handler.
+export const PostsPageQuery = Schema.Struct({
+  page: Schema.optional(
+    Schema.NumberFromString.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1)),
+  ),
+  pageSize: Schema.optional(
+    Schema.NumberFromString.pipe(
+      Schema.int(),
+      Schema.between(1, MAX_POSTS_PAGE_SIZE),
+    ),
+  ),
+}).annotations({ identifier: "PostsPageQuery" });
+
+export const PostsPage = Schema.Struct({
+  posts: Schema.Array(Post),
+  page: Schema.Number,
+  pageSize: Schema.Number,
+  total: Schema.Number,
+}).annotations({ identifier: "PostsPage" });
+
 const UsersGroup = HttpApiGroup.make("users")
   .add(
     HttpApiEndpoint.get("listUsers", "/users")
@@ -114,6 +140,14 @@ const PostsGroup = HttpApiGroup.make("posts")
       .setPath(Schema.Struct({ id: Schema.NumberFromString }))
       .addSuccess(Post)
       .addError(NotFound, { status: 404 }),
+  )
+  .add(
+    // Authenticated, paginated view over all posts — distinct from the
+    // public, unpaginated `listPosts`.
+    HttpApiEndpoint.get("listAllPosts", "/posts/all")
+      .setUrlParams(PostsPageQuery)
+      .addSuccess(PostsPage)
+      .middleware(Authentication),
   )
   .add(
     HttpApiEndpoint.post("createPost", "/posts")

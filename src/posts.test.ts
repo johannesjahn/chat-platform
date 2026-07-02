@@ -198,6 +198,101 @@ test("listPosts and getPost work without authentication", () =>
     }),
   ));
 
+test("listAllPosts rejects an unauthenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const result = yield* c.posts
+        .listAllPosts({ urlParams: {} })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
+    }),
+  ));
+
+test("listAllPosts returns a default first page with total count", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("olga", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      for (let i = 0; i < 3; i++) {
+        yield* authed.posts.createPost({
+          payload: { contentType: "text", content: `post ${i}` },
+        });
+      }
+
+      const result = yield* authed.posts.listAllPosts({ urlParams: {} });
+      expect(result.page).toBe(1);
+      expect(result.pageSize).toBe(20);
+      expect(result.total).toBe(3);
+      expect(result.posts).toHaveLength(3);
+    }),
+  ));
+
+test("listAllPosts paginates using page and pageSize query params", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("pete", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      const created = [];
+      for (let i = 0; i < 5; i++) {
+        created.push(
+          yield* authed.posts.createPost({
+            payload: { contentType: "text", content: `post ${i}` },
+          }),
+        );
+      }
+
+      const firstPage = yield* authed.posts.listAllPosts({
+        urlParams: { page: 1, pageSize: 2 },
+      });
+      expect(firstPage.total).toBe(5);
+      expect(firstPage.posts.map((p) => p.id)).toEqual(
+        created.slice(0, 2).map((p) => p.id),
+      );
+
+      const secondPage = yield* authed.posts.listAllPosts({
+        urlParams: { page: 2, pageSize: 2 },
+      });
+      expect(secondPage.posts.map((p) => p.id)).toEqual(
+        created.slice(2, 4).map((p) => p.id),
+      );
+
+      const thirdPage = yield* authed.posts.listAllPosts({
+        urlParams: { page: 3, pageSize: 2 },
+      });
+      expect(thirdPage.posts.map((p) => p.id)).toEqual(
+        created.slice(4, 5).map((p) => p.id),
+      );
+    }),
+  ));
+
+test("listAllPosts rejects a pageSize above the max", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("quinn", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.posts
+        .listAllPosts({ urlParams: { pageSize: 101 } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("listAllPosts rejects a page below 1", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("ruth", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.posts
+        .listAllPosts({ urlParams: { page: 0 } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
 test("getPost returns 404 for a missing id", () =>
   run(
     Effect.gen(function* () {
