@@ -1,5 +1,14 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ImageIcon, Loader2, Pencil, Trash2, Type } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  ImageIcon,
+  Loader2,
+  Pencil,
+  Trash2,
+  Type,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,6 +26,10 @@ type PostCardProps = {
   isDeleting: boolean;
 };
 
+// Posts longer than this are collapsed behind a "Show more" toggle so a
+// single long text post can't dominate the feed.
+const COLLAPSE_THRESHOLD = 500;
+
 export function PostCard({
   post,
   authorUsername,
@@ -25,6 +38,9 @@ export function PostCard({
   isDeleting,
 }: PostCardProps) {
   const wasEdited = post.updatedAt !== post.createdAt;
+  const isLongText =
+    post.contentType === "text" && post.content.length > COLLAPSE_THRESHOLD;
+  const [expanded, setExpanded] = useState(!isLongText);
 
   return (
     <Card
@@ -78,9 +94,36 @@ export function PostCard({
             className="aspect-4/5 w-full bg-muted object-cover"
           />
         ) : (
-          <p className="whitespace-pre-wrap px-6 py-6 text-base leading-relaxed">
-            {post.content}
-          </p>
+          <div className="px-6 py-6">
+            <p
+              className={
+                "whitespace-pre-wrap text-base leading-relaxed" +
+                (!expanded ? " line-clamp-6" : "")
+              }
+            >
+              {post.content}
+            </p>
+            {isLongText && (
+              <Button
+                variant="link"
+                size="sm"
+                className="mt-2 h-auto p-0"
+                onClick={() => setExpanded((prev) => !prev)}
+              >
+                {expanded ? (
+                  <>
+                    <ChevronUp className="size-4" />
+                    Show less
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="size-4" />
+                    Show more
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
         )}
       </CardContent>
 

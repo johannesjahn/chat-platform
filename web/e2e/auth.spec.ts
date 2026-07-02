@@ -12,12 +12,14 @@ test("registers a new user and sees the user list after login", async ({
   await page.fill("#password", password);
   await page.getByRole("button", { name: "Register" }).click();
 
-  // Registration auto-logs-in and redirects to the home page.
+  // Registration auto-logs-in and redirects to the home page (the feed).
   await expect(page).toHaveURL("/");
-  await expect(page.getByText(`Welcome back, ${username}`)).toBeVisible();
+  await expect(page.getByText(`@${username}`)).toBeVisible();
 
-  // The user list is a protected endpoint — it should now load (the bearer
-  // token is attached) and include the freshly registered user. Scope to the
-  // list so we don't also match the username shown in the nav bar.
+  // The user list lives on its own page and is a protected endpoint — it
+  // should now load (the bearer token is attached) and include the freshly
+  // registered user. Scope to the list so we don't also match the username
+  // shown in the nav bar.
+  await page.goto("/users");
   await expect(page.getByRole("list").getByText(`@${username}`)).toBeVisible();
 });

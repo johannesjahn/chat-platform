@@ -18,7 +18,7 @@ test("creating a post shows it in the feed, and infinite scroll loads more posts
   await page.getByRole("button", { name: "Text" }).click();
   await page.fill("#content", "My first post from the UI");
   await page.getByRole("button", { name: "Post" }).click();
-  await expect(page).toHaveURL("/posts");
+  await expect(page).toHaveURL("/");
   await expect(page.getByText("My first post from the UI")).toBeVisible();
 
   // Seed 7 more posts directly against the API — 8 total is enough to
@@ -57,7 +57,7 @@ test("edit is only available to a post's author, both in the UI and when navigat
   await pageA.goto("/posts/new");
   await pageA.fill("#content", "Only the author should be able to edit this");
   await pageA.getByRole("button", { name: "Post" }).click();
-  await expect(pageA).toHaveURL("/posts");
+  await expect(pageA).toHaveURL("/");
 
   const cardOnA = pageA.getByRole("article", { name: `Post by @${usernameA}` });
   await expect(cardOnA.getByRole("link", { name: "Edit post" })).toBeVisible();
@@ -65,7 +65,7 @@ test("edit is only available to a post's author, both in the UI and when navigat
   const contextB = await browser.newContext();
   const pageB = await contextB.newPage();
   await registerViaUi(pageB);
-  await pageB.goto("/posts");
+  await pageB.goto("/");
 
   const cardOnB = pageB.getByRole("article", { name: `Post by @${usernameA}` });
   await expect(cardOnB).toBeVisible();
@@ -85,7 +85,7 @@ test("edit is only available to a post's author, both in the UI and when navigat
   await expect(pageA).toHaveURL(`/posts/${postId}/edit`);
   await pageA.fill("#content", "Edited by the author");
   await pageA.getByRole("button", { name: "Save changes" }).click();
-  await expect(pageA).toHaveURL("/posts");
+  await expect(pageA).toHaveURL("/");
   await expect(pageA.getByText("Edited by the author")).toBeVisible();
 
   await contextA.close();
