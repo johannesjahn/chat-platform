@@ -88,29 +88,41 @@ export const UpdatePostBody = Schema.Struct({
   content: PostContent,
 }).annotations({ identifier: "UpdatePostBody" });
 
-export const DEFAULT_POSTS_PAGE_SIZE = 20;
-export const MAX_POSTS_PAGE_SIZE = 100;
+export const DEFAULT_POSTS_LIMIT = 20;
+export const MAX_POSTS_LIMIT = 100;
 
-// `page`/`pageSize` are left plain-optional (rather than `optionalWith` +
-// `default`) because a schema default only fills in on *decode* — an
-// HttpApiClient caller encoding a request would otherwise be forced to pass
-// both every time. Defaults are instead applied by the handler.
+// `offset`/`limit` (rather than `page`/`pageSize`) so a caller can request
+// irregularly-sized batches — e.g. an infinite-scroll feed that loads 5 posts
+// up front and 3 at a time thereafter — without the batch size having to stay
+// constant across requests.
+//
+// Left plain-optional (rather than `optionalWith` + `default`) because a
+// schema default only fills in on *decode* — an HttpApiClient caller encoding
+// a request would otherwise be forced to pass both every time. Defaults are
+// instead applied by the handler.
+//
+// Deliberately left un-`identifier`-annotated: the OpenAPI generator only
+// emits individual query-parameter entries when this struct is inlined —
+// giving it a named `identifier` turns it into a `$ref` to a component
+// schema instead, which it silently ignores when extracting parameters
+// (see `processParameters` in `OpenApi.ts`), producing an operation with no
+// documented/typed query params at all.
 export const PostsPageQuery = Schema.Struct({
-  page: Schema.optional(
-    Schema.NumberFromString.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1)),
+  offset: Schema.optional(
+    Schema.NumberFromString.pipe(Schema.int(), Schema.greaterThanOrEqualTo(0)),
   ),
-  pageSize: Schema.optional(
+  limit: Schema.optional(
     Schema.NumberFromString.pipe(
       Schema.int(),
-      Schema.between(1, MAX_POSTS_PAGE_SIZE),
+      Schema.between(1, MAX_POSTS_LIMIT),
     ),
   ),
-}).annotations({ identifier: "PostsPageQuery" });
+});
 
 export const PostsPage = Schema.Struct({
   posts: Schema.Array(Post),
-  page: Schema.Number,
-  pageSize: Schema.Number,
+  offset: Schema.Number,
+  limit: Schema.Number,
   total: Schema.Number,
 }).annotations({ identifier: "PostsPage" });
 

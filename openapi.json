@@ -550,7 +550,28 @@
           "posts"
         ],
         "operationId": "posts.listAllPosts",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "a string to be decoded into a number"
+            },
+            "required": false,
+            "description": "a string to be decoded into a number"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "a string to be decoded into a number"
+            },
+            "required": false,
+            "description": "a string to be decoded into a number"
+          }
+        ],
         "security": [
           {
             "bearer": []
@@ -898,27 +919,12 @@
           "image_url"
         ]
       },
-      "PostsPageQuery": {
-        "type": "object",
-        "required": [],
-        "properties": {
-          "page": {
-            "type": "string",
-            "description": "a string to be decoded into a number"
-          },
-          "pageSize": {
-            "type": "string",
-            "description": "a string to be decoded into a number"
-          }
-        },
-        "additionalProperties": false
-      },
       "PostsPage": {
         "type": "object",
         "required": [
           "posts",
-          "page",
-          "pageSize",
+          "offset",
+          "limit",
           "total"
         ],
         "properties": {
@@ -928,10 +934,10 @@
               "$ref": "#/components/schemas/Post"
             }
           },
-          "page": {
+          "offset": {
             "type": "number"
           },
-          "pageSize": {
+          "limit": {
             "type": "number"
           },
           "total": {
