@@ -46,7 +46,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           return toApiPost(row);
         }),
       )
-      .handle("listAllPosts", ({ urlParams }) =>
+      .handle("listPosts", ({ urlParams }) =>
         Effect.gen(function* () {
           const db = yield* Db;
           const offset = urlParams.offset ?? 0;

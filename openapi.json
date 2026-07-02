@@ -426,12 +426,12 @@
         }
       }
     },
-    "/posts/all": {
+    "/posts": {
       "get": {
         "tags": [
           "posts"
         ],
-        "operationId": "posts.listAllPosts",
+        "operationId": "posts.listPosts",
         "parameters": [
           {
             "name": "offset",
@@ -491,9 +491,7 @@
             }
           }
         }
-      }
-    },
-    "/posts": {
+      },
       "post": {
         "tags": [
           "posts"

@@ -160,7 +160,7 @@ const PostsGroup = HttpApiGroup.make("posts")
   )
   .add(
     // Authenticated, paginated view over all posts.
-    HttpApiEndpoint.get("listAllPosts", "/posts/all")
+    HttpApiEndpoint.get("listPosts", "/posts")
       .setUrlParams(PostsPageQuery)
       .addSuccess(PostsPage)
       .middleware(Authentication),

@@ -84,22 +84,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/posts/all": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["posts.listAllPosts"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/posts": {
         parameters: {
             query?: never;
@@ -107,7 +91,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["posts.listPosts"];
         put?: never;
         post: operations["posts.createPost"];
         delete?: never;
@@ -566,7 +550,7 @@ export interface operations {
             };
         };
     };
-    "posts.listAllPosts": {
+    "posts.listPosts": {
         parameters: {
             query?: {
                 /** @description a string to be decoded into a number */

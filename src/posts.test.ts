@@ -215,12 +215,12 @@ test("getPost works without authentication", () =>
     }),
   ));
 
-test("listAllPosts rejects an unauthenticated request", () =>
+test("listPosts rejects an unauthenticated request", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
       const result = yield* c.posts
-        .listAllPosts({ urlParams: {} })
+        .listPosts({ urlParams: {} })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left") {
@@ -229,7 +229,7 @@ test("listAllPosts rejects an unauthenticated request", () =>
     }),
   ));
 
-test("listAllPosts returns a default first page with total count", () =>
+test("listPosts returns a default first page with total count", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("olga", "pw");
@@ -240,7 +240,7 @@ test("listAllPosts returns a default first page with total count", () =>
         });
       }
 
-      const result = yield* authed.posts.listAllPosts({ urlParams: {} });
+      const result = yield* authed.posts.listPosts({ urlParams: {} });
       expect(result.offset).toBe(0);
       expect(result.limit).toBe(20);
       expect(result.total).toBe(3);
@@ -248,7 +248,7 @@ test("listAllPosts returns a default first page with total count", () =>
     }),
   ));
 
-test("listAllPosts paginates newest-first using offset and limit query params", () =>
+test("listPosts paginates newest-first using offset and limit query params", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("pete", "pw");
@@ -261,10 +261,10 @@ test("listAllPosts paginates newest-first using offset and limit query params", 
           }),
         );
       }
-      // listAllPosts orders newest-first, so pages walk `created` in reverse.
+      // listPosts orders newest-first, so pages walk `created` in reverse.
       const newestFirst = [...created].reverse();
 
-      const firstPage = yield* authed.posts.listAllPosts({
+      const firstPage = yield* authed.posts.listPosts({
         urlParams: { offset: 0, limit: 2 },
       });
       expect(firstPage.total).toBe(5);
@@ -272,14 +272,14 @@ test("listAllPosts paginates newest-first using offset and limit query params", 
         newestFirst.slice(0, 2).map((p) => p.id),
       );
 
-      const secondPage = yield* authed.posts.listAllPosts({
+      const secondPage = yield* authed.posts.listPosts({
         urlParams: { offset: 2, limit: 2 },
       });
       expect(secondPage.posts.map((p) => p.id)).toEqual(
         newestFirst.slice(2, 4).map((p) => p.id),
       );
 
-      const thirdPage = yield* authed.posts.listAllPosts({
+      const thirdPage = yield* authed.posts.listPosts({
         urlParams: { offset: 4, limit: 2 },
       });
       expect(thirdPage.posts.map((p) => p.id)).toEqual(
@@ -288,25 +288,25 @@ test("listAllPosts paginates newest-first using offset and limit query params", 
     }),
   ));
 
-test("listAllPosts rejects a limit above the max", () =>
+test("listPosts rejects a limit above the max", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("quinn", "pw");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
-        .listAllPosts({ urlParams: { limit: 101 } })
+        .listPosts({ urlParams: { limit: 101 } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
     }),
   ));
 
-test("listAllPosts rejects a negative offset", () =>
+test("listPosts rejects a negative offset", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("ruth", "pw");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
-        .listAllPosts({ urlParams: { offset: -1 } })
+        .listPosts({ urlParams: { offset: -1 } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
     }),

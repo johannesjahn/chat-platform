@@ -48,7 +48,7 @@ export type TestBackend = {
 
 // Boots a dedicated backend process on its own port, backed by its own
 // SQLite file in a fresh temp dir. Each e2e test gets one of these instead
-// of sharing a single backend/db across the whole run — the `/posts/all`
+// of sharing a single backend/db across the whole run — the `GET /posts`
 // feed isn't scoped per user, so a shared db let one test's seeded posts
 // shift another test's exact-count assertions.
 export async function startTestBackend(): Promise<TestBackend> {
