@@ -41,6 +41,45 @@ export class InvalidCredentials extends Schema.TaggedError<InvalidCredentials>()
   { message: Schema.String },
 ) {}
 
+export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
+  message: Schema.String,
+}) {}
+
+// Content types a post's body can hold. Extend this union (and the handler's
+// per-type validation, if any is ever needed) to support new post kinds.
+export const PostContentType = Schema.Literal("text", "image_url").annotations({
+  identifier: "PostContentType",
+});
+export type PostContentType = typeof PostContentType.Type;
+
+// Generous but bounded — prevents unbounded payloads while comfortably
+// fitting a long-form text post or an image URL.
+const MAX_POST_CONTENT_LENGTH = 10_000;
+
+const PostContent = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_POST_CONTENT_LENGTH),
+);
+
+export const Post = Schema.Struct({
+  id: Schema.Number,
+  authorId: Schema.Number,
+  contentType: PostContentType,
+  content: Schema.String,
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+}).annotations({ identifier: "Post" });
+export type Post = typeof Post.Type;
+
+export const CreatePostBody = Schema.Struct({
+  contentType: PostContentType,
+  content: PostContent,
+}).annotations({ identifier: "CreatePostBody" });
+
+export const UpdatePostBody = Schema.Struct({
+  contentType: PostContentType,
+  content: PostContent,
+}).annotations({ identifier: "UpdatePostBody" });
+
 const UsersGroup = HttpApiGroup.make("users")
   .add(
     HttpApiEndpoint.get("listUsers", "/users")
@@ -66,4 +105,40 @@ const UsersGroup = HttpApiGroup.make("users")
       .addError(InvalidCredentials, { status: 401 }),
   );
 
-export class ChatApi extends HttpApi.make("chat-platform").add(UsersGroup) {}
+const PostsGroup = HttpApiGroup.make("posts")
+  .add(
+    HttpApiEndpoint.get("listPosts", "/posts").addSuccess(Schema.Array(Post)),
+  )
+  .add(
+    HttpApiEndpoint.get("getPost", "/posts/:id")
+      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
+      .addSuccess(Post)
+      .addError(NotFound, { status: 404 }),
+  )
+  .add(
+    HttpApiEndpoint.post("createPost", "/posts")
+      .setPayload(CreatePostBody)
+      .addSuccess(Post, { status: 201 })
+      .middleware(Authentication),
+  )
+  .add(
+    HttpApiEndpoint.put("updatePost", "/posts/:id")
+      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
+      .setPayload(UpdatePostBody)
+      .addSuccess(Post)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    HttpApiEndpoint.del("deletePost", "/posts/:id")
+      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
+      .addSuccess(Schema.Void)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  );
+
+export class ChatApi extends HttpApi.make("chat-platform")
+  .add(UsersGroup)
+  .add(PostsGroup) {}

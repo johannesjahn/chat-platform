@@ -15,6 +15,7 @@ import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
+import { PostsHandlerLive } from "./PostsHandler.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import * as schema from "./db/schema.ts";
 
@@ -23,6 +24,7 @@ process.env.JWT_SECRET ??= "test-secret";
 
 const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(UsersHandlerLive),
+  Layer.provide(PostsHandlerLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
 );
