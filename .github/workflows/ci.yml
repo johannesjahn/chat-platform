@@ -59,6 +59,35 @@ jobs:
         run: bun run typecheck
         working-directory: web
 
+  openapi:
+    name: OpenAPI spec & generated types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install backend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+        working-directory: web
+
+      - name: Regenerate openapi.json and frontend API types
+        run: bun run gen:types
+        working-directory: web
+
+      - name: Fail if generated files are out of date
+        run: |
+          if ! git diff --exit-code -- openapi.json web/src/lib/api-types.ts; then
+            echo "::error::openapi.json and/or web/src/lib/api-types.ts are out of date." \
+              "Run 'cd web && bun run gen:types' and commit the result."
+            exit 1
+          fi
+
   unit:
     name: Backend tests
     runs-on: ubuntu-latest
