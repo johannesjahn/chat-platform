@@ -79,7 +79,9 @@ const verifyHs256 = async (
   );
   if (!valid) return null;
   try {
-    return JSON.parse(Buffer.from(body!, "base64url").toString()) as TokenClaims;
+    return JSON.parse(
+      Buffer.from(body!, "base64url").toString(),
+    ) as TokenClaims;
   } catch {
     return null;
   }
@@ -123,8 +125,7 @@ export const JwtLive = Layer.effect(
       });
 
     return {
-      signAccessToken: (user) =>
-        sign(user, "access", ACCESS_TOKEN_TTL_SECONDS),
+      signAccessToken: (user) => sign(user, "access", ACCESS_TOKEN_TTL_SECONDS),
       signRefreshToken: (user) =>
         sign(user, "refresh", REFRESH_TOKEN_TTL_SECONDS),
       verifyAccessToken: (token) =>

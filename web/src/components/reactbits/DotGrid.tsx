@@ -149,7 +149,10 @@ export function DotGrid({
     const onMove = (e: MouseEvent) => {
       const rect = wrapperRef.current?.getBoundingClientRect();
       if (!rect) return;
-      pointerRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      pointerRef.current = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
     };
 
     const onLeave = () => {

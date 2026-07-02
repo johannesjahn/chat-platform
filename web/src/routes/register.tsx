@@ -22,7 +22,9 @@ function RegisterPage() {
       onSubmit={async ({ username, password }) => {
         await register.mutateAsync({ body: { username, password } });
         // Registration succeeded — log straight in for a smooth first visit.
-        const session = await login.mutateAsync({ body: { username, password } });
+        const session = await login.mutateAsync({
+          body: { username, password },
+        });
         setSession(session);
         await queryClient.invalidateQueries({ queryKey: usersQueryKey });
         await router.navigate({ to: "/" });
@@ -30,7 +32,10 @@ function RegisterPage() {
       footer={
         <>
           Already have an account?{" "}
-          <Link to="/login" className="font-medium text-primary hover:underline">
+          <Link
+            to="/login"
+            className="font-medium text-primary hover:underline"
+          >
             Log in
           </Link>
         </>

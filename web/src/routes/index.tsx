@@ -64,7 +64,7 @@ function HomePage() {
 
             {!session ? (
               <p className="text-sm text-muted-foreground">
-                Log in to see who's registered.
+                Log in to see who&apos;s registered.
               </p>
             ) : isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>

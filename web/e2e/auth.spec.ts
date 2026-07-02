@@ -25,7 +25,5 @@ test("registers a new user and sees the user list after login", async ({
   // The user list is a protected endpoint — it should now load (the bearer
   // token is attached) and include the freshly registered user. Scope to the
   // list so we don't also match the username shown in the nav bar.
-  await expect(
-    page.getByRole("list").getByText(`@${username}`),
-  ).toBeVisible();
+  await expect(page.getByRole("list").getByText(`@${username}`)).toBeVisible();
 });

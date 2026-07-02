@@ -1,4 +1,8 @@
-import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware } from "@effect/platform";
+import {
+  HttpApiBuilder,
+  HttpApiSwagger,
+  HttpMiddleware,
+} from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Config, Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";

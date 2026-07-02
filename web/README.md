@@ -38,7 +38,7 @@ like `/login` resolve. `bun run preview` serves the build locally.
 Two settings must line up, one per side:
 
 1. **Build the frontend against the backend's public URL.** `VITE_API_URL` is
-   inlined at *build* time, so set it when building — not at runtime:
+   inlined at _build_ time, so set it when building — not at runtime:
 
    ```sh
    VITE_API_URL=https://api.example.com bun run build

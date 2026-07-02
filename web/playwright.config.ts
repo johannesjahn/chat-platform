@@ -15,9 +15,7 @@ export default defineConfig({
     baseURL: `http://localhost:${WEB_PORT}`,
     trace: "on-first-retry",
   },
-  projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-  ],
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
       // Backend lives one level up; give it a deterministic secret so the run

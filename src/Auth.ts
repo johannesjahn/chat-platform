@@ -37,11 +37,13 @@ export const AuthenticationLive = Layer.effect(
     const jwt = yield* Jwt;
     return {
       bearer: (token) =>
-        jwt.verifyAccessToken(Redacted.value(token)).pipe(
-          Effect.mapError(
-            () => new Unauthorized({ message: "Invalid or expired token" }),
+        jwt
+          .verifyAccessToken(Redacted.value(token))
+          .pipe(
+            Effect.mapError(
+              () => new Unauthorized({ message: "Invalid or expired token" }),
+            ),
           ),
-        ),
     };
   }),
 );

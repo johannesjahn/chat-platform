@@ -44,8 +44,13 @@ const run = <A, E>(
     ),
   );
 
-  const mockFetch = (input: string | URL | Request, init?: RequestInit): Promise<Response> =>
-    handler(input instanceof Request ? input : new Request(input.toString(), init));
+  const mockFetch = (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> =>
+    handler(
+      input instanceof Request ? input : new Request(input.toString(), init),
+    );
 
   const TestClientLayer = FetchHttpClient.layer.pipe(
     Layer.provide(
@@ -114,8 +119,12 @@ test("listUsers returns all users in insertion order without password data", () 
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({ payload: { username: "alice", password: "pw-alice" } });
-      yield* c.users.register({ payload: { username: "bob", password: "pw-bob" } });
+      yield* c.users.register({
+        payload: { username: "alice", password: "pw-alice" },
+      });
+      yield* c.users.register({
+        payload: { username: "bob", password: "pw-bob" },
+      });
       const { accessToken } = yield* c.users.login({
         payload: { username: "alice", password: "pw-alice" },
       });
@@ -144,9 +153,9 @@ test("getUser returns 404 for a missing id", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const result = yield* c.users.getUser({ path: { id: 9999 } }).pipe(
-        Effect.either,
-      );
+      const result = yield* c.users
+        .getUser({ path: { id: 9999 } })
+        .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left") {
         expect((result.left as { message: string }).message).toContain("9999");
@@ -158,7 +167,9 @@ test("register with a duplicate username returns a 409 conflict", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({ payload: { username: "dave", password: "pw1" } });
+      yield* c.users.register({
+        payload: { username: "dave", password: "pw1" },
+      });
       const result = yield* c.users
         .register({ payload: { username: "dave", password: "pw2" } })
         .pipe(Effect.either);
@@ -207,7 +218,9 @@ test("login succeeds and returns the user plus signed access and refresh JWTs", 
       expect(access.type).toBe("access");
       expect(refresh.type).toBe("refresh");
       // The refresh token outlives the access token.
-      expect(refresh.exp - refresh.iat).toBeGreaterThan(access.exp - access.iat);
+      expect(refresh.exp - refresh.iat).toBeGreaterThan(
+        access.exp - access.iat,
+      );
     }),
   ));
 
@@ -215,7 +228,9 @@ test("login fails with a wrong password", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({ payload: { username: "frank", password: "right-pw" } });
+      yield* c.users.register({
+        payload: { username: "frank", password: "right-pw" },
+      });
       const result = yield* c.users
         .login({ payload: { username: "frank", password: "wrong-pw" } })
         .pipe(Effect.either);

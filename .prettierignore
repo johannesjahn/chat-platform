@@ -1,0 +1,19 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+out
+
+# Lockfiles
+bun.lock
+
+# Generated code — do not reformat
+drizzle
+openapi.json
+web/src/routeTree.gen.ts
+web/src/lib/api-types.ts
+web/.tanstack
+
+# Local database files
+*.db

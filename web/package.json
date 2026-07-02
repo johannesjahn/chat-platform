@@ -7,6 +7,8 @@
     "dev": "vite dev --port 3001",
     "build": "vite build",
     "preview": "vite preview --port 3001",
+    "gen:routes": "tsr generate",
+    "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
     "gen:types": "bun run ../scripts/gen-openapi.ts && openapi-typescript ../openapi.json -o src/lib/api-types.ts"
   },
@@ -28,6 +30,7 @@
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.2",
+    "@tanstack/router-cli": "^1.167.18",
     "@types/node": "^26.1.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
