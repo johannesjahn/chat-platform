@@ -80,6 +80,11 @@ export const PostsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          // Set both from a single Date rather than relying on the schema's
+          // independent per-column $defaultFn — two separate `new Date()`
+          // calls can land a millisecond apart, and a freshly created post's
+          // createdAt/updatedAt should be identical, not just close.
+          const now = new Date();
           const rows = yield* Effect.try(() =>
             db
               .insert(posts)
@@ -87,6 +92,8 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 authorId: currentUser.id,
                 contentType: payload.contentType,
                 content: payload.content,
+                createdAt: now,
+                updatedAt: now,
               })
               .returning()
               .all(),
