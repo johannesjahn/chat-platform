@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type CSSProperties, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   ChevronDown,
@@ -9,6 +9,7 @@ import {
   Trash2,
   Type,
 } from "lucide-react";
+import { Spotlight } from "@/components/reactbits/Spotlight";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,6 +17,8 @@ import {
   CardFooter,
   CardHeader,
 } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import type { Post } from "@/lib/posts";
 
 type PostCardProps = {
@@ -24,7 +27,35 @@ type PostCardProps = {
   canModify: boolean;
   onDelete: () => void;
   isDeleting: boolean;
+  style?: CSSProperties;
 };
+
+// Structural placeholder shown while a page of posts is loading. Mirrors
+// PostCard's header/content/footer chrome exactly (same padding, avatar size,
+// border) so only the variable-height content area shifts once real posts
+// swap in — the same shift you'd see between two real posts of different
+// lengths, not a skeleton-to-content pop.
+export function PostCardSkeleton() {
+  return (
+    <Card className="w-full max-w-xl overflow-hidden py-0">
+      <CardHeader className="flex flex-row items-center gap-3 border-b border-border py-4">
+        <Skeleton className="size-9 shrink-0 rounded-full" />
+        <div className="flex flex-1 flex-col gap-2">
+          <Skeleton className="h-3.5 w-28" />
+          <Skeleton className="h-3 w-20" />
+        </div>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2.5 px-6 py-6">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-3/4" />
+      </CardContent>
+      <CardFooter className="border-t border-border py-3">
+        <Skeleton className="h-3 w-20" />
+      </CardFooter>
+    </Card>
+  );
+}
 
 // Posts longer than this are collapsed behind a "Show more" toggle so a
 // single long text post can't dominate the feed.
@@ -36,6 +67,7 @@ export function PostCard({
   canModify,
   onDelete,
   isDeleting,
+  style,
 }: PostCardProps) {
   const wasEdited = post.updatedAt !== post.createdAt;
   const isLongText =
@@ -47,8 +79,24 @@ export function PostCard({
       role="article"
       aria-label={`Post by @${authorUsername}`}
       data-post-id={post.id}
-      className="w-full max-w-xl overflow-hidden py-0"
+      style={style}
+      onMouseMove={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        e.currentTarget.style.setProperty(
+          "--spot-x",
+          `${e.clientX - rect.left}px`,
+        );
+        e.currentTarget.style.setProperty(
+          "--spot-y",
+          `${e.clientY - rect.top}px`,
+        );
+      }}
+      className={cn(
+        "group w-full max-w-xl overflow-hidden py-0 transition-[transform,box-shadow] duration-300 hover:-translate-y-0.5 hover:shadow-lg",
+        "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-500",
+      )}
     >
+      <Spotlight />
       <CardHeader className="flex flex-row items-center gap-3 border-b border-border py-4">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
           {authorUsername.slice(0, 1).toUpperCase()}

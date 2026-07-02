@@ -15,7 +15,7 @@ type LoginPromptProps = {
 
 export function LoginPrompt({ title, description }: LoginPromptProps) {
   return (
-    <Card className="w-full max-w-xl">
+    <Card className="w-full max-w-xl motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>

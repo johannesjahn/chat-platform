@@ -3,7 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Loader2, PlusCircle } from "lucide-react";
 import { LoginPrompt } from "@/components/LoginPrompt";
-import { PostCard } from "@/components/PostCard";
+import { PostCard, PostCardSkeleton } from "@/components/PostCard";
+import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
@@ -73,7 +74,9 @@ function PostsFeedPage() {
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col items-center gap-6 px-4 py-10">
       <div className="flex w-full items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Feed</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          <GradientText>Feed</GradientText>
+        </h1>
         {session && (
           <Button asChild size="sm">
             <Link to="/posts/new">
@@ -90,7 +93,11 @@ function PostsFeedPage() {
           description="Posts are only visible to signed-in users."
         />
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading posts…</p>
+        <div className="flex w-full flex-col items-center gap-6">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <PostCardSkeleton key={i} />
+          ))}
+        </div>
       ) : error ? (
         <p className="w-full rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           Could not load posts: {errorMessage(error)}
@@ -101,7 +108,7 @@ function PostsFeedPage() {
         </p>
       ) : (
         <ul role="list" className="flex w-full flex-col items-center gap-6">
-          {posts.map((post) => (
+          {posts.map((post, i) => (
             <li key={post.id} className="flex w-full justify-center">
               <PostCard
                 post={post}
@@ -114,6 +121,7 @@ function PostsFeedPage() {
                 }
                 onDelete={() => handleDelete(post.id)}
                 isDeleting={deletingId === post.id}
+                style={{ animationDelay: `${Math.min(i, 6) * 60}ms` }}
               />
             </li>
           ))}
