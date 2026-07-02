@@ -131,14 +131,18 @@ lint/format from the repo root; run `typecheck` per package.
 
 ## Code generation
 
-Three artifacts are generated, not hand-written. All are gitignored and
-regenerated on demand — don't edit them by hand.
+Three artifacts are generated, not hand-written — don't edit them by hand.
+`openapi.json` and `web/src/lib/api-types.ts` are **checked into git**
+(regenerate and commit them after any backend API change); `routeTree.gen.ts`
+is gitignored and rebuilt on every dev/build.
 
 - **OpenAPI spec** — `bun run gen:openapi` (root) writes `openapi.json` from the
   `ChatApi` definition via `OpenApi.fromApi` (no running server needed).
 - **Frontend API types** — `cd web && bun run gen:types` regenerates
   `openapi.json` and then `web/src/lib/api-types.ts` with `openapi-typescript`.
-  Re-run after any backend API change so the typed client stays in sync.
+  Re-run after any backend API change so the typed client stays in sync, and
+  commit both files — the `openapi` CI job fails the build if regenerating
+  them produces a diff from what's committed.
 - **Route tree** — `web/src/routeTree.gen.ts` is produced by TanStack Router.
   The Vite plugin regenerates it during `bun run dev`/`build`; to produce it
   without Vite (e.g. before a standalone `typecheck`) run
@@ -164,7 +168,11 @@ signature.
 ## CI
 
 [.github/workflows/ci.yml](.github/workflows/ci.yml) runs on pushes to `main`
-and all PRs, with four parallel jobs: **lint** (`format:check` + `lint`),
-**typecheck** (backend + web; generates the route tree first), **unit**
-(`bun test ./src`), and **e2e** (Playwright). The Bun version is pinned once via
-the workflow-level `BUN_VERSION` env var.
+and all PRs, with five parallel jobs: **lint** (`format:check` + `lint`),
+**typecheck** (backend + web; generates the route tree first), **openapi**
+(regenerates `openapi.json` and `web/src/lib/api-types.ts` via `gen:types` and
+fails if that produces a diff, i.e. catches a backend API change whose
+generated spec/types weren't regenerated and committed), **unit**
+(`bun test ./src`, which includes `src/openapi.test.ts` validating the spec
+against the `ChatApi` definition), and **e2e** (Playwright). The Bun version
+is pinned once via the workflow-level `BUN_VERSION` env var.
