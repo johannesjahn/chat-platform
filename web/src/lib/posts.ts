@@ -1,0 +1,43 @@
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { fetchClient } from "./api";
+import type { components } from "./api-types";
+
+export type Post = components["schemas"]["Post"];
+export type PostContentType = components["schemas"]["PostContentType"];
+
+// Content is capped server-side (`MAX_POST_CONTENT_LENGTH` in src/Api.ts) —
+// kept in sync here so the form can show a live counter/limit client-side.
+export const MAX_POST_CONTENT_LENGTH = 10_000;
+
+// Feed batch sizes: a fuller first screen, then smaller batches as the user
+// scrolls, for the infinite-scroll feed on `/posts`.
+export const INITIAL_POSTS_LIMIT = 5;
+export const LOAD_MORE_POSTS_LIMIT = 3;
+
+export const postsFeedQueryKey = ["posts", "feed"] as const;
+
+// The typed `$api.useInfiniteQuery` wrapper only supports a single, constant
+// query param driving pagination — it can't express a batch size that varies
+// between the first page and subsequent ones. So this talks to `fetchClient`
+// (the same client `$api` wraps, auth header and all) directly instead.
+export function usePostsFeed(enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: postsFeedQueryKey,
+    enabled,
+    initialPageParam: 0,
+    queryFn: async ({ pageParam, signal }) => {
+      const limit =
+        pageParam === 0 ? INITIAL_POSTS_LIMIT : LOAD_MORE_POSTS_LIMIT;
+      const { data, error } = await fetchClient.GET("/posts/all", {
+        params: { query: { offset: String(pageParam), limit: String(limit) } },
+        signal,
+      });
+      if (error) throw error;
+      return data;
+    },
+    getNextPageParam: (lastPage) => {
+      const loaded = lastPage.offset + lastPage.posts.length;
+      return loaded < lastPage.total ? loaded : undefined;
+    },
+  });
+}

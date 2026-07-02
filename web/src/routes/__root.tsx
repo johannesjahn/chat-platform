@@ -7,7 +7,7 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { LogOut, MessagesSquare } from "lucide-react";
+import { LogOut, MessagesSquare, Rss } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { clearSession, useSession } from "../lib/auth";
@@ -50,6 +50,14 @@ function Nav() {
         <MessagesSquare className="size-5 text-primary" />
         Chat Platform
       </Link>
+      {session && (
+        <Button asChild variant="ghost" size="sm">
+          <Link to="/posts">
+            <Rss className="size-4" />
+            Feed
+          </Link>
+        </Button>
+      )}
       <span className="flex-1" />
       {session ? (
         <div className="flex items-center gap-3">
