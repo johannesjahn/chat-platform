@@ -7,6 +7,13 @@ import { registerViaUi } from "./helpers";
 // through the "new post" UI eight times.
 const API_URL = "http://localhost:3000";
 
+// The feed endpoint returns every post from every user (it isn't scoped to
+// the current user), and all tests here share one real backend/db instance.
+// Running them concurrently would let one test's seeded posts shift another
+// test's exact-count assertions (e.g. the infinite-scroll batch counts), so
+// force this file to run serially instead of relying on `fullyParallel`.
+test.describe.configure({ mode: "serial" });
+
 test("creating a post shows it in the feed, and infinite scroll loads more posts in batches of 5 then 3", async ({
   page,
   request,
@@ -90,4 +97,39 @@ test("edit is only available to a post's author, both in the UI and when navigat
 
   await contextA.close();
   await contextB.close();
+});
+
+test("long posts are collapsed behind a Show more toggle", async ({
+  page,
+  request,
+}) => {
+  const { username } = await registerViaUi(page);
+
+  // Longer than PostCard's 500-char collapse threshold — created directly
+  // against the API since the point is to check the feed's rendering, not
+  // the "new post" form.
+  const longContent = "Lorem ipsum dolor sit amet.".repeat(30);
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  const response = await request.post(`${API_URL}/posts`, {
+    headers: { Authorization: `Bearer ${session.accessToken}` },
+    data: { contentType: "text", content: longContent },
+  });
+  expect(response.ok()).toBe(true);
+
+  await page.goto("/");
+  const card = page.getByRole("article", { name: `Post by @${username}` });
+  await expect(card).toBeVisible();
+
+  const showMore = card.getByRole("button", { name: "Show more" });
+  await expect(showMore).toBeVisible();
+  await expect(card.getByRole("button", { name: "Show less" })).toHaveCount(0);
+
+  await showMore.click();
+  await expect(card.getByRole("button", { name: "Show less" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Show more" })).toHaveCount(0);
+
+  await card.getByRole("button", { name: "Show less" }).click();
+  await expect(showMore).toBeVisible();
 });
