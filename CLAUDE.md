@@ -103,3 +103,51 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+
+## Project layout
+
+This is a two-package repo:
+
+- **Backend** (repo root): Bun + Effect `HttpApi`, Drizzle ORM over `bun:sqlite`
+  (`dev.db`, auto-migrated on startup). Sources in `src/`.
+- **Frontend** (`web/`): TanStack Start (React) in SPA mode, calling the backend
+  over HTTP. Has its own `package.json`.
+
+Tooling (Prettier, ESLint, TypeScript) lives at the root and covers **both**
+packages — there is a single `eslint.config.js` and `.prettierrc.json`. Run
+lint/format from the repo root; run `typecheck` per package.
+
+## Testing
+
+- **Backend** — `bun test ./src` (Bun's test runner). Tests in
+  [src/users.test.ts](src/users.test.ts) drive the Effect `HttpApi` through an
+  in-process web handler: each `run()` spins up a fresh in-memory SQLite
+  (`:memory:`), applies the Drizzle migrations from `./drizzle`, and sets a
+  deterministic `JWT_SECRET`. No server or network, fully isolated per test.
+- **E2E** — `cd web && bun run test:e2e` (Playwright, Chromium). The Playwright
+  `webServer` config boots the _real_ backend (`bun run start`, cwd `..`, with a
+  test `JWT_SECRET`) and the Vite dev server, then drives the browser against
+  them. Configured in [web/playwright.config.ts](web/playwright.config.ts).
+
+## Code generation
+
+Three artifacts are generated, not hand-written. All are gitignored and
+regenerated on demand — don't edit them by hand.
+
+- **OpenAPI spec** — `bun run gen:openapi` (root) writes `openapi.json` from the
+  `ChatApi` definition via `OpenApi.fromApi` (no running server needed).
+- **Frontend API types** — `cd web && bun run gen:types` regenerates
+  `openapi.json` and then `web/src/lib/api-types.ts` with `openapi-typescript`.
+  Re-run after any backend API change so the typed client stays in sync.
+- **Route tree** — `web/src/routeTree.gen.ts` is produced by TanStack Router.
+  The Vite plugin regenerates it during `bun run dev`/`build`; to produce it
+  without Vite (e.g. before a standalone `typecheck`) run
+  `cd web && bun run gen:routes` (`tsr generate`).
+
+## CI
+
+[.github/workflows/ci.yml](.github/workflows/ci.yml) runs on pushes to `main`
+and all PRs, with four parallel jobs: **lint** (`format:check` + `lint`),
+**typecheck** (backend + web; generates the route tree first), **unit**
+(`bun test ./src`), and **e2e** (Playwright). The Bun version is pinned once via
+the workflow-level `BUN_VERSION` env var.
