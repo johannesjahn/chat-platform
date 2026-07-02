@@ -122,7 +122,8 @@
                   "type": "object",
                   "required": [
                     "id",
-                    "username"
+                    "username",
+                    "role"
                   ],
                   "properties": {
                     "id": {
@@ -130,6 +131,9 @@
                     },
                     "username": {
                       "type": "string"
+                    },
+                    "role": {
+                      "$ref": "#/components/schemas/UserRole"
                     }
                   },
                   "additionalProperties": false
@@ -221,6 +225,370 @@
           "required": true
         }
       }
+    },
+    "/posts": {
+      "get": {
+        "tags": [
+          "posts"
+        ],
+        "operationId": "posts.listPosts",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Post"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "posts"
+        ],
+        "operationId": "posts.createPost",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "authorId",
+                    "contentType",
+                    "content",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    },
+                    "authorId": {
+                      "type": "number"
+                    },
+                    "contentType": {
+                      "$ref": "#/components/schemas/PostContentType"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "updatedAt": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePostBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/posts/{id}": {
+      "get": {
+        "tags": [
+          "posts"
+        ],
+        "operationId": "posts.getPost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Post",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Post"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "posts"
+        ],
+        "operationId": "posts.updatePost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Post",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Post"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePostBody"
+              }
+            }
+          },
+          "required": true
+        }
+      },
+      "delete": {
+        "tags": [
+          "posts"
+        ],
+        "operationId": "posts.deletePost",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/all": {
+      "get": {
+        "tags": [
+          "posts"
+        ],
+        "operationId": "posts.listAllPosts",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PostsPage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -229,7 +597,8 @@
         "type": "object",
         "required": [
           "id",
-          "username"
+          "username",
+          "role"
         ],
         "properties": {
           "id": {
@@ -237,9 +606,19 @@
           },
           "username": {
             "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
           }
         },
         "additionalProperties": false
+      },
+      "UserRole": {
+        "type": "string",
+        "enum": [
+          "user",
+          "admin"
+        ]
       },
       "HttpApiDecodeError": {
         "type": "object",
@@ -479,6 +858,144 @@
           }
         },
         "additionalProperties": false
+      },
+      "Post": {
+        "type": "object",
+        "required": [
+          "id",
+          "authorId",
+          "contentType",
+          "content",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "authorId": {
+            "type": "number"
+          },
+          "contentType": {
+            "$ref": "#/components/schemas/PostContentType"
+          },
+          "content": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PostContentType": {
+        "type": "string",
+        "enum": [
+          "text",
+          "image_url"
+        ]
+      },
+      "PostsPageQuery": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "page": {
+            "type": "string",
+            "description": "a string to be decoded into a number"
+          },
+          "pageSize": {
+            "type": "string",
+            "description": "a string to be decoded into a number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PostsPage": {
+        "type": "object",
+        "required": [
+          "posts",
+          "page",
+          "pageSize",
+          "total"
+        ],
+        "properties": {
+          "posts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Post"
+            }
+          },
+          "page": {
+            "type": "number"
+          },
+          "pageSize": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreatePostBody": {
+        "type": "object",
+        "required": [
+          "contentType",
+          "content"
+        ],
+        "properties": {
+          "contentType": {
+            "$ref": "#/components/schemas/PostContentType"
+          },
+          "content": {
+            "$ref": "#/components/schemas/NonEmptyTrimmedString",
+            "description": "a string at most 10000 character(s) long",
+            "title": "maxLength(10000)",
+            "maxLength": 10000
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdatePostBody": {
+        "type": "object",
+        "required": [
+          "contentType",
+          "content"
+        ],
+        "properties": {
+          "contentType": {
+            "$ref": "#/components/schemas/PostContentType"
+          },
+          "content": {
+            "$ref": "#/components/schemas/NonEmptyTrimmedString",
+            "description": "a string at most 10000 character(s) long",
+            "title": "maxLength(10000)",
+            "maxLength": 10000
+          }
+        },
+        "additionalProperties": false
+      },
+      "Forbidden": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "Forbidden"
+            ]
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {
@@ -492,6 +1009,9 @@
   "tags": [
     {
       "name": "users"
+    },
+    {
+      "name": "posts"
     }
   ]
 }

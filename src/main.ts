@@ -9,17 +9,19 @@ import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
 import { DbLive } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
+import { PostsHandlerLive } from "./PostsHandler.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 
 // Allow the web frontend (different origin) to call the API from the browser.
 const CorsLive = HttpApiBuilder.middlewareCors({
   allowedOrigins: [process.env.WEB_ORIGIN ?? "http://localhost:3001"],
-  allowedMethods: ["GET", "POST"],
+  allowedMethods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
 });
 
 const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(UsersHandlerLive),
+  Layer.provide(PostsHandlerLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
   Layer.provide(CorsLive),

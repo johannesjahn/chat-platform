@@ -15,6 +15,7 @@ import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
+import { PostsHandlerLive } from "./PostsHandler.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import * as schema from "./db/schema.ts";
 
@@ -23,6 +24,7 @@ process.env.JWT_SECRET ??= "test-secret";
 
 const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(UsersHandlerLive),
+  Layer.provide(PostsHandlerLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
 );
@@ -110,6 +112,7 @@ test("register returns the created user with an id and no password", () =>
       });
       expect(user.username).toBe("alice");
       expect(typeof user.id).toBe("number");
+      expect(user.role).toBe("user");
       expect(user).not.toHaveProperty("password");
       expect(user).not.toHaveProperty("passwordHash");
     }),
@@ -189,6 +192,7 @@ const decodeClaims = (token: string) => {
   return claims as {
     sub: number;
     username: string;
+    role: string;
     type: string;
     iat: number;
     exp: number;
@@ -213,6 +217,7 @@ test("login succeeds and returns the user plus signed access and refresh JWTs", 
       for (const claims of [access, refresh]) {
         expect(claims.sub).toBe(created.id);
         expect(claims.username).toBe("erin");
+        expect(claims.role).toBe("user");
         expect(claims.exp).toBeGreaterThan(claims.iat);
       }
       expect(access.type).toBe("access");
