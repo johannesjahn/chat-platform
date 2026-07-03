@@ -13,7 +13,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "gen:openapi": "bun run scripts/gen-openapi.ts"
+    "gen:openapi": "bun run scripts/gen-openapi.ts",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@effect/platform": "latest",
