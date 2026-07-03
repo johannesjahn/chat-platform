@@ -15,7 +15,9 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: `http://localhost:${WEB_PORT}`,
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+    video: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
