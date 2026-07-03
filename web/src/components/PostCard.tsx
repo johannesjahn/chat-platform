@@ -9,7 +9,6 @@ import {
   Trash2,
   Type,
 } from "lucide-react";
-import { Spotlight } from "@/components/reactbits/Spotlight";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -80,23 +79,11 @@ export function PostCard({
       aria-label={`Post by @${authorUsername}`}
       data-post-id={post.id}
       style={style}
-      onMouseMove={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        e.currentTarget.style.setProperty(
-          "--spot-x",
-          `${e.clientX - rect.left}px`,
-        );
-        e.currentTarget.style.setProperty(
-          "--spot-y",
-          `${e.clientY - rect.top}px`,
-        );
-      }}
       className={cn(
-        "group w-full max-w-xl overflow-hidden py-0 transition-[transform,box-shadow] duration-300 hover:-translate-y-0.5 hover:shadow-lg",
+        "w-full max-w-xl overflow-hidden py-0 transition-[transform,box-shadow] duration-300 hover:-translate-y-0.5 hover:shadow-lg",
         "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-500",
       )}
     >
-      <Spotlight />
       <CardHeader className="flex flex-row items-center gap-3 border-b border-border py-4">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
           {authorUsername.slice(0, 1).toUpperCase()}
