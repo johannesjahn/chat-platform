@@ -11,9 +11,42 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { errorMessage } from "@/lib/errors";
 import { MAX_POST_CONTENT_LENGTH, type PostContentType } from "@/lib/posts";
+
+// Structural placeholder shown while an existing post is being fetched for
+// editing — mirrors PostForm's card/field layout so the form doesn't pop into
+// existence once the post data arrives.
+export function PostFormSkeleton() {
+  return (
+    <main className="mx-auto w-full max-w-xl px-4 py-10">
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-6 w-32" />
+          <Skeleton className="h-4 w-64" />
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-4 w-20" />
+              <div className="flex gap-2">
+                <Skeleton className="h-9 flex-1" />
+                <Skeleton className="h-9 flex-1" />
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-4 w-16" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+            <Skeleton className="h-9 w-full" />
+          </div>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
 
 type PostFormProps = {
   title: string;
@@ -49,7 +82,7 @@ export function PostForm({
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 py-10">
-      <Card>
+      <Card className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
         <CardHeader>
           <CardTitle>{title}</CardTitle>
           <CardDescription>{description}</CardDescription>

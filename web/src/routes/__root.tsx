@@ -9,6 +9,7 @@ import {
 import { QueryClientProvider } from "@tanstack/react-query";
 import { LogOut, MessagesSquare, Users } from "lucide-react";
 import type { ReactNode } from "react";
+import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { clearSession, useSession } from "../lib/auth";
 import { queryClient } from "../lib/query";
@@ -45,10 +46,11 @@ function Nav() {
     <nav className="sticky top-0 z-20 flex items-center gap-4 border-b border-border bg-card/70 px-5 py-3 backdrop-blur">
       <Link
         to="/"
-        className="flex items-center gap-2 font-semibold tracking-tight text-foreground transition-colors hover:text-primary"
+        className="group relative flex items-center gap-2 font-semibold tracking-tight text-foreground"
       >
-        <MessagesSquare className="size-5 text-primary" />
-        Chat Platform
+        <MessagesSquare className="size-5 text-primary transition-transform duration-300 group-hover:scale-110 group-hover:rotate-6" />
+        <GradientText>Chat Platform</GradientText>
+        <span className="pointer-events-none absolute -bottom-1 left-7 h-px w-0 bg-primary transition-all duration-300 group-hover:w-[calc(100%-1.75rem)]" />
       </Link>
       <Button asChild variant="ghost" size="sm">
         <Link to="/users">

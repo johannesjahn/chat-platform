@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { LoginPrompt } from "@/components/LoginPrompt";
-import { PostForm } from "@/components/PostForm";
+import { PostForm, PostFormSkeleton } from "@/components/PostForm";
 import {
   Card,
   CardDescription,
@@ -43,11 +43,7 @@ function EditPostPage() {
   }
 
   if (isLoading) {
-    return (
-      <main className="mx-auto w-full max-w-xl px-4 py-10">
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      </main>
-    );
+    return <PostFormSkeleton />;
   }
 
   if (error || !post) {
