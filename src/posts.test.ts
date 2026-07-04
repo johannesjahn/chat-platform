@@ -40,6 +40,7 @@ const run = <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
 ): Promise<A> => {
   const sqlite = new Database(":memory:");
+  sqlite.exec("PRAGMA foreign_keys = ON;");
   const db = drizzle(sqlite, { schema });
   migrate(db, { migrationsFolder: "./drizzle" });
   const TestDbLive = Layer.succeed(Db, db);

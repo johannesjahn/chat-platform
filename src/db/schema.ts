@@ -36,9 +36,13 @@ export const chats = sqliteTable("chats", {
   // Only set (and editable) for group chats — a direct chat's "name" is
   // always derived client-side from the other participant.
   title: text("title"),
-  createdBy: integer("created_by")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+  // Nullable + set null (not cascade): if the creator's account is ever
+  // deleted, the chat and everyone else's messages should survive — it just
+  // becomes un-renameable/un-manageable rather than vanishing for every
+  // other participant.
+  createdBy: integer("created_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),

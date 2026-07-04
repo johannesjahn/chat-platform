@@ -191,7 +191,10 @@ export const Chat = Schema.Struct({
   id: Schema.Number,
   type: ChatType,
   title: Schema.NullOr(Schema.String),
-  createdBy: Schema.Number,
+  // Null once the creator's account has been deleted (see db/schema.ts) —
+  // the chat and its history survive, but creator-only actions (rename, add
+  // participants) become unavailable to everyone.
+  createdBy: Schema.NullOr(Schema.Number),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
   participants: Schema.Array(ChatParticipant),

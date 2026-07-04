@@ -36,6 +36,7 @@ const run = <A, E>(
 ): Promise<A> => {
   const TestDbLive = Layer.sync(Db, () => {
     const sqlite = new Database(":memory:");
+    sqlite.exec("PRAGMA foreign_keys = ON;");
     const db = drizzle(sqlite, { schema });
     migrate(db, { migrationsFolder: "./drizzle" });
     return db;

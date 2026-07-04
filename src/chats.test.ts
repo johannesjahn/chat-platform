@@ -10,6 +10,7 @@ import { BunHttpServer } from "@effect/platform-bun";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi, MAX_GROUP_PARTICIPANTS } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
@@ -36,6 +37,7 @@ const run = <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
 ): Promise<A> => {
   const sqlite = new Database(":memory:");
+  sqlite.exec("PRAGMA foreign_keys = ON;");
   const db = drizzle(sqlite, { schema });
   migrate(db, { migrationsFolder: "./drizzle" });
   const TestDbLive = Layer.succeed(Db, db);
@@ -589,6 +591,120 @@ test("getChat 404s for a missing chat and is forbidden for non-participants", ()
       expect(forbidden._tag).toBe("Left");
       if (forbidden._tag === "Left") {
         expect((forbidden.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+    }),
+  ));
+
+test("createDirectChat does not create duplicate chats when two requests race", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+
+      // Both requests see no existing chat and try to create one
+      // concurrently — without the fix, this would leave two separate
+      // direct chats for the same pair.
+      const [first, second] = yield* Effect.all(
+        [
+          alice.client.chats.createDirectChat({
+            payload: { userId: bob.user.id },
+          }),
+          bob.client.chats.createDirectChat({
+            payload: { userId: alice.user.id },
+          }),
+        ],
+        { concurrency: "unbounded" },
+      );
+      expect(second.id).toBe(first.id);
+
+      const aliceChats = yield* alice.client.chats.listChats();
+      expect(aliceChats).toHaveLength(1);
+    }),
+  ));
+
+test("addParticipants does not exceed the group cap when two requests race", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Race", participantIds: [bob.user.id] },
+      });
+      // 2 participants so far (alice, bob); cap is 20, so 18 slots remain.
+      const pool = yield* insertDummyUsers(MAX_GROUP_PARTICIPANTS - 1);
+      const fillsTheCap = pool.slice(0, MAX_GROUP_PARTICIPANTS - 2);
+      const oneMore = pool[MAX_GROUP_PARTICIPANTS - 2]!;
+
+      // One request fills every remaining slot exactly to the cap; the
+      // other adds one further user. Run concurrently — combined, they'd
+      // push the group to 21 members if the cap check weren't atomic with
+      // the insert.
+      const [fillResult, oneMoreResult] = yield* Effect.all(
+        [
+          alice.client.chats
+            .addParticipants({
+              path: { id: chat.id },
+              payload: { participantIds: fillsTheCap.map((u) => u.id) },
+            })
+            .pipe(Effect.either),
+          alice.client.chats
+            .addParticipants({
+              path: { id: chat.id },
+              payload: { participantIds: [oneMore.id] },
+            })
+            .pipe(Effect.either),
+        ],
+        { concurrency: "unbounded" },
+      );
+
+      const outcomes = [fillResult, oneMoreResult];
+      const succeeded = outcomes.filter((r) => r._tag === "Right");
+      const failed = outcomes.filter((r) => r._tag === "Left");
+      // Exactly one of the two racing requests must have been rejected —
+      // both together would have exceeded the cap.
+      expect(succeeded).toHaveLength(1);
+      expect(failed).toHaveLength(1);
+      expect((failed[0] as { left: { _tag: string } }).left._tag).toBe(
+        "InvalidChatRequest",
+      );
+
+      const finalChat = yield* alice.client.chats.getChat({
+        path: { id: chat.id },
+      });
+      expect(finalChat.participants.length).toBeLessThanOrEqual(
+        MAX_GROUP_PARTICIPANTS,
+      );
+    }),
+  ));
+
+test("deleting a group chat's creator sets createdBy to null instead of deleting the chat", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Survives", participantIds: [bob.user.id] },
+      });
+
+      const db = yield* Db;
+      yield* Effect.try(() =>
+        db.delete(users).where(eq(users.id, alice.user.id)).run(),
+      ).pipe(Effect.orDie);
+
+      const survived = yield* bob.client.chats.getChat({
+        path: { id: chat.id },
+      });
+      expect(survived.title).toBe("Survives");
+      expect(survived.createdBy).toBeNull();
+      expect(survived.participants.map((p) => p.userId)).toContain(bob.user.id);
+
+      // With no creator left, renaming is now forbidden for everyone.
+      const result = yield* bob.client.chats
+        .updateChat({ path: { id: chat.id }, payload: { title: "Nope" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Forbidden");
       }
     }),
   ));

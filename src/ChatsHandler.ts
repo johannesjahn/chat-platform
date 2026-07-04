@@ -257,60 +257,85 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               new NotFound({ message: `User ${payload.userId} not found` }),
             );
 
-          // A direct chat always has exactly the two participants it was
-          // created with, so matching on "both ids are participants of some
-          // direct chat, and it has exactly two participants" uniquely
-          // identifies the (at most one) existing chat for this pair.
-          const existing = yield* Effect.try(() =>
-            db
-              .select({ chatId: chatParticipants.chatId })
-              .from(chatParticipants)
-              .innerJoin(chats, eq(chats.id, chatParticipants.chatId))
-              .where(
-                and(
-                  eq(chats.type, "direct"),
-                  inArray(chatParticipants.userId, [
-                    currentUser.id,
-                    payload.userId,
-                  ]),
-                ),
-              )
-              .groupBy(chatParticipants.chatId)
-              .having(eq(count(chatParticipants.userId), 2))
-              .all(),
-          ).pipe(Effect.orDie);
+          // The "does a direct chat for this pair already exist" check and
+          // the "create one if not" insert run as a single synchronous
+          // callback inside an immediate (write-locking) transaction. Doing
+          // both as two separate `yield*`ed steps would leave a gap where a
+          // concurrent request for the same pair could also see "no existing
+          // chat" and also create one — this closes that gap by making the
+          // whole read-then-write atomic, with no suspension point in
+          // between for another fiber to interleave.
+          const chatRow = yield* Effect.try(() =>
+            db.transaction(
+              (tx) => {
+                // A direct chat always has exactly the two participants it
+                // was created with, so matching on "both ids are
+                // participants of some direct chat, and it has exactly two
+                // participants" uniquely identifies the (at most one)
+                // existing chat for this pair.
+                const existing = tx
+                  .select({ chatId: chatParticipants.chatId })
+                  .from(chatParticipants)
+                  .innerJoin(chats, eq(chats.id, chatParticipants.chatId))
+                  .where(
+                    and(
+                      eq(chats.type, "direct"),
+                      inArray(chatParticipants.userId, [
+                        currentUser.id,
+                        payload.userId,
+                      ]),
+                    ),
+                  )
+                  .groupBy(chatParticipants.chatId)
+                  .having(eq(count(chatParticipants.userId), 2))
+                  .all();
 
-          if (existing[0]) {
-            const row = yield* getChatOr404(db, existing[0].chatId);
-            return yield* buildChat(db, row, currentUser.id);
-          }
+                if (existing[0]) {
+                  const rows = tx
+                    .select()
+                    .from(chats)
+                    .where(eq(chats.id, existing[0].chatId))
+                    .all();
+                  const row = rows[0];
+                  if (!row)
+                    throw new Error("Existing chat vanished mid-transaction");
+                  return row;
+                }
 
-          const now = new Date();
-          const created = yield* Effect.try(() =>
-            db
-              .insert(chats)
-              .values({
-                type: "direct",
-                title: null,
-                createdBy: currentUser.id,
-                createdAt: now,
-                updatedAt: now,
-              })
-              .returning()
-              .all(),
-          ).pipe(Effect.orDie);
-          const chatRow = created[0];
-          if (!chatRow)
-            return yield* Effect.die(new Error("INSERT returned no rows"));
+                const now = new Date();
+                const created = tx
+                  .insert(chats)
+                  .values({
+                    type: "direct",
+                    title: null,
+                    createdBy: currentUser.id,
+                    createdAt: now,
+                    updatedAt: now,
+                  })
+                  .returning()
+                  .all();
+                const newRow = created[0];
+                if (!newRow) throw new Error("INSERT returned no rows");
 
-          yield* Effect.try(() =>
-            db
-              .insert(chatParticipants)
-              .values([
-                { chatId: chatRow.id, userId: currentUser.id, joinedAt: now },
-                { chatId: chatRow.id, userId: payload.userId, joinedAt: now },
-              ])
-              .run(),
+                tx.insert(chatParticipants)
+                  .values([
+                    {
+                      chatId: newRow.id,
+                      userId: currentUser.id,
+                      joinedAt: now,
+                    },
+                    {
+                      chatId: newRow.id,
+                      userId: payload.userId,
+                      joinedAt: now,
+                    },
+                  ])
+                  .run();
+
+                return newRow;
+              },
+              { behavior: "immediate" },
+            ),
           ).pipe(Effect.orDie);
 
           return yield* buildChat(db, chatRow, currentUser.id);
@@ -434,43 +459,68 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          const currentParticipants = yield* getParticipants(db, id);
-          const currentIds = new Set(currentParticipants.map((p) => p.userId));
-          const newIds = [...new Set(payload.participantIds)].filter(
-            (userId) => !currentIds.has(userId),
-          );
+          // Existence-check the requested users up front — unrelated to the
+          // cap race below, so it doesn't need to be inside the transaction.
+          const requestedIds = [...new Set(payload.participantIds)];
+          const found = yield* existingUserIds(db, requestedIds);
+          const missing = requestedIds.filter((userId) => !found.has(userId));
+          if (missing.length > 0)
+            return yield* Effect.fail(
+              new NotFound({
+                message: `User${missing.length > 1 ? "s" : ""} ${missing.join(", ")} not found`,
+              }),
+            );
 
-          if (currentIds.size + newIds.length > MAX_GROUP_PARTICIPANTS)
+          // Recomputing who's already a participant and enforcing the group
+          // cap has to happen in the same synchronous transaction as the
+          // insert — otherwise two concurrent addParticipants calls could
+          // each read the same (still-under-cap) participant count before
+          // either insert commits, and together push the group over
+          // MAX_GROUP_PARTICIPANTS. `onConflictDoNothing` also guards
+          // against re-adding someone a concurrent call just added.
+          const result = yield* Effect.try(() =>
+            db.transaction(
+              (tx) => {
+                const currentIds = new Set(
+                  tx
+                    .select({ userId: chatParticipants.userId })
+                    .from(chatParticipants)
+                    .where(eq(chatParticipants.chatId, id))
+                    .all()
+                    .map((p) => p.userId),
+                );
+                const newIds = requestedIds.filter(
+                  (userId) => !currentIds.has(userId),
+                );
+
+                if (currentIds.size + newIds.length > MAX_GROUP_PARTICIPANTS)
+                  return { ok: false as const };
+
+                if (newIds.length > 0) {
+                  const now = new Date();
+                  tx.insert(chatParticipants)
+                    .values(
+                      newIds.map((userId) => ({
+                        chatId: id,
+                        userId,
+                        joinedAt: now,
+                      })),
+                    )
+                    .onConflictDoNothing()
+                    .run();
+                }
+                return { ok: true as const };
+              },
+              { behavior: "immediate" },
+            ),
+          ).pipe(Effect.orDie);
+
+          if (!result.ok)
             return yield* Effect.fail(
               new InvalidChatRequest({
                 message: `Group chats can have at most ${MAX_GROUP_PARTICIPANTS} participants`,
               }),
             );
-
-          if (newIds.length > 0) {
-            const found = yield* existingUserIds(db, newIds);
-            const missing = newIds.filter((userId) => !found.has(userId));
-            if (missing.length > 0)
-              return yield* Effect.fail(
-                new NotFound({
-                  message: `User${missing.length > 1 ? "s" : ""} ${missing.join(", ")} not found`,
-                }),
-              );
-
-            const now = new Date();
-            yield* Effect.try(() =>
-              db
-                .insert(chatParticipants)
-                .values(
-                  newIds.map((userId) => ({
-                    chatId: id,
-                    userId,
-                    joinedAt: now,
-                  })),
-                )
-                .run(),
-            ).pipe(Effect.orDie);
-          }
 
           return yield* buildChat(db, existing, currentUser.id);
         }),

@@ -333,7 +333,7 @@ export interface components {
             id: number;
             type: components["schemas"]["ChatType"];
             title: string | null;
-            createdBy: number;
+            createdBy: number | null;
             createdAt: number;
             updatedAt: number;
             participants: components["schemas"]["ChatParticipant"][];
@@ -1066,7 +1066,7 @@ export interface operations {
                         id: number;
                         type: components["schemas"]["ChatType"];
                         title: string | null;
-                        createdBy: number;
+                        createdBy: number | null;
                         createdAt: number;
                         updatedAt: number;
                         participants: components["schemas"]["ChatParticipant"][];
