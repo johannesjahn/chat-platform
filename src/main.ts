@@ -7,6 +7,7 @@ import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Config, Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
+import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
@@ -22,6 +23,7 @@ const CorsLive = HttpApiBuilder.middlewareCors({
 const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(UsersHandlerLive),
   Layer.provide(PostsHandlerLive),
+  Layer.provide(ChatsHandlerLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
   Layer.provide(CorsLive),

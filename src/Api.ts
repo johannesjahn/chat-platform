@@ -53,6 +53,14 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
   message: Schema.String,
 }) {}
 
+// Raised for chat domain-rule violations that aren't a 404/403 — messaging
+// yourself, exceeding the group participant cap, editing a direct chat's
+// title, duplicate participants, etc.
+export class InvalidChatRequest extends Schema.TaggedError<InvalidChatRequest>()(
+  "InvalidChatRequest",
+  { message: Schema.String },
+) {}
+
 // Content types a post's body can hold. Extend this union (and the handler's
 // per-type validation, if any is ever needed) to support new post kinds.
 export const PostContentType = Schema.Literal("text", "image_url").annotations({
@@ -126,6 +134,132 @@ export const PostsPage = Schema.Struct({
   total: Schema.Number,
 }).annotations({ identifier: "PostsPage" });
 
+// A chat is either a "direct" (exactly two participants, no title — the UI
+// derives a name from the other participant) or a "group" chat (2-20
+// participants, a title set at creation and changeable by its creator).
+export const ChatType = Schema.Literal("direct", "group").annotations({
+  identifier: "ChatType",
+});
+export type ChatType = typeof ChatType.Type;
+
+// Total participants a chat (of either kind) may ever have, creator included.
+export const MAX_GROUP_PARTICIPANTS = 20;
+const MAX_GROUP_TITLE_LENGTH = 100;
+
+const GroupTitle = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_GROUP_TITLE_LENGTH),
+);
+
+export const ChatParticipant = Schema.Struct({
+  userId: Schema.Number,
+  username: Schema.String,
+}).annotations({ identifier: "ChatParticipant" });
+export type ChatParticipant = typeof ChatParticipant.Type;
+
+// Content types a message's body can hold — mirrors `PostContentType` but
+// kept as its own union so messages and posts can diverge later.
+export const MessageContentType = Schema.Literal(
+  "text",
+  "image_url",
+).annotations({ identifier: "MessageContentType" });
+export type MessageContentType = typeof MessageContentType.Type;
+
+// Shorter than a post's cap — chat messages are conversational, not
+// long-form content, so a generous-but-bounded limit keeps bubbles sane.
+export const MAX_MESSAGE_CONTENT_LENGTH = 4_000;
+
+const MessageContent = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_MESSAGE_CONTENT_LENGTH),
+);
+
+export const Message = Schema.Struct({
+  id: Schema.Number,
+  chatId: Schema.Number,
+  senderId: Schema.Number,
+  contentType: MessageContentType,
+  content: Schema.String,
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+  // Ids of participants (other than the sender) who have read this message —
+  // read state is tracked per message/user, not as a single chat-wide flag,
+  // so the UI can show WhatsApp/Telegram-style read receipts.
+  readByUserIds: Schema.Array(Schema.Number),
+}).annotations({ identifier: "Message" });
+export type Message = typeof Message.Type;
+
+export const Chat = Schema.Struct({
+  id: Schema.Number,
+  type: ChatType,
+  title: Schema.NullOr(Schema.String),
+  // Null once the creator's account has been deleted (see db/schema.ts) —
+  // the chat and its history survive, but creator-only actions (rename, add
+  // participants) become unavailable to everyone.
+  createdBy: Schema.NullOr(Schema.Number),
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+  participants: Schema.Array(ChatParticipant),
+  lastMessage: Schema.NullOr(Message),
+  // Messages in this chat sent by someone else that the current user hasn't
+  // read yet — computed relative to whoever is making the request.
+  unreadCount: Schema.Number,
+}).annotations({ identifier: "Chat" });
+export type Chat = typeof Chat.Type;
+
+export const CreateDirectChatBody = Schema.Struct({
+  userId: Schema.Number,
+}).annotations({ identifier: "CreateDirectChatBody" });
+
+export const CreateGroupChatBody = Schema.Struct({
+  title: GroupTitle,
+  // The creator is added automatically — this is everyone *else*, hence one
+  // short of the overall cap.
+  participantIds: Schema.Array(Schema.Number).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_GROUP_PARTICIPANTS - 1),
+  ),
+}).annotations({ identifier: "CreateGroupChatBody" });
+
+export const UpdateChatBody = Schema.Struct({
+  title: GroupTitle,
+}).annotations({ identifier: "UpdateChatBody" });
+
+export const AddParticipantsBody = Schema.Struct({
+  participantIds: Schema.Array(Schema.Number).pipe(Schema.minItems(1)),
+}).annotations({ identifier: "AddParticipantsBody" });
+
+export const CreateMessageBody = Schema.Struct({
+  contentType: MessageContentType,
+  content: MessageContent,
+}).annotations({ identifier: "CreateMessageBody" });
+
+export const MarkReadBody = Schema.Struct({
+  messageId: Schema.Number,
+}).annotations({ identifier: "MarkReadBody" });
+
+export const DEFAULT_MESSAGES_LIMIT = 30;
+export const MAX_MESSAGES_LIMIT = 100;
+
+// Left un-`identifier`-annotated for the same reason as `PostsPageQuery`
+// above (see CLAUDE.md) — it's inlined into path/query parameters.
+export const MessagesPageQuery = Schema.Struct({
+  offset: Schema.optional(
+    Schema.NumberFromString.pipe(Schema.int(), Schema.greaterThanOrEqualTo(0)),
+  ),
+  limit: Schema.optional(
+    Schema.NumberFromString.pipe(
+      Schema.int(),
+      Schema.between(1, MAX_MESSAGES_LIMIT),
+    ),
+  ),
+});
+
+export const MessagesPage = Schema.Struct({
+  messages: Schema.Array(Message),
+  offset: Schema.Number,
+  limit: Schema.Number,
+  total: Schema.Number,
+}).annotations({ identifier: "MessagesPage" });
+
 const UsersGroup = HttpApiGroup.make("users")
   .add(
     HttpApiEndpoint.get("listUsers", "/users")
@@ -189,6 +323,97 @@ const PostsGroup = HttpApiGroup.make("posts")
       .middleware(Authentication),
   );
 
+const ChatIdPath = Schema.Struct({ id: Schema.NumberFromString });
+
+const ChatsGroup = HttpApiGroup.make("chats")
+  .add(
+    // All chats the current user participates in, newest-activity-first,
+    // each carrying its own unread count and last-message preview so the
+    // chat list never needs a request per row.
+    HttpApiEndpoint.get("listChats", "/chats")
+      .addSuccess(Schema.Array(Chat))
+      .middleware(Authentication),
+  )
+  .add(
+    HttpApiEndpoint.get("getChat", "/chats/:id")
+      .setPath(ChatIdPath)
+      .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Idempotent: returns the existing direct chat with this user if one
+    // already exists rather than creating a duplicate.
+    HttpApiEndpoint.post("createDirectChat", "/chats/direct")
+      .setPayload(CreateDirectChatBody)
+      .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    HttpApiEndpoint.post("createGroupChat", "/chats/group")
+      .setPayload(CreateGroupChatBody)
+      .addSuccess(Chat, { status: 201 })
+      .addError(NotFound, { status: 404 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Renames a group chat — the creator only.
+    HttpApiEndpoint.put("updateChat", "/chats/:id")
+      .setPath(ChatIdPath)
+      .setPayload(UpdateChatBody)
+      .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Adds participants to a group chat — the creator only.
+    HttpApiEndpoint.post("addParticipants", "/chats/:id/participants")
+      .setPath(ChatIdPath)
+      .setPayload(AddParticipantsBody)
+      .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Oldest-first page of a chat's messages — any participant may read.
+    HttpApiEndpoint.get("listMessages", "/chats/:id/messages")
+      .setPath(ChatIdPath)
+      .setUrlParams(MessagesPageQuery)
+      .addSuccess(MessagesPage)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    HttpApiEndpoint.post("createMessage", "/chats/:id/messages")
+      .setPath(ChatIdPath)
+      .setPayload(CreateMessageBody)
+      .addSuccess(Message, { status: 201 })
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Marks every unread message up to and including `messageId` as read by
+    // the current user; returns the chat with its recalculated unread count.
+    HttpApiEndpoint.post("markRead", "/chats/:id/read")
+      .setPath(ChatIdPath)
+      .setPayload(MarkReadBody)
+      .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  );
+
 export class ChatApi extends HttpApi.make("chat-platform")
   .add(UsersGroup)
-  .add(PostsGroup) {}
+  .add(PostsGroup)
+  .add(ChatsGroup) {}

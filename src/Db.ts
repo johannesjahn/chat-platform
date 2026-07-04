@@ -10,6 +10,10 @@ export class Db extends Context.Tag("Db")<Db, DrizzleDb>() {}
 
 export const DbLive = Layer.sync(Db, () => {
   const sqlite = new Database(process.env.DB_PATH ?? "dev.db");
+  // Off by default in bun:sqlite (as in SQLite generally) — without this the
+  // onDelete: "cascade"/"set null" behavior declared in db/schema.ts is
+  // never actually enforced by the database.
+  sqlite.exec("PRAGMA foreign_keys = ON;");
   const db = drizzle(sqlite, { schema });
   migrate(db, { migrationsFolder: "./drizzle" });
   return db;

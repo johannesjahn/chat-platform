@@ -14,6 +14,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
+import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
@@ -27,6 +28,7 @@ process.env.JWT_SECRET ??= "test-secret";
 const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(UsersHandlerLive),
   Layer.provide(PostsHandlerLive),
+  Layer.provide(ChatsHandlerLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
 );
@@ -38,6 +40,7 @@ const run = <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
 ): Promise<A> => {
   const sqlite = new Database(":memory:");
+  sqlite.exec("PRAGMA foreign_keys = ON;");
   const db = drizzle(sqlite, { schema });
   migrate(db, { migrationsFolder: "./drizzle" });
   const TestDbLive = Layer.succeed(Db, db);
