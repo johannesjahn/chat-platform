@@ -126,3 +126,122 @@ test("long messages are collapsed behind a Show more toggle", async ({
   await contextA.close();
   await contextB.close();
 });
+
+test("the creator can add participants to a group chat, and the new participant sees it in their list", async ({
+  browser,
+  injectApiUrl,
+}) => {
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  await registerViaUi(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const { username: usernameB } = await registerViaUi(pageB);
+
+  const contextC = await browser.newContext();
+  await injectApiUrl(contextC);
+  const pageC = await contextC.newPage();
+  const { username: usernameC } = await registerViaUi(pageC);
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Group chat" }).click();
+  await pageA.fill("#group-title", "Add participants test");
+  await pageA.fill("#user-search", usernameB);
+  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+  await pageA.getByRole("button", { name: /^Create group/ }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+  await expect(pageA.getByText("2 participants")).toBeVisible();
+
+  await pageA.getByRole("button", { name: "Add participants" }).click();
+  await pageA.getByRole("button", { name: `@${usernameC}` }).click();
+  await pageA.getByRole("button", { name: /^Add 1/ }).click();
+  await expect(pageA.getByText("3 participants")).toBeVisible();
+
+  // The newly added participant now sees the chat in their own list.
+  await pageC.goto("/chats");
+  await expect(pageC.getByText("Add participants test")).toBeVisible();
+
+  await contextA.close();
+  await contextB.close();
+  await contextC.close();
+});
+
+test("navigating directly to a chat you can't access shows a not-found message", async ({
+  browser,
+  injectApiUrl,
+}) => {
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  await registerViaUi(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const { username: usernameB } = await registerViaUi(pageB);
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Direct message" }).click();
+  await pageA.fill("#user-search", usernameB);
+  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+  const chatId = pageA.url().split("/").pop();
+
+  const contextC = await browser.newContext();
+  await injectApiUrl(contextC);
+  const pageC = await contextC.newPage();
+  await registerViaUi(pageC);
+
+  // A chat id that doesn't exist at all...
+  await pageC.goto("/chats/999999");
+  await expect(pageC.getByText("Chat not found")).toBeVisible();
+
+  // ...and a real chat C just isn't a participant in — both show the same
+  // fallback rather than leaking whether the chat exists.
+  await pageC.goto(`/chats/${chatId}`);
+  await expect(pageC.getByText("Chat not found")).toBeVisible();
+
+  await contextA.close();
+  await contextB.close();
+  await contextC.close();
+});
+
+test("a message sent by one user appears on the other's already-open chat via polling", async ({
+  browser,
+  injectApiUrl,
+}) => {
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  const { username: usernameA } = await registerViaUi(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const { username: usernameB } = await registerViaUi(pageB);
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Direct message" }).click();
+  await pageA.fill("#user-search", usernameB);
+  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+  const chatId = pageA.url().split("/").pop();
+
+  // B opens the same chat and just leaves it open — no reload from here on,
+  // so anything B sees has to come from the polling refetch, not a fresh load.
+  await pageB.goto(`/chats/${chatId}`);
+  await expect(pageB.getByText(`@${usernameA}`)).toBeVisible();
+
+  await pageA.fill("textarea", "Message sent while B is watching");
+  await pageA.keyboard.press("Enter");
+
+  await expect(pageB.getByText("Message sent while B is watching")).toBeVisible(
+    { timeout: 10_000 },
+  );
+
+  await contextA.close();
+  await contextB.close();
+});

@@ -708,3 +708,161 @@ test("deleting a group chat's creator sets createdBy to null instead of deleting
       }
     }),
   ));
+
+test("every chats endpoint rejects an unauthenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+
+      const results = yield* Effect.all(
+        [
+          c.chats.listChats().pipe(Effect.either),
+          c.chats.getChat({ path: { id: 1 } }).pipe(Effect.either),
+          c.chats
+            .createDirectChat({ payload: { userId: 1 } })
+            .pipe(Effect.either),
+          c.chats
+            .createGroupChat({
+              payload: { title: "x", participantIds: [1] },
+            })
+            .pipe(Effect.either),
+          c.chats
+            .updateChat({ path: { id: 1 }, payload: { title: "x" } })
+            .pipe(Effect.either),
+          c.chats
+            .addParticipants({
+              path: { id: 1 },
+              payload: { participantIds: [1] },
+            })
+            .pipe(Effect.either),
+          c.chats
+            .listMessages({ path: { id: 1 }, urlParams: {} })
+            .pipe(Effect.either),
+          c.chats
+            .createMessage({
+              path: { id: 1 },
+              payload: { contentType: "text", content: "hi" },
+            })
+            .pipe(Effect.either),
+          c.chats
+            .markRead({ path: { id: 1 }, payload: { messageId: 1 } })
+            .pipe(Effect.either),
+        ],
+        { concurrency: "unbounded" },
+      );
+
+      for (const result of results) {
+        expect(result._tag).toBe("Left");
+        if (result._tag === "Left") {
+          expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+        }
+      }
+    }),
+  ));
+
+test("createGroupChat's participant list is capped at the schema level", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const pool = yield* insertDummyUsers(MAX_GROUP_PARTICIPANTS);
+
+      // Exactly at the limit (19 others + the creator = 20 total) succeeds.
+      const atCap = yield* alice.client.chats.createGroupChat({
+        payload: {
+          title: "At cap",
+          participantIds: pool
+            .slice(0, MAX_GROUP_PARTICIPANTS - 1)
+            .map((u) => u.id),
+        },
+      });
+      expect(atCap.participants).toHaveLength(MAX_GROUP_PARTICIPANTS);
+
+      // One more than that is rejected by the payload schema itself
+      // (Schema.maxItems on participantIds) before it ever reaches the
+      // handler's own cap check.
+      const overCap = yield* alice.client.chats
+        .createGroupChat({
+          payload: {
+            title: "Over cap",
+            participantIds: pool
+              .slice(0, MAX_GROUP_PARTICIPANTS)
+              .map((u) => u.id),
+          },
+        })
+        .pipe(Effect.either);
+      expect(overCap._tag).toBe("Left");
+    }),
+  ));
+
+test("addParticipants rejects adding people to a direct chat", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const carol = yield* registerAndLogin("carol", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+
+      const result = yield* alice.client.chats
+        .addParticipants({
+          path: { id: chat.id },
+          payload: { participantIds: [carol.user.id] },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+    }),
+  ));
+
+test("markRead 404s for a missing chat or a message from a different chat", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const carol = yield* registerAndLogin("carol", "pw");
+
+      const chatAB = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const messageInAB = yield* alice.client.chats.createMessage({
+        path: { id: chatAB.id },
+        payload: { contentType: "text", content: "hi bob" },
+      });
+
+      const missingChat = yield* alice.client.chats
+        .markRead({
+          path: { id: 9999 },
+          payload: { messageId: messageInAB.id },
+        })
+        .pipe(Effect.either);
+      expect(missingChat._tag).toBe("Left");
+      if (missingChat._tag === "Left") {
+        expect((missingChat.left as { _tag: string })._tag).toBe("NotFound");
+      }
+
+      const chatAC = yield* alice.client.chats.createDirectChat({
+        payload: { userId: carol.user.id },
+      });
+      const messageInAC = yield* alice.client.chats.createMessage({
+        path: { id: chatAC.id },
+        payload: { contentType: "text", content: "hi carol" },
+      });
+
+      // messageInAC exists, but not in chatAB.
+      const wrongChat = yield* bob.client.chats
+        .markRead({
+          path: { id: chatAB.id },
+          payload: { messageId: messageInAC.id },
+        })
+        .pipe(Effect.either);
+      expect(wrongChat._tag).toBe("Left");
+      if (wrongChat._tag === "Left") {
+        expect((wrongChat.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
