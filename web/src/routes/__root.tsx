@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { clearSession, useSession } from "../lib/auth";
+import { useChatSocket } from "../lib/chatSocket";
 import { useTotalUnreadCount } from "../lib/chats";
 import { queryClient } from "../lib/query";
 import appCss from "../styles.css?url";
@@ -42,6 +43,7 @@ function RootComponent() {
 function Nav() {
   const session = useSession();
   const router = useRouter();
+  useChatSocket(!!session);
   const unreadCount = useTotalUnreadCount(!!session);
 
   return (

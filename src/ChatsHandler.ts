@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { and, count, desc, eq, inArray, isNull, lte, ne } from "drizzle-orm";
-import { Effect } from "effect";
+import { Context, Effect } from "effect";
 import {
   ChatApi,
   DEFAULT_MESSAGES_LIMIT,
@@ -13,6 +13,7 @@ import {
   type Message,
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
+import { ChatConnections } from "./ChatEvents.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import {
   chatParticipants,
@@ -50,6 +51,21 @@ const getParticipants = (
       .where(eq(chatParticipants.chatId, chatId))
       .all(),
   ).pipe(Effect.orDie);
+
+// Pushes a `chat_updated` event to every current participant of `chatId` so
+// their chat list / open conversation can refetch instead of polling for it.
+const notifyChatUpdated = (
+  db: DrizzleDb,
+  connections: Context.Tag.Service<typeof ChatConnections>,
+  chatId: number,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const participants = yield* getParticipants(db, chatId);
+    yield* connections.notifyUsers(
+      participants.map((p) => p.userId),
+      { type: "chat_updated", chatId },
+    );
+  });
 
 const getLastMessage = (
   db: DrizzleDb,
@@ -243,6 +259,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          const connections = yield* ChatConnections;
 
           if (payload.userId === currentUser.id)
             return yield* Effect.fail(
@@ -338,6 +355,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             ),
           ).pipe(Effect.orDie);
 
+          yield* notifyChatUpdated(db, connections, chatRow.id);
           return yield* buildChat(db, chatRow, currentUser.id);
         }),
       )
@@ -345,6 +363,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          const connections = yield* ChatConnections;
 
           const uniqueIds = new Set(payload.participantIds);
           if (uniqueIds.size !== payload.participantIds.length)
@@ -406,6 +425,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               .run(),
           ).pipe(Effect.orDie);
 
+          yield* notifyChatUpdated(db, connections, chatRow.id);
           return yield* buildChat(db, chatRow, currentUser.id);
         }),
       )
@@ -413,6 +433,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          const connections = yield* ChatConnections;
           const existing = yield* getChatOr404(db, id);
           if (existing.type !== "group")
             return yield* Effect.fail(
@@ -438,6 +459,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const row = updated[0];
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
+          yield* notifyChatUpdated(db, connections, id);
           return yield* buildChat(db, row, currentUser.id);
         }),
       )
@@ -445,6 +467,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          const connections = yield* ChatConnections;
           const existing = yield* getChatOr404(db, id);
           if (existing.type !== "group")
             return yield* Effect.fail(
@@ -522,6 +545,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
+          yield* notifyChatUpdated(db, connections, id);
           return yield* buildChat(db, existing, currentUser.id);
         }),
       )
@@ -588,6 +612,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          const connections = yield* ChatConnections;
           yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
 
@@ -618,6 +643,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               .run(),
           ).pipe(Effect.orDie);
 
+          yield* notifyChatUpdated(db, connections, id);
           return toApiMessage(row, []);
         }),
       )
@@ -625,6 +651,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          const connections = yield* ChatConnections;
           const chatRow = yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
 
@@ -679,6 +706,9 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             ).pipe(Effect.orDie);
           }
 
+          if (unreadUpTo.length > 0) {
+            yield* notifyChatUpdated(db, connections, id);
+          }
           return yield* buildChat(db, chatRow, currentUser.id);
         }),
       ),

@@ -14,6 +14,7 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
+import { ChatConnectionsLive } from "./ChatEvents.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
@@ -29,6 +30,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(UsersHandlerLive),
   Layer.provide(PostsHandlerLive),
   Layer.provide(ChatsHandlerLive),
+  Layer.provide(ChatConnectionsLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
 );

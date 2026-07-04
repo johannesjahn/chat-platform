@@ -22,11 +22,6 @@ export const MESSAGE_COLLAPSE_THRESHOLD = 300;
 const MESSAGES_PAGE_SIZE = 30;
 const MESSAGES_MAX_LIMIT = 100;
 
-// No WebSocket channel (yet) — short polling keeps the chat list and open
-// conversation close to real-time without adding a push-transport layer.
-export const CHAT_LIST_POLL_MS = 4000;
-export const CHAT_MESSAGES_POLL_MS = 2500;
-
 export const chatsListQueryKey = ["chats", "list"] as const;
 export const chatDetailQueryKey = (chatId: number) =>
   ["chats", chatId, "detail"] as const;
@@ -35,12 +30,13 @@ export const chatMessagesQueryKey = (chatId: number) =>
 
 // Chat list is shared between the nav's unread badge and the `/chats` page —
 // same query key, so React Query dedupes the underlying request and both
-// consumers see the same poll.
+// consumers see the same data. Kept fresh by `useChatSocket`, which
+// invalidates this key whenever the `/ws` connection reports a `chat_updated`
+// event for any chat the current user is part of — no polling.
 export function useChatsList(enabled: boolean) {
   return useQuery({
     queryKey: chatsListQueryKey,
     enabled,
-    refetchInterval: enabled ? CHAT_LIST_POLL_MS : false,
     queryFn: async () => {
       const { data, error } = await fetchClient.GET("/chats", {});
       if (error) throw error;
@@ -79,7 +75,6 @@ export function useChatDetail(chatId: number | undefined, enabled: boolean) {
     queryKey:
       chatId != null ? chatDetailQueryKey(chatId) : ["chats", "detail", "none"],
     enabled: enabled && chatId != null,
-    refetchInterval: enabled && chatId != null ? CHAT_LIST_POLL_MS : false,
     queryFn: async () => {
       const { data, error } = await fetchClient.GET("/chats/{id}", {
         params: { path: { id: String(chatId) } },
@@ -111,10 +106,12 @@ async function fetchMessagesPage(
 // currently-loaded page starts at — and:
 //  - on first load, probes the total then jumps the anchor to the last
 //    `MESSAGES_PAGE_SIZE` messages instead of the first;
-//  - on every poll, re-fetches from that same anchor with a generous limit,
-//    so newly arrived messages are picked up without moving the anchor;
-//  - if the window fills up (a very chatty poll interval), slides the anchor
-//    forward to keep pace with the newest messages;
+//  - on every refetch (triggered by `useChatSocket` invalidating this query
+//    key on a `chat_updated` event), re-fetches from that same anchor with a
+//    generous limit, so newly arrived messages are picked up without moving
+//    the anchor;
+//  - if the window fills up, slides the anchor forward to keep pace with the
+//    newest messages;
 //  - `loadEarlier` walks the anchor backward a page at a time.
 //
 // The anchor lives in a ref that's only ever mutated from the query/callback
@@ -130,7 +127,6 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
         ? chatMessagesQueryKey(chatId)
         : ["chats", "messages", "none"],
     enabled: enabled && chatId != null,
-    refetchInterval: enabled && chatId != null ? CHAT_MESSAGES_POLL_MS : false,
     queryFn: async () => {
       const id = chatId!;
       if (anchorRef.current === null) {

@@ -209,7 +209,7 @@ test("navigating directly to a chat you can't access shows a not-found message",
   await contextC.close();
 });
 
-test("a message sent by one user appears on the other's already-open chat via polling", async ({
+test("a message sent by one user appears on the other's already-open chat via the websocket push", async ({
   browser,
   injectApiUrl,
 }) => {
@@ -231,7 +231,8 @@ test("a message sent by one user appears on the other's already-open chat via po
   const chatId = pageA.url().split("/").pop();
 
   // B opens the same chat and just leaves it open — no reload from here on,
-  // so anything B sees has to come from the polling refetch, not a fresh load.
+  // so anything B sees has to come from the `/ws` push invalidating the
+  // query, not a fresh load.
   await pageB.goto(`/chats/${chatId}`);
   await expect(pageB.getByText(`@${usernameA}`)).toBeVisible();
 

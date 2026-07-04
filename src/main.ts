@@ -7,6 +7,8 @@ import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Config, Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
+import { ChatConnectionsLive } from "./ChatEvents.ts";
+import { ChatSocketRouteLive } from "./ChatSocket.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
@@ -32,8 +34,13 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
 const ServerLive = Layer.mergeAll(
   HttpApiBuilder.serve(HttpMiddleware.logger),
   HttpApiSwagger.layer({ path: "/docs" }),
+  // Raw `/ws` route, attached to the same shared router as `ChatApi` — see
+  // ChatSocket.ts for why this can't be a typed HttpApiEndpoint.
+  ChatSocketRouteLive,
 ).pipe(
   Layer.provide(ApiLive),
+  Layer.provide(ChatConnectionsLive),
+  Layer.provide(JwtLive),
   Layer.provide(DbLive),
   Layer.provide(
     Layer.unwrapEffect(
