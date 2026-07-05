@@ -109,8 +109,12 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 This is a two-package repo:
 
 - **Backend** (repo root): Bun + Effect `HttpApi`, Drizzle ORM over `PGlite`
-  (an embedded Postgres — `DB_PATH` data directory, unset = in-memory,
-  auto-migrated on startup). Sources in `src/`.
+  by default (an embedded Postgres — `DB_PATH` data directory, unset =
+  in-memory, auto-migrated on startup). Set `DATABASE_URL` to instead connect
+  to a real Postgres over the wire via `drizzle-orm/bun-sql` (`Bun.sql`) — see
+  [`src/Db.ts`](src/Db.ts). `docker compose up` (see [`docker-compose.yml`](docker-compose.yml)
+  and [`Dockerfile`](Dockerfile)) runs a real Postgres plus the backend
+  wired to it this way. Sources in `src/`.
 - **Frontend** (`web/`): TanStack Start (React) in SPA mode, calling the backend
   over HTTP. Has its own `package.json`.
 

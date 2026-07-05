@@ -16,6 +16,19 @@ bun run dev            # backend on http://localhost:3000 (--hot reload)
 http://localhost:3000/docs. The database is a local PGlite data directory
 (`DB_PATH`, unset = in-memory), created and migrated automatically on startup.
 
+### Running against a real Postgres
+
+```bash
+docker compose up --build
+```
+
+Starts a real Postgres container plus the backend (built from the root
+[`Dockerfile`](Dockerfile)) connected to it via `DATABASE_URL` — see
+[`docker-compose.yml`](docker-compose.yml). Migrations run automatically on
+startup, same as the PGlite path. The backend is on http://localhost:3000; set
+`DATABASE_URL` yourself (see [`.env.example`](.env.example)) to point `bun run
+dev`/`start` at that same Postgres instead of embedded PGlite.
+
 ## Testing
 
 Two independent suites:
