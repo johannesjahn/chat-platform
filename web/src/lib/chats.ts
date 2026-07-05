@@ -19,7 +19,7 @@ export const MAX_GROUP_PARTICIPANTS = 20;
 // same idea as PostCard's threshold but shorter — chat bubbles are narrow.
 export const MESSAGE_COLLAPSE_THRESHOLD = 300;
 
-const MESSAGES_PAGE_SIZE = 30;
+const MESSAGES_PAGE_SIZE = 10;
 const MESSAGES_MAX_LIMIT = 100;
 
 export const chatsListQueryKey = ["chats", "list"] as const;
@@ -152,7 +152,7 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       0,
       (anchorRef.current ?? 0) - MESSAGES_PAGE_SIZE,
     );
-    void query.refetch();
+    return query.refetch();
   };
 
   return { ...query, loadEarlier };

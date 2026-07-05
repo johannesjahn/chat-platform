@@ -4,7 +4,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Check,
-  ChevronUp,
   Loader2,
   Pencil,
   UserPlus,
@@ -81,6 +80,8 @@ function ChatView({ id }: { id: string }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastMessageIdRef = useRef<number | null>(null);
   const prevScrollHeightRef = useRef<number | null>(null);
+  const initializedRef = useRef(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
 
   const messages = messagesData?.messages ?? [];
 
@@ -94,13 +95,15 @@ function ChatView({ id }: { id: string }) {
       lastMessageIdRef.current = newestMessageId;
       scrollRef.current?.scrollTo({
         top: scrollRef.current.scrollHeight,
-        behavior: "smooth",
+        behavior: initializedRef.current ? "smooth" : "auto",
       });
+      initializedRef.current = true;
     }
   }, [newestMessageId]);
 
-  // Preserve scroll position when older messages are prepended by "Load
-  // earlier" — without this the view would jump to the (now-shifted) top.
+  // Preserve scroll position when older messages are prepended by the
+  // infinite-scroll-to-top loader — without this the view would jump to the
+  // (now-shifted) top.
   useEffect(() => {
     if (prevScrollHeightRef.current != null && scrollRef.current) {
       const delta =
@@ -109,6 +112,20 @@ function ChatView({ id }: { id: string }) {
       prevScrollHeightRef.current = null;
     }
   }, [messagesData?.offset]);
+
+  // Infinite scroll: reaching near the top of the scroll container loads the
+  // previous page of older messages, anchored so scroll position is preserved
+  // once they're prepended (see the effect above). The spinner clears when
+  // the triggering fetch settles, even on failure.
+  function handleScroll(e: React.UIEvent<HTMLDivElement>) {
+    if (!initializedRef.current || loadingEarlier) return;
+    if (!messagesData?.hasEarlier) return;
+    const el = e.currentTarget;
+    if (el.scrollTop > 120) return;
+    prevScrollHeightRef.current = el.scrollHeight;
+    setLoadingEarlier(true);
+    void loadEarlier().finally(() => setLoadingEarlier(false));
+  }
 
   // Mark everything up to the newest loaded message as read once we know
   // there's something unread — keeps this chat's badge and the nav badge live.
@@ -396,24 +413,13 @@ function ChatView({ id }: { id: string }) {
         <CardContent className="px-0">
           <div
             ref={scrollRef}
+            onScroll={handleScroll}
             className="flex h-[60vh] flex-col gap-2 overflow-y-auto px-4 py-4"
           >
-            {messagesData?.hasEarlier && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mx-auto"
-                onClick={() => {
-                  if (scrollRef.current) {
-                    prevScrollHeightRef.current =
-                      scrollRef.current.scrollHeight;
-                  }
-                  loadEarlier();
-                }}
-              >
-                <ChevronUp className="size-4" />
-                Load earlier messages
-              </Button>
+            {loadingEarlier && (
+              <div className="flex justify-center py-1">
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+              </div>
             )}
 
             {messagesLoading ? (
