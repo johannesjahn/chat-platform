@@ -1,5 +1,15 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { and, count, desc, eq, inArray, isNull, lte, max, ne } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  lte,
+  max,
+  ne,
+} from "drizzle-orm";
 import { Context, Effect } from "effect";
 import {
   ChatApi,
