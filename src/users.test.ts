@@ -7,9 +7,8 @@ import {
   HttpClientRequest,
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
-import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { drizzle } from "drizzle-orm/pglite";
+import { migrate } from "drizzle-orm/pglite/migrator";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
@@ -17,6 +16,7 @@ import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
+import { InMemoryPubSubLive } from "./PubSub.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import * as schema from "./db/schema.ts";
@@ -29,6 +29,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(PostsHandlerLive),
   Layer.provide(ChatsHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
+  Layer.provide(InMemoryPubSubLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
 );
@@ -36,13 +37,14 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
 const run = <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient>,
 ): Promise<A> => {
-  const TestDbLive = Layer.sync(Db, () => {
-    const sqlite = new Database(":memory:");
-    sqlite.exec("PRAGMA foreign_keys = ON;");
-    const db = drizzle(sqlite, { schema });
-    migrate(db, { migrationsFolder: "./drizzle" });
-    return db;
-  });
+  const TestDbLive = Layer.effect(
+    Db,
+    Effect.promise(async () => {
+      const db = drizzle({ schema });
+      await migrate(db, { migrationsFolder: "./drizzle" });
+      return db;
+    }),
+  );
 
   const { handler, dispose } = HttpApiBuilder.toWebHandler(
     Layer.mergeAll(

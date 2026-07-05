@@ -1,9 +1,8 @@
 import { expect, test } from "bun:test";
 import { FetchHttpClient, HttpApiBuilder, HttpClient } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
-import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { drizzle } from "drizzle-orm/pglite";
+import { migrate } from "drizzle-orm/pglite/migrator";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
@@ -11,6 +10,7 @@ import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
+import { InMemoryPubSubLive } from "./PubSub.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
@@ -36,16 +36,15 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
 
 const ServerLive = Layer.mergeAll(ApiLive, RealtimeSocketRouteLive).pipe(
   Layer.provide(RealtimeConnectionsLive),
+  Layer.provide(InMemoryPubSubLive),
   Layer.provide(JwtLive),
 );
 
-const run = <A, E>(
+const run = async <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient>,
 ): Promise<A> => {
-  const sqlite = new Database(":memory:");
-  sqlite.exec("PRAGMA foreign_keys = ON;");
-  const db = drizzle(sqlite, { schema });
-  migrate(db, { migrationsFolder: "./drizzle" });
+  const db = drizzle({ schema });
+  await migrate(db, { migrationsFolder: "./drizzle" });
   const TestDbLive = Layer.succeed(Db, db);
 
   const { handler, dispose } = HttpApiBuilder.toWebHandler(
@@ -69,12 +68,14 @@ const run = <A, E>(
     ),
   );
 
-  return Effect.runPromise(
-    effect.pipe(Effect.provide(TestClientLayer)),
-  ).finally(() => {
-    dispose();
-    sqlite.close();
-  });
+  try {
+    return await Effect.runPromise(
+      effect.pipe(Effect.provide(TestClientLayer)),
+    );
+  } finally {
+    await dispose();
+    await db.$client.close();
+  }
 };
 
 test("GET /ws with no token is rejected before any upgrade is attempted", async () => {

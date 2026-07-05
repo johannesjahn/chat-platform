@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
+import { InMemoryPubSubLive } from "./PubSub.ts";
 import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
+
+// RealtimeConnectionsLive now delivers through PubSub (see Realtime.ts) — the
+// in-memory implementation is the fully correct single-process one, not a
+// stand-in, so these tests stay exactly as fast/synchronous as before.
+const TestRealtimeLive = RealtimeConnectionsLive.pipe(
+  Layer.provide(InMemoryPubSubLive),
+);
 
 // A writer that just records every chunk it was asked to send, standing in
 // for a real `/ws` socket's outbound channel.
@@ -14,7 +22,7 @@ const recordingWriter = () => {
 };
 
 const run = <A, E>(effect: Effect.Effect<A, E, RealtimeConnections>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(RealtimeConnectionsLive)));
+  Effect.runPromise(effect.pipe(Effect.provide(TestRealtimeLive)));
 
 test("notifyUsers delivers only to the listed users, not to everyone connected", async () => {
   await run(
@@ -179,7 +187,7 @@ test("different RealtimeConnectionsLive instances don't share state", async () =
     Effect.gen(function* () {
       const connections = yield* RealtimeConnections;
       yield* connections.register(1, alice.write);
-    }).pipe(Effect.provide(RealtimeConnectionsLive)),
+    }).pipe(Effect.provide(TestRealtimeLive)),
   );
 
   await run(

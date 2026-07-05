@@ -47,22 +47,26 @@ export type TestBackend = {
 };
 
 // Boots a dedicated backend process on its own port, backed by its own
-// SQLite file in a fresh temp dir. Each e2e test gets one of these instead
-// of sharing a single backend/db across the whole run — the `GET /posts`
-// feed isn't scoped per user, so a shared db let one test's seeded posts
-// shift another test's exact-count assertions.
+// PGlite data directory in a fresh temp dir. Each e2e test gets one of these
+// instead of sharing a single backend/db across the whole run — the
+// `GET /posts` feed isn't scoped per user, so a shared db let one test's
+// seeded posts shift another test's exact-count assertions.
 export async function startTestBackend(): Promise<TestBackend> {
   const port = await getFreePort();
   const dataDir = mkdtempSync(path.join(tmpdir(), "chat-platform-e2e-"));
-  const dbPath = path.join(dataDir, "test.db");
 
   const child: ChildProcess = spawn("bun", ["run", "start"], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
       PORT: String(port),
-      DB_PATH: dbPath,
+      // A PGlite data directory, not a single file — see Db.ts.
+      DB_PATH: dataDir,
       JWT_SECRET: "e2e-test-secret",
+      // Single backend instance per e2e test — force the in-memory PubSub
+      // fallback regardless of whatever REDIS_URL the host happens to have
+      // set (see PubSub.ts).
+      REDIS_URL: "",
     },
     stdio: "ignore",
   });

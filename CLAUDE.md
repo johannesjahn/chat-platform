@@ -108,8 +108,18 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 
 This is a two-package repo:
 
-- **Backend** (repo root): Bun + Effect `HttpApi`, Drizzle ORM over `bun:sqlite`
-  (`dev.db`, auto-migrated on startup). Sources in `src/`.
+- **Backend** (repo root): Bun + Effect `HttpApi`, Drizzle ORM over `PGlite`
+  by default (an embedded Postgres — `DB_PATH` data directory, unset =
+  in-memory, auto-migrated on startup). Set `DATABASE_URL` to instead connect
+  to a real Postgres over the wire via `drizzle-orm/bun-sql` (`Bun.sql`) — see
+  [`src/Db.ts`](src/Db.ts). Realtime (chat/post) events fan out through
+  [`src/PubSub.ts`](src/PubSub.ts): an in-memory implementation by default
+  (correct for a single process), or Redis Pub/Sub (`Bun.redis`) when
+  `REDIS_URL` is set, so multiple horizontally-scaled instances share events
+  — see [`src/Realtime.ts`](src/Realtime.ts). `docker compose up` (see
+  [`docker-compose.yml`](docker-compose.yml) and [`Dockerfile`](Dockerfile))
+  runs a real Postgres and Redis plus the backend wired to both. Sources in
+  `src/`.
 - **Frontend** (`web/`): TanStack Start (React) in SPA mode, calling the backend
   over HTTP. Has its own `package.json`.
 
@@ -121,9 +131,16 @@ lint/format from the repo root; run `typecheck` per package.
 
 - **Backend** — `bun test ./src` (Bun's test runner). Tests in
   [src/users.test.ts](src/users.test.ts) drive the Effect `HttpApi` through an
-  in-process web handler: each `run()` spins up a fresh in-memory SQLite
-  (`:memory:`), applies the Drizzle migrations from `./drizzle`, and sets a
+  in-process web handler: each `run()` spins up a fresh in-memory PGlite
+  instance, applies the Drizzle migrations from `./drizzle`, and sets a
   deterministic `JWT_SECRET`. No server or network, fully isolated per test.
+  PGlite is a real (WASM-embedded) Postgres, so it's slower to start per test
+  than `bun:sqlite` was — see `bunfig.toml`'s raised test timeout. Every test
+  file provides `InMemoryPubSubLive` for `RealtimeConnectionsLive`'s `PubSub`
+  dependency, except
+  [src/RealtimePubSub.integration.test.ts](src/RealtimePubSub.integration.test.ts),
+  which needs a real Redis at `REDIS_URL` (CI provides one as a service
+  container — see `.github/workflows/ci.yml`) and skips itself otherwise.
 - **E2E** — `cd web && bun run test:e2e` (Playwright, Chromium). The Playwright
   `webServer` config boots the _real_ backend (`bun run start`, cwd `..`, with a
   test `JWT_SECRET`) and the Vite dev server, then drives the browser against

@@ -7,9 +7,8 @@ import {
   HttpClientRequest,
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
-import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { drizzle } from "drizzle-orm/pglite";
+import { migrate } from "drizzle-orm/pglite/migrator";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi, MAX_GROUP_PARTICIPANTS } from "./Api.ts";
@@ -18,6 +17,7 @@ import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
+import { InMemoryPubSubLive } from "./PubSub.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import * as schema from "./db/schema.ts";
@@ -31,17 +31,16 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(PostsHandlerLive),
   Layer.provide(ChatsHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
+  Layer.provide(InMemoryPubSubLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
 );
 
-const run = <A, E>(
+const run = async <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
 ): Promise<A> => {
-  const sqlite = new Database(":memory:");
-  sqlite.exec("PRAGMA foreign_keys = ON;");
-  const db = drizzle(sqlite, { schema });
-  migrate(db, { migrationsFolder: "./drizzle" });
+  const db = drizzle({ schema });
+  await migrate(db, { migrationsFolder: "./drizzle" });
   const TestDbLive = Layer.succeed(Db, db);
 
   const { handler, dispose } = HttpApiBuilder.toWebHandler(
@@ -65,12 +64,14 @@ const run = <A, E>(
     ),
   );
 
-  return Effect.runPromise(
-    effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
-  ).finally(() => {
-    dispose();
-    sqlite.close();
-  });
+  try {
+    return await Effect.runPromise(
+      effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
+    );
+  } finally {
+    await dispose();
+    await db.$client.close();
+  }
 };
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
@@ -315,7 +316,7 @@ test("addParticipants lets the creator add people, up to the group cap", () =>
 const insertDummyUsers = (count: number) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    return yield* Effect.try(() =>
+    return yield* Effect.tryPromise(() =>
       db
         .insert(users)
         .values(
@@ -324,8 +325,7 @@ const insertDummyUsers = (count: number) =>
             passwordHash: "unused",
           })),
         )
-        .returning({ id: users.id })
-        .all(),
+        .returning({ id: users.id }),
     ).pipe(Effect.orDie);
   });
 
@@ -689,8 +689,8 @@ test("deleting a group chat's creator sets createdBy to null instead of deleting
       });
 
       const db = yield* Db;
-      yield* Effect.try(() =>
-        db.delete(users).where(eq(users.id, alice.user.id)).run(),
+      yield* Effect.tryPromise(() =>
+        db.delete(users).where(eq(users.id, alice.user.id)),
       ).pipe(Effect.orDie);
 
       const survived = yield* bob.client.chats.getChat({
