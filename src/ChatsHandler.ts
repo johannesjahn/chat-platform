@@ -755,8 +755,15 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
 
+          // Inserting the message and bumping the parent chat's `updatedAt`
+          // (which `listChats` sorts by) are done as one atomic statement via
+          // a writable CTE, rather than two separate un-transacted round
+          // trips — Postgres always runs a data-modifying CTE to completion
+          // even though only `inserted`'s output is selected here, and a
+          // single statement is atomic without needing an explicit
+          // transaction.
           const now = new Date();
-          const created = yield* Effect.tryPromise(() =>
+          const inserted = db.$with("inserted").as(
             db
               .insert(messages)
               .values({
@@ -768,14 +775,22 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 updatedAt: now,
               })
               .returning(),
+          );
+          const touched = db
+            .$with("touched")
+            .as(
+              db
+                .update(chats)
+                .set({ updatedAt: now })
+                .where(eq(chats.id, id))
+                .returning({ id: chats.id }),
+            );
+          const created = yield* Effect.tryPromise(() =>
+            db.with(inserted, touched).select().from(inserted),
           ).pipe(Effect.orDie);
           const row = created[0];
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
-
-          yield* Effect.tryPromise(() =>
-            db.update(chats).set({ updatedAt: now }).where(eq(chats.id, id)),
-          ).pipe(Effect.orDie);
 
           const participants = yield* getParticipants(db, id);
           yield* notifyChatUpdated(
