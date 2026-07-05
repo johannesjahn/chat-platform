@@ -146,5 +146,48 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const refreshToken = yield* jwt.signRefreshToken(publicUser);
           return { user: publicUser, accessToken, refreshToken };
         }),
+      )
+      .handle("refresh", ({ payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const jwt = yield* Jwt;
+
+          const tokenUser = yield* jwt
+            .verifyRefreshToken(payload.refreshToken)
+            .pipe(
+              Effect.mapError(
+                () =>
+                  new InvalidCredentials({
+                    message: "Invalid or expired refresh token",
+                  }),
+              ),
+            );
+
+          // Re-fetch rather than trust the token's claims, so a deleted
+          // account or a role change since the refresh token was issued
+          // takes effect immediately instead of surviving up to its full TTL.
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select({
+                id: users.id,
+                username: users.username,
+                role: users.role,
+              })
+              .from(users)
+              .where(eq(users.id, tokenUser.id))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          const publicUser = rows[0];
+          if (!publicUser)
+            return yield* Effect.fail(
+              new InvalidCredentials({
+                message: "Invalid or expired refresh token",
+              }),
+            );
+
+          const accessToken = yield* jwt.signAccessToken(publicUser);
+          const refreshToken = yield* jwt.signRefreshToken(publicUser);
+          return { accessToken, refreshToken };
+        }),
       ),
 );

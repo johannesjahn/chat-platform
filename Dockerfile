@@ -11,6 +11,10 @@ COPY drizzle ./drizzle
 COPY drizzle.config.ts ./
 COPY src ./src
 
+# Run as the non-root `bun` user the base image ships with, rather than root.
+RUN chown -R bun:bun /app
+USER bun
+
 ENV PORT=3000
 EXPOSE 3000
 

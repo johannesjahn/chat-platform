@@ -4,7 +4,7 @@
 // (see `bun run gen:types`), so requests/responses stay in lockstep with the API.
 import createFetchClient from "openapi-fetch";
 import createQueryClient from "openapi-react-query";
-import { clearSession, getSession } from "./auth";
+import { clearSession, getSession, setSession } from "./auth";
 import type { components, paths } from "./api-types";
 
 // `__E2E_API_URL__` is injected by Playwright (see `web/e2e/fixtures.ts`) so
@@ -17,12 +17,68 @@ export const API_URL =
 
 export const fetchClient = createFetchClient<paths>({ baseUrl: API_URL });
 
+// The access token is short-lived (15 minutes, see src/Jwt.ts) — decode its
+// `exp` claim (no signature check needed, this is just a client-side timing
+// hint) so a request can trigger a refresh *before* the token expires,
+// rather than only reacting after the server has already rejected it once.
+function accessTokenExpiresAt(accessToken: string): number | null {
+  try {
+    const payload = accessToken.split(".")[1];
+    if (!payload) return null;
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+    const claims = JSON.parse(json) as { exp?: unknown };
+    return typeof claims.exp === "number" ? claims.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+const REFRESH_SKEW_MS = 30_000;
+
+// Deduplicates concurrent refreshes — several requests can notice an
+// about-to-expire token at once, but only one of them should call
+// `/users/refresh` (a refresh token is rotated on use, so a second call with
+// the now-stale refresh token would otherwise fail).
+let refreshInFlight: Promise<Session | null> | null = null;
+
+function refreshSession(session: Session): Promise<Session | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch(`${API_URL}/users/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: session.refreshToken }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          clearSession();
+          return null;
+        }
+        const { accessToken, refreshToken } = (await response.json()) as {
+          accessToken: string;
+          refreshToken: string;
+        };
+        const next: Session = { ...session, accessToken, refreshToken };
+        setSession(next);
+        return next;
+      })
+      .catch(() => null) // network error — leave the session alone, might just be offline
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
 // Attach the access token to every request so protected endpoints (e.g. the
 // user list) are authenticated, and drop the session if the server rejects it.
 fetchClient.use({
-  onRequest({ request }) {
-    const session = getSession();
+  async onRequest({ request }) {
+    let session = getSession();
     if (session) {
+      const expiresAt = accessTokenExpiresAt(session.accessToken);
+      if (expiresAt !== null && expiresAt - REFRESH_SKEW_MS <= Date.now()) {
+        session = (await refreshSession(session)) ?? session;
+      }
       request.headers.set("Authorization", `Bearer ${session.accessToken}`);
     }
     return request;

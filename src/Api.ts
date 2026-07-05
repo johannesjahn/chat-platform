@@ -35,6 +35,18 @@ export const LoginResponse = Schema.Struct({
 }).annotations({ identifier: "LoginResponse" });
 export type LoginResponse = typeof LoginResponse.Type;
 
+export const RefreshBody = Schema.Struct({
+  refreshToken: Schema.String,
+}).annotations({ identifier: "RefreshBody" });
+
+// A refresh exchanges a valid refresh token for a new token pair — the
+// refresh token is rotated too rather than reused, so a client always holds
+// exactly one live refresh token at a time.
+export const RefreshResponse = Schema.Struct({
+  accessToken: Schema.String,
+  refreshToken: Schema.String,
+}).annotations({ identifier: "RefreshResponse" });
+
 export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
   message: Schema.String,
 }) {}
@@ -270,7 +282,8 @@ const UsersGroup = HttpApiGroup.make("users")
     HttpApiEndpoint.get("getUser", "/users/:id")
       .setPath(Schema.Struct({ id: Schema.NumberFromString }))
       .addSuccess(User)
-      .addError(NotFound, { status: 404 }),
+      .addError(NotFound, { status: 404 })
+      .middleware(Authentication),
   )
   .add(
     HttpApiEndpoint.post("register", "/users/register")
@@ -283,6 +296,12 @@ const UsersGroup = HttpApiGroup.make("users")
       .setPayload(LoginBody)
       .addSuccess(LoginResponse)
       .addError(InvalidCredentials, { status: 401 }),
+  )
+  .add(
+    HttpApiEndpoint.post("refresh", "/users/refresh")
+      .setPayload(RefreshBody)
+      .addSuccess(RefreshResponse)
+      .addError(InvalidCredentials, { status: 401 }),
   );
 
 const PostsGroup = HttpApiGroup.make("posts")
@@ -290,7 +309,8 @@ const PostsGroup = HttpApiGroup.make("posts")
     HttpApiEndpoint.get("getPost", "/posts/:id")
       .setPath(Schema.Struct({ id: Schema.NumberFromString }))
       .addSuccess(Post)
-      .addError(NotFound, { status: 404 }),
+      .addError(NotFound, { status: 404 })
+      .middleware(Authentication),
   )
   .add(
     // Authenticated, paginated view over all posts.
