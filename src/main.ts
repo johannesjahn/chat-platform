@@ -11,6 +11,7 @@ import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
+import { PubSubLive } from "./PubSub.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
@@ -40,6 +41,7 @@ const ServerLive = Layer.mergeAll(
 ).pipe(
   Layer.provide(ApiLive),
   Layer.provide(RealtimeConnectionsLive),
+  Layer.provide(PubSubLive),
   Layer.provide(JwtLive),
   Layer.provide(DbLive),
   Layer.provide(

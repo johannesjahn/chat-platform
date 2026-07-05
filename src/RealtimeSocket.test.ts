@@ -10,6 +10,7 @@ import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
+import { InMemoryPubSubLive } from "./PubSub.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
@@ -35,6 +36,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
 
 const ServerLive = Layer.mergeAll(ApiLive, RealtimeSocketRouteLive).pipe(
   Layer.provide(RealtimeConnectionsLive),
+  Layer.provide(InMemoryPubSubLive),
   Layer.provide(JwtLive),
 );
 

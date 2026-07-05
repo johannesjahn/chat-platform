@@ -65,6 +65,10 @@ beforeAll(async () => {
       // A PGlite data directory, not a single file — see Db.ts.
       DB_PATH: dataDir,
       JWT_SECRET: "realtime-integration-test-secret",
+      // This test only exercises single-instance delivery, so force the
+      // in-memory PubSub fallback regardless of whatever REDIS_URL the host
+      // running the suite happens to have set (see PubSub.ts).
+      REDIS_URL: "",
     },
     stdio: "ignore",
   });

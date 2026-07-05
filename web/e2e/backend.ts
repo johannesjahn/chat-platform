@@ -63,6 +63,10 @@ export async function startTestBackend(): Promise<TestBackend> {
       // A PGlite data directory, not a single file — see Db.ts.
       DB_PATH: dataDir,
       JWT_SECRET: "e2e-test-secret",
+      // Single backend instance per e2e test — force the in-memory PubSub
+      // fallback regardless of whatever REDIS_URL the host happens to have
+      // set (see PubSub.ts).
+      REDIS_URL: "",
     },
     stdio: "ignore",
   });
