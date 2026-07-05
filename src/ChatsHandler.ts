@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { and, count, desc, eq, inArray, isNull, lte, ne } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, lte, max, ne } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import {
   ChatApi,
@@ -119,6 +119,120 @@ const getUnreadCount = (
     return rows[0]?.total ?? 0;
   }).pipe(Effect.orDie);
 
+// Batched equivalents of getParticipants/getLastMessage/getUnreadCount for
+// building many chats at once (e.g. listChats) — each does one query (plus,
+// for last-message, one extra query to resolve read receipts) across all
+// `chatIds` instead of firing per-chat, avoiding an N+1 round trip per chat.
+
+const getParticipantsForChats = (
+  db: DrizzleDb,
+  chatIds: ReadonlyArray<number>,
+): Effect.Effect<Map<number, ChatParticipant[]>> =>
+  chatIds.length === 0
+    ? Effect.succeed(new Map())
+    : Effect.tryPromise(() =>
+        db
+          .select({
+            chatId: chatParticipants.chatId,
+            userId: chatParticipants.userId,
+            username: users.username,
+          })
+          .from(chatParticipants)
+          .innerJoin(users, eq(users.id, chatParticipants.userId))
+          .where(inArray(chatParticipants.chatId, chatIds)),
+      ).pipe(
+        Effect.orDie,
+        Effect.map((rows) => {
+          const byChat = new Map<number, ChatParticipant[]>();
+          for (const { chatId, ...participant } of rows) {
+            const list = byChat.get(chatId) ?? [];
+            list.push(participant);
+            byChat.set(chatId, list);
+          }
+          return byChat;
+        }),
+      );
+
+const getLastMessagesForChats = (
+  db: DrizzleDb,
+  chatIds: ReadonlyArray<number>,
+): Effect.Effect<Map<number, Message>> =>
+  Effect.gen(function* () {
+    const byChat = new Map<number, Message>();
+    if (chatIds.length === 0) return byChat;
+
+    // One most-recent message id per chat, then fetch just those messages —
+    // avoids pulling every message in every chat to pick the last one.
+    const latest = yield* Effect.tryPromise(() =>
+      db
+        .select({ lastId: max(messages.id) })
+        .from(messages)
+        .where(inArray(messages.chatId, chatIds))
+        .groupBy(messages.chatId),
+    ).pipe(Effect.orDie);
+    const lastIds = latest
+      .map((r) => r.lastId)
+      .filter((id): id is number => id !== null);
+    if (lastIds.length === 0) return byChat;
+
+    const rows = yield* Effect.tryPromise(() =>
+      db.select().from(messages).where(inArray(messages.id, lastIds)),
+    ).pipe(Effect.orDie);
+    const readRows = yield* Effect.tryPromise(() =>
+      db
+        .select({
+          messageId: messageReads.messageId,
+          userId: messageReads.userId,
+        })
+        .from(messageReads)
+        .where(inArray(messageReads.messageId, lastIds)),
+    ).pipe(Effect.orDie);
+    const readersByMessage = new Map<number, number[]>();
+    for (const r of readRows) {
+      const list = readersByMessage.get(r.messageId) ?? [];
+      list.push(r.userId);
+      readersByMessage.set(r.messageId, list);
+    }
+    for (const row of rows) {
+      byChat.set(
+        row.chatId,
+        toApiMessage(row, readersByMessage.get(row.id) ?? []),
+      );
+    }
+    return byChat;
+  });
+
+const getUnreadCountsForChats = (
+  db: DrizzleDb,
+  chatIds: ReadonlyArray<number>,
+  userId: number,
+): Effect.Effect<Map<number, number>> =>
+  chatIds.length === 0
+    ? Effect.succeed(new Map())
+    : Effect.tryPromise(() =>
+        db
+          .select({ chatId: messages.chatId, total: count() })
+          .from(messages)
+          .leftJoin(
+            messageReads,
+            and(
+              eq(messageReads.messageId, messages.id),
+              eq(messageReads.userId, userId),
+            ),
+          )
+          .where(
+            and(
+              inArray(messages.chatId, chatIds),
+              ne(messages.senderId, userId),
+              isNull(messageReads.id),
+            ),
+          )
+          .groupBy(messages.chatId),
+      ).pipe(
+        Effect.orDie,
+        Effect.map((rows) => new Map(rows.map((r) => [r.chatId, r.total]))),
+      );
+
 const isParticipant = (
   db: DrizzleDb,
   chatId: number,
@@ -234,9 +348,26 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               )
               .orderBy(desc(chats.updatedAt)),
           ).pipe(Effect.orDie);
-          return yield* Effect.all(
-            rows.map((row) => buildChat(db, row, currentUser.id)),
-          );
+
+          const chatIds = rows.map((row) => row.id);
+          const [participantsByChat, lastMessageByChat, unreadByChat] =
+            yield* Effect.all([
+              getParticipantsForChats(db, chatIds),
+              getLastMessagesForChats(db, chatIds),
+              getUnreadCountsForChats(db, chatIds, currentUser.id),
+            ]);
+
+          return rows.map((row) => ({
+            id: row.id,
+            type: row.type,
+            title: row.title,
+            createdBy: row.createdBy,
+            createdAt: row.createdAt.getTime(),
+            updatedAt: row.updatedAt.getTime(),
+            participants: participantsByChat.get(row.id) ?? [],
+            lastMessage: lastMessageByChat.get(row.id) ?? null,
+            unreadCount: unreadByChat.get(row.id) ?? 0,
+          }));
         }),
       )
       .handle("getChat", ({ path: { id } }) =>
