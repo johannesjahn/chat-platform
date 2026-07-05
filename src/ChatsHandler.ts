@@ -13,8 +13,8 @@ import {
   type Message,
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
-import { ChatConnections } from "./ChatEvents.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
+import { RealtimeConnections } from "./Realtime.ts";
 import {
   chatParticipants,
   chats,
@@ -56,7 +56,7 @@ const getParticipants = (
 // their chat list / open conversation can refetch instead of polling for it.
 const notifyChatUpdated = (
   db: DrizzleDb,
-  connections: Context.Tag.Service<typeof ChatConnections>,
+  connections: Context.Tag.Service<typeof RealtimeConnections>,
   chatId: number,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
@@ -259,7 +259,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* ChatConnections;
+          const connections = yield* RealtimeConnections;
 
           if (payload.userId === currentUser.id)
             return yield* Effect.fail(
@@ -363,7 +363,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* ChatConnections;
+          const connections = yield* RealtimeConnections;
 
           const uniqueIds = new Set(payload.participantIds);
           if (uniqueIds.size !== payload.participantIds.length)
@@ -433,7 +433,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* ChatConnections;
+          const connections = yield* RealtimeConnections;
           const existing = yield* getChatOr404(db, id);
           if (existing.type !== "group")
             return yield* Effect.fail(
@@ -467,7 +467,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* ChatConnections;
+          const connections = yield* RealtimeConnections;
           const existing = yield* getChatOr404(db, id);
           if (existing.type !== "group")
             return yield* Effect.fail(
@@ -612,7 +612,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* ChatConnections;
+          const connections = yield* RealtimeConnections;
           yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
 
@@ -651,7 +651,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* ChatConnections;
+          const connections = yield* RealtimeConnections;
           const chatRow = yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
 

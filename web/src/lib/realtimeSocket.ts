@@ -7,8 +7,11 @@ import {
   chatMessagesQueryKey,
   chatsListQueryKey,
 } from "./chats";
+import { postDetailQueryKeyPrefix, postsFeedQueryKey } from "./posts";
 
-type ChatSocketEvent = { type: "chat_updated"; chatId: number };
+type RealtimeSocketEvent =
+  | { type: "chat_updated"; chatId: number }
+  | { type: "post_changed"; postId: number };
 
 // A little more than the default Bun WebSocket idle timeout — sending
 // anything at all (the content is irrelevant, the server ignores incoming
@@ -18,7 +21,7 @@ const PING_INTERVAL_MS = 30_000;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 15_000;
 
-function chatSocketUrl(accessToken: string): string {
+function realtimeSocketUrl(accessToken: string): string {
   const url = new URL("/ws", API_URL);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("token", accessToken);
@@ -26,16 +29,18 @@ function chatSocketUrl(accessToken: string): string {
 }
 
 // Replaces the old short-polling on the chat list / chat detail / messages
-// queries: one authenticated WebSocket connection, kept open for as long as
-// there's a session, that invalidates exactly the queries affected by a
-// `chat_updated` event. The server only ever sends this event to users who
-// are participants of the chat that changed, so this hook doesn't need to
-// filter anything itself — every event it receives is relevant.
+// queries, and adds the same live behavior to the posts feed: one
+// authenticated WebSocket connection, kept open for as long as there's a
+// session, that invalidates exactly the queries affected by each event.
+//
+// `chat_updated` is scoped server-side to a chat's participants, so this
+// hook doesn't need to filter it. `post_changed` goes out to every connected
+// user — the feed has no notion of participants, anyone signed in sees it.
 //
 // Mounted once near the root (see `__root.tsx`'s `Nav`) so the nav's unread
-// badge and the `/chats` list both stay live even while the user isn't
-// looking at a specific conversation.
-export function useChatSocket(enabled: boolean): void {
+// badge, the `/chats` list, and the `/` feed all stay live even when the
+// user isn't looking at them.
+export function useRealtimeSocket(enabled: boolean): void {
   const queryClient = useQueryClient();
   const session = useSession();
   const accessToken = enabled ? session?.accessToken : undefined;
@@ -50,7 +55,7 @@ export function useChatSocket(enabled: boolean): void {
     let stopped = false;
 
     function connect() {
-      socket = new WebSocket(chatSocketUrl(accessToken!));
+      socket = new WebSocket(realtimeSocketUrl(accessToken!));
 
       socket.onopen = () => {
         reconnectDelay = RECONNECT_BASE_MS;
@@ -58,20 +63,33 @@ export function useChatSocket(enabled: boolean): void {
       };
 
       socket.onmessage = (event) => {
-        let parsed: ChatSocketEvent;
+        let parsed: RealtimeSocketEvent;
         try {
           parsed = JSON.parse(event.data as string);
         } catch {
           return;
         }
-        if (parsed.type !== "chat_updated") return;
-        void queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
-        void queryClient.invalidateQueries({
-          queryKey: chatDetailQueryKey(parsed.chatId),
-        });
-        void queryClient.invalidateQueries({
-          queryKey: chatMessagesQueryKey(parsed.chatId),
-        });
+        switch (parsed.type) {
+          case "chat_updated":
+            void queryClient.invalidateQueries({
+              queryKey: chatsListQueryKey,
+            });
+            void queryClient.invalidateQueries({
+              queryKey: chatDetailQueryKey(parsed.chatId),
+            });
+            void queryClient.invalidateQueries({
+              queryKey: chatMessagesQueryKey(parsed.chatId),
+            });
+            break;
+          case "post_changed":
+            void queryClient.invalidateQueries({
+              queryKey: postsFeedQueryKey,
+            });
+            void queryClient.invalidateQueries({
+              queryKey: postDetailQueryKeyPrefix,
+            });
+            break;
+        }
       };
 
       socket.onclose = () => {

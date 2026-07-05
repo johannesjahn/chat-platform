@@ -16,6 +16,14 @@ export const LOAD_MORE_POSTS_LIMIT = 3;
 
 export const postsFeedQueryKey = ["posts", "feed"] as const;
 
+// Prefix of the query key `$api.useQuery("get", "/posts/{id}", ...)`
+// generates (openapi-react-query keys queries as `[method, path, init]`).
+// `queryClient.invalidateQueries` matches by prefix by default, so this
+// invalidates every currently-mounted single-post query regardless of which
+// id it was fetched with — used by `useRealtimeSocket` on a `post_changed`
+// event, since the event doesn't say which page happens to have it open.
+export const postDetailQueryKeyPrefix = ["get", "/posts/{id}"] as const;
+
 // The typed `$api.useInfiniteQuery` wrapper only supports a single, constant
 // query param driving pagination — it can't express a batch size that varies
 // between the first page and subsequent ones. So this talks to `fetchClient`
