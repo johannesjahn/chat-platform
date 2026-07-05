@@ -54,18 +54,16 @@ const getParticipants = (
 
 // Pushes a `chat_updated` event to every current participant of `chatId` so
 // their chat list / open conversation can refetch instead of polling for it.
+// Takes the participant ids rather than re-deriving them from `chatId` —
+// every call site already has a freshly-fetched participant list on hand for
+// building its own response (see `buildChat`), so this avoids a second
+// `getParticipants` round-trip per mutation.
 const notifyChatUpdated = (
-  db: DrizzleDb,
   connections: Context.Tag.Service<typeof RealtimeConnections>,
   chatId: number,
+  participantUserIds: ReadonlyArray<number>,
 ): Effect.Effect<void> =>
-  Effect.gen(function* () {
-    const participants = yield* getParticipants(db, chatId);
-    yield* connections.notifyUsers(
-      participants.map((p) => p.userId),
-      { type: "chat_updated", chatId },
-    );
-  });
+  connections.notifyUsers(participantUserIds, { type: "chat_updated", chatId });
 
 const getLastMessage = (
   db: DrizzleDb,
@@ -172,13 +170,18 @@ const requireParticipant = (db: DrizzleDb, chatId: number, userId: number) =>
       );
   });
 
+// `participants`, if passed, is used as-is instead of re-fetching — callers
+// that already have a fresh list (e.g. because they just notified over the
+// websocket) can reuse it rather than paying for the join twice.
 const buildChat = (
   db: DrizzleDb,
   row: DbChat,
   currentUserId: number,
+  participants?: ReadonlyArray<ChatParticipant>,
 ): Effect.Effect<Chat> =>
   Effect.gen(function* () {
-    const participants = yield* getParticipants(db, row.id);
+    const resolvedParticipants =
+      participants ?? (yield* getParticipants(db, row.id));
     const lastMessage = yield* getLastMessage(db, row.id);
     const unreadCount = yield* getUnreadCount(db, row.id, currentUserId);
     return {
@@ -188,7 +191,7 @@ const buildChat = (
       createdBy: row.createdBy,
       createdAt: row.createdAt.getTime(),
       updatedAt: row.updatedAt.getTime(),
-      participants: [...participants],
+      participants: [...resolvedParticipants],
       lastMessage,
       unreadCount,
     };
@@ -355,8 +358,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             ),
           ).pipe(Effect.orDie);
 
-          yield* notifyChatUpdated(db, connections, chatRow.id);
-          return yield* buildChat(db, chatRow, currentUser.id);
+          const participants = yield* getParticipants(db, chatRow.id);
+          yield* notifyChatUpdated(
+            connections,
+            chatRow.id,
+            participants.map((p) => p.userId),
+          );
+          return yield* buildChat(db, chatRow, currentUser.id, participants);
         }),
       )
       .handle("createGroupChat", ({ payload }) =>
@@ -425,8 +433,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               .run(),
           ).pipe(Effect.orDie);
 
-          yield* notifyChatUpdated(db, connections, chatRow.id);
-          return yield* buildChat(db, chatRow, currentUser.id);
+          const participants = yield* getParticipants(db, chatRow.id);
+          yield* notifyChatUpdated(
+            connections,
+            chatRow.id,
+            participants.map((p) => p.userId),
+          );
+          return yield* buildChat(db, chatRow, currentUser.id, participants);
         }),
       )
       .handle("updateChat", ({ path: { id }, payload }) =>
@@ -459,8 +472,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const row = updated[0];
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
-          yield* notifyChatUpdated(db, connections, id);
-          return yield* buildChat(db, row, currentUser.id);
+          const participants = yield* getParticipants(db, id);
+          yield* notifyChatUpdated(
+            connections,
+            id,
+            participants.map((p) => p.userId),
+          );
+          return yield* buildChat(db, row, currentUser.id, participants);
         }),
       )
       .handle("addParticipants", ({ path: { id }, payload }) =>
@@ -545,8 +563,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          yield* notifyChatUpdated(db, connections, id);
-          return yield* buildChat(db, existing, currentUser.id);
+          const participants = yield* getParticipants(db, id);
+          yield* notifyChatUpdated(
+            connections,
+            id,
+            participants.map((p) => p.userId),
+          );
+          return yield* buildChat(db, existing, currentUser.id, participants);
         }),
       )
       .handle("listMessages", ({ path: { id }, urlParams }) =>
@@ -643,7 +666,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               .run(),
           ).pipe(Effect.orDie);
 
-          yield* notifyChatUpdated(db, connections, id);
+          const participants = yield* getParticipants(db, id);
+          yield* notifyChatUpdated(
+            connections,
+            id,
+            participants.map((p) => p.userId),
+          );
           return toApiMessage(row, []);
         }),
       )
@@ -706,10 +734,15 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             ).pipe(Effect.orDie);
           }
 
+          const participants = yield* getParticipants(db, id);
           if (unreadUpTo.length > 0) {
-            yield* notifyChatUpdated(db, connections, id);
+            yield* notifyChatUpdated(
+              connections,
+              id,
+              participants.map((p) => p.userId),
+            );
           }
-          return yield* buildChat(db, chatRow, currentUser.id);
+          return yield* buildChat(db, chatRow, currentUser.id, participants);
         }),
       ),
 );
