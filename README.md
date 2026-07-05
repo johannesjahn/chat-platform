@@ -1,8 +1,9 @@
 # chat-platform
 
 A small chat-platform API built with **Bun**, **Effect** (`HttpApi`), and
-**Drizzle ORM** over SQLite, plus a **TanStack Start** (React) frontend in
-[`web/`](web/). See [web/README.md](web/README.md) for frontend-specific docs.
+**Drizzle ORM** over **PGlite** (an embedded Postgres), plus a **TanStack
+Start** (React) frontend in [`web/`](web/). See [web/README.md](web/README.md)
+for frontend-specific docs.
 
 ## Install & run
 
@@ -12,8 +13,8 @@ bun run dev            # backend on http://localhost:3000 (--hot reload)
 ```
 
 `bun run start` runs without hot reload. The API docs (Swagger) are served at
-http://localhost:3000/docs. The database is a local SQLite file (`dev.db`),
-created and migrated automatically on startup.
+http://localhost:3000/docs. The database is a local PGlite data directory
+(`DB_PATH`, unset = in-memory), created and migrated automatically on startup.
 
 ## Testing
 
@@ -23,8 +24,9 @@ Two independent suites:
 
 Bun's built-in test runner. [src/users.test.ts](src/users.test.ts) exercises the
 Effect `HttpApi` in-process (no network): every test gets a **fresh in-memory
-SQLite** database with the Drizzle migrations applied and a deterministic
-`JWT_SECRET`, so tests are fully isolated and don't depend on a local `.env`.
+PGlite** database (real Postgres semantics, no server to run) with the
+Drizzle migrations applied and a deterministic `JWT_SECRET`, so tests are
+fully isolated and don't depend on a local `.env`.
 
 ### End-to-end — `cd web && bun run test:e2e`
 

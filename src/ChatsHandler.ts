@@ -43,13 +43,12 @@ const getParticipants = (
   db: DrizzleDb,
   chatId: number,
 ): Effect.Effect<ReadonlyArray<ChatParticipant>> =>
-  Effect.try(() =>
+  Effect.tryPromise(() =>
     db
       .select({ userId: chatParticipants.userId, username: users.username })
       .from(chatParticipants)
       .innerJoin(users, eq(users.id, chatParticipants.userId))
-      .where(eq(chatParticipants.chatId, chatId))
-      .all(),
+      .where(eq(chatParticipants.chatId, chatId)),
   ).pipe(Effect.orDie);
 
 // Pushes a `chat_updated` event to every current participant of `chatId` so
@@ -70,23 +69,21 @@ const getLastMessage = (
   chatId: number,
 ): Effect.Effect<Message | null> =>
   Effect.gen(function* () {
-    const rows = yield* Effect.try(() =>
+    const rows = yield* Effect.tryPromise(() =>
       db
         .select()
         .from(messages)
         .where(eq(messages.chatId, chatId))
         .orderBy(desc(messages.id))
-        .limit(1)
-        .all(),
+        .limit(1),
     ).pipe(Effect.orDie);
     const row = rows[0];
     if (!row) return null;
-    const readers = yield* Effect.try(() =>
+    const readers = yield* Effect.tryPromise(() =>
       db
         .select({ userId: messageReads.userId })
         .from(messageReads)
-        .where(eq(messageReads.messageId, row.id))
-        .all(),
+        .where(eq(messageReads.messageId, row.id)),
     ).pipe(Effect.orDie);
     return toApiMessage(
       row,
@@ -101,8 +98,8 @@ const getUnreadCount = (
   chatId: number,
   userId: number,
 ): Effect.Effect<number> =>
-  Effect.try(() => {
-    const rows = db
+  Effect.tryPromise(async () => {
+    const rows = await db
       .select({ total: count() })
       .from(messages)
       .leftJoin(
@@ -118,8 +115,7 @@ const getUnreadCount = (
           ne(messages.senderId, userId),
           isNull(messageReads.id),
         ),
-      )
-      .all();
+      );
     return rows[0]?.total ?? 0;
   }).pipe(Effect.orDie);
 
@@ -128,7 +124,7 @@ const isParticipant = (
   chatId: number,
   userId: number,
 ): Effect.Effect<boolean> =>
-  Effect.try(() =>
+  Effect.tryPromise(() =>
     db
       .select({ id: chatParticipants.id })
       .from(chatParticipants)
@@ -138,8 +134,7 @@ const isParticipant = (
           eq(chatParticipants.userId, userId),
         ),
       )
-      .limit(1)
-      .all(),
+      .limit(1),
   ).pipe(
     Effect.orDie,
     Effect.map((rows) => rows.length > 0),
@@ -150,8 +145,8 @@ const getChatOr404 = (
   id: number,
 ): Effect.Effect<DbChat, NotFound> =>
   Effect.gen(function* () {
-    const rows = yield* Effect.try(() =>
-      db.select().from(chats).where(eq(chats.id, id)).limit(1).all(),
+    const rows = yield* Effect.tryPromise(() =>
+      db.select().from(chats).where(eq(chats.id, id)).limit(1),
     ).pipe(Effect.orDie);
     const row = rows[0];
     if (!row)
@@ -203,12 +198,8 @@ const existingUserIds = (
 ): Effect.Effect<Set<number>> =>
   ids.length === 0
     ? Effect.succeed(new Set())
-    : Effect.try(() =>
-        db
-          .select({ id: users.id })
-          .from(users)
-          .where(inArray(users.id, ids))
-          .all(),
+    : Effect.tryPromise(() =>
+        db.select({ id: users.id }).from(users).where(inArray(users.id, ids)),
       ).pipe(
         Effect.orDie,
         Effect.map((rows) => new Set(rows.map((r) => r.id))),
@@ -223,7 +214,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const rows = yield* Effect.try(() =>
+          const rows = yield* Effect.tryPromise(() =>
             db
               .select({
                 id: chats.id,
@@ -241,8 +232,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                   eq(chatParticipants.userId, currentUser.id),
                 ),
               )
-              .orderBy(desc(chats.updatedAt))
-              .all(),
+              .orderBy(desc(chats.updatedAt)),
           ).pipe(Effect.orDie);
           return yield* Effect.all(
             rows.map((row) => buildChat(db, row, currentUser.id)),
@@ -278,22 +268,21 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             );
 
           // The "does a direct chat for this pair already exist" check and
-          // the "create one if not" insert run as a single synchronous
-          // callback inside an immediate (write-locking) transaction. Doing
-          // both as two separate `yield*`ed steps would leave a gap where a
-          // concurrent request for the same pair could also see "no existing
-          // chat" and also create one — this closes that gap by making the
-          // whole read-then-write atomic, with no suspension point in
-          // between for another fiber to interleave.
-          const chatRow = yield* Effect.try(() =>
+          // the "create one if not" insert run inside a single `serializable`
+          // transaction. Two concurrent requests for the same pair would
+          // otherwise both see "no existing chat" and both create one; under
+          // `serializable` isolation Postgres instead aborts one of them with
+          // a serialization failure (surfaced here as a die, same as any
+          // other unexpected DB error) rather than letting it silently race.
+          const chatRow = yield* Effect.tryPromise(() =>
             db.transaction(
-              (tx) => {
+              async (tx) => {
                 // A direct chat always has exactly the two participants it
                 // was created with, so matching on "both ids are
                 // participants of some direct chat, and it has exactly two
                 // participants" uniquely identifies the (at most one)
                 // existing chat for this pair.
-                const existing = tx
+                const existing = await tx
                   .select({ chatId: chatParticipants.chatId })
                   .from(chatParticipants)
                   .innerJoin(chats, eq(chats.id, chatParticipants.chatId))
@@ -307,15 +296,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                     ),
                   )
                   .groupBy(chatParticipants.chatId)
-                  .having(eq(count(chatParticipants.userId), 2))
-                  .all();
+                  .having(eq(count(chatParticipants.userId), 2));
 
                 if (existing[0]) {
-                  const rows = tx
+                  const rows = await tx
                     .select()
                     .from(chats)
-                    .where(eq(chats.id, existing[0].chatId))
-                    .all();
+                    .where(eq(chats.id, existing[0].chatId));
                   const row = rows[0];
                   if (!row)
                     throw new Error("Existing chat vanished mid-transaction");
@@ -323,7 +310,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 }
 
                 const now = new Date();
-                const created = tx
+                const created = await tx
                   .insert(chats)
                   .values({
                     type: "direct",
@@ -332,29 +319,26 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                     createdAt: now,
                     updatedAt: now,
                   })
-                  .returning()
-                  .all();
+                  .returning();
                 const newRow = created[0];
                 if (!newRow) throw new Error("INSERT returned no rows");
 
-                tx.insert(chatParticipants)
-                  .values([
-                    {
-                      chatId: newRow.id,
-                      userId: currentUser.id,
-                      joinedAt: now,
-                    },
-                    {
-                      chatId: newRow.id,
-                      userId: payload.userId,
-                      joinedAt: now,
-                    },
-                  ])
-                  .run();
+                await tx.insert(chatParticipants).values([
+                  {
+                    chatId: newRow.id,
+                    userId: currentUser.id,
+                    joinedAt: now,
+                  },
+                  {
+                    chatId: newRow.id,
+                    userId: payload.userId,
+                    joinedAt: now,
+                  },
+                ]);
 
                 return newRow;
               },
-              { behavior: "immediate" },
+              { isolationLevel: "serializable" },
             ),
           ).pipe(Effect.orDie);
 
@@ -403,7 +387,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             );
 
           const now = new Date();
-          const created = yield* Effect.try(() =>
+          const created = yield* Effect.tryPromise(() =>
             db
               .insert(chats)
               .values({
@@ -413,24 +397,20 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 createdAt: now,
                 updatedAt: now,
               })
-              .returning()
-              .all(),
+              .returning(),
           ).pipe(Effect.orDie);
           const chatRow = created[0];
           if (!chatRow)
             return yield* Effect.die(new Error("INSERT returned no rows"));
 
-          yield* Effect.try(() =>
-            db
-              .insert(chatParticipants)
-              .values(
-                [currentUser.id, ...uniqueIds].map((userId) => ({
-                  chatId: chatRow.id,
-                  userId,
-                  joinedAt: now,
-                })),
-              )
-              .run(),
+          yield* Effect.tryPromise(() =>
+            db.insert(chatParticipants).values(
+              [currentUser.id, ...uniqueIds].map((userId) => ({
+                chatId: chatRow.id,
+                userId,
+                joinedAt: now,
+              })),
+            ),
           ).pipe(Effect.orDie);
 
           const participants = yield* getParticipants(db, chatRow.id);
@@ -461,13 +441,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          const updated = yield* Effect.try(() =>
+          const updated = yield* Effect.tryPromise(() =>
             db
               .update(chats)
               .set({ title: payload.title })
               .where(eq(chats.id, id))
-              .returning()
-              .all(),
+              .returning(),
           ).pipe(Effect.orDie);
           const row = updated[0];
           if (!row)
@@ -513,22 +492,21 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             );
 
           // Recomputing who's already a participant and enforcing the group
-          // cap has to happen in the same synchronous transaction as the
+          // cap has to happen in the same `serializable` transaction as the
           // insert — otherwise two concurrent addParticipants calls could
           // each read the same (still-under-cap) participant count before
           // either insert commits, and together push the group over
           // MAX_GROUP_PARTICIPANTS. `onConflictDoNothing` also guards
           // against re-adding someone a concurrent call just added.
-          const result = yield* Effect.try(() =>
+          const result = yield* Effect.tryPromise(() =>
             db.transaction(
-              (tx) => {
+              async (tx) => {
+                const currentParticipants = await tx
+                  .select({ userId: chatParticipants.userId })
+                  .from(chatParticipants)
+                  .where(eq(chatParticipants.chatId, id));
                 const currentIds = new Set(
-                  tx
-                    .select({ userId: chatParticipants.userId })
-                    .from(chatParticipants)
-                    .where(eq(chatParticipants.chatId, id))
-                    .all()
-                    .map((p) => p.userId),
+                  currentParticipants.map((p) => p.userId),
                 );
                 const newIds = requestedIds.filter(
                   (userId) => !currentIds.has(userId),
@@ -539,7 +517,8 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
 
                 if (newIds.length > 0) {
                   const now = new Date();
-                  tx.insert(chatParticipants)
+                  await tx
+                    .insert(chatParticipants)
                     .values(
                       newIds.map((userId) => ({
                         chatId: id,
@@ -547,12 +526,11 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                         joinedAt: now,
                       })),
                     )
-                    .onConflictDoNothing()
-                    .run();
+                    .onConflictDoNothing();
                 }
                 return { ok: true as const };
               },
-              { behavior: "immediate" },
+              { isolationLevel: "serializable" },
             ),
           ).pipe(Effect.orDie);
 
@@ -581,22 +559,20 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
 
           const offset = urlParams.offset ?? 0;
           const limit = urlParams.limit ?? DEFAULT_MESSAGES_LIMIT;
-          const rows = yield* Effect.try(() =>
+          const rows = yield* Effect.tryPromise(() =>
             db
               .select()
               .from(messages)
               .where(eq(messages.chatId, id))
               .orderBy(messages.id)
               .limit(limit)
-              .offset(offset)
-              .all(),
+              .offset(offset),
           ).pipe(Effect.orDie);
-          const totalRows = yield* Effect.try(() =>
+          const totalRows = yield* Effect.tryPromise(() =>
             db
               .select({ total: count() })
               .from(messages)
-              .where(eq(messages.chatId, id))
-              .all(),
+              .where(eq(messages.chatId, id)),
           ).pipe(Effect.orDie);
           const total = totalRows[0]?.total ?? 0;
 
@@ -604,15 +580,14 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const readRows =
             messageIds.length === 0
               ? []
-              : yield* Effect.try(() =>
+              : yield* Effect.tryPromise(() =>
                   db
                     .select({
                       messageId: messageReads.messageId,
                       userId: messageReads.userId,
                     })
                     .from(messageReads)
-                    .where(inArray(messageReads.messageId, messageIds))
-                    .all(),
+                    .where(inArray(messageReads.messageId, messageIds)),
                 ).pipe(Effect.orDie);
           const readersByMessage = new Map<number, number[]>();
           for (const r of readRows) {
@@ -640,7 +615,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           yield* requireParticipant(db, id, currentUser.id);
 
           const now = new Date();
-          const created = yield* Effect.try(() =>
+          const created = yield* Effect.tryPromise(() =>
             db
               .insert(messages)
               .values({
@@ -651,19 +626,14 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 createdAt: now,
                 updatedAt: now,
               })
-              .returning()
-              .all(),
+              .returning(),
           ).pipe(Effect.orDie);
           const row = created[0];
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
 
-          yield* Effect.try(() =>
-            db
-              .update(chats)
-              .set({ updatedAt: now })
-              .where(eq(chats.id, id))
-              .run(),
+          yield* Effect.tryPromise(() =>
+            db.update(chats).set({ updatedAt: now }).where(eq(chats.id, id)),
           ).pipe(Effect.orDie);
 
           const participants = yield* getParticipants(db, id);
@@ -683,7 +653,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const chatRow = yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
 
-          const target = yield* Effect.try(() =>
+          const target = yield* Effect.tryPromise(() =>
             db
               .select({ id: messages.id })
               .from(messages)
@@ -693,8 +663,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                   eq(messages.id, payload.messageId),
                 ),
               )
-              .limit(1)
-              .all(),
+              .limit(1),
           ).pipe(Effect.orDie);
           if (!target[0])
             return yield* Effect.fail(
@@ -703,7 +672,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          const unreadUpTo = yield* Effect.try(() =>
+          const unreadUpTo = yield* Effect.tryPromise(() =>
             db
               .select({ id: messages.id })
               .from(messages)
@@ -713,13 +682,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                   ne(messages.senderId, currentUser.id),
                   lte(messages.id, payload.messageId),
                 ),
-              )
-              .all(),
+              ),
           ).pipe(Effect.orDie);
 
           if (unreadUpTo.length > 0) {
             const now = new Date();
-            yield* Effect.try(() =>
+            yield* Effect.tryPromise(() =>
               db
                 .insert(messageReads)
                 .values(
@@ -729,8 +697,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                     readAt: now,
                   })),
                 )
-                .onConflictDoNothing()
-                .run(),
+                .onConflictDoNothing(),
             ).pipe(Effect.orDie);
           }
 

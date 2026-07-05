@@ -19,6 +19,7 @@
   "dependencies": {
     "@effect/platform": "latest",
     "@effect/platform-bun": "latest",
+    "@electric-sql/pglite": "^0.5.4",
     "drizzle-orm": "^0.45.2",
     "effect": "latest"
   },

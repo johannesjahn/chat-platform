@@ -25,8 +25,8 @@ const canModify = (
 const getPostOr404 = (id: number) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    const rows = yield* Effect.try(() =>
-      db.select().from(posts).where(eq(posts.id, id)).limit(1).all(),
+    const rows = yield* Effect.tryPromise(() =>
+      db.select().from(posts).where(eq(posts.id, id)).limit(1),
     ).pipe(Effect.orDie);
     const row = rows[0];
     if (!row)
@@ -52,17 +52,16 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const offset = urlParams.offset ?? 0;
           const limit = urlParams.limit ?? DEFAULT_POSTS_LIMIT;
-          const rows = yield* Effect.try(() =>
+          const rows = yield* Effect.tryPromise(() =>
             db
               .select()
               .from(posts)
               .orderBy(desc(posts.id))
               .limit(limit)
-              .offset(offset)
-              .all(),
+              .offset(offset),
           ).pipe(Effect.orDie);
-          const totalRows = yield* Effect.try(() =>
-            db.select({ total: count() }).from(posts).all(),
+          const totalRows = yield* Effect.tryPromise(() =>
+            db.select({ total: count() }).from(posts),
           ).pipe(Effect.orDie);
           const total = totalRows[0]?.total ?? 0;
           return { posts: rows.map(toApiPost), offset, limit, total };
@@ -78,7 +77,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           // calls can land a millisecond apart, and a freshly created post's
           // createdAt/updatedAt should be identical, not just close.
           const now = new Date();
-          const rows = yield* Effect.try(() =>
+          const rows = yield* Effect.tryPromise(() =>
             db
               .insert(posts)
               .values({
@@ -88,8 +87,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 createdAt: now,
                 updatedAt: now,
               })
-              .returning()
-              .all(),
+              .returning(),
           ).pipe(Effect.orDie);
           const row = rows[0];
           if (!row)
@@ -112,7 +110,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               new Forbidden({ message: "You can only edit your own posts" }),
             );
 
-          const rows = yield* Effect.try(() =>
+          const rows = yield* Effect.tryPromise(() =>
             db
               .update(posts)
               .set({
@@ -121,8 +119,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 updatedAt: new Date(),
               })
               .where(eq(posts.id, id))
-              .returning()
-              .all(),
+              .returning(),
           ).pipe(Effect.orDie);
           const row = rows[0];
           if (!row)
@@ -147,8 +144,8 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          yield* Effect.try(() =>
-            db.delete(posts).where(eq(posts.id, id)).run(),
+          yield* Effect.tryPromise(() =>
+            db.delete(posts).where(eq(posts.id, id)),
           ).pipe(Effect.orDie);
           yield* connections.broadcastAll({ type: "post_changed", postId: id });
         }),

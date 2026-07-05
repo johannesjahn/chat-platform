@@ -57,13 +57,13 @@ let wsUrl: string;
 beforeAll(async () => {
   const port = await getFreePort();
   dataDir = mkdtempSync(path.join(tmpdir(), "chat-platform-ws-test-"));
-  const dbPath = path.join(dataDir, "test.db");
 
   child = spawn("bun", ["run", "start"], {
     env: {
       ...process.env,
       PORT: String(port),
-      DB_PATH: dbPath,
+      // A PGlite data directory, not a single file — see Db.ts.
+      DB_PATH: dataDir,
       JWT_SECRET: "realtime-integration-test-secret",
     },
     stdio: "ignore",

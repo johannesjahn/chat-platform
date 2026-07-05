@@ -39,7 +39,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
       .handle("listUsers", () =>
         Effect.gen(function* () {
           const db = yield* Db;
-          return yield* Effect.try(() =>
+          return yield* Effect.tryPromise(() =>
             db
               .select({
                 id: users.id,
@@ -47,15 +47,14 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 role: users.role,
               })
               .from(users)
-              .orderBy(users.id)
-              .all(),
+              .orderBy(users.id),
           ).pipe(Effect.orDie);
         }),
       )
       .handle("getUser", ({ path: { id } }) =>
         Effect.gen(function* () {
           const db = yield* Db;
-          const rows = yield* Effect.try(() =>
+          const rows = yield* Effect.tryPromise(() =>
             db
               .select({
                 id: users.id,
@@ -64,8 +63,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               })
               .from(users)
               .where(eq(users.id, id))
-              .limit(1)
-              .all(),
+              .limit(1),
           ).pipe(Effect.orDie);
           if (!rows[0])
             return yield* Effect.fail(
@@ -78,13 +76,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
 
-          const existing = yield* Effect.try(() =>
+          const existing = yield* Effect.tryPromise(() =>
             db
               .select({ id: users.id })
               .from(users)
               .where(eq(users.username, payload.username))
-              .limit(1)
-              .all(),
+              .limit(1),
           ).pipe(Effect.orDie);
           if (existing[0])
             return yield* Effect.fail(
@@ -95,7 +92,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
 
           const passwordHash = yield* hashPassword(payload.password);
 
-          const rows = yield* Effect.try(() =>
+          const rows = yield* Effect.tryPromise(() =>
             db
               .insert(users)
               // Registration always creates a "user" — admins are promoted
@@ -109,8 +106,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 id: users.id,
                 username: users.username,
                 role: users.role,
-              })
-              .all(),
+              }),
           ).pipe(Effect.orDie);
           if (!rows[0])
             return yield* Effect.die(new Error("INSERT returned no rows"));
@@ -121,13 +117,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const jwt = yield* Jwt;
-          const rows = yield* Effect.try(() =>
+          const rows = yield* Effect.tryPromise(() =>
             db
               .select()
               .from(users)
               .where(eq(users.username, payload.username))
-              .limit(1)
-              .all(),
+              .limit(1),
           ).pipe(Effect.orDie);
 
           // Always run a verify — against a dummy hash when the user is

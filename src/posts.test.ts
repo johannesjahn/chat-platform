@@ -7,9 +7,8 @@ import {
   HttpClientRequest,
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
-import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
-import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { drizzle } from "drizzle-orm/pglite";
+import { migrate } from "drizzle-orm/pglite/migrator";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
@@ -38,13 +37,11 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
 // `effect` may also require `Db` directly (e.g. to promote a user to admin
 // out-of-band, the way it'd happen in production) — it shares the exact same
 // in-memory database instance as the API layer built below.
-const run = <A, E>(
+const run = async <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
 ): Promise<A> => {
-  const sqlite = new Database(":memory:");
-  sqlite.exec("PRAGMA foreign_keys = ON;");
-  const db = drizzle(sqlite, { schema });
-  migrate(db, { migrationsFolder: "./drizzle" });
+  const db = drizzle({ schema });
+  await migrate(db, { migrationsFolder: "./drizzle" });
   const TestDbLive = Layer.succeed(Db, db);
 
   const { handler, dispose } = HttpApiBuilder.toWebHandler(
@@ -68,12 +65,14 @@ const run = <A, E>(
     ),
   );
 
-  return Effect.runPromise(
-    effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
-  ).finally(() => {
-    dispose();
-    sqlite.close();
-  });
+  try {
+    return await Effect.runPromise(
+      effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
+    );
+  } finally {
+    await dispose();
+    await db.$client.close();
+  }
 };
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
@@ -107,12 +106,11 @@ const registerAndLogin = (username: string, password: string) =>
 const promoteToAdmin = (username: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
-    yield* Effect.try(() =>
+    yield* Effect.tryPromise(() =>
       db
         .update(users)
         .set({ role: "admin" })
-        .where(eq(users.username, username))
-        .run(),
+        .where(eq(users.username, username)),
     ).pipe(Effect.orDie);
   });
 

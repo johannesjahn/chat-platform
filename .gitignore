@@ -6,7 +6,10 @@ out
 dist
 *.tgz
 
-# SQLite databases (dev.db is created/migrated at runtime)
+# PGlite data directory (created/migrated at runtime, see .env.example)
+pgdata
+
+# SQLite databases (unused by the app itself, but kept ignored just in case)
 *.db
 *.db-shm
 *.db-wal
