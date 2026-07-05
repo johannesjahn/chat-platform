@@ -19,8 +19,14 @@ http://localhost:3000/docs. The database is a local PGlite data directory
 ### Running against a real Postgres and Redis
 
 ```bash
+cp .env.example .env   # then fill in JWT_SECRET/POSTGRES_PASSWORD/REDIS_PASSWORD
 docker compose up --build
 ```
+
+`docker-compose.yml` refuses to start unless `JWT_SECRET`, `POSTGRES_PASSWORD`,
+and `REDIS_PASSWORD` are set (no insecure fallback defaults — see
+[`.env.example`](.env.example)); `docker compose` reads them from a `.env`
+file in the repo root automatically.
 
 Starts a real Postgres and Redis container plus the backend (built from the
 root [`Dockerfile`](Dockerfile)) connected to both via `DATABASE_URL`/

@@ -147,6 +147,23 @@ test("listUsers returns all users in insertion order without password data", () 
     }),
   ));
 
+test("getUser rejects an unauthenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const created = yield* c.users.register({
+        payload: { username: "carol", password: "pw-carol" },
+      });
+      const result = yield* c.users
+        .getUser({ path: { id: created.id } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
+    }),
+  ));
+
 test("getUser returns the correct user after registration", () =>
   run(
     Effect.gen(function* () {
@@ -154,7 +171,11 @@ test("getUser returns the correct user after registration", () =>
       const created = yield* c.users.register({
         payload: { username: "carol", password: "pw-carol" },
       });
-      const fetched = yield* c.users.getUser({ path: { id: created.id } });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "carol", password: "pw-carol" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      const fetched = yield* authed.users.getUser({ path: { id: created.id } });
       expect(fetched).toEqual(created);
     }),
   ));
@@ -163,7 +184,14 @@ test("getUser returns 404 for a missing id", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const result = yield* c.users
+      yield* c.users.register({
+        payload: { username: "dave", password: "pw-dave" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "dave", password: "pw-dave" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.users
         .getUser({ path: { id: 9999 } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
@@ -258,5 +286,90 @@ test("login fails for an unknown username", () =>
         .login({ payload: { username: "ghost", password: "whatever" } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("refresh exchanges a valid refresh token for a new, working access token", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "hana", password: "pw-hana" },
+      });
+      const { refreshToken } = yield* c.users.login({
+        payload: { username: "hana", password: "pw-hana" },
+      });
+
+      const refreshed = yield* c.users.refresh({
+        payload: { refreshToken },
+      });
+      const claims = decodeClaims(refreshed.accessToken);
+      expect(claims.username).toBe("hana");
+      expect(claims.type).toBe("access");
+
+      const authed = yield* makeAuthedClient(refreshed.accessToken);
+      const users = yield* authed.users.listUsers({});
+      expect(users.map((u) => u.username)).toContain("hana");
+    }),
+  ));
+
+test("refresh rotates the refresh token", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "ivan", password: "pw-ivan" },
+      });
+      const { refreshToken } = yield* c.users.login({
+        payload: { username: "ivan", password: "pw-ivan" },
+      });
+
+      const first = yield* c.users.refresh({ payload: { refreshToken } });
+      expect(first.refreshToken).not.toBe(refreshToken);
+
+      // The new refresh token works...
+      const second = yield* c.users.refresh({
+        payload: { refreshToken: first.refreshToken },
+      });
+      expect(decodeClaims(second.accessToken).username).toBe("ivan");
+    }),
+  ));
+
+test("refresh rejects an access token used in place of a refresh token", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "jack", password: "pw-jack" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "jack", password: "pw-jack" },
+      });
+
+      const result = yield* c.users
+        .refresh({ payload: { refreshToken: accessToken } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidCredentials",
+        );
+      }
+    }),
+  ));
+
+test("refresh rejects a bogus refresh token", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const result = yield* c.users
+        .refresh({ payload: { refreshToken: "not-a-real-token" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidCredentials",
+        );
+      }
     }),
   ));

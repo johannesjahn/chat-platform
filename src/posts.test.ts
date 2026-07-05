@@ -205,17 +205,38 @@ test("createPost rejects an invalid content type", () =>
     }),
   ));
 
-test("getPost works without authentication", () =>
+test("getPost rejects an unauthenticated request", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("frank", "pw");
       const authed = yield* makeAuthedClient(accessToken);
       const created = yield* authed.posts.createPost({
-        payload: { contentType: "text", content: "public post" },
+        payload: { contentType: "text", content: "post" },
       });
 
       const c = yield* makeClient;
-      const fetched = yield* c.posts.getPost({ path: { id: created.id } });
+      const result = yield* c.posts
+        .getPost({ path: { id: created.id } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
+    }),
+  ));
+
+test("getPost returns the post for an authenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("frankie", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      const created = yield* authed.posts.createPost({
+        payload: { contentType: "text", content: "post" },
+      });
+
+      const fetched = yield* authed.posts.getPost({
+        path: { id: created.id },
+      });
       expect(fetched).toEqual(created);
     }),
   ));
@@ -320,8 +341,9 @@ test("listPosts rejects a negative offset", () =>
 test("getPost returns 404 for a missing id", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const result = yield* c.posts
+      const { accessToken } = yield* registerAndLogin("sam", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.posts
         .getPost({ path: { id: 9999 } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
@@ -430,11 +452,13 @@ test("deletePost allows the author to delete their post", () =>
 
       yield* authed.posts.deletePost({ path: { id: created.id } });
 
-      const c = yield* makeClient;
-      const result = yield* c.posts
+      const result = yield* authed.posts
         .getPost({ path: { id: created.id } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+      }
     }),
   ));
 
@@ -478,10 +502,13 @@ test("deletePost allows an admin to delete another user's post", () =>
 
       yield* adminClient.posts.deletePost({ path: { id: created.id } });
 
-      const result = yield* c.posts
+      const result = yield* authorClient.posts
         .getPost({ path: { id: created.id } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+      }
     }),
   ));
 

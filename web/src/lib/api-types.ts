@@ -68,6 +68,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["users.refresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/posts/{id}": {
         parameters: {
             query?: never;
@@ -292,6 +308,13 @@ export interface components {
             /** @enum {string} */
             _tag: "InvalidCredentials";
         };
+        RefreshBody: {
+            refreshToken: string;
+        };
+        RefreshResponse: {
+            accessToken: string;
+            refreshToken: string;
+        };
         Post: {
             id: number;
             authorId: number;
@@ -485,6 +508,15 @@ export interface operations {
                     "application/json": components["schemas"]["HttpApiDecodeError"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
             /** @description NotFound */
             404: {
                 headers: {
@@ -584,6 +616,48 @@ export interface operations {
             };
         };
     };
+    "users.refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshBody"];
+            };
+        };
+        responses: {
+            /** @description RefreshResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshResponse"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description InvalidCredentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvalidCredentials"];
+                };
+            };
+        };
+    };
     "posts.getPost": {
         parameters: {
             query?: never;
@@ -611,6 +685,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
                 };
             };
             /** @description NotFound */

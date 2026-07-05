@@ -26,9 +26,12 @@ function EditPostPage() {
     data: post,
     isLoading,
     error,
-  } = $api.useQuery("get", "/posts/{id}", {
-    params: { path: { id } },
-  });
+  } = $api.useQuery(
+    "get",
+    "/posts/{id}",
+    { params: { path: { id } } },
+    { enabled: !!session },
+  );
   const updatePost = $api.useMutation("put", "/posts/{id}");
 
   if (!session) {

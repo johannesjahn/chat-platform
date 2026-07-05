@@ -70,7 +70,11 @@
             "required": true
           }
         ],
-        "security": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "User",
@@ -88,6 +92,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
                 }
               }
             }
@@ -226,6 +240,58 @@
         }
       }
     },
+    "/users/refresh": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users.refresh",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "RefreshResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "InvalidCredentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidCredentials"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
     "/posts/{id}": {
       "get": {
         "tags": [
@@ -242,7 +308,11 @@
             "required": true
           }
         ],
-        "security": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Post",
@@ -260,6 +330,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
                 }
               }
             }
@@ -1661,6 +1741,34 @@
             "enum": [
               "InvalidCredentials"
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "RefreshBody": {
+        "type": "object",
+        "required": [
+          "refreshToken"
+        ],
+        "properties": {
+          "refreshToken": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RefreshResponse": {
+        "type": "object",
+        "required": [
+          "accessToken",
+          "refreshToken"
+        ],
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "refreshToken": {
+            "type": "string"
           }
         },
         "additionalProperties": false

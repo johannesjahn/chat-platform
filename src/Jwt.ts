@@ -18,6 +18,11 @@ export type TokenClaims = {
   readonly type: TokenType;
   readonly iat: number;
   readonly exp: number;
+  // Random per-token identifier — without it, two tokens signed for the same
+  // user within the same second (same iat/exp) would be byte-identical, so
+  // e.g. refreshing twice in quick succession wouldn't actually rotate the
+  // refresh token to a new string.
+  readonly jti: string;
 };
 
 export type TokenUser = {
@@ -107,6 +112,9 @@ export class Jwt extends Context.Tag("Jwt")<
     readonly verifyAccessToken: (
       token: string,
     ) => Effect.Effect<TokenUser, InvalidToken>;
+    readonly verifyRefreshToken: (
+      token: string,
+    ) => Effect.Effect<TokenUser, InvalidToken>;
   }
 >() {}
 
@@ -126,31 +134,36 @@ export const JwtLive = Layer.effect(
             type,
             iat: now,
             exp: now + ttl,
+            jti: crypto.randomUUID(),
           },
           secret,
         );
+      });
+
+    const verify = (
+      token: string,
+      type: TokenType,
+    ): Effect.Effect<TokenUser, InvalidToken> =>
+      Effect.gen(function* () {
+        const claims = yield* Effect.promise(() => verifyHs256(token, secret));
+        const now = Math.floor(Date.now() / 1000);
+        if (!claims || claims.type !== type || claims.exp <= now)
+          return yield* Effect.fail(
+            new InvalidToken({ reason: `invalid or expired ${type} token` }),
+          );
+        return {
+          id: claims.sub,
+          username: claims.username,
+          role: claims.role,
+        };
       });
 
     return {
       signAccessToken: (user) => sign(user, "access", ACCESS_TOKEN_TTL_SECONDS),
       signRefreshToken: (user) =>
         sign(user, "refresh", REFRESH_TOKEN_TTL_SECONDS),
-      verifyAccessToken: (token) =>
-        Effect.gen(function* () {
-          const claims = yield* Effect.promise(() =>
-            verifyHs256(token, secret),
-          );
-          const now = Math.floor(Date.now() / 1000);
-          if (!claims || claims.type !== "access" || claims.exp <= now)
-            return yield* Effect.fail(
-              new InvalidToken({ reason: "invalid or expired access token" }),
-            );
-          return {
-            id: claims.sub,
-            username: claims.username,
-            role: claims.role,
-          };
-        }),
+      verifyAccessToken: (token) => verify(token, "access"),
+      verifyRefreshToken: (token) => verify(token, "refresh"),
     };
   }),
 );
