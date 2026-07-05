@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { ChatApi, DEFAULT_POSTS_LIMIT, Forbidden, NotFound } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db } from "./Db.ts";
+import { RealtimeConnections } from "./Realtime.ts";
 import { posts } from "./db/schema.ts";
 
 const toApiPost = (row: typeof posts.$inferSelect) => ({
@@ -71,6 +72,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
           // Set both from a single Date rather than relying on the schema's
           // independent per-column $defaultFn — two separate `new Date()`
           // calls can land a millisecond apart, and a freshly created post's
@@ -92,6 +94,10 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
+          yield* connections.broadcastAll({
+            type: "post_changed",
+            postId: row.id,
+          });
           return toApiPost(row);
         }),
       )
@@ -99,6 +105,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
           const existing = yield* getPostOr404(id);
           if (!canModify(currentUser, existing))
             return yield* Effect.fail(
@@ -120,6 +127,10 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
+          yield* connections.broadcastAll({
+            type: "post_changed",
+            postId: row.id,
+          });
           return toApiPost(row);
         }),
       )
@@ -127,6 +138,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
           const existing = yield* getPostOr404(id);
           if (!canModify(currentUser, existing))
             return yield* Effect.fail(
@@ -138,6 +150,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           yield* Effect.try(() =>
             db.delete(posts).where(eq(posts.id, id)).run(),
           ).pipe(Effect.orDie);
+          yield* connections.broadcastAll({ type: "post_changed", postId: id });
         }),
       ),
 );

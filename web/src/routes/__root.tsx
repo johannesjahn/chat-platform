@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { clearSession, useSession } from "../lib/auth";
 import { useTotalUnreadCount } from "../lib/chats";
 import { queryClient } from "../lib/query";
+import { useRealtimeSocket } from "../lib/realtimeSocket";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -42,6 +43,7 @@ function RootComponent() {
 function Nav() {
   const session = useSession();
   const router = useRouter();
+  useRealtimeSocket(!!session);
   const unreadCount = useTotalUnreadCount(!!session);
 
   return (

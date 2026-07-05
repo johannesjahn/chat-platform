@@ -42,6 +42,50 @@ test("creating a post shows it in the feed, and infinite scroll loads more posts
   await expect(page.getByText("You're all caught up.")).toBeVisible();
 });
 
+test("a post created by one user appears live in another user's already-open feed", async ({
+  browser,
+  injectApiUrl,
+}) => {
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  const { username: usernameA } = await registerViaUi(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  await registerViaUi(pageB);
+
+  // B sits on the feed and just leaves it open — no reload from here on, so
+  // anything B sees has to come from the `/ws` push invalidating the feed
+  // query, not a fresh load.
+  await pageB.goto("/");
+  await expect(pageB.getByText("No posts yet")).toBeVisible();
+
+  await pageA.goto("/posts/new");
+  await pageA.fill("#content", "Posted while B is watching the feed");
+  await pageA.getByRole("button", { name: "Post" }).click();
+  await expect(pageA).toHaveURL("/");
+
+  await expect(
+    pageB.getByText("Posted while B is watching the feed"),
+  ).toBeVisible({ timeout: 10_000 });
+
+  // An edit by A should likewise reach B's open feed live.
+  const cardOnA = pageA.getByRole("article", { name: `Post by @${usernameA}` });
+  await cardOnA.getByRole("link", { name: "Edit post" }).click();
+  await pageA.fill("#content", "Edited while B is watching the feed");
+  await pageA.getByRole("button", { name: "Save changes" }).click();
+  await expect(pageA).toHaveURL("/");
+
+  await expect(
+    pageB.getByText("Edited while B is watching the feed"),
+  ).toBeVisible({ timeout: 10_000 });
+
+  await contextA.close();
+  await contextB.close();
+});
+
 test("edit is only available to a post's author, both in the UI and when navigating directly", async ({
   browser,
   injectApiUrl,

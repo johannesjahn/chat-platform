@@ -11,6 +11,8 @@ import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
+import { RealtimeConnectionsLive } from "./Realtime.ts";
+import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 
 // Allow the web frontend (different origin) to call the API from the browser.
@@ -32,8 +34,13 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
 const ServerLive = Layer.mergeAll(
   HttpApiBuilder.serve(HttpMiddleware.logger),
   HttpApiSwagger.layer({ path: "/docs" }),
+  // Raw `/ws` route, attached to the same shared router as `ChatApi` — see
+  // RealtimeSocket.ts for why this can't be a typed HttpApiEndpoint.
+  RealtimeSocketRouteLive,
 ).pipe(
   Layer.provide(ApiLive),
+  Layer.provide(RealtimeConnectionsLive),
+  Layer.provide(JwtLive),
   Layer.provide(DbLive),
   Layer.provide(
     Layer.unwrapEffect(
