@@ -23,12 +23,19 @@ export type TokenClaims = {
   // e.g. refreshing twice in quick succession wouldn't actually rotate the
   // refresh token to a new string.
   readonly jti: string;
+  // Copied from `users.token_version` at signing time. Verification compares
+  // this against the user's *current* token_version (fetched fresh from the
+  // DB, not trusted from an earlier token) so bumping it — on forced logout
+  // or, in future, a password change — invalidates every access and refresh
+  // token issued before the bump, immediately rather than at their own TTL.
+  readonly tokenVersion: number;
 };
 
 export type TokenUser = {
   readonly id: number;
   readonly username: string;
   readonly role: UserRole;
+  readonly tokenVersion: number;
 };
 
 // Returned only for refresh tokens — the jti is the server-side session
@@ -157,6 +164,7 @@ export const JwtLive = Layer.effect(
             iat: now,
             exp,
             jti,
+            tokenVersion: user.tokenVersion,
           },
           secret,
         );
@@ -180,6 +188,7 @@ export const JwtLive = Layer.effect(
           role: claims.role,
           jti: claims.jti,
           expiresAt: new Date(claims.exp * 1000),
+          tokenVersion: claims.tokenVersion,
         };
       });
 

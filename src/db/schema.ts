@@ -15,6 +15,11 @@ export const users = pgTable("users", {
   role: text("role", { enum: ["user", "admin"] })
     .notNull()
     .default("user"),
+  // Bumped on password change or forced logout to immediately invalidate
+  // every outstanding access + refresh token, rather than waiting for each
+  // to hit its own TTL — embedded in issued tokens and compared against this
+  // column on every verification (src/Jwt.ts, src/UsersHandler.ts).
+  tokenVersion: integer("token_version").notNull().default(0),
 });
 
 export type DbUser = typeof users.$inferSelect;
