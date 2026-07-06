@@ -335,6 +335,60 @@ test("refresh rotates the refresh token", () =>
     }),
   ));
 
+test("refresh rejects the previous refresh token once it's been rotated away", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "kate", password: "pw-kate" },
+      });
+      const { refreshToken } = yield* c.users.login({
+        payload: { username: "kate", password: "pw-kate" },
+      });
+
+      yield* c.users.refresh({ payload: { refreshToken } });
+
+      // The old token is signature- and expiry-valid, but its store row was
+      // deleted on rotation, so re-presenting it must be rejected.
+      const result = yield* c.users
+        .refresh({ payload: { refreshToken } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidCredentials",
+        );
+      }
+    }),
+  ));
+
+test("two concurrent login sessions each rotate independently", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "liam", password: "pw-liam" },
+      });
+      const sessionA = yield* c.users.login({
+        payload: { username: "liam", password: "pw-liam" },
+      });
+      const sessionB = yield* c.users.login({
+        payload: { username: "liam", password: "pw-liam" },
+      });
+
+      // Rotating session A must not invalidate session B's still-unused
+      // refresh token — each login's refresh token is tracked by its own
+      // store row.
+      yield* c.users.refresh({
+        payload: { refreshToken: sessionA.refreshToken },
+      });
+      const refreshedB = yield* c.users.refresh({
+        payload: { refreshToken: sessionB.refreshToken },
+      });
+      expect(decodeClaims(refreshedB.accessToken).username).toBe("liam");
+    }),
+  ));
+
 test("refresh rejects an access token used in place of a refresh token", () =>
   run(
     Effect.gen(function* () {

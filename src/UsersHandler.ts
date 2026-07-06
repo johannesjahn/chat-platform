@@ -1,10 +1,39 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { eq } from "drizzle-orm";
-import { Effect } from "effect";
+import { Context, Effect } from "effect";
 import { ChatApi, InvalidCredentials, NotFound, UsernameTaken } from "./Api.ts";
-import { Db } from "./Db.ts";
-import { Jwt } from "./Jwt.ts";
-import { users } from "./db/schema.ts";
+import { Db, type DrizzleDb } from "./Db.ts";
+import { Jwt, type TokenUser } from "./Jwt.ts";
+import { refreshTokens, users } from "./db/schema.ts";
+
+// Issues a refresh token for `user` and persists its jti so `POST
+// /users/refresh` can later look it up — a refresh token is only honored
+// while its row still exists. When `replacingJti` is given (rotation), the
+// old row's deletion and the new row's insertion happen in one transaction,
+// so the previous refresh token stops working at the same instant the new
+// one starts.
+const issueRefreshToken = (
+  db: DrizzleDb,
+  jwt: Context.Tag.Service<typeof Jwt>,
+  user: TokenUser,
+  replacingJti?: string,
+): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const { token, jti, expiresAt } = yield* jwt.signRefreshToken(user);
+    yield* Effect.tryPromise(() =>
+      replacingJti
+        ? db.transaction(async (tx) => {
+            await tx
+              .delete(refreshTokens)
+              .where(eq(refreshTokens.jti, replacingJti));
+            await tx
+              .insert(refreshTokens)
+              .values({ jti, userId: user.id, expiresAt });
+          })
+        : db.insert(refreshTokens).values({ jti, userId: user.id, expiresAt }),
+    ).pipe(Effect.orDie);
+    return token;
+  });
 
 // Argon2id via Bun's built-in password hashing — no external dependency.
 const hashPassword = (password: string): Effect.Effect<string> =>
@@ -143,7 +172,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             role: user.role,
           };
           const accessToken = yield* jwt.signAccessToken(publicUser);
-          const refreshToken = yield* jwt.signRefreshToken(publicUser);
+          const refreshToken = yield* issueRefreshToken(db, jwt, publicUser);
           return { user: publicUser, accessToken, refreshToken };
         }),
       )
@@ -161,6 +190,24 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                     message: "Invalid or expired refresh token",
                   }),
               ),
+            );
+
+          // Reject anything not present in the server-side store — a
+          // signature- and expiry-valid token whose row is gone (already
+          // rotated away, explicitly revoked, or never issued by this
+          // server) is refused rather than trusted on claims alone.
+          const stored = yield* Effect.tryPromise(() =>
+            db
+              .select({ jti: refreshTokens.jti })
+              .from(refreshTokens)
+              .where(eq(refreshTokens.jti, tokenUser.jti))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          if (!stored[0])
+            return yield* Effect.fail(
+              new InvalidCredentials({
+                message: "Invalid or expired refresh token",
+              }),
             );
 
           // Re-fetch rather than trust the token's claims, so a deleted
@@ -186,7 +233,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             );
 
           const accessToken = yield* jwt.signAccessToken(publicUser);
-          const refreshToken = yield* jwt.signRefreshToken(publicUser);
+          const refreshToken = yield* issueRefreshToken(
+            db,
+            jwt,
+            publicUser,
+            tokenUser.jti,
+          );
           return { accessToken, refreshToken };
         }),
       ),
