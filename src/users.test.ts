@@ -349,13 +349,54 @@ test("refresh rejects the previous refresh token once it's been rotated away", (
       yield* c.users.refresh({ payload: { refreshToken } });
 
       // The old token is signature- and expiry-valid, but its store row was
-      // deleted on rotation, so re-presenting it must be rejected.
+      // marked revoked on rotation, so re-presenting it must be rejected.
       const result = yield* c.users
         .refresh({ payload: { refreshToken } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left") {
         expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidCredentials",
+        );
+      }
+    }),
+  ));
+
+test("replaying a rotated-away refresh token revokes the whole family, including the token it was rotated to", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "nora", password: "pw-nora" },
+      });
+      const { refreshToken } = yield* c.users.login({
+        payload: { username: "nora", password: "pw-nora" },
+      });
+
+      // Simulates theft: someone rotates the token first (the legitimate
+      // client, in the normal case), then the original (now stale) token
+      // gets replayed — e.g. by whoever stole it before the rotation.
+      const rotated = yield* c.users.refresh({ payload: { refreshToken } });
+      const reuse = yield* c.users
+        .refresh({ payload: { refreshToken } })
+        .pipe(Effect.either);
+      expect(reuse._tag).toBe("Left");
+      if (reuse._tag === "Left") {
+        expect((reuse.left as { _tag: string })._tag).toBe(
+          "InvalidCredentials",
+        );
+      }
+
+      // The replay must have poisoned the whole family: even the token the
+      // legitimate client rotated to (and never leaked) is now revoked, so
+      // both parties are forced to log back in rather than the thief simply
+      // getting rejected while the legitimate session carries on unaware.
+      const afterReuse = yield* c.users
+        .refresh({ payload: { refreshToken: rotated.refreshToken } })
+        .pipe(Effect.either);
+      expect(afterReuse._tag).toBe("Left");
+      if (afterReuse._tag === "Left") {
+        expect((afterReuse.left as { _tag: string })._tag).toBe(
           "InvalidCredentials",
         );
       }

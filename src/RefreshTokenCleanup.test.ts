@@ -36,9 +36,15 @@ test("cleanupExpiredRefreshTokens deletes only rows past their expiresAt", () =>
           {
             jti: "expired",
             userId: user!.id,
+            familyId: "family-expired",
             expiresAt: new Date(now - 1000),
           },
-          { jti: "live", userId: user!.id, expiresAt: new Date(now + 100_000) },
+          {
+            jti: "live",
+            userId: user!.id,
+            familyId: "family-live",
+            expiresAt: new Date(now + 100_000),
+          },
         ]),
       );
 
