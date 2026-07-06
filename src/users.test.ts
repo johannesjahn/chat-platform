@@ -427,3 +427,93 @@ test("refresh rejects a bogus refresh token", () =>
       }
     }),
   ));
+
+test("logout revokes the presented refresh token", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "maya", password: "pw-maya" },
+      });
+      const { refreshToken } = yield* c.users.login({
+        payload: { username: "maya", password: "pw-maya" },
+      });
+
+      yield* c.users.logout({ payload: { refreshToken } });
+
+      const result = yield* c.users
+        .refresh({ payload: { refreshToken } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidCredentials",
+        );
+      }
+    }),
+  ));
+
+test("logout only revokes the presented session, leaving others intact", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "noah", password: "pw-noah" },
+      });
+      const sessionA = yield* c.users.login({
+        payload: { username: "noah", password: "pw-noah" },
+      });
+      const sessionB = yield* c.users.login({
+        payload: { username: "noah", password: "pw-noah" },
+      });
+
+      yield* c.users.logout({
+        payload: { refreshToken: sessionA.refreshToken },
+      });
+
+      const refreshedB = yield* c.users.refresh({
+        payload: { refreshToken: sessionB.refreshToken },
+      });
+      expect(decodeClaims(refreshedB.accessToken).username).toBe("noah");
+    }),
+  ));
+
+test("logout with allSessions revokes every session for the user", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "olga", password: "pw-olga" },
+      });
+      const sessionA = yield* c.users.login({
+        payload: { username: "olga", password: "pw-olga" },
+      });
+      const sessionB = yield* c.users.login({
+        payload: { username: "olga", password: "pw-olga" },
+      });
+
+      yield* c.users.logout({
+        payload: { refreshToken: sessionA.refreshToken, allSessions: true },
+      });
+
+      for (const refreshToken of [
+        sessionA.refreshToken,
+        sessionB.refreshToken,
+      ]) {
+        const result = yield* c.users
+          .refresh({ payload: { refreshToken } })
+          .pipe(Effect.either);
+        expect(result._tag).toBe("Left");
+      }
+    }),
+  ));
+
+test("logout with an already-invalid refresh token succeeds as a no-op", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.logout({
+        payload: { refreshToken: "not-a-real-token" },
+      });
+    }),
+  ));

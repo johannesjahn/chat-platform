@@ -292,6 +292,41 @@
         }
       }
     },
+    "/users/logout": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users.logout",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogoutBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
     "/posts/{id}": {
       "get": {
         "tags": [
@@ -1769,6 +1804,21 @@
           },
           "refreshToken": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LogoutBody": {
+        "type": "object",
+        "required": [
+          "refreshToken"
+        ],
+        "properties": {
+          "refreshToken": {
+            "type": "string"
+          },
+          "allSessions": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false

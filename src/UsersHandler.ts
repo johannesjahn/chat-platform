@@ -241,5 +241,29 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           );
           return { accessToken, refreshToken };
         }),
+      )
+      .handle("logout", ({ payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const jwt = yield* Jwt;
+
+          // A token that's already invalid, expired, or unrecognized has
+          // nothing to revoke — treat logout as a no-op success rather than
+          // erroring, so the client can always clear its session cleanly.
+          const tokenUser = yield* jwt
+            .verifyRefreshToken(payload.refreshToken)
+            .pipe(Effect.orElseSucceed(() => undefined));
+          if (!tokenUser) return;
+
+          yield* Effect.tryPromise(() =>
+            payload.allSessions
+              ? db
+                  .delete(refreshTokens)
+                  .where(eq(refreshTokens.userId, tokenUser.id))
+              : db
+                  .delete(refreshTokens)
+                  .where(eq(refreshTokens.jti, tokenUser.jti)),
+          ).pipe(Effect.orDie);
+        }),
       ),
 );

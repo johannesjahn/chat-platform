@@ -47,6 +47,13 @@ export const RefreshResponse = Schema.Struct({
   refreshToken: Schema.String,
 }).annotations({ identifier: "RefreshResponse" });
 
+export const LogoutBody = Schema.Struct({
+  refreshToken: Schema.String,
+  // When true, revokes every refresh token belonging to the presented
+  // token's user (all sessions/devices) instead of just this one.
+  allSessions: Schema.optional(Schema.Boolean),
+}).annotations({ identifier: "LogoutBody" });
+
 export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
   message: Schema.String,
 }) {}
@@ -302,6 +309,15 @@ const UsersGroup = HttpApiGroup.make("users")
       .setPayload(RefreshBody)
       .addSuccess(RefreshResponse)
       .addError(InvalidCredentials, { status: 401 }),
+  )
+  .add(
+    // Revokes the presented refresh token (or, with `allSessions`, every
+    // refresh token for its user) by deleting its store row. Idempotent and
+    // unauthenticated like `refresh` — an already-invalid/expired token has
+    // nothing to revoke, so it still succeeds rather than erroring.
+    HttpApiEndpoint.post("logout", "/users/logout")
+      .setPayload(LogoutBody)
+      .addSuccess(Schema.Void),
   );
 
 const PostsGroup = HttpApiGroup.make("posts")
