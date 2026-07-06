@@ -14,6 +14,7 @@ import { PostsHandlerLive } from "./PostsHandler.ts";
 import { PubSubLive } from "./PubSub.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
+import { RefreshTokenCleanupLive } from "./RefreshTokenCleanup.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 
 // Allow the web frontend (different origin) to call the API from the browser.
@@ -38,6 +39,7 @@ const ServerLive = Layer.mergeAll(
   // Raw `/ws` route, attached to the same shared router as `ChatApi` — see
   // RealtimeSocket.ts for why this can't be a typed HttpApiEndpoint.
   RealtimeSocketRouteLive,
+  RefreshTokenCleanupLive,
 ).pipe(
   Layer.provide(ApiLive),
   Layer.provide(RealtimeConnectionsLive),
