@@ -92,6 +92,19 @@ fetchClient.use({
 // `$api.useQuery("get", "/users")`, `$api.useMutation("post", "/users/login")`, …
 export const $api = createQueryClient(fetchClient);
 
+// Revokes the session's refresh token server-side, then clears it locally.
+// The revoke call is best-effort (fire-and-forget) — a network failure
+// shouldn't stop the user from logging out of this device; the token will
+// simply outlive its already-cleared client session until it expires.
+export function logout(session: Session): void {
+  fetchClient
+    .POST("/users/logout", {
+      body: { refreshToken: session.refreshToken },
+    })
+    .catch(() => {});
+  clearSession();
+}
+
 // React Query key for the user list, so mutations can invalidate it.
 export const usersQueryKey = ["get", "/users"] as const;
 

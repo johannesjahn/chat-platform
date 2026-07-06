@@ -11,7 +11,8 @@ import { LogOut, MessagesSquare, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
-import { clearSession, useSession } from "../lib/auth";
+import { logout } from "../lib/api";
+import { useSession } from "../lib/auth";
 import { useTotalUnreadCount } from "../lib/chats";
 import { queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
@@ -83,7 +84,7 @@ function Nav() {
             variant="ghost"
             size="sm"
             onClick={() => {
-              clearSession();
+              logout(session);
               router.invalidate();
             }}
           >

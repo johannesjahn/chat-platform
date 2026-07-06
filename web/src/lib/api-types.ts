@@ -84,6 +84,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["users.logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/posts/{id}": {
         parameters: {
             query?: never;
@@ -314,6 +330,10 @@ export interface components {
         RefreshResponse: {
             accessToken: string;
             refreshToken: string;
+        };
+        LogoutBody: {
+            refreshToken: string;
+            allSessions?: boolean;
         };
         Post: {
             id: number;
@@ -654,6 +674,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvalidCredentials"];
+                };
+            };
+        };
+    };
+    "users.logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogoutBody"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
                 };
             };
         };
