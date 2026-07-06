@@ -31,6 +31,14 @@ export type TokenUser = {
   readonly role: UserRole;
 };
 
+// Returned only for refresh tokens — the jti is the server-side session
+// store's lookup key, and expiresAt lets it size the stored row's lifetime
+// to match the token's own.
+export type RefreshTokenUser = TokenUser & {
+  readonly jti: string;
+  readonly expiresAt: Date;
+};
+
 const encoder = new TextEncoder();
 
 const base64url = (data: string | Uint8Array): string =>
@@ -108,13 +116,17 @@ export class Jwt extends Context.Tag("Jwt")<
   Jwt,
   {
     readonly signAccessToken: (user: TokenUser) => Effect.Effect<string>;
-    readonly signRefreshToken: (user: TokenUser) => Effect.Effect<string>;
+    readonly signRefreshToken: (user: TokenUser) => Effect.Effect<{
+      readonly token: string;
+      readonly jti: string;
+      readonly expiresAt: Date;
+    }>;
     readonly verifyAccessToken: (
       token: string,
     ) => Effect.Effect<TokenUser, InvalidToken>;
     readonly verifyRefreshToken: (
       token: string,
-    ) => Effect.Effect<TokenUser, InvalidToken>;
+    ) => Effect.Effect<RefreshTokenUser, InvalidToken>;
   }
 >() {}
 
@@ -123,27 +135,38 @@ export const JwtLive = Layer.effect(
   Effect.gen(function* () {
     const secret = yield* Config.string("JWT_SECRET");
 
-    const sign = (user: TokenUser, type: TokenType, ttl: number) =>
-      Effect.promise(() => {
+    const sign = (
+      user: TokenUser,
+      type: TokenType,
+      ttl: number,
+    ): Effect.Effect<{
+      readonly token: string;
+      readonly jti: string;
+      readonly expiresAt: Date;
+    }> =>
+      Effect.promise(async () => {
         const now = Math.floor(Date.now() / 1000);
-        return signHs256(
+        const jti = crypto.randomUUID();
+        const exp = now + ttl;
+        const token = await signHs256(
           {
             sub: user.id,
             username: user.username,
             role: user.role,
             type,
             iat: now,
-            exp: now + ttl,
-            jti: crypto.randomUUID(),
+            exp,
+            jti,
           },
           secret,
         );
+        return { token, jti, expiresAt: new Date(exp * 1000) };
       });
 
     const verify = (
       token: string,
       type: TokenType,
-    ): Effect.Effect<TokenUser, InvalidToken> =>
+    ): Effect.Effect<RefreshTokenUser, InvalidToken> =>
       Effect.gen(function* () {
         const claims = yield* Effect.promise(() => verifyHs256(token, secret));
         const now = Math.floor(Date.now() / 1000);
@@ -155,11 +178,16 @@ export const JwtLive = Layer.effect(
           id: claims.sub,
           username: claims.username,
           role: claims.role,
+          jti: claims.jti,
+          expiresAt: new Date(claims.exp * 1000),
         };
       });
 
     return {
-      signAccessToken: (user) => sign(user, "access", ACCESS_TOKEN_TTL_SECONDS),
+      signAccessToken: (user) =>
+        sign(user, "access", ACCESS_TOKEN_TTL_SECONDS).pipe(
+          Effect.map(({ token }) => token),
+        ),
       signRefreshToken: (user) =>
         sign(user, "refresh", REFRESH_TOKEN_TTL_SECONDS),
       verifyAccessToken: (token) => verify(token, "access"),

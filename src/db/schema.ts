@@ -19,6 +19,25 @@ export const users = pgTable("users", {
 export type DbUser = typeof users.$inferSelect;
 export type NewDbUser = typeof users.$inferInsert;
 
+// One row per issued (and not-yet-rotated/revoked) refresh token, keyed on
+// its JWT `jti` claim. `POST /users/refresh` looks up the presented token's
+// jti here and rejects anything not found, so a refresh token stops working
+// the moment its row is deleted — on rotation (replaced by the new token's
+// row) or, later, on explicit logout/revocation.
+export const refreshTokens = pgTable("refresh_tokens", {
+  jti: text("jti").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+  createdAt: timestamp("created_at", { mode: "date" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export type DbRefreshToken = typeof refreshTokens.$inferSelect;
+export type NewDbRefreshToken = typeof refreshTokens.$inferInsert;
+
 export const posts = pgTable("posts", {
   id: serial("id").primaryKey(),
   authorId: integer("author_id")
