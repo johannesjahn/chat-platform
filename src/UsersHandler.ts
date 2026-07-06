@@ -1,39 +1,67 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { ChatApi, InvalidCredentials, NotFound, UsernameTaken } from "./Api.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
 import { refreshTokens, users } from "./db/schema.ts";
 
+// Rotation info for a refresh: the row being replaced, identified by its own
+// jti plus the familyId it belongs to (every token descended from the same
+// login shares one, so the whole chain can be revoked at once on reuse).
+type Rotating = { readonly oldJti: string; readonly familyId: string };
+
 // Issues a refresh token for `user` and persists its jti so `POST
 // /users/refresh` can later look it up — a refresh token is only honored
-// while its row still exists. When `replacingJti` is given (rotation), the
-// old row's deletion and the new row's insertion happen in one transaction,
-// so the previous refresh token stops working at the same instant the new
-// one starts.
+// while its row is present and unrevoked. A fresh login starts a new
+// family. On rotation, the old row is marked revoked (not deleted) and the
+// new row joins the same family, in one transaction, so the previous
+// refresh token stops working at the same instant the new one starts, while
+// still being available for reuse detection later.
 const issueRefreshToken = (
   db: DrizzleDb,
   jwt: Context.Tag.Service<typeof Jwt>,
   user: TokenUser,
-  replacingJti?: string,
+  rotating?: Rotating,
 ): Effect.Effect<string> =>
   Effect.gen(function* () {
     const { token, jti, expiresAt } = yield* jwt.signRefreshToken(user);
+    const familyId = rotating?.familyId ?? crypto.randomUUID();
     yield* Effect.tryPromise(() =>
-      replacingJti
+      rotating
         ? db.transaction(async (tx) => {
             await tx
-              .delete(refreshTokens)
-              .where(eq(refreshTokens.jti, replacingJti));
+              .update(refreshTokens)
+              .set({ revokedAt: new Date() })
+              .where(eq(refreshTokens.jti, rotating.oldJti));
             await tx
               .insert(refreshTokens)
-              .values({ jti, userId: user.id, expiresAt });
+              .values({ jti, userId: user.id, familyId, expiresAt });
           })
-        : db.insert(refreshTokens).values({ jti, userId: user.id, expiresAt }),
+        : db
+            .insert(refreshTokens)
+            .values({ jti, userId: user.id, familyId, expiresAt }),
     ).pipe(Effect.orDie);
     return token;
   });
+
+// Revokes every still-active (unrevoked) row in a token family — called when
+// a refresh token is replayed after having already been rotated away, which
+// means it was stolen: the thief and the legitimate holder now both think
+// they have a valid token, so the whole chain (including whatever the
+// legitimate holder rotated to) is cut off, forcing a fresh login.
+const revokeFamily = (db: DrizzleDb, familyId: string): Effect.Effect<void> =>
+  Effect.tryPromise(() =>
+    db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(refreshTokens.familyId, familyId),
+          isNull(refreshTokens.revokedAt),
+        ),
+      ),
+  ).pipe(Effect.orDie, Effect.asVoid);
 
 // Argon2id via Bun's built-in password hashing — no external dependency.
 const hashPassword = (password: string): Effect.Effect<string> =>
@@ -193,22 +221,42 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             );
 
           // Reject anything not present in the server-side store — a
-          // signature- and expiry-valid token whose row is gone (already
-          // rotated away, explicitly revoked, or never issued by this
-          // server) is refused rather than trusted on claims alone.
+          // signature- and expiry-valid token whose row is gone (never
+          // issued by this server, or already reclaimed after expiry) is
+          // refused rather than trusted on claims alone.
           const stored = yield* Effect.tryPromise(() =>
             db
-              .select({ jti: refreshTokens.jti })
+              .select({
+                familyId: refreshTokens.familyId,
+                revokedAt: refreshTokens.revokedAt,
+              })
               .from(refreshTokens)
               .where(eq(refreshTokens.jti, tokenUser.jti))
               .limit(1),
           ).pipe(Effect.orDie);
-          if (!stored[0])
+          const storedToken = stored[0];
+          if (!storedToken)
             return yield* Effect.fail(
               new InvalidCredentials({
                 message: "Invalid or expired refresh token",
               }),
             );
+
+          // The row is still there but already revoked — either explicitly
+          // (logout) or, most notably, by rotation: this exact token was
+          // already exchanged for a newer one once before. Presenting it
+          // again means someone other than whoever holds the current token
+          // has a copy, i.e. it was stolen. Revoke the rest of the family
+          // (including whatever it was rotated to) so the thief and the
+          // legitimate holder both get logged out and have to re-authenticate.
+          if (storedToken.revokedAt) {
+            yield* revokeFamily(db, storedToken.familyId);
+            return yield* Effect.fail(
+              new InvalidCredentials({
+                message: "Invalid or expired refresh token",
+              }),
+            );
+          }
 
           // Re-fetch rather than trust the token's claims, so a deleted
           // account or a role change since the refresh token was issued
@@ -233,12 +281,10 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             );
 
           const accessToken = yield* jwt.signAccessToken(publicUser);
-          const refreshToken = yield* issueRefreshToken(
-            db,
-            jwt,
-            publicUser,
-            tokenUser.jti,
-          );
+          const refreshToken = yield* issueRefreshToken(db, jwt, publicUser, {
+            oldJti: tokenUser.jti,
+            familyId: storedToken.familyId,
+          });
           return { accessToken, refreshToken };
         }),
       )

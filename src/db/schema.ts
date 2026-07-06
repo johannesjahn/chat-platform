@@ -1,4 +1,5 @@
 import {
+  index,
   integer,
   pgTable,
   serial,
@@ -19,21 +20,34 @@ export const users = pgTable("users", {
 export type DbUser = typeof users.$inferSelect;
 export type NewDbUser = typeof users.$inferInsert;
 
-// One row per issued (and not-yet-rotated/revoked) refresh token, keyed on
-// its JWT `jti` claim. `POST /users/refresh` looks up the presented token's
-// jti here and rejects anything not found, so a refresh token stops working
-// the moment its row is deleted — on rotation (replaced by the new token's
-// row) or, later, on explicit logout/revocation.
-export const refreshTokens = pgTable("refresh_tokens", {
-  jti: text("jti").primaryKey(),
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
-  createdAt: timestamp("created_at", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
+// One row per issued refresh token, keyed on its JWT `jti` claim. `POST
+// /users/refresh` looks up the presented token's jti here and rejects
+// anything not found or already revoked. Rotation doesn't delete the old
+// row — it sets `revokedAt` and inserts a new row sharing the same
+// `familyId` — so a later replay of that same (rotated-away) token can be
+// told apart from a token that was never issued, and treated as a sign of
+// theft: `POST /users/refresh` responds by revoking every still-active row
+// in the family, forcing the whole chain (including whatever legitimate
+// token the theft victim rotated to) to re-authenticate. Explicit
+// logout/revocation also just sets `revokedAt` rather than deleting.
+export const refreshTokens = pgTable(
+  "refresh_tokens",
+  {
+    jti: text("jti").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Shared by every token descended from the same login via rotation, so
+    // reuse of one member of the chain can revoke the whole chain at once.
+    familyId: text("family_id").notNull(),
+    expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    revokedAt: timestamp("revoked_at", { mode: "date" }),
+  },
+  (table) => [index("refresh_tokens_family_id_idx").on(table.familyId)],
+);
 
 export type DbRefreshToken = typeof refreshTokens.$inferSelect;
 export type NewDbRefreshToken = typeof refreshTokens.$inferInsert;
