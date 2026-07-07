@@ -231,6 +231,7 @@ const decodeClaims = (token: string) => {
     type: string;
     iat: number;
     exp: number;
+    tokenVersion: number;
   };
 };
 
@@ -254,6 +255,7 @@ test("login succeeds and returns the user plus signed access and refresh JWTs", 
         expect(claims.username).toBe("erin");
         expect(claims.role).toBe("user");
         expect(claims.exp).toBeGreaterThan(claims.iat);
+        expect(claims.tokenVersion).toBe(0);
       }
       expect(access.type).toBe("access");
       expect(refresh.type).toBe("refresh");
@@ -545,6 +547,93 @@ test("logout with allSessions revokes every session for the user", () =>
           .refresh({ payload: { refreshToken } })
           .pipe(Effect.either);
         expect(result._tag).toBe("Left");
+      }
+    }),
+  ));
+
+test("logout with allSessions immediately invalidates outstanding access tokens, not just refresh tokens", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "petra", password: "pw-petra" },
+      });
+      const { accessToken, refreshToken } = yield* c.users.login({
+        payload: { username: "petra", password: "pw-petra" },
+      });
+
+      // Sanity check: the access token works before the forced logout.
+      const authedBefore = yield* makeAuthedClient(accessToken);
+      yield* authedBefore.users.listUsers({});
+
+      yield* c.users.logout({
+        payload: { refreshToken, allSessions: true },
+      });
+
+      // Still well within its own 15-minute TTL, but token_version has been
+      // bumped, so it must be rejected immediately rather than surviving to
+      // its own expiry.
+      const authedAfter = yield* makeAuthedClient(accessToken);
+      const result = yield* authedAfter.users.listUsers({}).pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
+    }),
+  ));
+
+test("a fresh login after a forced logout still works", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "quinn", password: "pw-quinn" },
+      });
+      const { refreshToken } = yield* c.users.login({
+        payload: { username: "quinn", password: "pw-quinn" },
+      });
+      yield* c.users.logout({
+        payload: { refreshToken, allSessions: true },
+      });
+
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "quinn", password: "pw-quinn" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      const users = yield* authed.users.listUsers({});
+      expect(users.map((u) => u.username)).toContain("quinn");
+    }),
+  ));
+
+test("refresh rejects a token signed under a token_version invalidated by a forced logout", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "ravi", password: "pw-ravi" },
+      });
+      const sessionA = yield* c.users.login({
+        payload: { username: "ravi", password: "pw-ravi" },
+      });
+      const sessionB = yield* c.users.login({
+        payload: { username: "ravi", password: "pw-ravi" },
+      });
+
+      yield* c.users.logout({
+        payload: { refreshToken: sessionA.refreshToken, allSessions: true },
+      });
+
+      // sessionB's refresh token row is deleted by the forced logout too, so
+      // this already fails on the store lookup — but it now also carries a
+      // stale token_version, which must independently be rejected.
+      const result = yield* c.users
+        .refresh({ payload: { refreshToken: sessionB.refreshToken } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidCredentials",
+        );
       }
     }),
   ));

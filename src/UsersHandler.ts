@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import { ChatApi, InvalidCredentials, NotFound, UsernameTaken } from "./Api.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
@@ -199,8 +199,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             username: user.username,
             role: user.role,
           };
-          const accessToken = yield* jwt.signAccessToken(publicUser);
-          const refreshToken = yield* issueRefreshToken(db, jwt, publicUser);
+          const tokenUser = { ...publicUser, tokenVersion: user.tokenVersion };
+          const accessToken = yield* jwt.signAccessToken(tokenUser);
+          const refreshToken = yield* issueRefreshToken(db, jwt, tokenUser);
           return { user: publicUser, accessToken, refreshToken };
         }),
       )
@@ -267,21 +268,35 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 id: users.id,
                 username: users.username,
                 role: users.role,
+                tokenVersion: users.tokenVersion,
               })
               .from(users)
               .where(eq(users.id, tokenUser.id))
               .limit(1),
           ).pipe(Effect.orDie);
-          const publicUser = rows[0];
-          if (!publicUser)
+          const dbUser = rows[0];
+          // Also reject if the presented token was signed under an older
+          // token_version — it survived the store lookup above (rotation
+          // doesn't touch other users' rows), but a version bump since
+          // issuance means it must not be trusted regardless.
+          if (!dbUser || dbUser.tokenVersion !== tokenUser.tokenVersion)
             return yield* Effect.fail(
               new InvalidCredentials({
                 message: "Invalid or expired refresh token",
               }),
             );
 
-          const accessToken = yield* jwt.signAccessToken(publicUser);
-          const refreshToken = yield* issueRefreshToken(db, jwt, publicUser, {
+          const publicUser = {
+            id: dbUser.id,
+            username: dbUser.username,
+            role: dbUser.role,
+          };
+          const newTokenUser = {
+            ...publicUser,
+            tokenVersion: dbUser.tokenVersion,
+          };
+          const accessToken = yield* jwt.signAccessToken(newTokenUser);
+          const refreshToken = yield* issueRefreshToken(db, jwt, newTokenUser, {
             oldJti: tokenUser.jti,
             familyId: storedToken.familyId,
           });
@@ -303,9 +318,20 @@ export const UsersHandlerLive = HttpApiBuilder.group(
 
           yield* Effect.tryPromise(() =>
             payload.allSessions
-              ? db
-                  .delete(refreshTokens)
-                  .where(eq(refreshTokens.userId, tokenUser.id))
+              ? // A "forced logout" of every session: besides revoking the
+                // refresh tokens, bump token_version so any access token
+                // already issued (and still within its own TTL) is cut off
+                // immediately too, rather than remaining usable for up to 15
+                // more minutes.
+                db.transaction(async (tx) => {
+                  await tx
+                    .delete(refreshTokens)
+                    .where(eq(refreshTokens.userId, tokenUser.id));
+                  await tx
+                    .update(users)
+                    .set({ tokenVersion: sql`${users.tokenVersion} + 1` })
+                    .where(eq(users.id, tokenUser.id));
+                })
               : db
                   .delete(refreshTokens)
                   .where(eq(refreshTokens.jti, tokenUser.jti)),
