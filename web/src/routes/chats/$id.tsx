@@ -63,6 +63,14 @@ function ChatView({ id }: { id: string }) {
   const markRead = $api.useMutation("post", "/chats/{id}/read");
   const updateChat = $api.useMutation("put", "/chats/{id}");
   const addParticipants = $api.useMutation("post", "/chats/{id}/participants");
+  const updateMessage = $api.useMutation(
+    "put",
+    "/chats/{id}/messages/{messageId}",
+  );
+  const deleteMessage = $api.useMutation(
+    "delete",
+    "/chats/{id}/messages/{messageId}",
+  );
 
   const { data: allUsers } = $api.useQuery(
     "get",
@@ -212,6 +220,31 @@ function ChatView({ id }: { id: string }) {
     await sendMessage.mutateAsync({
       params: { path: { id: String(chatId) } },
       body: values,
+    });
+    await Promise.all([
+      refetchMessages(),
+      queryClient.invalidateQueries({ queryKey: chatsListQueryKey }),
+    ]);
+  }
+
+  async function handleEditMessage(messageId: number, content: string) {
+    await updateMessage.mutateAsync({
+      params: {
+        path: { id: String(chatId), messageId: String(messageId) },
+      },
+      body: { contentType: "text", content },
+    });
+    await Promise.all([
+      refetchMessages(),
+      queryClient.invalidateQueries({ queryKey: chatsListQueryKey }),
+    ]);
+  }
+
+  async function handleDeleteMessage(messageId: number) {
+    await deleteMessage.mutateAsync({
+      params: {
+        path: { id: String(chatId), messageId: String(messageId) },
+      },
     });
     await Promise.all([
       refetchMessages(),
@@ -443,6 +476,9 @@ function ChatView({ id }: { id: string }) {
                     message={message}
                     isOwn={isOwn}
                     isRead={message.readByUserIds.length > 0}
+                    canModify={isOwn || session.user.role === "admin"}
+                    onEdit={(content) => handleEditMessage(message.id, content)}
+                    onDelete={() => handleDeleteMessage(message.id)}
                     senderUsername={
                       chat.type === "group" ? sender?.username : undefined
                     }

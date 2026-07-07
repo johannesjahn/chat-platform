@@ -251,6 +251,11 @@ export const CreateMessageBody = Schema.Struct({
   content: MessageContent,
 }).annotations({ identifier: "CreateMessageBody" });
 
+export const UpdateMessageBody = Schema.Struct({
+  contentType: MessageContentType,
+  content: MessageContent,
+}).annotations({ identifier: "UpdateMessageBody" });
+
 export const MarkReadBody = Schema.Struct({
   messageId: Schema.Number,
 }).annotations({ identifier: "MarkReadBody" });
@@ -361,6 +366,11 @@ const PostsGroup = HttpApiGroup.make("posts")
 
 const ChatIdPath = Schema.Struct({ id: Schema.NumberFromString });
 
+const MessageIdPath = Schema.Struct({
+  id: Schema.NumberFromString,
+  messageId: Schema.NumberFromString,
+});
+
 const ChatsGroup = HttpApiGroup.make("chats")
   .add(
     // All chats the current user participates in, newest-activity-first,
@@ -444,6 +454,26 @@ const ChatsGroup = HttpApiGroup.make("chats")
       .setPath(ChatIdPath)
       .setPayload(MarkReadBody)
       .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Edits a message's content — the sender only (or an admin).
+    HttpApiEndpoint.put("updateMessage", "/chats/:id/messages/:messageId")
+      .setPath(MessageIdPath)
+      .setPayload(UpdateMessageBody)
+      .addSuccess(Message)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Deletes a message — the sender only (or an admin). The
+    // `message_reads` rows cascade via the FK, so nothing else to clean up.
+    HttpApiEndpoint.del("deleteMessage", "/chats/:id/messages/:messageId")
+      .setPath(MessageIdPath)
+      .addSuccess(Schema.Void)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })
       .middleware(Authentication),
