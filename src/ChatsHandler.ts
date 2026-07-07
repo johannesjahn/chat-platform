@@ -243,6 +243,51 @@ const getUnreadCountsForChats = (
         Effect.map((rows) => new Map(rows.map((r) => [r.chatId, r.total]))),
       );
 
+// Admins can edit/delete any message; everyone else only their own — mirrors
+// PostsHandler's `canModify`.
+const canModifyMessage = (
+  currentUser: { readonly id: number; readonly role: string },
+  message: { readonly senderId: number },
+): boolean =>
+  currentUser.role === "admin" || message.senderId === currentUser.id;
+
+const getMessageOr404 = (
+  db: DrizzleDb,
+  chatId: number,
+  messageId: number,
+): Effect.Effect<DbMessage, NotFound> =>
+  Effect.gen(function* () {
+    const rows = yield* Effect.tryPromise(() =>
+      db
+        .select()
+        .from(messages)
+        .where(and(eq(messages.chatId, chatId), eq(messages.id, messageId)))
+        .limit(1),
+    ).pipe(Effect.orDie);
+    const row = rows[0];
+    if (!row)
+      return yield* Effect.fail(
+        new NotFound({
+          message: `Message ${messageId} not found in chat ${chatId}`,
+        }),
+      );
+    return row;
+  });
+
+const getReaders = (
+  db: DrizzleDb,
+  messageId: number,
+): Effect.Effect<ReadonlyArray<number>> =>
+  Effect.tryPromise(() =>
+    db
+      .select({ userId: messageReads.userId })
+      .from(messageReads)
+      .where(eq(messageReads.messageId, messageId)),
+  ).pipe(
+    Effect.orDie,
+    Effect.map((rows) => rows.map((r) => r.userId)),
+  );
+
 const isParticipant = (
   db: DrizzleDb,
   chatId: number,
@@ -866,6 +911,71 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             );
           }
           return yield* buildChat(db, chatRow, currentUser.id, participants);
+        }),
+      )
+      .handle("updateMessage", ({ path: { id, messageId }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+          const existing = yield* getMessageOr404(db, id, messageId);
+          if (!canModifyMessage(currentUser, existing))
+            return yield* Effect.fail(
+              new Forbidden({ message: "You can only edit your own messages" }),
+            );
+
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .update(messages)
+              .set({
+                contentType: payload.contentType,
+                content: payload.content,
+                updatedAt: new Date(),
+              })
+              .where(eq(messages.id, messageId))
+              .returning(),
+          ).pipe(Effect.orDie);
+          const row = rows[0];
+          if (!row)
+            return yield* Effect.die(new Error("UPDATE returned no rows"));
+
+          const readers = yield* getReaders(db, messageId);
+          const participants = yield* getParticipants(db, id);
+          yield* notifyChatUpdated(
+            connections,
+            id,
+            participants.map((p) => p.userId),
+          );
+          return toApiMessage(row, readers);
+        }),
+      )
+      .handle("deleteMessage", ({ path: { id, messageId } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+          const existing = yield* getMessageOr404(db, id, messageId);
+          if (!canModifyMessage(currentUser, existing))
+            return yield* Effect.fail(
+              new Forbidden({
+                message: "You can only delete your own messages",
+              }),
+            );
+
+          yield* Effect.tryPromise(() =>
+            db.delete(messages).where(eq(messages.id, messageId)),
+          ).pipe(Effect.orDie);
+
+          const participants = yield* getParticipants(db, id);
+          yield* notifyChatUpdated(
+            connections,
+            id,
+            participants.map((p) => p.userId),
+          );
         }),
       ),
 );

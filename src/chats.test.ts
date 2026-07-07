@@ -569,6 +569,108 @@ test("markRead marks messages up to a point as read and updates unreadCount + re
     }),
   ));
 
+test("updateMessage lets the sender edit their message and bumps updatedAt past createdAt, but forbids others", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const message = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "original" },
+      });
+      expect(message.updatedAt).toBe(message.createdAt);
+
+      const edited = yield* alice.client.chats.updateMessage({
+        path: { id: chat.id, messageId: message.id },
+        payload: { contentType: "text", content: "edited" },
+      });
+      expect(edited.content).toBe("edited");
+      expect(edited.updatedAt).toBeGreaterThanOrEqual(message.updatedAt);
+
+      const forbidden = yield* bob.client.chats
+        .updateMessage({
+          path: { id: chat.id, messageId: message.id },
+          payload: { contentType: "text", content: "hijacked" },
+        })
+        .pipe(Effect.either);
+      expect(forbidden._tag).toBe("Left");
+      if (forbidden._tag === "Left") {
+        expect((forbidden.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+    }),
+  ));
+
+test("updateMessage 404s for a message that doesn't belong to the given chat", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chatAB = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const eve = yield* registerAndLogin("eve", "pw");
+      const chatAE = yield* alice.client.chats.createDirectChat({
+        payload: { userId: eve.user.id },
+      });
+      const messageInAB = yield* alice.client.chats.createMessage({
+        path: { id: chatAB.id },
+        payload: { contentType: "text", content: "hi bob" },
+      });
+
+      const result = yield* alice.client.chats
+        .updateMessage({
+          path: { id: chatAE.id, messageId: messageInAB.id },
+          payload: { contentType: "text", content: "wrong chat" },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("deleteMessage removes the message and its read receipts, and is forbidden for non-senders", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const message = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "delete me" },
+      });
+      yield* bob.client.chats.markRead({
+        path: { id: chat.id },
+        payload: { messageId: message.id },
+      });
+
+      const forbidden = yield* bob.client.chats
+        .deleteMessage({ path: { id: chat.id, messageId: message.id } })
+        .pipe(Effect.either);
+      expect(forbidden._tag).toBe("Left");
+      if (forbidden._tag === "Left") {
+        expect((forbidden.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+
+      yield* alice.client.chats.deleteMessage({
+        path: { id: chat.id, messageId: message.id },
+      });
+
+      const page = yield* alice.client.chats.listMessages({
+        path: { id: chat.id },
+        urlParams: {},
+      });
+      expect(page.messages.map((m) => m.id)).not.toContain(message.id);
+      expect(page.total).toBe(0);
+    }),
+  ));
+
 test("getChat 404s for a missing chat and is forbidden for non-participants", () =>
   run(
     Effect.gen(function* () {
@@ -748,6 +850,15 @@ test("every chats endpoint rejects an unauthenticated request", () =>
             .pipe(Effect.either),
           c.chats
             .markRead({ path: { id: 1 }, payload: { messageId: 1 } })
+            .pipe(Effect.either),
+          c.chats
+            .updateMessage({
+              path: { id: 1, messageId: 1 },
+              payload: { contentType: "text", content: "hi" },
+            })
+            .pipe(Effect.either),
+          c.chats
+            .deleteMessage({ path: { id: 1, messageId: 1 } })
             .pipe(Effect.either),
         ],
         { concurrency: "unbounded" },
