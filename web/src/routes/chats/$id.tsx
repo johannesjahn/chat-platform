@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
@@ -103,8 +103,10 @@ function ChatView({ id }: { id: string }) {
 
   // Preserve scroll position when older messages are prepended by the
   // infinite-scroll-to-top loader — without this the view would jump to the
-  // (now-shifted) top.
-  useEffect(() => {
+  // (now-shifted) top. Uses useLayoutEffect (not useEffect) so the
+  // correction lands before the browser paints the prepended content —
+  // otherwise the user would see a visible flash at the wrong position.
+  useLayoutEffect(() => {
     if (prevScrollHeightRef.current != null && scrollRef.current) {
       const delta =
         scrollRef.current.scrollHeight - prevScrollHeightRef.current;

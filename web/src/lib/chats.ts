@@ -133,10 +133,22 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
         const probe = await fetchMessagesPage(id, 0, MESSAGES_PAGE_SIZE);
         anchorRef.current = Math.max(0, probe.total - MESSAGES_PAGE_SIZE);
       }
-      const offset = anchorRef.current;
-      const page = await fetchMessagesPage(id, offset, MESSAGES_MAX_LIMIT);
+      let offset = anchorRef.current;
+      let page = await fetchMessagesPage(id, offset, MESSAGES_MAX_LIMIT);
       if (page.offset + page.messages.length < page.total) {
-        anchorRef.current = Math.max(0, page.total - MESSAGES_PAGE_SIZE);
+        // More messages exist than this window (capped at
+        // MESSAGES_MAX_LIMIT) can show from the current anchor — slide the
+        // anchor forward just enough to keep the newest messages in view,
+        // then re-fetch so the returned `offset`/`messages` reflect the
+        // anchor that's actually used going forward. Sliding all the way
+        // back to the last page here (instead of by the max limit) is what
+        // caused the anchor tracked for the *next* `loadEarlier` call to
+        // diverge from what was actually rendered, producing both a scroll
+        // jump to the newest messages and a subsequent re-fetch of a
+        // range that had already been loaded.
+        offset = Math.max(0, page.total - MESSAGES_MAX_LIMIT);
+        anchorRef.current = offset;
+        page = await fetchMessagesPage(id, offset, MESSAGES_MAX_LIMIT);
       }
       return {
         messages: page.messages,
