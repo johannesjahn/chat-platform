@@ -1,0 +1,80 @@
+{{- $fullname := include "chat-platform.fullname" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-redis
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  # A single replica writing to its own volume — Recreate avoids two pods
+  # ever mounting the same ReadWriteOnce PVC at once during a rollout.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "chat-platform.selectorLabels" (dict "Release" .Release "Chart" .Chart "component" "redis") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "chat-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      containers:
+        - name: redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          command:
+            - redis-server
+            - --requirepass
+            - $(REDIS_PASSWORD)
+            {{- if .Values.redis.persistence.enabled }}
+            - --appendonly
+            - "yes"
+            - --dir
+            - /data
+            {{- end }}
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "chat-platform.redisSecretName" . }}
+                  key: {{ include "chat-platform.redisSecretKey" . }}
+          ports:
+            - containerPort: 6379
+              name: redis
+          {{- if .Values.redis.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+          # `$REDIS_PASSWORD` here is a shell expansion of the container's own
+          # env var (via `sh -c`), not Kubernetes' `$(VAR)` command/args
+          # substitution — that substitution isn't applied to probe exec
+          # commands.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+      {{- if .Values.redis.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $fullname }}-redis
+      {{- end }}
