@@ -18,14 +18,33 @@ export const User = Schema.Struct({
 }).annotations({ identifier: "User" });
 export type User = typeof User.Type;
 
+// Sensible cap on username length (issue #46) — mirrors common site limits
+// (Discord uses 32, GitHub 39) and keeps the value small enough to embed in
+// JWT claims and UI without an unbounded storage/DoS risk.
+export const MAX_USERNAME_LENGTH = 32;
+
+const Username = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_USERNAME_LENGTH),
+);
+
+// A generous ceiling — long enough for any real passphrase, but bounded so a
+// multi-megabyte payload can't be pushed through the (deliberately
+// expensive) Argon2id hash/verify path. Minimum length/complexity is a
+// separate concern (issue #45).
+export const MAX_PASSWORD_LENGTH = 128;
+
+const Password = Schema.NonEmptyString.pipe(
+  Schema.maxLength(MAX_PASSWORD_LENGTH),
+);
+
 export const RegisterBody = Schema.Struct({
-  username: Schema.NonEmptyTrimmedString,
-  password: Schema.NonEmptyString,
+  username: Username,
+  password: Password,
 }).annotations({ identifier: "RegisterBody" });
 
 export const LoginBody = Schema.Struct({
-  username: Schema.NonEmptyTrimmedString,
-  password: Schema.NonEmptyString,
+  username: Username,
+  password: Password,
 }).annotations({ identifier: "LoginBody" });
 
 export const LoginResponse = Schema.Struct({
@@ -35,8 +54,17 @@ export const LoginResponse = Schema.Struct({
 }).annotations({ identifier: "LoginResponse" });
 export type LoginResponse = typeof LoginResponse.Type;
 
+// A well-formed token signed by this server is well under this (see
+// Jwt.ts) — anything longer is necessarily garbage, not worth spending a
+// verify() on.
+const MAX_REFRESH_TOKEN_LENGTH = 1024;
+
+const RefreshTokenValue = Schema.String.pipe(
+  Schema.maxLength(MAX_REFRESH_TOKEN_LENGTH),
+);
+
 export const RefreshBody = Schema.Struct({
-  refreshToken: Schema.String,
+  refreshToken: RefreshTokenValue,
 }).annotations({ identifier: "RefreshBody" });
 
 // A refresh exchanges a valid refresh token for a new token pair — the
@@ -48,7 +76,7 @@ export const RefreshResponse = Schema.Struct({
 }).annotations({ identifier: "RefreshResponse" });
 
 export const LogoutBody = Schema.Struct({
-  refreshToken: Schema.String,
+  refreshToken: RefreshTokenValue,
   // When true, revokes every refresh token belonging to the presented
   // token's user (all sessions/devices) instead of just this one.
   allSessions: Schema.optional(Schema.Boolean),
@@ -252,7 +280,13 @@ export const UpdateChatBody = Schema.Struct({
 }).annotations({ identifier: "UpdateChatBody" });
 
 export const AddParticipantsBody = Schema.Struct({
-  participantIds: Schema.Array(Schema.Number).pipe(Schema.minItems(1)),
+  // A group can never hold more than MAX_GROUP_PARTICIPANTS total, so a
+  // single request can never legitimately add more than that minus the
+  // existing creator — mirrors CreateGroupChatBody's cap.
+  participantIds: Schema.Array(Schema.Number).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_GROUP_PARTICIPANTS - 1),
+  ),
 }).annotations({ identifier: "AddParticipantsBody" });
 
 export const CreateMessageBody = Schema.Struct({
@@ -297,10 +331,17 @@ export const MessagesPage = Schema.Struct({
 // query cost and result size from growing with the user base (issue #48).
 export const MIN_USER_SEARCH_QUERY_LENGTH = 3;
 
+// A query longer than the longest possible username can never usefully
+// narrow an ILIKE match — bounded mainly to keep the request small.
+export const MAX_USER_SEARCH_QUERY_LENGTH = 64;
+
 // Left un-`identifier`-annotated for the same reason as `PostsPageQuery`
 // above (see CLAUDE.md) — it's inlined into query parameters.
 export const UserSearchQuery = Schema.Struct({
-  q: Schema.Trim.pipe(Schema.minLength(MIN_USER_SEARCH_QUERY_LENGTH)),
+  q: Schema.Trim.pipe(
+    Schema.minLength(MIN_USER_SEARCH_QUERY_LENGTH),
+    Schema.maxLength(MAX_USER_SEARCH_QUERY_LENGTH),
+  ),
 });
 
 const UsersGroup = HttpApiGroup.make("users")

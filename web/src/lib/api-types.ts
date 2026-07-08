@@ -308,7 +308,15 @@ export interface components {
             _tag: "NotFound";
         };
         RegisterBody: {
+            /**
+             * maxLength(32)
+             * @description a string at most 32 character(s) long
+             */
             username: components["schemas"]["NonEmptyTrimmedString"];
+            /**
+             * maxLength(128)
+             * @description a string at most 128 character(s) long
+             */
             password: components["schemas"]["NonEmptyString"];
         };
         /**
@@ -333,7 +341,15 @@ export interface components {
             _tag: "TooManyRequests";
         };
         LoginBody: {
+            /**
+             * maxLength(32)
+             * @description a string at most 32 character(s) long
+             */
             username: components["schemas"]["NonEmptyTrimmedString"];
+            /**
+             * maxLength(128)
+             * @description a string at most 128 character(s) long
+             */
             password: components["schemas"]["NonEmptyString"];
         };
         LoginResponse: {
@@ -347,6 +363,10 @@ export interface components {
             _tag: "InvalidCredentials";
         };
         RefreshBody: {
+            /**
+             * maxLength(1024)
+             * @description a string at most 1024 character(s) long
+             */
             refreshToken: string;
         };
         RefreshResponse: {
@@ -354,6 +374,10 @@ export interface components {
             refreshToken: string;
         };
         LogoutBody: {
+            /**
+             * maxLength(1024)
+             * @description a string at most 1024 character(s) long
+             */
             refreshToken: string;
             allSessions?: boolean;
         };
@@ -452,8 +476,8 @@ export interface components {
         };
         AddParticipantsBody: {
             /**
-             * minItems(1)
-             * @description an array of at least 1 item(s)
+             * maxItems(19)
+             * @description an array of at most 19 item(s)
              */
             participantIds: number[];
         };

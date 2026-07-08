@@ -1893,10 +1893,16 @@
         ],
         "properties": {
           "username": {
-            "$ref": "#/components/schemas/NonEmptyTrimmedString"
+            "$ref": "#/components/schemas/NonEmptyTrimmedString",
+            "description": "a string at most 32 character(s) long",
+            "title": "maxLength(32)",
+            "maxLength": 32
           },
           "password": {
-            "$ref": "#/components/schemas/NonEmptyString"
+            "$ref": "#/components/schemas/NonEmptyString",
+            "description": "a string at most 128 character(s) long",
+            "title": "maxLength(128)",
+            "maxLength": 128
           }
         },
         "additionalProperties": false
@@ -1964,10 +1970,16 @@
         ],
         "properties": {
           "username": {
-            "$ref": "#/components/schemas/NonEmptyTrimmedString"
+            "$ref": "#/components/schemas/NonEmptyTrimmedString",
+            "description": "a string at most 32 character(s) long",
+            "title": "maxLength(32)",
+            "maxLength": 32
           },
           "password": {
-            "$ref": "#/components/schemas/NonEmptyString"
+            "$ref": "#/components/schemas/NonEmptyString",
+            "description": "a string at most 128 character(s) long",
+            "title": "maxLength(128)",
+            "maxLength": 128
           }
         },
         "additionalProperties": false
@@ -2018,7 +2030,10 @@
         ],
         "properties": {
           "refreshToken": {
-            "type": "string"
+            "type": "string",
+            "description": "a string at most 1024 character(s) long",
+            "title": "maxLength(1024)",
+            "maxLength": 1024
           }
         },
         "additionalProperties": false
@@ -2046,7 +2061,10 @@
         ],
         "properties": {
           "refreshToken": {
-            "type": "string"
+            "type": "string",
+            "description": "a string at most 1024 character(s) long",
+            "title": "maxLength(1024)",
+            "maxLength": 1024
           },
           "allSessions": {
             "type": "boolean"
@@ -2401,9 +2419,10 @@
             "items": {
               "type": "number"
             },
-            "description": "an array of at least 1 item(s)",
-            "title": "minItems(1)",
-            "minItems": 1
+            "description": "an array of at most 19 item(s)",
+            "title": "maxItems(19)",
+            "minItems": 1,
+            "maxItems": 19
           }
         },
         "additionalProperties": false
