@@ -121,23 +121,33 @@ export const chatParticipants = pgTable(
 export type DbChatParticipant = typeof chatParticipants.$inferSelect;
 export type NewDbChatParticipant = typeof chatParticipants.$inferInsert;
 
-export const messages = pgTable("messages", {
-  id: serial("id").primaryKey(),
-  chatId: integer("chat_id")
-    .notNull()
-    .references(() => chats.id, { onDelete: "cascade" }),
-  senderId: integer("sender_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  contentType: text("content_type", { enum: ["text", "image_url"] }).notNull(),
-  content: text("content").notNull(),
-  createdAt: timestamp("created_at", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  updatedAt: timestamp("updated_at", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
+export const messages = pgTable(
+  "messages",
+  {
+    id: serial("id").primaryKey(),
+    chatId: integer("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    senderId: integer("sender_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    contentType: text("content_type", {
+      enum: ["text", "image_url"],
+    }).notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  // `listMessages` filters + orders by (chatId, id) for every page fetch,
+  // and `createMessage`/`markRead` etc. all look up by chatId too —
+  // Postgres doesn't auto-index foreign key columns, so without this every
+  // one of those becomes a sequential scan as the table grows.
+  (table) => [index("messages_chat_id_idx").on(table.chatId, table.id)],
+);
 
 export type DbMessage = typeof messages.$inferSelect;
 export type NewDbMessage = typeof messages.$inferInsert;
@@ -159,6 +169,10 @@ export const messageReads = pgTable(
       .notNull()
       .$defaultFn(() => new Date()),
   },
+  // The unique constraint below is backed by a composite (messageId,
+  // userId) btree index, whose leading column already serves `listMessages`'
+  // `inArray(messageReads.messageId, ...)` lookups — no separate index
+  // needed on messageId alone.
   (table) => [unique().on(table.messageId, table.userId)],
 );
 
