@@ -19,10 +19,11 @@ backend:
   replicaCount: 2
   port: 3000
 
-  # The origin the Cloudflare Workers frontend is served from — the backend's
-  # CORS middleware only allows this one origin (see src/main.ts). Set this
-  # to your Worker's production domain (custom domain or *.workers.dev).
-  webOrigin: "https://chat-platform.workers.dev"
+  # The origin(s) the Cloudflare Workers frontend is served from — the
+  # backend's CORS middleware only allows origin(s) listed here (see
+  # src/main.ts). Comma-separate multiple values, e.g. a custom domain plus
+  # its *.workers.dev URL: "https://chat.example.com,https://chat-platform.<subdomain>.workers.dev".
+  webOrigin: "https://chat-platform.johannes-jahn-ca7.workers.dev,https://chat-platform.johannes-jahn.com"
 
   service:
     type: ClusterIP

@@ -12,10 +12,12 @@ from inside the cluster, or your own ingress/port-forward.
 {{- end }}
 
 This chart only deploys the backend, Postgres, and Redis. The frontend
-(web/) is a static SPA — build and deploy it to Cloudflare Pages separately,
-pointing VITE_API_URL at the backend URL above, and make sure
-`backend.webOrigin` in values.yaml matches the Pages URL (the backend's CORS
-only allows that one origin). See ../README.md for the full walkthrough.
+(web/) is a static SPA — build and deploy it to Cloudflare Workers
+separately, pointing VITE_API_URL at the backend URL above, and make sure
+`backend.webOrigin` in values.yaml matches the Worker's origin(s) (the
+backend's CORS only allows the origin(s) listed there — comma-separate
+multiple, e.g. a custom domain plus its *.workers.dev URL). See
+../README.md for the full walkthrough.
 
 Check rollout status with:
   kubectl rollout status deployment/{{ include "chat-platform.fullname" . }}-backend -n {{ .Release.Namespace }}

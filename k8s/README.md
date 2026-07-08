@@ -52,8 +52,10 @@ for the full set, with comments):
 
 - `backend.image.repository` / `backend.image.tag` — where to pull the
   backend image from.
-- `backend.webOrigin` — must match the frontend's origin exactly; the
-  backend's CORS middleware (`src/main.ts`) only allows this one origin.
+- `backend.webOrigin` — must match the frontend's origin(s) exactly; the
+  backend's CORS middleware (`src/main.ts`) only allows the origin(s) listed
+  here. Comma-separate multiple values if the frontend is reachable at more
+  than one origin (e.g. a custom domain plus its `*.workers.dev` URL).
 - `backend.ingress.*` — host, ingress class, and cert-manager annotations.
   Defaults assume an `nginx` `IngressClass` and cert-manager with a
   `letsencrypt-prod` `ClusterIssuer`; adjust or set `backend.ingress.enabled:
@@ -127,6 +129,10 @@ the Worker named in `web/wrangler.jsonc` (`chat-platform`) on first run.
   old Pages-era `_redirects` file, which is no longer needed).
 - **CORS** — set the chart's `backend.webOrigin` to this exact Worker URL
   (custom domain, or `<name>.<subdomain>.workers.dev` if you're not using
-  one). The backend only allows one CORS origin.
+  one). If the frontend needs to be reachable at both a custom domain and
+  its `*.workers.dev` URL, comma-separate them, e.g.
+  `https://chat.example.com,https://chat-platform.<subdomain>.workers.dev`
+  — the backend's CORS middleware (`src/main.ts`) allows every origin
+  listed.
 - **Worker name** — set by `name` in `web/wrangler.jsonc` (`chat-platform`);
   update it there if you want a different name.

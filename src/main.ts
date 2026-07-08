@@ -16,9 +16,16 @@ import { redactedLogger } from "./RedactedLogger.ts";
 import { RefreshTokenCleanupLive } from "./RefreshTokenCleanup.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 
-// Allow the web frontend (different origin) to call the API from the browser.
+// Allow the web frontend(s) (different origin) to call the API from the
+// browser. WEB_ORIGIN may hold a single origin or a comma-separated list
+// (e.g. a Workers custom domain plus its *.workers.dev URL).
+const allowedOrigins = (process.env.WEB_ORIGIN ?? "http://localhost:3001")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter((origin) => origin.length > 0);
+
 const CorsLive = HttpApiBuilder.middlewareCors({
-  allowedOrigins: [process.env.WEB_ORIGIN ?? "http://localhost:3001"],
+  allowedOrigins,
   allowedMethods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
 });
