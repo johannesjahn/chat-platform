@@ -98,13 +98,13 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
-      - name: Sync Chart.yaml and values.yaml to package.json's version
+      - name: Sync Chart.yaml, values.yaml, and web/package.json to package.json's version
         run: bun run sync:chart-version
 
-      - name: Fail if the Helm chart's version fields are out of date
+      - name: Fail if the Helm chart's or web's version fields are out of date
         run: |
-          if ! git diff --exit-code -- k8s/chat-platform/Chart.yaml k8s/chat-platform/values.yaml; then
-            echo "::error::k8s/chat-platform/Chart.yaml and/or values.yaml are out of sync with package.json's version." \
+          if ! git diff --exit-code -- k8s/chat-platform/Chart.yaml k8s/chat-platform/values.yaml web/package.json; then
+            echo "::error::k8s/chat-platform/Chart.yaml, values.yaml, and/or web/package.json are out of sync with package.json's version." \
               "Run 'bun run sync:chart-version' and commit the result."
             exit 1
           fi

@@ -112,16 +112,15 @@ The root `package.json`'s `version` is the source of truth for releases (see
 [`.github/workflows/tag-release.yml`](.github/workflows/tag-release.yml)) and
 must stay in sync with the Helm chart's version fields
 (`k8s/chat-platform/Chart.yaml`'s `version`/`appVersion` and
-`values.yaml`'s `backend.image.tag`). After bumping the root
-`package.json`'s version, run:
+`values.yaml`'s `backend.image.tag`) and with `web/package.json`'s version.
+After bumping the root `package.json`'s version, run:
 
 ```bash
 bun run sync:chart-version
 ```
 
 and commit the result. CI's `chart-version` job re-runs this and fails the
-build on drift. `web/package.json`'s version is independent and doesn't need
-to match.
+build on drift.
 
 ## CI
 
