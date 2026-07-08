@@ -110,14 +110,10 @@ jobs:
     needs: docker
     runs-on: ubuntu-latest
     steps:
-      - name: Sync ArgoCD application
-        run: |
-          curl --fail --silent --show-error --request POST \
-            "$ARGOCD_ADDRESS/api/v1/applications/$ARGOCD_APP_NAME/sync" \
-            --header "Authorization: Bearer $ARGOCD_TOKEN" \
-            --header "Content-Type: application/json" \
-            --data '{}'
-        env:
-          ARGOCD_ADDRESS: ${{ vars.ARGOCD_ADDRESS }}
-          ARGOCD_APP_NAME: ${{ vars.ARGOCD_APP_NAME }}
-          ARGOCD_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
+      - name: Sync ArgoCD Application
+        uses: omegion/argocd-actions@v1
+        with:
+          address: ${{ vars.ARGOCD_ADDRESS }}
+          token: ${{ secrets.ARGOCD_TOKEN }}
+          action: sync
+          appName: ${{ vars.ARGOCD_APP_NAME }}
