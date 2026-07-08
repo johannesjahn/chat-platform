@@ -28,9 +28,12 @@ name: Tag Release
 # assets) via Wrangler — see k8s/README.md's "Frontend: Cloudflare Workers"
 # section. It lives here (rather than its own push-triggered workflow) so it
 # always runs after argocd-sync, never concurrently with or ahead of a
-# backend release. It runs once the pipeline reaches that point without a
-# failure, whether or not `tag` actually cut a new release, since a frontend
-# deploy isn't tied to the backend's version bump.
+# backend release. It only runs when `tag` actually cut a new release, so
+# frontend deploys stay tied to a backend version bump instead of running on
+# every pipeline invocation.
+#
+# workflow_dispatch runs the same pipeline manually (e.g. to retry a release
+# that didn't fire automatically) rather than being a frontend-only shortcut.
 on:
   workflow_run:
     workflows: [CI]
@@ -45,14 +48,14 @@ jobs:
   tag:
     name: Tag release
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       created: ${{ steps.check.outputs.exists == 'false' }}
     steps:
       - uses: actions/checkout@v7.0.0
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Read version from package.json
@@ -132,12 +135,9 @@ jobs:
     needs: [tag, docker, argocd-sync]
     if: |
       always() &&
-      (
-        github.event_name == 'workflow_dispatch' ||
-        (needs.tag.result == 'success' &&
-         !contains(needs.*.result, 'failure') &&
-         !contains(needs.*.result, 'cancelled'))
-      )
+      needs.tag.outputs.created == 'true' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       contents: read
