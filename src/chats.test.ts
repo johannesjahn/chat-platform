@@ -909,6 +909,31 @@ test("createGroupChat's participant list is capped at the schema level", () =>
     }),
   ));
 
+test("addParticipants's participant list is capped at the schema level", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+      const pool = yield* insertDummyUsers(MAX_GROUP_PARTICIPANTS);
+
+      // A single addParticipants request can never legitimately add more
+      // than MAX_GROUP_PARTICIPANTS - 1 people (the creator already takes
+      // one slot) — this is rejected by the payload schema itself
+      // (Schema.maxItems), before it ever reaches the handler's own cap
+      // check.
+      const overCap = yield* alice.client.chats
+        .addParticipants({
+          path: { id: chat.id },
+          payload: { participantIds: pool.map((u) => u.id) },
+        })
+        .pipe(Effect.either);
+      expect(overCap._tag).toBe("Left");
+    }),
+  ));
+
 test("addParticipants rejects adding people to a direct chat", () =>
   run(
     Effect.gen(function* () {

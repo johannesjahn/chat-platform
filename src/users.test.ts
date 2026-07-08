@@ -10,7 +10,12 @@ import { BunHttpServer } from "@effect/platform-bun";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { Effect, Layer } from "effect";
-import { ChatApi } from "./Api.ts";
+import {
+  ChatApi,
+  MAX_PASSWORD_LENGTH,
+  MAX_USER_SEARCH_QUERY_LENGTH,
+  MAX_USERNAME_LENGTH,
+} from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
@@ -131,6 +136,38 @@ test("register returns the created user with an id and no password", () =>
     }),
   ));
 
+test("register rejects a username over the maximum length", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const result = yield* c.users
+        .register({
+          payload: {
+            username: "a".repeat(MAX_USERNAME_LENGTH + 1),
+            password: "s3cret-pw",
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("register rejects a password over the maximum length", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const result = yield* c.users
+        .register({
+          payload: {
+            username: "alice2",
+            password: "a".repeat(MAX_PASSWORD_LENGTH + 1),
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
 test("searchUsers returns matching users, case-insensitively, without password data", () =>
   run(
     Effect.gen(function* () {
@@ -172,6 +209,27 @@ test("searchUsers rejects a query shorter than the minimum length", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
         .searchUsers({ urlParams: { q: "ce" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("searchUsers rejects a query longer than the maximum length", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "cyrus", password: "pw-cyrus" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "cyrus", password: "pw-cyrus" },
+      });
+
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.users
+        .searchUsers({
+          urlParams: { q: "c".repeat(MAX_USER_SEARCH_QUERY_LENGTH + 1) },
+        })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
     }),
