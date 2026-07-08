@@ -547,7 +547,19 @@ const ChatsGroup = HttpApiGroup.make("chats")
       .middleware(Authentication),
   );
 
+export const VersionResponse = Schema.Struct({
+  version: Schema.String,
+}).annotations({ identifier: "VersionResponse" });
+export type VersionResponse = typeof VersionResponse.Type;
+
+const MetaGroup = HttpApiGroup.make("meta").add(
+  // Unauthenticated on purpose — the frontend displays this in its footer
+  // before (and regardless of) login.
+  HttpApiEndpoint.get("getVersion", "/version").addSuccess(VersionResponse),
+);
+
 export class ChatApi extends HttpApi.make("chat-platform")
   .add(UsersGroup)
   .add(PostsGroup)
-  .add(ChatsGroup) {}
+  .add(ChatsGroup)
+  .add(MetaGroup) {}

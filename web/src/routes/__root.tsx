@@ -11,6 +11,7 @@ import { LogOut, MessagesSquare, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
+import { VersionFooter } from "@/components/VersionFooter";
 import { logout } from "../lib/api";
 import { useSession } from "../lib/auth";
 import { useTotalUnreadCount } from "../lib/chats";
@@ -36,6 +37,7 @@ function RootComponent() {
       <QueryClientProvider client={queryClient}>
         <Nav />
         <Outlet />
+        <VersionFooter />
       </QueryClientProvider>
     </RootDocument>
   );
