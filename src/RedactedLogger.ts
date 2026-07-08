@@ -1,0 +1,89 @@
+import {
+  HttpMiddleware,
+  HttpServerError,
+  HttpServerRequest,
+  type HttpApp,
+} from "@effect/platform";
+import { Context, Effect } from "effect";
+
+// Query params that carry credentials and must never reach logs verbatim.
+// `token` covers the `/ws?token=` handshake (see RealtimeSocket.ts — browsers
+// can't set an Authorization header on a WebSocket upgrade, so the access
+// token travels in the URL instead); the rest are redacted defensively in
+// case a future auth mechanism puts a credential in a query param too.
+const SENSITIVE_PARAMS = [
+  "token",
+  "access_token",
+  "accessToken",
+  "refresh_token",
+  "refreshToken",
+  "password",
+  "secret",
+  "api_key",
+  "apiKey",
+];
+
+export const redactUrl = (url: string): string => {
+  const queryIndex = url.indexOf("?");
+  if (queryIndex === -1) return url;
+  const params = new URLSearchParams(url.slice(queryIndex + 1));
+  let redacted = false;
+  for (const key of SENSITIVE_PARAMS) {
+    if (params.has(key)) {
+      params.set(key, "REDACTED");
+      redacted = true;
+    }
+  }
+  return redacted ? `${url.slice(0, queryIndex)}?${params.toString()}` : url;
+};
+
+// A drop-in replacement for `HttpMiddleware.logger` that redacts credential
+// query params (see SENSITIVE_PARAMS) from the logged URL. Only the log
+// annotation is redacted — the request passed to `httpApp` is untouched, so
+// route matching, query-param decoding, and handlers like the `/ws` token
+// check still see the real URL.
+export const redactedLogger = HttpMiddleware.make(
+  <E, R>(httpApp: HttpApp.Default<E, R>): HttpApp.Default<E, R> => {
+    let counter = 0;
+    return Effect.withFiberRuntime((fiber) => {
+      const request = Context.unsafeGet(
+        fiber.currentContext,
+        HttpServerRequest.HttpServerRequest,
+      );
+      const url = redactUrl(request.url);
+      return Effect.withLogSpan(
+        Effect.flatMap(Effect.exit(httpApp), (exit) => {
+          if (fiber.getFiberRef(HttpMiddleware.loggerDisabled)) {
+            return exit;
+          } else if (exit._tag === "Failure") {
+            const [response, cause] = HttpServerError.causeResponseStripped(
+              exit.cause,
+            );
+            return Effect.zipRight(
+              Effect.annotateLogs(
+                Effect.log(
+                  cause._tag === "Some" ? cause.value : "Sent HTTP Response",
+                ),
+                {
+                  "http.method": request.method,
+                  "http.url": url,
+                  "http.status": response.status,
+                },
+              ),
+              exit,
+            );
+          }
+          return Effect.zipRight(
+            Effect.annotateLogs(Effect.log("Sent HTTP response"), {
+              "http.method": request.method,
+              "http.url": url,
+              "http.status": exit.value.status,
+            }),
+            exit,
+          );
+        }),
+        `http.span.${++counter}`,
+      );
+    });
+  },
+);

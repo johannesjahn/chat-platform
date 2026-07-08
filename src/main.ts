@@ -1,8 +1,4 @@
-import {
-  HttpApiBuilder,
-  HttpApiSwagger,
-  HttpMiddleware,
-} from "@effect/platform";
+import { HttpApiBuilder, HttpApiSwagger } from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Config, Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
@@ -15,6 +11,7 @@ import { PubSubLive } from "./PubSub.ts";
 import { RateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
+import { redactedLogger } from "./RedactedLogger.ts";
 import { RefreshTokenCleanupLive } from "./RefreshTokenCleanup.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 
@@ -36,7 +33,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
 );
 
 const ServerLive = Layer.mergeAll(
-  HttpApiBuilder.serve(HttpMiddleware.logger),
+  HttpApiBuilder.serve(redactedLogger),
   HttpApiSwagger.layer({ path: "/docs" }),
   // Raw `/ws` route, attached to the same shared router as `ChatApi` — see
   // RealtimeSocket.ts for why this can't be a typed HttpApiEndpoint.
