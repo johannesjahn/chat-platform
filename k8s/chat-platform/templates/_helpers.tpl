@@ -40,80 +40,37 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
 {{/*
-Get-or-generate a stable secret value. If a Secret with this name already
-exists in the cluster (e.g. from a previous `helm install`), reuse its value
-for `key` rather than rotating it on every `helm upgrade`. Otherwise fall
-back to the explicit `default` (from values.yaml), or generate a random one.
-Call with a dict of { "context" . "name" <secret-name> "key" <data-key>
-"default" <fallback-value> }.
-*/}}
-{{- define "chat-platform.secretValue" -}}
-{{- $existing := lookup "v1" "Secret" .context.Release.Namespace .name -}}
-{{- if and $existing (hasKey $existing.data .key) -}}
-{{- index $existing.data .key | b64dec -}}
-{{- else if .default -}}
-{{- .default -}}
-{{- else -}}
-{{- randAlphaNum 32 -}}
-{{- end -}}
-{{- end -}}
-
-{{/*
-Resolved Secret name/key for the JWT signing secret, honoring
-jwt.existingSecret when set.
+Resolved Secret name/key for the JWT signing secret. Its data key is
+assumed to match the Secret's own name (see values.yaml's jwt.existingSecret).
 */}}
 {{- define "chat-platform.jwtSecretName" -}}
-{{- if .Values.jwt.existingSecret -}}
-{{- .Values.jwt.existingSecret -}}
-{{- else -}}
-{{- printf "%s-secrets" (include "chat-platform.fullname" .) -}}
-{{- end -}}
+{{- required "jwt.existingSecret is required — create a Secret holding the JWT signing secret and set this to its name (see values.yaml)" .Values.jwt.existingSecret -}}
 {{- end -}}
 
 {{- define "chat-platform.jwtSecretKey" -}}
-{{- if .Values.jwt.existingSecret -}}
-{{- .Values.jwt.existingSecretKey -}}
-{{- else -}}
-jwt-secret
-{{- end -}}
+{{- include "chat-platform.jwtSecretName" . -}}
 {{- end -}}
 
 {{/*
-Resolved Secret name/key for the Postgres password, honoring
-postgres.auth.existingSecret when set.
+Resolved Secret name/key for the Postgres password. Its data key is assumed
+to match the Secret's own name (see values.yaml's postgres.auth.existingSecret).
 */}}
 {{- define "chat-platform.postgresSecretName" -}}
-{{- if .Values.postgres.auth.existingSecret -}}
-{{- .Values.postgres.auth.existingSecret -}}
-{{- else -}}
-{{- printf "%s-secrets" (include "chat-platform.fullname" .) -}}
-{{- end -}}
+{{- required "postgres.auth.existingSecret is required — create a Secret holding the Postgres password and set this to its name (see values.yaml)" .Values.postgres.auth.existingSecret -}}
 {{- end -}}
 
 {{- define "chat-platform.postgresSecretKey" -}}
-{{- if .Values.postgres.auth.existingSecret -}}
-{{- .Values.postgres.auth.existingSecretKey -}}
-{{- else -}}
-postgres-password
-{{- end -}}
+{{- include "chat-platform.postgresSecretName" . -}}
 {{- end -}}
 
 {{/*
-Resolved Secret name/key for the Redis password, honoring
-redis.auth.existingSecret when set.
+Resolved Secret name/key for the Redis password. Its data key is assumed
+to match the Secret's own name (see values.yaml's redis.auth.existingSecret).
 */}}
 {{- define "chat-platform.redisSecretName" -}}
-{{- if .Values.redis.auth.existingSecret -}}
-{{- .Values.redis.auth.existingSecret -}}
-{{- else -}}
-{{- printf "%s-secrets" (include "chat-platform.fullname" .) -}}
-{{- end -}}
+{{- required "redis.auth.existingSecret is required — create a Secret holding the Redis password and set this to its name (see values.yaml)" .Values.redis.auth.existingSecret -}}
 {{- end -}}
 
 {{- define "chat-platform.redisSecretKey" -}}
-{{- if .Values.redis.auth.existingSecret -}}
-{{- .Values.redis.auth.existingSecretKey -}}
-{{- else -}}
-redis-password
-{{- end -}}
+{{- include "chat-platform.redisSecretName" . -}}
 {{- end -}}

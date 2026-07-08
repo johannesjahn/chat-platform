@@ -21,7 +21,7 @@ not into the cluster. See
 | `backend`  | `Deployment` + `Service`           | The Bun/Effect API. `Ingress` optional (on by default).                                                                                                                |
 | `postgres` | `StatefulSet` + headless `Service` | Persisted via a `volumeClaimTemplate` (disable with `postgres.persistence.enabled=false`).                                                                             |
 | `redis`    | `Deployment` + `Service`           | Backs realtime Pub/Sub fan-out and rate limiting; no persistence by default.                                                                                           |
-| secrets    | `Secret`                           | `JWT_SECRET`, the Postgres password, and the Redis password — auto-generated on first install if left blank, or bring your own via `existingSecret` (see values.yaml). |
+| secrets    | `Secret`                           | `JWT_SECRET`, the Postgres password, and the Redis password. `values.yaml` defaults all three to `existingSecret`, pointing at Secrets (`jwt`, `postgres-password`, `redis-password`) created once by hand in-cluster — see note below. |
 
 Nothing here builds the backend's container image — the chart just deploys
 one. Build and push the repo-root [`Dockerfile`](../Dockerfile) to a
@@ -62,13 +62,29 @@ for the full set, with comments):
 false` if your cluster's setup differs.
 - `postgres.persistence.*` / `redis.persistence.*` — size and
   `storageClassName` (empty uses the cluster default).
-- `jwt.secret`, `postgres.auth.password`, `redis.auth.password` — leave blank
-  to auto-generate a random value on first install (the value is then
-  read back from the existing `Secret` on every `helm upgrade`, not
-  rotated). Set `jwt.existingSecret` / `postgres.auth.existingSecret` /
-  `redis.auth.existingSecret` instead to supply your own pre-created
-  `Secret` (recommended for production, e.g. managed via
-  [External Secrets](https://external-secrets.io/) or sealed-secrets).
+- `jwt.existingSecret` / `postgres.auth.existingSecret` /
+  `redis.auth.existingSecret` — **required**, the name of a pre-existing
+  Secret holding each value (the chart no longer generates these itself —
+  see below for why). This repo's `values.yaml` defaults all three to
+  Secrets (`jwt`, `postgres-password`, `redis-password`) created once by
+  hand, e.g.:
+  ```bash
+  kubectl create secret generic postgres-password -n chat-platform \
+    --from-literal=postgres-password="$(openssl rand -base64 24)"
+  ```
+  (same for `redis-password` / `jwt`, each with a data key matching its own
+  Secret name — the chart reads the key by that same name, so there's no
+  separate key field to set). **Why not have the chart auto-generate these
+  password on first install?** An earlier version did exactly that (leave
+  blank → generate a random value, reused across `helm upgrade` via a
+  `lookup`-based helper that read back the existing Secret so it wouldn't
+  rotate). That trick needs a live connection to the target cluster at
+  render time, which plain `helm install`/`upgrade` has but ArgoCD's Helm
+  rendering doesn't — so under ArgoCD, every auto-sync regenerated a fresh
+  random password and overwrote the Secret, while the already-initialized
+  Postgres/Redis didn't pick up the new value and stopped authenticating.
+  Rather than only working under one of the two ways this chart gets
+  deployed, `existingSecret` is now required unconditionally.
 
 After install, `helm status chat-platform -n chat-platform` re-prints the
 NOTES.txt output (API URL, rollout-status command).
@@ -80,9 +96,8 @@ helm upgrade chat-platform ./chat-platform -n chat-platform \
   --set backend.image.tag=<new-tag>
 ```
 
-Auto-generated secrets are preserved across upgrades (see
-`templates/_helpers.tpl`'s `chat-platform.secretValue`) — they're only
-generated once, on first install.
+Secrets aren't managed by this chart at all (see `existingSecret` above), so
+there's nothing for `helm upgrade` to rotate or regenerate.
 
 ### Validating the chart locally
 
