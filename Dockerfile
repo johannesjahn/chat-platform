@@ -18,4 +18,11 @@ USER bun
 ENV PORT=3000
 EXPOSE 3000
 
+# Liveness only (see src/Health.ts) — readiness (DB/Redis reachability) is a
+# separate concern for the orchestrator's own readiness probe, not this
+# container-level check. Uses `bun` rather than curl/wget since neither is
+# guaranteed present in the base image.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+  CMD bun -e "fetch('http://localhost:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
 CMD ["bun", "run", "start"]

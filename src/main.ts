@@ -5,6 +5,7 @@ import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
+import { HealthRouteLive, ReadyRouteLive } from "./Health.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { PubSubLive } from "./PubSub.ts";
@@ -38,6 +39,9 @@ const ServerLive = Layer.mergeAll(
   // Raw `/ws` route, attached to the same shared router as `ChatApi` — see
   // RealtimeSocket.ts for why this can't be a typed HttpApiEndpoint.
   RealtimeSocketRouteLive,
+  // Raw `/health` (liveness) and `/ready` (readiness) routes — see Health.ts.
+  HealthRouteLive,
+  ReadyRouteLive,
   RefreshTokenCleanupLive,
 ).pipe(
   Layer.provide(ApiLive),

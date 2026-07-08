@@ -19,6 +19,10 @@ export class PubSub extends Context.Tag("PubSub")<
       channel: string,
       onMessage: (message: string) => Effect.Effect<void>,
     ) => Effect.Effect<void>;
+    // Used by the `/ready` readiness endpoint (see Health.ts) to confirm
+    // this instance's realtime fan-out path is actually reachable right now,
+    // not just configured.
+    readonly ping: Effect.Effect<void, unknown>;
   }
 >() {}
 
@@ -53,6 +57,9 @@ export const InMemoryPubSubLive = Layer.sync(PubSub, () => {
         listeners.add(onMessage);
         subscribers.set(channel, listeners);
       }),
+    // No external dependency to lose — a single process is always ready to
+    // fan out to its own local subscribers.
+    ping: Effect.void,
   };
 });
 
@@ -81,6 +88,7 @@ export const RedisPubSubLive = Layer.effect(
             Effect.runFork(onMessage(message));
           }),
         ).pipe(Effect.asVoid),
+      ping: Effect.tryPromise(() => publisher.ping()).pipe(Effect.asVoid),
     };
   }),
 );
