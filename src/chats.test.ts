@@ -7,8 +7,6 @@ import {
   HttpClientRequest,
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
-import { drizzle } from "drizzle-orm/pglite";
-import { migrate } from "drizzle-orm/pglite/migrator";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi, MAX_GROUP_PARTICIPANTS } from "./Api.ts";
@@ -21,9 +19,9 @@ import { InMemoryPubSubLive } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
+import { getTestDb, resetTestDb } from "./testDb.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
-import * as schema from "./db/schema.ts";
 import { users } from "./db/schema.ts";
 import { InMemoryWsTicketLive } from "./WsTicket.ts";
 
@@ -47,8 +45,8 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
 const run = async <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
 ): Promise<A> => {
-  const db = drizzle({ schema });
-  await migrate(db, { migrationsFolder: "./drizzle" });
+  const db = await getTestDb();
+  await resetTestDb(db);
   const TestDbLive = Layer.succeed(Db, db);
 
   const { handler, dispose } = HttpApiBuilder.toWebHandler(
@@ -78,7 +76,6 @@ const run = async <A, E>(
     );
   } finally {
     await dispose();
-    await db.$client.close();
   }
 };
 

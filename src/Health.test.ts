@@ -1,8 +1,6 @@
 import { expect, test } from "bun:test";
 import { FetchHttpClient, HttpApiBuilder, HttpClient } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
-import { drizzle } from "drizzle-orm/pglite";
-import { migrate } from "drizzle-orm/pglite/migrator";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
@@ -15,9 +13,9 @@ import { InMemoryPubSubLive, PubSub } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
+import { getTestDb, resetTestDb } from "./testDb.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
-import * as schema from "./db/schema.ts";
 import { InMemoryWsTicketLive } from "./WsTicket.ts";
 
 // JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
@@ -43,8 +41,8 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
 const migratedDbLive = Layer.effect(
   Db,
   Effect.promise(async () => {
-    const db = drizzle({ schema });
-    await migrate(db, { migrationsFolder: "./drizzle" });
+    const db = await getTestDb();
+    await resetTestDb(db);
     return db;
   }),
 );

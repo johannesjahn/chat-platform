@@ -1,18 +1,16 @@
 import { expect, test } from "bun:test";
-import { drizzle } from "drizzle-orm/pglite";
-import { migrate } from "drizzle-orm/pglite/migrator";
 import { Effect, Layer } from "effect";
 import { Db } from "./Db.ts";
 import { cleanupExpiredRefreshTokens } from "./RefreshTokenCleanup.ts";
+import { getTestDb, resetTestDb } from "./testDb.ts";
 import { refreshTokens, users } from "./db/schema.ts";
-import * as schema from "./db/schema.ts";
 
 const run = <A, E>(effect: Effect.Effect<A, E, Db>): Promise<A> => {
   const TestDbLive = Layer.effect(
     Db,
     Effect.promise(async () => {
-      const db = drizzle({ schema });
-      await migrate(db, { migrationsFolder: "./drizzle" });
+      const db = await getTestDb();
+      await resetTestDb(db);
       return db;
     }),
   );
