@@ -22,6 +22,7 @@ import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import {
   MAX_GROUP_PARTICIPANTS,
+  appendSentMessage,
   chatDetailQueryKey,
   chatDisplayName,
   chatsListQueryKey,
@@ -57,7 +58,6 @@ function ChatView({ id }: { id: string }) {
   const {
     data: messagesData,
     isLoading: messagesLoading,
-    refetch: refetchMessages,
     loadEarlier,
   } = useChatMessages(chatId, !!session);
 
@@ -231,27 +231,29 @@ function ChatView({ id }: { id: string }) {
     contentType: "text" | "image_url";
     content: string;
   }) {
-    await sendMessage.mutateAsync({
+    const message = await sendMessage.mutateAsync({
       params: { path: { id: String(chatId) } },
       body: values,
     });
-    await Promise.all([
-      refetchMessages(),
-      queryClient.invalidateQueries({ queryKey: chatsListQueryKey }),
-    ]);
+    // Show it immediately from the mutation's own response instead of
+    // waiting on a refetch. The server also pushes a `chat_updated` WS event
+    // to every participant (including the sender) for this same send, which
+    // invalidates the messages/detail/list queries and reconciles anything
+    // this optimistic write can't know locally (e.g. read receipts) — so no
+    // manual refetch/invalidate is needed here on top of that.
+    appendSentMessage(queryClient, chatId, message);
   }
 
   async function handleEditMessage(messageId: number, content: string) {
+    // No manual refetch here either — same reasoning as handleSend, the
+    // `chat_updated` WS push triggered by this edit already invalidates the
+    // messages/list queries for every participant, including this client.
     await updateMessage.mutateAsync({
       params: {
         path: { id: String(chatId), messageId: String(messageId) },
       },
       body: { contentType: "text", content },
     });
-    await Promise.all([
-      refetchMessages(),
-      queryClient.invalidateQueries({ queryKey: chatsListQueryKey }),
-    ]);
   }
 
   async function handleDeleteMessage(messageId: number) {
@@ -260,10 +262,6 @@ function ChatView({ id }: { id: string }) {
         path: { id: String(chatId), messageId: String(messageId) },
       },
     });
-    await Promise.all([
-      refetchMessages(),
-      queryClient.invalidateQueries({ queryKey: chatsListQueryKey }),
-    ]);
   }
 
   async function handleRenameSubmit() {

@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
 
@@ -100,6 +101,39 @@ async function fetchMessagesPage(
   return data;
 }
 
+type ChatMessagesPage = {
+  messages: ChatMessage[];
+  total: number;
+  offset: number;
+  hasEarlier: boolean;
+};
+
+// Appends a just-sent message straight into the cached page instead of
+// waiting for the `chat_updated` WS round trip (server -> pubsub -> socket
+// -> invalidate -> refetch) to bring it back — the POST response already
+// *is* the canonical row, so there's no reason to re-fetch just to show it.
+// The WS-triggered refetch still happens afterwards and reconciles anything
+// this optimistic write can't know locally (e.g. other participants' read
+// receipts), same as it does for every other participant's client.
+export function appendSentMessage(
+  queryClient: QueryClient,
+  chatId: number,
+  message: ChatMessage,
+) {
+  queryClient.setQueryData<ChatMessagesPage>(
+    chatMessagesQueryKey(chatId),
+    (prev) => {
+      if (!prev) return prev;
+      if (prev.messages.some((m) => m.id === message.id)) return prev;
+      return {
+        ...prev,
+        messages: [...prev.messages, message],
+        total: prev.total + 1,
+      };
+    },
+  );
+}
+
 // Chats read oldest-first server-side (offset/limit, same shape as posts'
 // pagination) but a conversation should *open* on its newest messages, like
 // WhatsApp/Telegram. So this keeps a "window anchor" — the offset the
@@ -133,22 +167,37 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
         const probe = await fetchMessagesPage(id, 0, MESSAGES_PAGE_SIZE);
         anchorRef.current = Math.max(0, probe.total - MESSAGES_PAGE_SIZE);
       }
-      let offset = anchorRef.current;
-      let page = await fetchMessagesPage(id, offset, MESSAGES_MAX_LIMIT);
-      if (page.offset + page.messages.length < page.total) {
+      const offset = anchorRef.current;
+      const page = await fetchMessagesPage(id, offset, MESSAGES_MAX_LIMIT);
+      const loadedThrough = page.offset + page.messages.length;
+      if (loadedThrough < page.total) {
         // More messages exist than this window (capped at
-        // MESSAGES_MAX_LIMIT) can show from the current anchor — slide the
-        // anchor forward just enough to keep the newest messages in view,
-        // then re-fetch so the returned `offset`/`messages` reflect the
-        // anchor that's actually used going forward. Sliding all the way
-        // back to the last page here (instead of by the max limit) is what
-        // caused the anchor tracked for the *next* `loadEarlier` call to
-        // diverge from what was actually rendered, producing both a scroll
-        // jump to the newest messages and a subsequent re-fetch of a
-        // range that had already been loaded.
-        offset = Math.max(0, page.total - MESSAGES_MAX_LIMIT);
-        anchorRef.current = offset;
-        page = await fetchMessagesPage(id, offset, MESSAGES_MAX_LIMIT);
+        // MESSAGES_MAX_LIMIT) can show from the current anchor — rather than
+        // re-requesting the whole window again (this is the common case
+        // once a chat has grown past MESSAGES_MAX_LIMIT and the anchor sits
+        // pinned to the tail, since *any* new message re-triggers it), fetch
+        // only the rows past what was just loaded and merge them in. Sliding
+        // all the way back to the last page here (instead of by the max
+        // limit) is what caused the anchor tracked for the *next*
+        // `loadEarlier` call to diverge from what was actually rendered,
+        // producing both a scroll jump to the newest messages and a
+        // subsequent re-fetch of a range that had already been loaded.
+        const tail = await fetchMessagesPage(
+          id,
+          loadedThrough,
+          Math.min(page.total - loadedThrough, MESSAGES_MAX_LIMIT),
+        );
+        const merged = [...page.messages, ...tail.messages].slice(
+          -MESSAGES_MAX_LIMIT,
+        );
+        const newOffset = tail.offset + tail.messages.length - merged.length;
+        anchorRef.current = newOffset;
+        return {
+          messages: merged,
+          total: tail.total,
+          offset: newOffset,
+          hasEarlier: newOffset > 0,
+        };
       }
       return {
         messages: page.messages,
