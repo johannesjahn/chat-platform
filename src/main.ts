@@ -15,6 +15,7 @@ import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { redactedLogger } from "./RedactedLogger.ts";
 import { RefreshTokenCleanupLive } from "./RefreshTokenCleanup.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
+import { VersionHandlerLive } from "./VersionHandler.ts";
 
 // Allow the web frontend(s) (different origin) to call the API from the
 // browser. WEB_ORIGIN may hold a single origin or a comma-separated list
@@ -34,6 +35,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(UsersHandlerLive),
   Layer.provide(PostsHandlerLive),
   Layer.provide(ChatsHandlerLive),
+  Layer.provide(VersionHandlerLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
   Layer.provide(CorsLive),

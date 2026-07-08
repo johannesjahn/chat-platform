@@ -1718,6 +1718,38 @@
           }
         }
       }
+    },
+    "/version": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "operationId": "meta.getVersion",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "VersionResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2484,6 +2516,18 @@
           }
         },
         "additionalProperties": false
+      },
+      "VersionResponse": {
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "version": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {
@@ -2503,6 +2547,9 @@
     },
     {
       "name": "chats"
+    },
+    {
+      "name": "meta"
     }
   ]
 }

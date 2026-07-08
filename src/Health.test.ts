@@ -15,6 +15,7 @@ import { InMemoryPubSubLive, PubSub } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
+import { VersionHandlerLive } from "./VersionHandler.ts";
 import * as schema from "./db/schema.ts";
 
 // JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
@@ -29,6 +30,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(UsersHandlerLive),
   Layer.provide(PostsHandlerLive),
   Layer.provide(ChatsHandlerLive),
+  Layer.provide(VersionHandlerLive),
   Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
