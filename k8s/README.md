@@ -16,11 +16,11 @@ not into the cluster. See
 
 ## What's in the chart
 
-| Component  | Kind                               | Notes                                                                                                                                                                  |
-| ---------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `backend`  | `Deployment` + `Service`           | The Bun/Effect API. `Ingress` optional (on by default).                                                                                                                |
-| `postgres` | `StatefulSet` + headless `Service` | Persisted via a `volumeClaimTemplate` (disable with `postgres.persistence.enabled=false`).                                                                             |
-| `redis`    | `Deployment` + `Service`           | Backs realtime Pub/Sub fan-out and rate limiting; no persistence by default.                                                                                           |
+| Component  | Kind                               | Notes                                                                                                                                                                                                                                   |
+| ---------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend`  | `Deployment` + `Service`           | The Bun/Effect API. `Ingress` optional (on by default).                                                                                                                                                                                 |
+| `postgres` | `StatefulSet` + headless `Service` | Persisted via a `volumeClaimTemplate` (disable with `postgres.persistence.enabled=false`).                                                                                                                                              |
+| `redis`    | `Deployment` + `Service`           | Backs realtime Pub/Sub fan-out and rate limiting; no persistence by default.                                                                                                                                                            |
 | secrets    | `Secret`                           | `JWT_SECRET`, the Postgres password, and the Redis password. `values.yaml` defaults all three to `existingSecret`, pointing at Secrets (`jwt`, `postgres-password`, `redis-password`) created once by hand in-cluster — see note below. |
 
 Nothing here builds the backend's container image — the chart just deploys
@@ -98,6 +98,17 @@ helm upgrade chat-platform ./chat-platform -n chat-platform \
 
 Secrets aren't managed by this chart at all (see `existingSecret` above), so
 there's nothing for `helm upgrade` to rotate or regenerate.
+
+### Chart version
+
+`Chart.yaml`'s `version`/`appVersion` and `values.yaml`'s
+`backend.image.tag` are generated from the root `package.json`'s version,
+not hand-edited — run `bun run sync:chart-version` (repo root) after
+bumping it, and commit the result. This matters at runtime:
+`backend.image.tag` must match the tag `tag-release.yml` actually pushes to
+Docker Hub, or an install/upgrade will pull the wrong image. CI's
+`chart-version` job re-runs the sync and fails the build if it produces a
+diff.
 
 ### Validating the chart locally
 

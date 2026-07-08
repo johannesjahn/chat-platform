@@ -88,6 +88,41 @@ jobs:
             exit 1
           fi
 
+  chart-version:
+    name: Helm chart version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Sync Chart.yaml and values.yaml to package.json's version
+        run: bun run sync:chart-version
+
+      - name: Fail if the Helm chart's version fields are out of date
+        run: |
+          if ! git diff --exit-code -- k8s/chat-platform/Chart.yaml k8s/chat-platform/values.yaml; then
+            echo "::error::k8s/chat-platform/Chart.yaml and/or values.yaml are out of sync with package.json's version." \
+              "Run 'bun run sync:chart-version' and commit the result."
+            exit 1
+          fi
+
+  helm:
+    name: Helm chart lint & template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - uses: azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint k8s/chat-platform
+
+      - name: Helm template (default values)
+        run: helm template k8s/chat-platform
+
   unit:
     name: Backend tests
     runs-on: ubuntu-latest

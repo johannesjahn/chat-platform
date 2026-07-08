@@ -14,6 +14,15 @@ name: Tag Release
 # tag with the default GITHUB_TOKEN doesn't fire other workflows' `push`
 # triggers (GitHub blocks that to avoid recursive runs), so the build never
 # ran. Doing both in one workflow sidesteps that entirely.
+#
+# The version bump lands on main (via sync:chart-version, see
+# k8s/chat-platform/values.yaml's backend.image.tag) well before this
+# workflow finishes building and pushing the matching image tag, so ArgoCD's
+# auto-sync is disabled — otherwise it'd try to pull a tag that doesn't
+# exist on Docker Hub yet. The argocd-sync job closes that gap by triggering
+# a sync explicitly, only once the image for the new tag is actually
+# up. It's skipped along with `docker` (and thus never fires an unnecessary
+# sync) whenever `tag` didn't create a new release.
 on:
   workflow_run:
     workflows: [CI]
@@ -95,3 +104,20 @@ jobs:
           tags: |
             johannesjahn/chat-platform:latest
             johannesjahn/chat-platform:${{ steps.version.outputs.tag }}
+
+  argocd-sync:
+    name: Trigger ArgoCD sync
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync ArgoCD application
+        run: |
+          curl --fail --silent --show-error --request POST \
+            "$ARGOCD_ADDRESS/api/v1/applications/$ARGOCD_APP_NAME/sync" \
+            --header "Authorization: Bearer $ARGOCD_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data '{}'
+        env:
+          ARGOCD_ADDRESS: ${{ vars.ARGOCD_ADDRESS }}
+          ARGOCD_APP_NAME: ${{ vars.ARGOCD_APP_NAME }}
+          ARGOCD_TOKEN: ${{ secrets.ARGOCD_TOKEN }}

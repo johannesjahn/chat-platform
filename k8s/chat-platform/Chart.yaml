@@ -3,7 +3,7 @@ name: chat-platform
 description: >-
   Helm chart for deploying the chat-platform backend, Postgres, and Redis to a
   Kubernetes cluster. The frontend (web/) is deployed separately to Cloudflare
-  Pages — see ../README.md.
+  Workers — see ../README.md.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.1.6
+appVersion: "0.1.6"

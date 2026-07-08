@@ -11,9 +11,8 @@ backend:
   image:
     # Build & push the repo-root Dockerfile to a registry this cluster can
     # pull from, then point this at it (e.g. ghcr.io/<you>/chat-platform).
-    repository: ghcr.io/johannesjahn/chat-platform
-    # Defaults to .Chart.AppVersion when empty.
-    tag: ""
+    repository: johannesjahn/chat-platform
+    tag: "0.1.6"
     pullPolicy: IfNotPresent
 
   replicaCount: 2
@@ -23,7 +22,7 @@ backend:
   # backend's CORS middleware only allows origin(s) listed here (see
   # src/main.ts). Comma-separate multiple values, e.g. a custom domain plus
   # its *.workers.dev URL: "https://chat.example.com,https://chat-platform.<subdomain>.workers.dev".
-  webOrigin: "https://chat-platform.johannes-jahn-ca7.workers.dev,https://chat-platform.johannes-jahn.com"
+  webOrigin: "https://nacho.johannes-jahn.com"
 
   service:
     type: ClusterIP
