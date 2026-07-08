@@ -16,6 +16,12 @@ bun run dev            # backend on http://localhost:3000 (--hot reload)
 http://localhost:3000/docs. The database is a local PGlite data directory
 (`DB_PATH`, unset = in-memory), created and migrated automatically on startup.
 
+`GET /health` (liveness — the process is up) and `GET /ready` (readiness —
+the DB, and Redis when `REDIS_URL` is set, are reachable) are unauthenticated
+ops endpoints for orchestrators/load balancers; see
+[`src/Health.ts`](src/Health.ts). They aren't part of `ChatApi`, so they
+don't appear in the Swagger docs or the generated frontend client.
+
 ### Running against a real Postgres and Redis
 
 ```bash
