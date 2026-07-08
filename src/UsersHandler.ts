@@ -1,10 +1,65 @@
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpApiBuilder, HttpServerRequest } from "@effect/platform";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { Context, Effect } from "effect";
-import { ChatApi, InvalidCredentials, NotFound, UsernameTaken } from "./Api.ts";
+import { Context, Effect, Option } from "effect";
+import {
+  ChatApi,
+  InvalidCredentials,
+  NotFound,
+  TooManyRequests,
+  UsernameTaken,
+} from "./Api.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
+import { RateLimiter } from "./RateLimiter.ts";
 import { refreshTokens, users } from "./db/schema.ts";
+
+// Sensible defaults for auth-endpoint rate limiting (see issue #25). Login is
+// capped both per source IP and per targeted account, so a single attacker
+// can't brute-force one account from many IPs, or spray many accounts from
+// one IP, without tripping a limit either way.
+const LOGIN_MAX_ATTEMPTS_PER_IP = 20;
+const LOGIN_MAX_ATTEMPTS_PER_ACCOUNT = 5;
+const LOGIN_WINDOW_SECONDS = 15 * 60;
+
+// Registration has no natural "account" bucket (that's what's being
+// created), so it's capped per IP only.
+const REGISTER_MAX_ATTEMPTS_PER_IP = 5;
+const REGISTER_WINDOW_SECONDS = 60 * 60;
+
+// Refreshing is routine/automatic (a client does it roughly once per access
+// token lifetime), so its limit is looser than login's — it exists mainly as
+// a ceiling against refresh-token guessing, not to constrain normal use.
+const REFRESH_MAX_ATTEMPTS_PER_IP = 60;
+const REFRESH_WINDOW_SECONDS = 15 * 60;
+
+// HttpServerRequest.remoteAddress is populated from the real TCP connection
+// by BunHttpServer in production; it's unset in the in-process test harness
+// (see users.test.ts), where every request falls back to the same bucket.
+const clientIp = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  return Option.getOrElse(request.remoteAddress, () => "unknown");
+});
+
+// Consumes `key` from the rate limiter and fails with TooManyRequests if the
+// caller has exceeded `limit` calls within `windowSeconds`. The failure
+// message is deliberately generic — it must never reveal which bucket (IP
+// vs. account) tripped, so it can't be used to enumerate accounts.
+const enforceRateLimit = (
+  limiter: Context.Tag.Service<typeof RateLimiter>,
+  key: string,
+  limit: number,
+  windowSeconds: number,
+): Effect.Effect<void, TooManyRequests> =>
+  Effect.gen(function* () {
+    const result = yield* limiter.consume(key, limit, windowSeconds);
+    if (!result.allowed)
+      return yield* Effect.fail(
+        new TooManyRequests({
+          message: "Too many requests. Please try again later.",
+          retryAfterSeconds: result.retryAfterSeconds,
+        }),
+      );
+  });
 
 // Rotation info for a refresh: the row being replaced, identified by its own
 // jti plus the familyId it belongs to (every token descended from the same
@@ -132,6 +187,14 @@ export const UsersHandlerLive = HttpApiBuilder.group(
       .handle("register", ({ payload }) =>
         Effect.gen(function* () {
           const db = yield* Db;
+          const limiter = yield* RateLimiter;
+          const ip = yield* clientIp;
+          yield* enforceRateLimit(
+            limiter,
+            `register:ip:${ip}`,
+            REGISTER_MAX_ATTEMPTS_PER_IP,
+            REGISTER_WINDOW_SECONDS,
+          );
 
           const existing = yield* Effect.tryPromise(() =>
             db
@@ -174,6 +237,20 @@ export const UsersHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const jwt = yield* Jwt;
+          const limiter = yield* RateLimiter;
+          const ip = yield* clientIp;
+          yield* enforceRateLimit(
+            limiter,
+            `login:ip:${ip}`,
+            LOGIN_MAX_ATTEMPTS_PER_IP,
+            LOGIN_WINDOW_SECONDS,
+          );
+          yield* enforceRateLimit(
+            limiter,
+            `login:account:${payload.username.toLowerCase()}`,
+            LOGIN_MAX_ATTEMPTS_PER_ACCOUNT,
+            LOGIN_WINDOW_SECONDS,
+          );
           const rows = yield* Effect.tryPromise(() =>
             db
               .select()
@@ -209,6 +286,14 @@ export const UsersHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const jwt = yield* Jwt;
+          const limiter = yield* RateLimiter;
+          const ip = yield* clientIp;
+          yield* enforceRateLimit(
+            limiter,
+            `refresh:ip:${ip}`,
+            REFRESH_MAX_ATTEMPTS_PER_IP,
+            REFRESH_WINDOW_SECONDS,
+          );
 
           const tokenUser = yield* jwt
             .verifyRefreshToken(payload.refreshToken)

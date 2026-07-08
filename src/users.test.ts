@@ -17,6 +17,7 @@ import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
+import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import * as schema from "./db/schema.ts";
@@ -30,6 +31,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(ChatsHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
   Layer.provide(InMemoryPubSubLive),
+  Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
 );
@@ -645,5 +647,86 @@ test("logout with an already-invalid refresh token succeeds as a no-op", () =>
       yield* c.users.logout({
         payload: { refreshToken: "not-a-real-token" },
       });
+    }),
+  ));
+
+test("register is rate-limited per IP after repeated attempts", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      // REGISTER_MAX_ATTEMPTS_PER_IP is 5 (UsersHandler.ts) — the test
+      // harness has no real socket, so every call in this test shares one
+      // "unknown" IP bucket regardless of username.
+      for (let i = 0; i < 5; i++) {
+        yield* c.users.register({
+          payload: { username: `reguser${i}`, password: "pw-register" },
+        });
+      }
+      const result = yield* c.users
+        .register({
+          payload: { username: "reguser5", password: "pw-register" },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        const left = result.left as { _tag: string; retryAfterSeconds: number };
+        expect(left._tag).toBe("TooManyRequests");
+        expect(left.retryAfterSeconds).toBeGreaterThan(0);
+      }
+    }),
+  ));
+
+test("login is rate-limited per account after repeated attempts, independent of whether the account exists", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      // LOGIN_MAX_ATTEMPTS_PER_ACCOUNT is 5, well below the per-IP cap of 20,
+      // so this trips the per-account bucket first. The username need not
+      // belong to a real account — the bucket is keyed on the submitted
+      // username regardless, so a nonexistent account can't be used to
+      // bypass the limit.
+      for (let i = 0; i < 5; i++) {
+        const attempt = yield* c.users
+          .login({ payload: { username: "ghost-account", password: "wrong" } })
+          .pipe(Effect.either);
+        expect(attempt._tag).toBe("Left");
+        if (attempt._tag === "Left") {
+          expect((attempt.left as { _tag: string })._tag).toBe(
+            "InvalidCredentials",
+          );
+        }
+      }
+      const result = yield* c.users
+        .login({ payload: { username: "ghost-account", password: "wrong" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        const left = result.left as { _tag: string; retryAfterSeconds: number };
+        expect(left._tag).toBe("TooManyRequests");
+        expect(left.retryAfterSeconds).toBeGreaterThan(0);
+      }
+    }),
+  ));
+
+test("refresh is rate-limited per IP after repeated attempts", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      // REFRESH_MAX_ATTEMPTS_PER_IP is 60 — a bogus token is enough to
+      // exercise the limit without needing a real refresh token per call.
+      for (let i = 0; i < 60; i++) {
+        yield* c.users
+          .refresh({ payload: { refreshToken: "not-a-real-token" } })
+          .pipe(Effect.either);
+      }
+      const result = yield* c.users
+        .refresh({ payload: { refreshToken: "not-a-real-token" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        const left = result.left as { _tag: string; retryAfterSeconds: number };
+        expect(left._tag).toBe("TooManyRequests");
+        expect(left.retryAfterSeconds).toBeGreaterThan(0);
+      }
     }),
   ));

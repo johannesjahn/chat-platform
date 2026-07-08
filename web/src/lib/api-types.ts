@@ -326,6 +326,12 @@ export interface components {
             /** @enum {string} */
             _tag: "UsernameTaken";
         };
+        TooManyRequests: {
+            message: string;
+            retryAfterSeconds: number;
+            /** @enum {string} */
+            _tag: "TooManyRequests";
+        };
         LoginBody: {
             username: components["schemas"]["NonEmptyTrimmedString"];
             password: components["schemas"]["NonEmptyString"];
@@ -616,6 +622,15 @@ export interface operations {
                     "application/json": components["schemas"]["UsernameTaken"];
                 };
             };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequests"];
+                };
+            };
         };
     };
     "users.login": {
@@ -658,6 +673,15 @@ export interface operations {
                     "application/json": components["schemas"]["InvalidCredentials"];
                 };
             };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequests"];
+                };
+            };
         };
     };
     "users.refresh": {
@@ -698,6 +722,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvalidCredentials"];
+                };
+            };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequests"];
                 };
             };
         };

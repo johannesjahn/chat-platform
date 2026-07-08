@@ -11,6 +11,7 @@ import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
+import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
@@ -30,6 +31,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(UsersHandlerLive),
   Layer.provide(PostsHandlerLive),
   Layer.provide(ChatsHandlerLive),
+  Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
 );
