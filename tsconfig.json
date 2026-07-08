@@ -29,6 +29,6 @@
   },
 
   // The `web/` frontend is a separate project with its own tsconfig.
-  "include": ["src"],
+  "include": ["src", "scripts"],
   "exclude": ["node_modules", "web"]
 }
