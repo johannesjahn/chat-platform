@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-postgres
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  # Headless — the backend connects to a stable per-Pod DNS name rather than
+  # a load-balanced VIP, appropriate for a single-writer Postgres.
+  clusterIP: None
+  selector:
+    {{- include "chat-platform.selectorLabels" (dict "Release" .Release "Chart" .Chart "component" "postgres") | nindent 4 }}
+  ports:
+    - port: 5432
+      targetPort: postgres
+      name: postgres

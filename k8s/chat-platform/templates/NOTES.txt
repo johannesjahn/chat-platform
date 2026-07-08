@@ -1,0 +1,21 @@
+chat-platform backend deployed as {{ include "chat-platform.fullname" . }}-backend.
+
+{{- if .Values.backend.ingress.enabled }}
+
+Backend API reachable at:
+  {{ if .Values.backend.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.backend.ingress.host }}
+{{- else }}
+
+Ingress is disabled — reach the backend via the
+{{ include "chat-platform.fullname" . }}-backend Service ({{ .Values.backend.service.type }})
+from inside the cluster, or your own ingress/port-forward.
+{{- end }}
+
+This chart only deploys the backend, Postgres, and Redis. The frontend
+(web/) is a static SPA — build and deploy it to Cloudflare Pages separately,
+pointing VITE_API_URL at the backend URL above, and make sure
+`backend.webOrigin` in values.yaml matches the Pages URL (the backend's CORS
+only allows that one origin). See ../README.md for the full walkthrough.
+
+Check rollout status with:
+  kubectl rollout status deployment/{{ include "chat-platform.fullname" . }}-backend -n {{ .Release.Namespace }}

@@ -17,3 +17,7 @@ web/.tanstack
 
 # Local database files
 *.db
+
+# Helm templates — Go template syntax ({{ }}) isn't valid YAML, so
+# Prettier's YAML parser can't handle these.
+k8s/chat-platform/templates

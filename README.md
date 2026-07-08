@@ -100,6 +100,14 @@ bun run lint           # ESLint (bun run lint:fix to autofix)
 bun run typecheck      # backend types; run the same in web/ for the frontend
 ```
 
+## Deployment
+
+- **Docker Compose** — `docker compose up` (see above) for a local real
+  Postgres + Redis + backend stack.
+- **Kubernetes** — [`k8s/`](k8s/) has a Helm chart deploying the backend,
+  Postgres, and Redis to a cluster. The frontend deploys separately to
+  Cloudflare Pages instead — see [k8s/README.md](k8s/README.md) for both.
+
 ## CI
 
 [.github/workflows/ci.yml](.github/workflows/ci.yml) runs on pushes to `main`
