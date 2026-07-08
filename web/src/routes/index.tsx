@@ -10,6 +10,7 @@ import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { postsFeedQueryKey, usePostsFeed } from "@/lib/posts";
+import { useUsernamesById } from "@/lib/users";
 
 export const Route = createFileRoute("/")({
   component: PostsFeedPage,
@@ -19,17 +20,6 @@ function PostsFeedPage() {
   const session = useSession();
   const queryClient = useQueryClient();
 
-  // Used to resolve `authorId` -> `@username` on each card without a
-  // per-post request — the user list is already a protected endpoint the
-  // rest of the app fetches the same way.
-  const { data: users } = $api.useQuery(
-    "get",
-    "/users",
-    {},
-    { enabled: !!session },
-  );
-  const usernameById = new Map((users ?? []).map((u) => [u.id, u.username]));
-
   const {
     data,
     isLoading,
@@ -38,6 +28,15 @@ function PostsFeedPage() {
     hasNextPage,
     isFetchingNextPage,
   } = usePostsFeed(!!session);
+
+  const posts = data?.pages.flatMap((page) => page.posts) ?? [];
+
+  // Resolves `authorId` -> `@username` on each card, one request per
+  // distinct author currently loaded (see `useUsernamesById`).
+  const usernameById = useUsernamesById(
+    posts.map((post) => post.authorId),
+    !!session,
+  );
 
   const deletePost = $api.useMutation("delete", "/posts/{id}");
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -57,8 +56,6 @@ function PostsFeedPage() {
     observer.observe(node);
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
-
-  const posts = data?.pages.flatMap((page) => page.posts) ?? [];
 
   async function handleDelete(id: number) {
     if (!window.confirm("Delete this post? This can't be undone.")) return;

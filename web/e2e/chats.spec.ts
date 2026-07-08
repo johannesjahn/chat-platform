@@ -156,6 +156,7 @@ test("the creator can add participants to a group chat, and the new participant 
   await expect(pageA.getByText("2 participants")).toBeVisible();
 
   await pageA.getByRole("button", { name: "Add participants" }).click();
+  await pageA.getByPlaceholder("Search users to add…").fill(usernameC);
   await pageA.getByRole("button", { name: `@${usernameC}` }).click();
   await pageA.getByRole("button", { name: /^Add 1/ }).click();
   await expect(pageA.getByText("3 participants")).toBeVisible();

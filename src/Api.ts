@@ -293,9 +293,24 @@ export const MessagesPage = Schema.Struct({
   total: Schema.Number,
 }).annotations({ identifier: "MessagesPage" });
 
+// Below this, a search isn't narrow enough to be worth running — keeps the
+// query cost and result size from growing with the user base (issue #48).
+export const MIN_USER_SEARCH_QUERY_LENGTH = 3;
+
+// Left un-`identifier`-annotated for the same reason as `PostsPageQuery`
+// above (see CLAUDE.md) — it's inlined into query parameters.
+export const UserSearchQuery = Schema.Struct({
+  q: Schema.Trim.pipe(Schema.minLength(MIN_USER_SEARCH_QUERY_LENGTH)),
+});
+
 const UsersGroup = HttpApiGroup.make("users")
   .add(
-    HttpApiEndpoint.get("listUsers", "/users")
+    // Replaces the old unpaginated "list every user" endpoint (issue #48):
+    // the full directory isn't exposed to every authenticated user anymore,
+    // only search results for a query of at least
+    // `MIN_USER_SEARCH_QUERY_LENGTH` characters.
+    HttpApiEndpoint.get("searchUsers", "/users/search")
+      .setUrlParams(UserSearchQuery)
       .addSuccess(Schema.Array(User))
       .middleware(Authentication),
   )

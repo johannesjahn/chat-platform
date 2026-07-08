@@ -89,7 +89,7 @@ fetchClient.use({
   },
 });
 
-// `$api.useQuery("get", "/users")`, `$api.useMutation("post", "/users/login")`, …
+// `$api.useQuery("get", "/users/search", ...)`, `$api.useMutation("post", "/users/login")`, …
 export const $api = createQueryClient(fetchClient);
 
 // Revokes the session's refresh token server-side, then clears it locally.
@@ -105,8 +105,18 @@ export function logout(session: Session): void {
   clearSession();
 }
 
-// React Query key for the user list, so mutations can invalidate it.
-export const usersQueryKey = ["get", "/users"] as const;
+// Prefix of the query key `$api.useQuery("get", "/users/search", ...)`
+// generates (openapi-react-query keys queries as `[method, path, init]`).
+// `queryClient.invalidateQueries` matches by prefix by default, so this
+// invalidates every currently-mounted user search regardless of its query
+// text — used after login/register so a freshly-authenticated session's
+// searches aren't served stale (previously-disabled) data.
+export const usersQueryKey = ["get", "/users/search"] as const;
+
+// Below this, a search isn't narrow enough to be worth sending (mirrors
+// `MIN_USER_SEARCH_QUERY_LENGTH` in src/Api.ts) — keeps queries and payloads
+// bounded independent of the user base's size (see issue #48).
+export const MIN_USER_SEARCH_QUERY_LENGTH = 3;
 
 export type PublicUser = components["schemas"]["User"];
 export type Session = components["schemas"]["LoginResponse"];

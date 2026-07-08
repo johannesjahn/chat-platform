@@ -16,10 +16,11 @@ test("registers a new user and sees the user list after login", async ({
   await expect(page).toHaveURL("/");
   await expect(page.getByText(`@${username}`)).toBeVisible();
 
-  // The user list lives on its own page and is a protected endpoint — it
-  // should now load (the bearer token is attached) and include the freshly
-  // registered user. Scope to the list so we don't also match the username
-  // shown in the nav bar.
+  // User search lives on its own page and is a protected endpoint — it
+  // should now load (the bearer token is attached) and, once searched,
+  // include the freshly registered user. Scope to the list so we don't also
+  // match the username shown in the nav bar.
   await page.goto("/users");
+  await page.getByPlaceholder("Search users…").fill(username);
   await expect(page.getByRole("list").getByText(`@${username}`)).toBeVisible();
 });

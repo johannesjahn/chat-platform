@@ -13,10 +13,11 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { $api } from "@/lib/api";
+import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { MAX_GROUP_PARTICIPANTS, chatsListQueryKey } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
+import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/chats/new")({
@@ -34,11 +35,13 @@ function NewChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [pendingUserId, setPendingUserId] = useState<number | null>(null);
 
+  const query = useDebouncedValue(search.trim(), 300);
+  const searchReady = query.length >= MIN_USER_SEARCH_QUERY_LENGTH;
   const { data: users, isLoading } = $api.useQuery(
     "get",
-    "/users",
-    {},
-    { enabled: !!session },
+    "/users/search",
+    { params: { query: { q: query } } },
+    { enabled: !!session && searchReady },
   );
   const createDirectChat = $api.useMutation("post", "/chats/direct");
   const createGroupChat = $api.useMutation("post", "/chats/group");
@@ -54,10 +57,7 @@ function NewChatPage() {
     );
   }
 
-  const others = (users ?? []).filter((u) => u.id !== session.user.id);
-  const filtered = others.filter((u) =>
-    u.username.toLowerCase().includes(search.trim().toLowerCase()),
-  );
+  const filtered = (users ?? []).filter((u) => u.id !== session.user.id);
 
   async function startDirectChat(userId: number) {
     setError(null);
@@ -172,9 +172,14 @@ function NewChatPage() {
               />
             </div>
 
-            {isLoading ? (
+            {!searchReady ? (
               <p className="py-4 text-center text-sm text-muted-foreground">
-                Loading users…
+                Type at least {MIN_USER_SEARCH_QUERY_LENGTH} characters to
+                search.
+              </p>
+            ) : isLoading ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                Searching users…
               </p>
             ) : filtered.length === 0 ? (
               <p className="py-4 text-center text-sm text-muted-foreground">

@@ -6,6 +6,7 @@ import {
   Check,
   Loader2,
   Pencil,
+  Search,
   UserPlus,
   Users,
   X,
@@ -17,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { $api } from "@/lib/api";
+import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import {
   MAX_GROUP_PARTICIPANTS,
@@ -28,6 +29,7 @@ import {
   useChatMessages,
 } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
+import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/chats/$id")({
@@ -72,18 +74,28 @@ function ChatView({ id }: { id: string }) {
     "/chats/{id}/messages/{messageId}",
   );
 
-  const { data: allUsers } = $api.useQuery(
-    "get",
-    "/users",
-    {},
-    { enabled: !!session },
-  );
-
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [addingParticipants, setAddingParticipants] = useState(false);
+  const [addParticipantsSearch, setAddParticipantsSearch] = useState("");
   const [selectedToAdd, setSelectedToAdd] = useState<number[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const addParticipantsQuery = useDebouncedValue(
+    addParticipantsSearch.trim(),
+    300,
+  );
+  const addParticipantsSearchReady =
+    addParticipantsQuery.length >= MIN_USER_SEARCH_QUERY_LENGTH;
+  const { data: userSearchResults, isLoading: userSearchLoading } =
+    $api.useQuery(
+      "get",
+      "/users/search",
+      { params: { query: { q: addParticipantsQuery } } },
+      {
+        enabled: !!session && addingParticipants && addParticipantsSearchReady,
+      },
+    );
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastMessageIdRef = useRef<number | null>(null);
@@ -211,7 +223,7 @@ function ChatView({ id }: { id: string }) {
   const isCreator = chat.createdBy === session.user.id;
   const canAddMore =
     chat.type === "group" && chat.participants.length < MAX_GROUP_PARTICIPANTS;
-  const candidatesToAdd = (allUsers ?? []).filter(
+  const candidatesToAdd = (userSearchResults ?? []).filter(
     (u) => !chat.participants.some((p) => p.userId === u.id),
   );
 
@@ -286,6 +298,7 @@ function ChatView({ id }: { id: string }) {
       });
       setSelectedToAdd([]);
       setAddingParticipants(false);
+      setAddParticipantsSearch("");
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -383,7 +396,10 @@ function ChatView({ id }: { id: string }) {
               size="icon"
               variant="ghost"
               aria-label="Add participants"
-              onClick={() => setAddingParticipants((v) => !v)}
+              onClick={() => {
+                setAddingParticipants((v) => !v);
+                setAddParticipantsSearch("");
+              }}
             >
               <UserPlus className="size-4" />
             </Button>
@@ -395,9 +411,25 @@ function ChatView({ id }: { id: string }) {
             {actionError && (
               <p className="text-xs text-destructive">{actionError}</p>
             )}
-            {candidatesToAdd.length === 0 ? (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={addParticipantsSearch}
+                onChange={(e) => setAddParticipantsSearch(e.target.value)}
+                placeholder="Search users to add…"
+                className="h-8 pl-8 text-xs"
+              />
+            </div>
+            {!addParticipantsSearchReady ? (
               <p className="text-xs text-muted-foreground">
-                Everyone is already in this chat.
+                Type at least {MIN_USER_SEARCH_QUERY_LENGTH} characters to
+                search.
+              </p>
+            ) : userSearchLoading ? (
+              <p className="text-xs text-muted-foreground">Searching…</p>
+            ) : candidatesToAdd.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No matching users to add.
               </p>
             ) : (
               <>
