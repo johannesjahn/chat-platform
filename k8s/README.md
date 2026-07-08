@@ -101,14 +101,14 @@ there's nothing for `helm upgrade` to rotate or regenerate.
 
 ### Chart version
 
-`Chart.yaml`'s `version`/`appVersion` and `values.yaml`'s
-`backend.image.tag` are generated from the root `package.json`'s version,
-not hand-edited — run `bun run sync:chart-version` (repo root) after
-bumping it, and commit the result. This matters at runtime:
-`backend.image.tag` must match the tag `tag-release.yml` actually pushes to
-Docker Hub, or an install/upgrade will pull the wrong image. CI's
-`chart-version` job re-runs the sync and fails the build if it produces a
-diff.
+`Chart.yaml`'s `version`/`appVersion`, `values.yaml`'s
+`backend.image.tag`, and `web/package.json`'s version are all generated from
+the root `package.json`'s version, not hand-edited — run
+`bun run sync:chart-version` (repo root) after bumping it, and commit the
+result. This matters at runtime: `backend.image.tag` must match the tag
+`tag-release.yml` actually pushes to Docker Hub, or an install/upgrade will
+pull the wrong image. CI's `chart-version` job re-runs the sync and fails
+the build if it produces a diff.
 
 ### Validating the chart locally
 

@@ -1,6 +1,7 @@
-// Syncs the chat-platform Helm chart's version fields to package.json's
-// version, so the image tag a fresh `helm install`/`upgrade` pulls (unless
-// overridden with --set) never drifts from what's actually published by
+// Syncs the chat-platform Helm chart's version fields, and web/package.json's
+// version, to the root package.json's version, so neither the image tag a
+// fresh `helm install`/`upgrade` pulls (unless overridden with --set) nor the
+// frontend's version ever drifts from what's actually published by
 // .github/workflows/tag-release.yml.
 import packageJson from "../package.json" with { type: "json" };
 
@@ -14,6 +15,16 @@ const chartUpdated = chartOriginal
   .replace(/^appVersion:.*$/m, `appVersion: "${version}"`);
 await Bun.write(chartPath, chartUpdated);
 console.log(`Synced ${chartPath} to version ${version}`);
+
+const webPackageJsonPath = new URL("../web/package.json", import.meta.url)
+  .pathname;
+const webPackageJsonOriginal = await Bun.file(webPackageJsonPath).text();
+const webPackageJsonUpdated = webPackageJsonOriginal.replace(
+  /^(\s*"version":\s*").*(",?)$/m,
+  `$1${version}$2`,
+);
+await Bun.write(webPackageJsonPath, webPackageJsonUpdated);
+console.log(`Synced ${webPackageJsonPath} to version ${version}`);
 
 const valuesPath = new URL("../k8s/chat-platform/values.yaml", import.meta.url)
   .pathname;

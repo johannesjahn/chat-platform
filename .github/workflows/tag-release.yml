@@ -23,11 +23,23 @@ name: Tag Release
 # a sync explicitly, only once the image for the new tag is actually
 # up. It's skipped along with `docker` (and thus never fires an unnecessary
 # sync) whenever `tag` didn't create a new release.
+#
+# deploy-frontend builds web/ and pushes it to Cloudflare Workers (static
+# assets) via Wrangler — see k8s/README.md's "Frontend: Cloudflare Workers"
+# section. It lives here (rather than its own push-triggered workflow) so it
+# always runs after argocd-sync, never concurrently with or ahead of a
+# backend release. It only runs when `tag` actually cut a new release, so
+# frontend deploys stay tied to a backend version bump instead of running on
+# every pipeline invocation.
+#
+# workflow_dispatch runs the same pipeline manually (e.g. to retry a release
+# that didn't fire automatically) rather than being a frontend-only shortcut.
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -36,14 +48,14 @@ jobs:
   tag:
     name: Tag release
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       created: ${{ steps.check.outputs.exists == 'false' }}
     steps:
       - uses: actions/checkout@v7.0.0
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
       - name: Read version from package.json
@@ -117,3 +129,46 @@ jobs:
           token: ${{ secrets.ARGOCD_TOKEN }}
           action: sync
           appName: ${{ vars.ARGOCD_APP_NAME }}
+
+  deploy-frontend:
+    name: Build & deploy frontend to Cloudflare Workers
+    needs: [tag, docker, argocd-sync]
+    if: |
+      always() &&
+      needs.tag.outputs.created == 'true' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      BUN_VERSION: 1.3.14
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: web
+
+      - name: Build
+        run: bun run build
+        working-directory: web
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+
+      # dist/client is the static site wrangler.jsonc's assets.directory
+      # points at; dist/server is an SSR/prerender artifact TanStack Start
+      # also emits and the Worker should never serve.
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: web
+          command: deploy
