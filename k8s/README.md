@@ -10,8 +10,9 @@ StatefulSet instead of `hostPath` volumes, so it isn't pinned to a single
 node).
 
 The **frontend** (`../web/`) is deployed differently — as a static SPA on
-[Cloudflare Pages](https://pages.cloudflare.com/), not into the cluster. See
-[Frontend: Cloudflare Pages](#frontend-cloudflare-pages) below.
+[Cloudflare Workers](https://developers.cloudflare.com/workers/static-assets/),
+not into the cluster. See
+[Frontend: Cloudflare Workers](#frontend-cloudflare-workers) below.
 
 ## What's in the chart
 
@@ -88,35 +89,28 @@ helm lint ./chat-platform
 helm template chat-platform ./chat-platform | kubectl apply --dry-run=client -f -
 ```
 
-## Frontend: Cloudflare Pages
+## Frontend: Cloudflare Workers
 
 The frontend (`../web/`) is a client-side-rendered SPA (TanStack Start in SPA
 mode — see `web/vite.config.ts`), so it doesn't need a Kubernetes deployment
-or a Node/Bun server at runtime; Cloudflare Pages serves the static build
-output directly from its CDN.
+or a Node/Bun server at runtime; it's deployed as a Cloudflare Worker with
+static assets (`web/wrangler.jsonc`), which serves the build output directly
+from Cloudflare's CDN with no Worker script needed. Cloudflare now steers new
+static sites toward Workers instead of Pages (`wrangler pages` errors out
+telling you to use `wrangler deploy` if the Pages project doesn't already
+exist), so this repo targets Workers directly.
 
 Deploys are pushed from GitHub Actions
-([`.github/workflows/pages-deploy.yml`](../.github/workflows/pages-deploy.yml))
-via `wrangler pages deploy` on every push to `main` that touches `web/`,
-rather than Cloudflare's own Git integration — this keeps the deploy trigger
-in the same CI as the rest of the repo (see `docker-publish.yml` for the
-backend equivalent) instead of Cloudflare building on its own schedule. That
-means the Pages project needs to exist as a **Direct Upload** project (no
-Git connection) before the workflow can push to it:
-
-```bash
-bunx wrangler pages project create chat-platform
-```
-
-(or via the dashboard — Workers & Pages → Create → Pages → Upload assets —
-just don't connect it to the GitHub repo, since the workflow triggers builds
-instead.)
+([`.github/workflows/workers-deploy.yml`](../.github/workflows/workers-deploy.yml))
+via `wrangler deploy` on every push to `main` that touches `web/`. Unlike
+Pages, there's no project to pre-create — `wrangler deploy` creates/updates
+the Worker named in `web/wrangler.jsonc` (`chat-platform`) on first run.
 
 **One-time setup**, before the workflow can deploy:
 
 | What                    | Where                                                                                                                                                                    |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `CLOUDFLARE_API_TOKEN`  | Repo secret — a token with "Cloudflare Pages: Edit" permission (dashboard → Manage Account → API Tokens).                                                                |
+| `CLOUDFLARE_API_TOKEN`  | Repo secret — a token with "Workers Scripts: Edit" permission (dashboard → Manage Account → API Tokens).                                                                 |
 | `CLOUDFLARE_ACCOUNT_ID` | Repo secret — shown in the Cloudflare dashboard's right sidebar.                                                                                                         |
 | `VITE_API_URL`          | Repo **variable** (not secret — it ends up in client-side JS regardless). The backend's public URL, e.g. `https://api.<your-domain>` (the `backend.ingress.host` above). |
 
@@ -125,15 +119,14 @@ instead.)
   `http://localhost:3000`, which won't resolve in production.
 - **Build output is `dist/client`, not `dist`** — the build also emits a
   `dist/server` (an SSR/prerender artifact TanStack Start produces
-  internally); the workflow only deploys `dist/client`.
-- **Client-side routing fallback** — [`web/public/_redirects`](../web/public/_redirects)
-  (`/* /index.html 200`) is already in place so Pages serves `index.html` for
-  any deep link instead of a 404; Vite copies it into `dist/client`
-  automatically.
-- **CORS** — set the chart's `backend.webOrigin` to this exact Pages URL
-  (custom domain, or `<project-name>.pages.dev` if you're not using one). The
-  backend only allows one CORS origin — a Direct Upload project has no
-  Git-integration preview deployments to worry about, so this isn't the
-  tradeoff it would be with the dashboard-managed flow.
-- **Project name** — the workflow deploys with `--project-name=chat-platform`;
-  update that flag if you named the Pages project something else.
+  internally); `web/wrangler.jsonc`'s `assets.directory` points only at
+  `dist/client`.
+- **Client-side routing fallback** — `web/wrangler.jsonc` sets
+  `assets.not_found_handling: "single-page-application"`, so the Worker
+  serves `index.html` for any deep link instead of a 404 (this replaces the
+  old Pages-era `_redirects` file, which is no longer needed).
+- **CORS** — set the chart's `backend.webOrigin` to this exact Worker URL
+  (custom domain, or `<name>.<subdomain>.workers.dev` if you're not using
+  one). The backend only allows one CORS origin.
+- **Worker name** — set by `name` in `web/wrangler.jsonc` (`chat-platform`);
+  update it there if you want a different name.

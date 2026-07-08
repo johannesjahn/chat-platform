@@ -6,7 +6,7 @@ global:
 
 # -- The chat-platform backend (Bun + Effect HttpApi). No frontend
 # deployment here — the frontend is a static SPA built from `web/` and
-# hosted on Cloudflare Pages instead (see ../README.md).
+# hosted on Cloudflare Workers instead (see ../README.md).
 backend:
   image:
     # Build & push the repo-root Dockerfile to a registry this cluster can
@@ -19,10 +19,10 @@ backend:
   replicaCount: 2
   port: 3000
 
-  # The origin the Cloudflare Pages frontend is served from — the backend's
+  # The origin the Cloudflare Workers frontend is served from — the backend's
   # CORS middleware only allows this one origin (see src/main.ts). Set this
-  # to your Pages production domain (custom domain or *.pages.dev).
-  webOrigin: "https://chat-platform.pages.dev"
+  # to your Worker's production domain (custom domain or *.workers.dev).
+  webOrigin: "https://chat-platform.workers.dev"
 
   service:
     type: ClusterIP

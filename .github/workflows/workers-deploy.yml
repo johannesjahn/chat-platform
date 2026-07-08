@@ -1,9 +1,9 @@
 name: Deploy Frontend
 
-# Builds web/ and pushes it to Cloudflare Pages via Wrangler whenever it
-# changes on main (or on manual dispatch) — see k8s/README.md's "Frontend:
-# Cloudflare Pages" section. The Pages project itself must already exist as
-# a Direct Upload project (no Git integration) before this can deploy to it.
+# Builds web/ and pushes it to Cloudflare Workers (static assets) via
+# Wrangler whenever it changes on main (or on manual dispatch) — see
+# k8s/README.md's "Frontend: Cloudflare Workers" section. `wrangler deploy`
+# creates/updates the Worker itself, so there's no project to pre-create.
 on:
   push:
     branches: [main]
@@ -15,7 +15,7 @@ env:
 
 jobs:
   deploy:
-    name: Build & deploy to Cloudflare Pages
+    name: Build & deploy to Cloudflare Workers
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -36,12 +36,13 @@ jobs:
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
 
-      # dist/client is the static site; dist/server is an SSR/prerender
-      # artifact TanStack Start also emits and Pages should never serve.
-      - name: Deploy to Cloudflare Pages
+      # dist/client is the static site wrangler.jsonc's assets.directory
+      # points at; dist/server is an SSR/prerender artifact TanStack Start
+      # also emits and the Worker should never serve.
+      - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: web
-          command: pages deploy dist/client --project-name=chat-platform --branch=main
+          command: deploy

@@ -106,7 +106,7 @@ bun run typecheck      # backend types; run the same in web/ for the frontend
   Postgres + Redis + backend stack.
 - **Kubernetes** — [`k8s/`](k8s/) has a Helm chart deploying the backend,
   Postgres, and Redis to a cluster. The frontend deploys separately to
-  Cloudflare Pages instead — see [k8s/README.md](k8s/README.md) for both.
+  Cloudflare Workers instead — see [k8s/README.md](k8s/README.md) for both.
 
 ## CI
 
