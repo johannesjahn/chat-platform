@@ -92,7 +92,7 @@ postgres.auth.existingSecret when set.
 
 {{- define "chat-platform.postgresSecretKey" -}}
 {{- if .Values.postgres.auth.existingSecret -}}
-{{- .Values.postgres.auth.existingSecretPasswordKey -}}
+{{- .Values.postgres.auth.existingSecretKey -}}
 {{- else -}}
 postgres-password
 {{- end -}}
@@ -112,7 +112,7 @@ redis.auth.existingSecret when set.
 
 {{- define "chat-platform.redisSecretKey" -}}
 {{- if .Values.redis.auth.existingSecret -}}
-{{- .Values.redis.auth.existingSecretPasswordKey -}}
+{{- .Values.redis.auth.existingSecretKey -}}
 {{- else -}}
 redis-password
 {{- end -}}
