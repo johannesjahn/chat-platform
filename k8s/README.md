@@ -114,10 +114,10 @@ instead.)
 
 **One-time setup**, before the workflow can deploy:
 
-| What                    | Where                                                                                                          |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`  | Repo secret — a token with "Cloudflare Pages: Edit" permission (dashboard → Manage Account → API Tokens).       |
-| `CLOUDFLARE_ACCOUNT_ID` | Repo secret — shown in the Cloudflare dashboard's right sidebar.                                                |
+| What                    | Where                                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CLOUDFLARE_API_TOKEN`  | Repo secret — a token with "Cloudflare Pages: Edit" permission (dashboard → Manage Account → API Tokens).                                                                |
+| `CLOUDFLARE_ACCOUNT_ID` | Repo secret — shown in the Cloudflare dashboard's right sidebar.                                                                                                         |
 | `VITE_API_URL`          | Repo **variable** (not secret — it ends up in client-side JS regardless). The backend's public URL, e.g. `https://api.<your-domain>` (the `backend.ingress.host` above). |
 
 - **`VITE_API_URL`** is baked in at build time and read by
