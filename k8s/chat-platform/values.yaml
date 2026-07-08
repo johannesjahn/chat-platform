@@ -41,7 +41,7 @@ backend:
     className: "traefik"
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt
-    host: api.chat-platform.example.com
+    host: api.chat-platform.johannes-jahn.com
     tls:
       enabled: true
       secretName: chat-platform-api-tls
