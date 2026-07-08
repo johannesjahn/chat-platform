@@ -1,5 +1,5 @@
 import { HttpApiBuilder, HttpServerRequest } from "@effect/platform";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, ilike, isNull, sql } from "drizzle-orm";
 import { Context, Effect, Option } from "effect";
 import {
   ChatApi,
@@ -31,6 +31,15 @@ const REGISTER_WINDOW_SECONDS = 60 * 60;
 // a ceiling against refresh-token guessing, not to constrain normal use.
 const REFRESH_MAX_ATTEMPTS_PER_IP = 60;
 const REFRESH_WINDOW_SECONDS = 15 * 60;
+
+// Caps a single search response regardless of how many usernames match, so
+// the payload stays bounded independent of the user base's size.
+const USER_SEARCH_RESULTS_LIMIT = 20;
+
+// Escapes LIKE/ILIKE wildcard characters in user-supplied search text so a
+// query containing "%" or "_" is matched literally instead of as a wildcard.
+const escapeLikePattern = (value: string): string =>
+  value.replace(/[\\%_]/g, (char) => `\\${char}`);
 
 // HttpServerRequest.remoteAddress is populated from the real TCP connection
 // by BunHttpServer in production; it's unset in the in-process test harness
@@ -148,9 +157,10 @@ export const UsersHandlerLive = HttpApiBuilder.group(
   "users",
   (handlers) =>
     handlers
-      .handle("listUsers", () =>
+      .handle("searchUsers", ({ urlParams: { q } }) =>
         Effect.gen(function* () {
           const db = yield* Db;
+          const pattern = `%${escapeLikePattern(q)}%`;
           return yield* Effect.tryPromise(() =>
             db
               .select({
@@ -159,7 +169,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 role: users.role,
               })
               .from(users)
-              .orderBy(users.id),
+              .where(ilike(users.username, pattern))
+              .orderBy(users.username)
+              .limit(USER_SEARCH_RESULTS_LIMIT),
           ).pipe(Effect.orDie);
         }),
       )

@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Users } from "lucide-react";
+import { Search, Users } from "lucide-react";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { CountUp } from "@/components/reactbits/CountUp";
 import { GradientText } from "@/components/reactbits/GradientText";
@@ -11,10 +12,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { $api } from "@/lib/api";
+import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { useSession } from "@/lib/auth";
+import { useDebouncedValue } from "@/lib/useDebouncedValue";
 
 export const Route = createFileRoute("/users/")({
   component: UsersPage,
@@ -22,12 +25,23 @@ export const Route = createFileRoute("/users/")({
 
 function UsersPage() {
   const session = useSession();
-  // The user list is a protected endpoint — only query it while logged in.
+  const [search, setSearch] = useState("");
+  const query = useDebouncedValue(search.trim(), 300);
+  const searchReady = query.length >= MIN_USER_SEARCH_QUERY_LENGTH;
+
+  // The search endpoint is protected — only query it while logged in and
+  // once the query is long enough (see issue #48: the full directory isn't
+  // exposed unpaginated anymore, only narrow searches).
   const {
     data: users,
     isLoading,
     error,
-  } = $api.useQuery("get", "/users", {}, { enabled: !!session });
+  } = $api.useQuery(
+    "get",
+    "/users/search",
+    { params: { query: { q: query } } },
+    { enabled: !!session && searchReady },
+  );
 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col items-center gap-6 px-4 py-10">
@@ -36,7 +50,7 @@ function UsersPage() {
         <h1 className="text-2xl font-semibold tracking-tight">
           <GradientText>Users</GradientText>
         </h1>
-        {users && (
+        {searchReady && users && (
           <span className="text-2xl font-semibold tracking-tight text-muted-foreground motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
             (<CountUp value={users.length} />)
           </span>
@@ -45,12 +59,29 @@ function UsersPage() {
 
       {!session ? (
         <LoginPrompt
-          title="Log in to see who's registered"
-          description="The user list is only visible to signed-in users."
+          title="Log in to search for people"
+          description="User search is only available to signed-in users."
         />
+      ) : (
+        <div className="relative w-full">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search users…"
+            className="pl-8"
+            autoFocus
+          />
+        </div>
+      )}
+
+      {!session ? null : !searchReady ? (
+        <p className="text-sm text-muted-foreground">
+          Type at least {MIN_USER_SEARCH_QUERY_LENGTH} characters to search.
+        </p>
       ) : error ? (
         <p className="w-full rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          Could not load users: {errorMessage(error)}
+          Could not search users: {errorMessage(error)}
         </p>
       ) : isLoading ? (
         <Card className="w-full">
@@ -73,14 +104,14 @@ function UsersPage() {
           </CardContent>
         </Card>
       ) : !users || users.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No users yet — be the first to register.
-        </p>
+        <p className="text-sm text-muted-foreground">No matching users.</p>
       ) : (
         <Card className="w-full motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
           <CardHeader>
-            <CardTitle>Registered users</CardTitle>
-            <CardDescription>Everyone with an account so far.</CardDescription>
+            <CardTitle>Matching users</CardTitle>
+            <CardDescription>
+              People whose username matches “{query}”.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <ul role="list" className="flex flex-col gap-2">

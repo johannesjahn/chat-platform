@@ -4,14 +4,14 @@
  */
 
 export interface paths {
-    "/users": {
+    "/users/search": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["users.listUsers"];
+        get: operations["users.searchUsers"];
         put?: never;
         post?: never;
         delete?: never;
@@ -491,9 +491,12 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    "users.listUsers": {
+    "users.searchUsers": {
         parameters: {
-            query?: never;
+            query: {
+                /** @description a string that will be trimmed */
+                q: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;

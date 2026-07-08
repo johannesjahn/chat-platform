@@ -88,11 +88,13 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-test("listUsers rejects an unauthenticated request", () =>
+test("searchUsers rejects an unauthenticated request", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const result = yield* c.users.listUsers({}).pipe(Effect.either);
+      const result = yield* c.users
+        .searchUsers({ urlParams: { q: "abc" } })
+        .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left") {
         expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
@@ -100,11 +102,13 @@ test("listUsers rejects an unauthenticated request", () =>
     }),
   ));
 
-test("listUsers rejects a bogus bearer token", () =>
+test("searchUsers rejects a bogus bearer token", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeAuthedClient("not-a-real-token");
-      const result = yield* c.users.listUsers({}).pipe(Effect.either);
+      const result = yield* c.users
+        .searchUsers({ urlParams: { q: "abc" } })
+        .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left") {
         expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
@@ -127,25 +131,68 @@ test("register returns the created user with an id and no password", () =>
     }),
   ));
 
-test("listUsers returns all users in insertion order without password data", () =>
+test("searchUsers returns matching users, case-insensitively, without password data", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "alice", password: "pw-alice" },
+        payload: { username: "alexander", password: "pw-alexander" },
+      });
+      yield* c.users.register({
+        payload: { username: "alexina", password: "pw-alexina" },
       });
       yield* c.users.register({
         payload: { username: "bob", password: "pw-bob" },
       });
       const { accessToken } = yield* c.users.login({
-        payload: { username: "alice", password: "pw-alice" },
+        payload: { username: "bob", password: "pw-bob" },
       });
 
       const authed = yield* makeAuthedClient(accessToken);
-      const users = yield* authed.users.listUsers({});
-      expect(users).toHaveLength(2);
-      expect(users.map((u) => u.username)).toEqual(["alice", "bob"]);
-      expect(users.every((u) => !("passwordHash" in u))).toBe(true);
+      const results = yield* authed.users.searchUsers({
+        urlParams: { q: "ALEX" },
+      });
+      expect(results).toHaveLength(2);
+      expect(results.map((u) => u.username)).toEqual(["alexander", "alexina"]);
+      expect(results.every((u) => !("passwordHash" in u))).toBe(true);
+    }),
+  ));
+
+test("searchUsers rejects a query shorter than the minimum length", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "cesar", password: "pw-cesar" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "cesar", password: "pw-cesar" },
+      });
+
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.users
+        .searchUsers({ urlParams: { q: "ce" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("searchUsers returns no results for a query that matches nobody", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "dahlia", password: "pw-dahlia" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "dahlia", password: "pw-dahlia" },
+      });
+
+      const authed = yield* makeAuthedClient(accessToken);
+      const results = yield* authed.users.searchUsers({
+        urlParams: { q: "zzzzz" },
+      });
+      expect(results).toEqual([]);
     }),
   ));
 
@@ -312,8 +359,10 @@ test("refresh exchanges a valid refresh token for a new, working access token", 
       expect(claims.type).toBe("access");
 
       const authed = yield* makeAuthedClient(refreshed.accessToken);
-      const users = yield* authed.users.listUsers({});
-      expect(users.map((u) => u.username)).toContain("hana");
+      const results = yield* authed.users.searchUsers({
+        urlParams: { q: "hana" },
+      });
+      expect(results.map((u) => u.username)).toContain("hana");
     }),
   ));
 
@@ -566,7 +615,7 @@ test("logout with allSessions immediately invalidates outstanding access tokens,
 
       // Sanity check: the access token works before the forced logout.
       const authedBefore = yield* makeAuthedClient(accessToken);
-      yield* authedBefore.users.listUsers({});
+      yield* authedBefore.users.searchUsers({ urlParams: { q: "petra" } });
 
       yield* c.users.logout({
         payload: { refreshToken, allSessions: true },
@@ -576,7 +625,9 @@ test("logout with allSessions immediately invalidates outstanding access tokens,
       // bumped, so it must be rejected immediately rather than surviving to
       // its own expiry.
       const authedAfter = yield* makeAuthedClient(accessToken);
-      const result = yield* authedAfter.users.listUsers({}).pipe(Effect.either);
+      const result = yield* authedAfter.users
+        .searchUsers({ urlParams: { q: "petra" } })
+        .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left") {
         expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
@@ -602,8 +653,10 @@ test("a fresh login after a forced logout still works", () =>
         payload: { username: "quinn", password: "pw-quinn" },
       });
       const authed = yield* makeAuthedClient(accessToken);
-      const users = yield* authed.users.listUsers({});
-      expect(users.map((u) => u.username)).toContain("quinn");
+      const results = yield* authed.users.searchUsers({
+        urlParams: { q: "quinn" },
+      });
+      expect(results.map((u) => u.username)).toContain("quinn");
     }),
   ));
 

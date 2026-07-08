@@ -5,13 +5,24 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/users": {
+    "/users/search": {
       "get": {
         "tags": [
           "users"
         ],
-        "operationId": "users.listUsers",
-        "parameters": [],
+        "operationId": "users.searchUsers",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "a string that will be trimmed"
+            },
+            "required": true,
+            "description": "a string that will be trimmed"
+          }
+        ],
         "security": [
           {
             "bearer": []
