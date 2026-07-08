@@ -4,11 +4,13 @@ name: Tag Release
 # changes on main (e.g. 0.1.0 -> v0.1.0). Pushing that tag is what triggers
 # docker-publish.yml, which strips the "v" for the Docker image tag. Does
 # nothing if the tag already exists (e.g. package.json changed but not the
-# version).
+# version). Runs after the CI workflow finishes on main, and only proceeds
+# if CI succeeded, so releases are never tagged from a broken build.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    paths: [package.json]
 
 permissions:
   contents: write
@@ -17,9 +19,11 @@ jobs:
   tag:
     name: Tag release
     runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v7.0.0
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
       - name: Read version from package.json
