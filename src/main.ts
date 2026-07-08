@@ -12,6 +12,7 @@ import { DbLive } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { PubSubLive } from "./PubSub.ts";
+import { RateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { RefreshTokenCleanupLive } from "./RefreshTokenCleanup.ts";
@@ -31,6 +32,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
   Layer.provide(CorsLive),
+  Layer.provide(RateLimiterLive),
 );
 
 const ServerLive = Layer.mergeAll(

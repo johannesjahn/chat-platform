@@ -68,6 +68,15 @@ export class InvalidCredentials extends Schema.TaggedError<InvalidCredentials>()
   { message: Schema.String },
 ) {}
 
+// Raised when a caller has exceeded an endpoint's rate limit (see
+// RateLimiter.ts). `message` is deliberately generic across every bucket an
+// endpoint checks (e.g. login's per-IP vs. per-account buckets) so it can't
+// be used to tell them apart.
+export class TooManyRequests extends Schema.TaggedError<TooManyRequests>()(
+  "TooManyRequests",
+  { message: Schema.String, retryAfterSeconds: Schema.Number },
+) {}
+
 export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
   message: Schema.String,
 }) {}
@@ -301,19 +310,22 @@ const UsersGroup = HttpApiGroup.make("users")
     HttpApiEndpoint.post("register", "/users/register")
       .setPayload(RegisterBody)
       .addSuccess(User, { status: 201 })
-      .addError(UsernameTaken, { status: 409 }),
+      .addError(UsernameTaken, { status: 409 })
+      .addError(TooManyRequests, { status: 429 }),
   )
   .add(
     HttpApiEndpoint.post("login", "/users/login")
       .setPayload(LoginBody)
       .addSuccess(LoginResponse)
-      .addError(InvalidCredentials, { status: 401 }),
+      .addError(InvalidCredentials, { status: 401 })
+      .addError(TooManyRequests, { status: 429 }),
   )
   .add(
     HttpApiEndpoint.post("refresh", "/users/refresh")
       .setPayload(RefreshBody)
       .addSuccess(RefreshResponse)
-      .addError(InvalidCredentials, { status: 401 }),
+      .addError(InvalidCredentials, { status: 401 })
+      .addError(TooManyRequests, { status: 429 }),
   )
   .add(
     // Revokes the presented refresh token (or, with `allSessions`, every
