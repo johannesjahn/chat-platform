@@ -1,0 +1,47 @@
+name: Deploy Frontend
+
+# Builds web/ and pushes it to Cloudflare Pages via Wrangler whenever it
+# changes on main (or on manual dispatch) — see k8s/README.md's "Frontend:
+# Cloudflare Pages" section. The Pages project itself must already exist as
+# a Direct Upload project (no Git integration) before this can deploy to it.
+on:
+  push:
+    branches: [main]
+    paths: [web/**]
+  workflow_dispatch:
+
+env:
+  BUN_VERSION: 1.3.14
+
+jobs:
+  deploy:
+    name: Build & deploy to Cloudflare Pages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: web
+
+      - name: Build
+        run: bun run build
+        working-directory: web
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+
+      # dist/client is the static site; dist/server is an SSR/prerender
+      # artifact TanStack Start also emits and Pages should never serve.
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: web
+          command: pages deploy dist/client --project-name=chat-platform --branch=main
