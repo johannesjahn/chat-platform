@@ -247,3 +247,98 @@ test("a message sent by one user appears on the other's already-open chat via th
   await contextA.close();
   await contextB.close();
 });
+
+test("infinite scroll stops requesting more messages once the oldest one is loaded", async ({
+  browser,
+  injectApiUrl,
+  page,
+  request,
+  apiUrl,
+}) => {
+  // Seeding 130 messages one HTTP request at a time (below), plus draining
+  // several rounds of `loadEarlier` pagination, comfortably exceeds the
+  // default 30s test timeout.
+  test.setTimeout(90_000);
+
+  await registerViaUi(page);
+
+  const otherContext = await browser.newContext();
+  await injectApiUrl(otherContext);
+  const otherPage = await otherContext.newPage();
+  const { username: otherUsername } = await registerViaUi(otherPage);
+  await otherContext.close();
+
+  await page.goto("/chats/new");
+  await page.getByRole("button", { name: "Direct message" }).click();
+  await page.fill("#user-search", otherUsername);
+  await page.getByRole("button", { name: `@${otherUsername}` }).click();
+  await expect(page).toHaveURL(/\/chats\/\d+/);
+  const chatId = page.url().split("/").pop();
+
+  // More messages than MESSAGES_MAX_LIMIT (100) so the pagination anchor has
+  // to walk all the way back to the true offset 0 through several
+  // `loadEarlier` pages — the case that used to keep re-triggering requests
+  // even after the oldest message had already been loaded.
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  const totalMessages = 130;
+  for (let i = 0; i < totalMessages; i++) {
+    const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      data: { contentType: "text", content: `Seeded message ${i}` },
+    });
+    expect(response.ok()).toBe(true);
+  }
+
+  let messagesRequestCount = 0;
+  page.on("request", (req) => {
+    const url = new URL(req.url());
+    if (
+      url.pathname === `/chats/${chatId}/messages` &&
+      req.method() === "GET"
+    ) {
+      messagesRequestCount++;
+    }
+  });
+
+  await page.reload();
+  await expect(page.getByText("Seeded message 129")).toBeVisible();
+
+  const scrollContainer = page.getByTestId("chat-scroll");
+
+  // Dispatch the scroll event explicitly rather than relying on the
+  // browser's native scroll-event semantics (which only fire when scrollTop
+  // actually changes) — this exercises `handleScroll`'s own `hasEarlier`
+  // guard directly instead of depending on incidental scroll-position
+  // physics.
+  async function scrollToTop() {
+    await scrollContainer.evaluate((el) => {
+      el.scrollTop = 0;
+      el.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+  }
+
+  // Repeatedly scroll to the top and give each `loadEarlier` fetch a moment
+  // to settle. MESSAGES_PAGE_SIZE is 10 and there are 130 seeded messages,
+  // so reaching offset 0 takes on the order of a dozen scroll-triggered
+  // fetches.
+  for (let i = 0; i < 20; i++) {
+    await scrollToTop();
+    await page.waitForTimeout(300);
+    if (await page.getByText("Seeded message 0").isVisible()) break;
+  }
+  await expect(page.getByText("Seeded message 0")).toBeVisible();
+
+  const countOnceOldestLoaded = messagesRequestCount;
+
+  // With the bug, reaching offset 0 in a chat longer than
+  // MESSAGES_MAX_LIMIT flipped `hasEarlier` back to true, so every further
+  // scroll-to-top kept sending another pagination request forever.
+  for (let i = 0; i < 5; i++) {
+    await scrollToTop();
+    await page.waitForTimeout(200);
+  }
+
+  expect(messagesRequestCount).toBe(countOnceOldestLoaded);
+});

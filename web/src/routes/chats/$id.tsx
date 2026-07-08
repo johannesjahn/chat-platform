@@ -479,6 +479,7 @@ function ChatView({ id }: { id: string }) {
           <div
             ref={scrollRef}
             onScroll={handleScroll}
+            data-testid="chat-scroll"
             className="flex h-[60vh] flex-col gap-2 overflow-y-auto px-4 py-4"
           >
             {loadingEarlier && (
