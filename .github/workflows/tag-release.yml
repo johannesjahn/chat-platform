@@ -31,6 +31,10 @@ on:
 
 permissions:
   contents: write
+  # Needed because the tagged commit's history can include changes to
+  # .github/workflows/*.yml; GitHub rejects a GITHUB_TOKEN push of any ref
+  # (including tags) whose history touches workflow files without this.
+  workflows: write
 
 jobs:
   tag:
