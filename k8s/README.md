@@ -95,31 +95,45 @@ mode — see `web/vite.config.ts`), so it doesn't need a Kubernetes deployment
 or a Node/Bun server at runtime; Cloudflare Pages serves the static build
 output directly from its CDN.
 
-**Build settings** (Cloudflare Pages dashboard, or `wrangler.toml` if you
-prefer config-as-code):
+Deploys are pushed from GitHub Actions
+([`.github/workflows/pages-deploy.yml`](../.github/workflows/pages-deploy.yml))
+via `wrangler pages deploy` on every push to `main` that touches `web/`,
+rather than Cloudflare's own Git integration — this keeps the deploy trigger
+in the same CI as the rest of the repo (see `docker-publish.yml` for the
+backend equivalent) instead of Cloudflare building on its own schedule. That
+means the Pages project needs to exist as a **Direct Upload** project (no
+Git connection) before the workflow can push to it:
 
-| Setting                | Value                                    |
-| ---------------------- | ---------------------------------------- |
-| Build command          | `cd web && bun install && bun run build` |
-| Build output directory | `web/dist/client`                        |
-| Root directory         | repo root                                |
+```bash
+bunx wrangler pages project create chat-platform
+```
 
-- **Build output directory is `dist/client`, not `dist`** — the build also
-  emits a `dist/server` (an SSR/prerender artifact TanStack Start produces
-  internally); only `dist/client` is the static site Pages should serve.
-- **`VITE_API_URL`** — a Pages build-time environment variable, set to the
-  backend's public URL (the `backend.ingress.host` above, e.g.
-  `https://api.<your-domain>`). Read by `web/src/lib/api.ts`; without it the
-  frontend falls back to `http://localhost:3000`, which won't resolve in
-  production.
+(or via the dashboard — Workers & Pages → Create → Pages → Upload assets —
+just don't connect it to the GitHub repo, since the workflow triggers builds
+instead.)
+
+**One-time setup**, before the workflow can deploy:
+
+| What                    | Where                                                                                                          |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`  | Repo secret — a token with "Cloudflare Pages: Edit" permission (dashboard → Manage Account → API Tokens).       |
+| `CLOUDFLARE_ACCOUNT_ID` | Repo secret — shown in the Cloudflare dashboard's right sidebar.                                                |
+| `VITE_API_URL`          | Repo **variable** (not secret — it ends up in client-side JS regardless). The backend's public URL, e.g. `https://api.<your-domain>` (the `backend.ingress.host` above). |
+
+- **`VITE_API_URL`** is baked in at build time and read by
+  `web/src/lib/api.ts`; without it the frontend falls back to
+  `http://localhost:3000`, which won't resolve in production.
+- **Build output is `dist/client`, not `dist`** — the build also emits a
+  `dist/server` (an SSR/prerender artifact TanStack Start produces
+  internally); the workflow only deploys `dist/client`.
 - **Client-side routing fallback** — [`web/public/_redirects`](../web/public/_redirects)
   (`/* /index.html 200`) is already in place so Pages serves `index.html` for
   any deep link instead of a 404; Vite copies it into `dist/client`
   automatically.
 - **CORS** — set the chart's `backend.webOrigin` to this exact Pages URL
-  (custom domain, or the `*.pages.dev` one if you're not using a custom
-  domain). The backend only allows one CORS origin; Pages preview
-  deployments (per-branch/PR `*.pages.dev` URLs) won't be allowed unless you
-  point `webOrigin` at one of them too — fine for a single production
-  frontend, but something to know if you rely on preview deployments talking
-  to this same backend.
+  (custom domain, or `<project-name>.pages.dev` if you're not using one). The
+  backend only allows one CORS origin — a Direct Upload project has no
+  Git-integration preview deployments to worry about, so this isn't the
+  tradeoff it would be with the dashboard-managed flow.
+- **Project name** — the workflow deploys with `--project-name=chat-platform`;
+  update that flag if you named the Pages project something else.
