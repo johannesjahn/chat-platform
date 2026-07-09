@@ -2,12 +2,16 @@ import type { VitePWAOptions } from "vite-plugin-pwa";
 
 // Shared between vite.config.ts (needed there only so app code can import
 // `virtual:pwa-register`) and vite.pwa.config.ts (which actually generates
-// sw.js — see that file for why). registerType "prompt" pairs with the
-// manual update banner in src/components/PwaUpdatePrompt.tsx; keep the two
-// configs' options in sync or the registered client and the generated
-// service worker can disagree about update behavior.
+// sw.js — see that file for why). registerType "autoUpdate" pairs with
+// `usePwaUpdate` in src/lib/pwa.ts immediately activating and reloading on
+// `onNeedRefresh` rather than waiting for a manual click — a backend API
+// response-shape change can otherwise crash any tab still running an old
+// cached bundle against the new API until it happens to reload, so clients
+// self-update instead of getting stuck. Keep the two configs' options in
+// sync or the registered client and the generated service worker can
+// disagree about update behavior.
 export const sharedPwaOptions: Partial<VitePWAOptions> = {
-  registerType: "prompt",
+  registerType: "autoUpdate",
   injectRegister: false,
   manifest: {
     name: "Chat Platform",
