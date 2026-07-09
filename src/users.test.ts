@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import {
   FetchHttpClient,
   HttpApiBuilder,
@@ -23,7 +23,7 @@ import { InMemoryPubSubLive } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { getTestDb, resetTestDb } from "./testDb.ts";
+import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
 import { InMemoryWsTicketLive } from "./WsTicket.ts";
@@ -44,6 +44,9 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(JwtLive),
   Layer.provide(InMemoryWsTicketLive),
 );
+
+const { getTestDb, closeTestDb } = makeTestDbAccessor();
+afterAll(closeTestDb);
 
 const run = async <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient>,

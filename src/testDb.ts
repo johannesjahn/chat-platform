@@ -4,23 +4,45 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 import type { DrizzleDb } from "./Db.ts";
 import * as schema from "./db/schema.ts";
 
-// Booting a fresh PGlite instance and replaying every migration costs
-// ~600-900ms — see bunfig.toml's raised test timeout. `bun test ./src` runs
-// every test file sequentially in a single process (no --jobs/sharding
-// configured), so this module's cache is shared across every file that
-// imports it: the cost is paid once for the whole suite instead of once per
-// test, and `resetTestDb` (a plain TRUNCATE, ~5ms) restores a clean slate
-// between tests so they stay as isolated as if each had gotten a brand new
-// database.
-let dbPromise: Promise<DrizzleDb> | undefined;
+const createTestDb = async () => {
+  const db = drizzle({ schema });
+  await migrate(db, { migrationsFolder: "./drizzle" });
+  return db;
+};
 
-export const getTestDb = (): Promise<DrizzleDb> => {
-  dbPromise ??= (async () => {
-    const db = drizzle({ schema });
-    await migrate(db, { migrationsFolder: "./drizzle" });
-    return db;
-  })();
-  return dbPromise;
+type TestDb = Awaited<ReturnType<typeof createTestDb>>;
+
+// Booting a fresh PGlite instance and replaying every migration costs
+// ~600-900ms — see bunfig.toml's raised test timeout. Each test file that
+// calls `makeTestDbAccessor()` gets one instance shared across all of its
+// own tests (paying that cost once per file instead of once per test), with
+// `resetTestDb` (a plain TRUNCATE, ~5ms) restoring a clean slate between
+// tests so they stay as isolated as if each had gotten a brand new
+// database.
+//
+// This is deliberately scoped *per file*, not shared process-wide across
+// the whole `bun test ./src` run: a single PGlite instance still open when
+// RealtimeSocket.integration.test.ts's spawned child process and
+// RealtimePubSub.integration.test.ts's real Redis connections are torn down
+// has been observed to crash the whole `bun test` process on exit (code 99,
+// no test failures — a native-level crash in Bun's WASM runtime, not a bug
+// in any test). Every caller must close its instance in `afterAll` — see
+// `closeTestDb` — so it's dead well before later files run.
+export const makeTestDbAccessor = () => {
+  let dbPromise: Promise<TestDb> | undefined;
+
+  const getTestDb = (): Promise<TestDb> => {
+    dbPromise ??= createTestDb();
+    return dbPromise;
+  };
+
+  const closeTestDb = async (): Promise<void> => {
+    if (!dbPromise) return;
+    const db = await dbPromise;
+    await db.$client.close();
+  };
+
+  return { getTestDb, closeTestDb };
 };
 
 // Listed in no particular order — TRUNCATE ... CASCADE takes care of foreign

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import {
   FetchHttpClient,
   HttpApiBuilder,
@@ -19,7 +19,7 @@ import { InMemoryPubSubLive } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { getTestDb, resetTestDb } from "./testDb.ts";
+import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
 import { users } from "./db/schema.ts";
@@ -41,6 +41,9 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(JwtLive),
   Layer.provide(InMemoryWsTicketLive),
 );
+
+const { getTestDb, closeTestDb } = makeTestDbAccessor();
+afterAll(closeTestDb);
 
 // `effect` may also require `Db` directly (e.g. to promote a user to admin
 // out-of-band, the way it'd happen in production) — it shares the exact same

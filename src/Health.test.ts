@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import { FetchHttpClient, HttpApiBuilder, HttpClient } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
@@ -13,7 +13,7 @@ import { InMemoryPubSubLive, PubSub } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { getTestDb, resetTestDb } from "./testDb.ts";
+import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
 import { InMemoryWsTicketLive } from "./WsTicket.ts";
@@ -37,6 +37,9 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(JwtLive),
   Layer.provide(InMemoryWsTicketLive),
 );
+
+const { getTestDb, closeTestDb } = makeTestDbAccessor();
+afterAll(closeTestDb);
 
 const migratedDbLive = Layer.effect(
   Db,
