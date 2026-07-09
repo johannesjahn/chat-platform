@@ -156,8 +156,12 @@ jobs:
           REDIS_URL: redis://localhost:6379
 
   e2e:
-    name: E2E tests
+    name: E2E tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -178,15 +182,19 @@ jobs:
         run: bunx playwright install --with-deps chromium
         working-directory: web
 
+      # Each test boots its own backend process (see web/e2e/backend.ts), so
+      # running everything on one runner means all shards' backends and
+      # browsers compete for that runner's cores. Splitting into shards
+      # across separate runners multiplies the CPU budget instead.
       - name: Run Playwright tests
-        run: bun run test:e2e
+        run: bun run test:e2e --shard=${{ matrix.shard }}/${{ strategy.job-total }}
         working-directory: web
 
       - name: Upload Playwright traces
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: playwright-traces
+          name: playwright-traces-${{ matrix.shard }}
           path: web/test-results/
           if-no-files-found: ignore
           retention-days: 7
