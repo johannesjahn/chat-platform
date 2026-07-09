@@ -7,7 +7,7 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { LogOut, MessagesSquare, Users } from "lucide-react";
+import { LogOut, MessagesSquare, Settings, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
@@ -97,6 +97,11 @@ function Nav() {
           <span className="text-sm text-muted-foreground">
             @{session.user.username}
           </span>
+          <Button asChild variant="ghost" size="icon" aria-label="Settings">
+            <Link to="/settings">
+              <Settings className="size-4" />
+            </Link>
+          </Button>
           <Button
             variant="ghost"
             size="sm"
