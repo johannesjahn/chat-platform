@@ -9,6 +9,7 @@ import {
   Trash2,
   Type,
 } from "lucide-react";
+import { Avatar } from "@/components/Avatar";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -22,6 +23,7 @@ import type { Post } from "@/lib/posts";
 
 type PostCardProps = {
   post: Post;
+  authorId: number;
   authorUsername: string;
   canModify: boolean;
   onDelete: () => void;
@@ -62,6 +64,7 @@ const COLLAPSE_THRESHOLD = 500;
 
 export function PostCard({
   post,
+  authorId,
   authorUsername,
   canModify,
   onDelete,
@@ -85,16 +88,20 @@ export function PostCard({
       )}
     >
       <CardHeader className="flex flex-row items-center gap-3 border-b border-border py-4">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">
-          {authorUsername.slice(0, 1).toUpperCase()}
-        </div>
-        <div className="flex flex-1 flex-col leading-tight">
-          <span className="font-medium">@{authorUsername}</span>
-          <span className="text-xs text-muted-foreground">
-            {new Date(post.createdAt).toLocaleString()}
-            {wasEdited && " · edited"}
-          </span>
-        </div>
+        <Link
+          to="/users/$id"
+          params={{ id: String(authorId) }}
+          className="flex flex-1 items-center gap-3 leading-tight"
+        >
+          <Avatar name={authorUsername} />
+          <div className="flex flex-1 flex-col leading-tight">
+            <span className="font-medium">@{authorUsername}</span>
+            <span className="text-xs text-muted-foreground">
+              {new Date(post.createdAt).toLocaleString()}
+              {wasEdited && " · edited"}
+            </span>
+          </div>
+        </Link>
         {canModify && (
           <div className="flex items-center gap-1">
             <Button asChild size="icon" variant="ghost" aria-label="Edit post">

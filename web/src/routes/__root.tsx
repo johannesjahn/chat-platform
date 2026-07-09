@@ -94,9 +94,13 @@ function Nav() {
       </div>
       {session ? (
         <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">
+          <Link
+            to="/users/$id"
+            params={{ id: String(session.user.id) }}
+            className="text-sm text-muted-foreground hover:text-foreground hover:underline"
+          >
             @{session.user.username}
-          </span>
+          </Link>
           <Button asChild variant="ghost" size="icon" aria-label="Settings">
             <Link to="/settings">
               <Settings className="size-4" />

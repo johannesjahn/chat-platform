@@ -11,6 +11,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { Avatar } from "@/components/Avatar";
 import { ChatComposer } from "@/components/ChatComposer";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -345,74 +346,78 @@ function ChatView({ id }: { id: string }) {
             </Link>
           </Button>
 
-          <div className="relative shrink-0">
-            <div
-              className={cn(
-                "flex size-9 items-center justify-center rounded-full text-sm font-semibold",
-                chat.type === "group"
-                  ? "bg-accent text-accent-foreground"
-                  : "bg-primary/15 text-primary",
-              )}
+          {chat.type === "direct" && otherParticipantId != null ? (
+            <Link
+              to="/users/$id"
+              params={{ id: String(otherParticipantId) }}
+              className="flex min-w-0 flex-1 items-center gap-3"
             >
-              {chat.type === "group" ? (
-                <Users className="size-4" />
-              ) : (
-                name.replace("@", "").slice(0, 1).toUpperCase()
-              )}
-            </div>
-            {chat.type === "direct" && (
-              <PresenceDot
-                online={otherParticipantOnline}
-                className="absolute -bottom-0.5 -right-0.5"
-              />
-            )}
-          </div>
-
-          <div className="flex min-w-0 flex-1 flex-col leading-tight">
-            {renaming ? (
-              <form
-                className="flex items-center gap-1"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void handleRenameSubmit();
-                }}
-              >
-                <Input
-                  autoFocus
-                  value={titleDraft}
-                  onChange={(e) => setTitleDraft(e.target.value)}
-                  maxLength={100}
-                  className="h-7 py-0"
+              <div className="relative shrink-0">
+                <Avatar name={name} />
+                <PresenceDot
+                  online={otherParticipantOnline}
+                  className="absolute -bottom-0.5 -right-0.5"
                 />
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  type="submit"
-                  className="size-7"
-                >
-                  <Check className="size-3.5" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  type="button"
-                  className="size-7"
-                  onClick={() => setRenaming(false)}
-                >
-                  <X className="size-3.5" />
-                </Button>
-              </form>
-            ) : (
-              <span className="truncate font-semibold">{name}</span>
-            )}
-            <span className="truncate text-xs text-muted-foreground">
-              {chat.type === "group"
-                ? `${chat.participants.length} participant${chat.participants.length === 1 ? "" : "s"}`
-                : otherParticipantOnline
-                  ? "Online"
-                  : "Direct message"}
-            </span>
-          </div>
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col leading-tight">
+                <span className="truncate font-semibold">{name}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {otherParticipantOnline ? "Online" : "Direct message"}
+                </span>
+              </div>
+            </Link>
+          ) : (
+            <>
+              <div className="relative shrink-0">
+                <div className="flex size-9 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
+                  <Users className="size-4" />
+                </div>
+              </div>
+
+              <div className="flex min-w-0 flex-1 flex-col leading-tight">
+                {renaming ? (
+                  <form
+                    className="flex items-center gap-1"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void handleRenameSubmit();
+                    }}
+                  >
+                    <Input
+                      autoFocus
+                      value={titleDraft}
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                      maxLength={100}
+                      className="h-7 py-0"
+                    />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      type="submit"
+                      className="size-7"
+                    >
+                      <Check className="size-3.5" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      type="button"
+                      className="size-7"
+                      onClick={() => setRenaming(false)}
+                    >
+                      <X className="size-3.5" />
+                    </Button>
+                  </form>
+                ) : (
+                  <span className="truncate font-semibold">{name}</span>
+                )}
+                <span className="truncate text-xs text-muted-foreground">
+                  {chat.participants.length} participant
+                  {chat.participants.length === 1 ? "" : "s"}
+                </span>
+              </div>
+            </>
+          )}
 
           {chat.type === "group" && isCreator && !renaming && (
             <Button
