@@ -368,6 +368,79 @@
         }
       }
     },
+    "/users/me/password": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users.changePassword",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "RefreshResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "InvalidCredentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidCredentials"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Unauthorized"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "TooManyRequests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyRequests"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
     "/posts/{id}": {
       "get": {
         "tags": [
@@ -2257,6 +2330,28 @@
           },
           "allSessions": {
             "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChangePasswordBody": {
+        "type": "object",
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "properties": {
+          "currentPassword": {
+            "$ref": "#/components/schemas/NonEmptyString",
+            "description": "a string at most 128 character(s) long",
+            "title": "maxLength(128)",
+            "maxLength": 128
+          },
+          "newPassword": {
+            "$ref": "#/components/schemas/NonEmptyString",
+            "description": "a string at most 128 character(s) long",
+            "title": "maxLength(128)",
+            "maxLength": 128
           }
         },
         "additionalProperties": false

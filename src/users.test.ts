@@ -768,6 +768,169 @@ test("logout with an already-invalid refresh token succeeds as a no-op", () =>
     }),
   ));
 
+test("changePassword rejects an unauthenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const result = yield* c.users
+        .changePassword({
+          payload: { currentPassword: "pw-sam", newPassword: "new-pw-sam" },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
+    }),
+  ));
+
+test("changePassword rejects a wrong current password", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "sam", password: "pw-sam" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "sam", password: "pw-sam" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.users
+        .changePassword({
+          payload: { currentPassword: "wrong-pw", newPassword: "new-pw-sam" },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidCredentials",
+        );
+      }
+    }),
+  ));
+
+test("changePassword updates the password and lets the caller log in with the new one", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "tara", password: "old-pw-tara" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "tara", password: "old-pw-tara" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      yield* authed.users.changePassword({
+        payload: { currentPassword: "old-pw-tara", newPassword: "new-pw-tara" },
+      });
+
+      const oldLogin = yield* c.users
+        .login({ payload: { username: "tara", password: "old-pw-tara" } })
+        .pipe(Effect.either);
+      expect(oldLogin._tag).toBe("Left");
+
+      const newLogin = yield* c.users.login({
+        payload: { username: "tara", password: "new-pw-tara" },
+      });
+      expect(newLogin.user.username).toBe("tara");
+    }),
+  ));
+
+test("changePassword returns a working access token for the calling session, despite bumping token_version", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "uma", password: "old-pw-uma" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "uma", password: "old-pw-uma" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      const { accessToken: newAccessToken } =
+        yield* authed.users.changePassword({
+          payload: { currentPassword: "old-pw-uma", newPassword: "new-pw-uma" },
+        });
+
+      // The old access token, signed under the pre-bump token_version, is
+      // now rejected...
+      const staleResult = yield* authed.users
+        .searchUsers({ urlParams: { q: "uma" } })
+        .pipe(Effect.either);
+      expect(staleResult._tag).toBe("Left");
+
+      // ...but the freshly issued one works.
+      const authedAfter = yield* makeAuthedClient(newAccessToken);
+      const results = yield* authedAfter.users.searchUsers({
+        urlParams: { q: "uma" },
+      });
+      expect(results.map((u) => u.username)).toContain("uma");
+    }),
+  ));
+
+test("changePassword revokes every other session's refresh token", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "vince", password: "old-pw-vince" },
+      });
+      const sessionA = yield* c.users.login({
+        payload: { username: "vince", password: "old-pw-vince" },
+      });
+      const sessionB = yield* c.users.login({
+        payload: { username: "vince", password: "old-pw-vince" },
+      });
+
+      const authedA = yield* makeAuthedClient(sessionA.accessToken);
+      yield* authedA.users.changePassword({
+        payload: {
+          currentPassword: "old-pw-vince",
+          newPassword: "new-pw-vince",
+        },
+      });
+
+      const refreshB = yield* c.users
+        .refresh({ payload: { refreshToken: sessionB.refreshToken } })
+        .pipe(Effect.either);
+      expect(refreshB._tag).toBe("Left");
+    }),
+  ));
+
+test("changePassword is rate-limited per account after repeated wrong attempts", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "wendy", password: "pw-wendy" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "wendy", password: "pw-wendy" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      // CHANGE_PASSWORD_MAX_ATTEMPTS_PER_ACCOUNT is 5 (UsersHandler.ts).
+      for (let i = 0; i < 5; i++) {
+        const attempt = yield* authed.users
+          .changePassword({
+            payload: { currentPassword: "wrong-pw", newPassword: "new-pw" },
+          })
+          .pipe(Effect.either);
+        expect(attempt._tag).toBe("Left");
+      }
+      const result = yield* authed.users
+        .changePassword({
+          payload: { currentPassword: "wrong-pw", newPassword: "new-pw" },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        const left = result.left as { _tag: string; retryAfterSeconds: number };
+        expect(left._tag).toBe("TooManyRequests");
+        expect(left.retryAfterSeconds).toBeGreaterThan(0);
+      }
+    }),
+  ));
+
 test("register is rate-limited per IP after repeated attempts", () =>
   run(
     Effect.gen(function* () {

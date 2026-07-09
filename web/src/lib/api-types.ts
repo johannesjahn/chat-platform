@@ -100,6 +100,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["users.changePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/posts/{id}": {
         parameters: {
             query?: never;
@@ -428,6 +444,18 @@ export interface components {
              */
             refreshToken: string;
             allSessions?: boolean;
+        };
+        ChangePasswordBody: {
+            /**
+             * maxLength(128)
+             * @description a string at most 128 character(s) long
+             */
+            currentPassword: components["schemas"]["NonEmptyString"];
+            /**
+             * maxLength(128)
+             * @description a string at most 128 character(s) long
+             */
+            newPassword: components["schemas"]["NonEmptyString"];
         };
         Post: {
             id: number;
@@ -846,6 +874,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+        };
+    };
+    "users.changePassword": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordBody"];
+            };
+        };
+        responses: {
+            /** @description RefreshResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshResponse"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description InvalidCredentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvalidCredentials"] | components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequests"];
                 };
             };
         };

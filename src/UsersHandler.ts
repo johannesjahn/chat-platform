@@ -8,6 +8,7 @@ import {
   TooManyRequests,
   UsernameTaken,
 } from "./Api.ts";
+import { CurrentUser } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
 import { RateLimiter } from "./RateLimiter.ts";
@@ -35,6 +36,12 @@ const REFRESH_WINDOW_SECONDS = 15 * 60;
 // Caps a single search response regardless of how many usernames match, so
 // the payload stays bounded independent of the user base's size.
 const USER_SEARCH_RESULTS_LIMIT = 20;
+
+// Bounds how many current-password guesses a caller (who must already hold a
+// valid access token) can make before being locked out — mirrors login's
+// per-account bucket, keyed by user id rather than username.
+const CHANGE_PASSWORD_MAX_ATTEMPTS_PER_ACCOUNT = 5;
+const CHANGE_PASSWORD_WINDOW_SECONDS = 15 * 60;
 
 // Escapes LIKE/ILIKE wildcard characters in user-supplied search text so a
 // query containing "%" or "_" is matched literally instead of as a wildcard.
@@ -433,6 +440,84 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                   .delete(refreshTokens)
                   .where(eq(refreshTokens.jti, tokenUser.jti)),
           ).pipe(Effect.orDie);
+        }),
+      )
+      .handle("changePassword", ({ payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const jwt = yield* Jwt;
+          const limiter = yield* RateLimiter;
+          const currentUser = yield* CurrentUser;
+
+          yield* enforceRateLimit(
+            limiter,
+            `change-password:account:${currentUser.id}`,
+            CHANGE_PASSWORD_MAX_ATTEMPTS_PER_ACCOUNT,
+            CHANGE_PASSWORD_WINDOW_SECONDS,
+          );
+
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select({ passwordHash: users.passwordHash })
+              .from(users)
+              .where(eq(users.id, currentUser.id))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          const dbUser = rows[0];
+          const valid =
+            dbUser &&
+            (yield* verifyPassword(
+              payload.currentPassword,
+              dbUser.passwordHash,
+            ));
+          if (!valid)
+            return yield* Effect.fail(
+              new InvalidCredentials({ message: "Incorrect current password" }),
+            );
+
+          const passwordHash = yield* hashPassword(payload.newPassword);
+
+          // Revoking every refresh token and bumping token_version in the
+          // same transaction as the password update mirrors `logout`'s
+          // `allSessions` option: every other outstanding session (access and
+          // refresh tokens alike) stops working immediately.
+          const updated = yield* Effect.tryPromise(() =>
+            db.transaction(async (tx) => {
+              await tx
+                .delete(refreshTokens)
+                .where(eq(refreshTokens.userId, currentUser.id));
+              const result = await tx
+                .update(users)
+                .set({
+                  passwordHash,
+                  tokenVersion: sql`${users.tokenVersion} + 1`,
+                })
+                .where(eq(users.id, currentUser.id))
+                .returning({
+                  id: users.id,
+                  username: users.username,
+                  role: users.role,
+                  tokenVersion: users.tokenVersion,
+                });
+              return result[0];
+            }),
+          ).pipe(Effect.orDie);
+          if (!updated)
+            return yield* Effect.die(new Error("UPDATE returned no rows"));
+
+          // Reissue a fresh pair for this session — otherwise the caller
+          // would be logged out by the very request that changed their
+          // password, since the token_version bump above also invalidates
+          // the access token used to authenticate this call.
+          const tokenUser = {
+            id: updated.id,
+            username: updated.username,
+            role: updated.role,
+            tokenVersion: updated.tokenVersion,
+          };
+          const accessToken = yield* jwt.signAccessToken(tokenUser);
+          const refreshToken = yield* issueRefreshToken(db, jwt, tokenUser);
+          return { accessToken, refreshToken };
         }),
       ),
 );

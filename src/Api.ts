@@ -82,6 +82,11 @@ export const LogoutBody = Schema.Struct({
   allSessions: Schema.optional(Schema.Boolean),
 }).annotations({ identifier: "LogoutBody" });
 
+export const ChangePasswordBody = Schema.Struct({
+  currentPassword: Password,
+  newPassword: Password,
+}).annotations({ identifier: "ChangePasswordBody" });
+
 export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
   message: Schema.String,
 }) {}
@@ -405,6 +410,20 @@ const UsersGroup = HttpApiGroup.make("users")
     HttpApiEndpoint.post("logout", "/users/logout")
       .setPayload(LogoutBody)
       .addSuccess(Schema.Void),
+  )
+  .add(
+    // Changes the current user's own password after verifying the current
+    // one. Bumps token_version so every other outstanding token (access +
+    // refresh, all sessions/devices) is revoked immediately — mirroring
+    // `logout`'s `allSessions` option — while reissuing a fresh access +
+    // refresh pair for the session making this request, so it isn't logged
+    // out by its own password change.
+    HttpApiEndpoint.post("changePassword", "/users/me/password")
+      .setPayload(ChangePasswordBody)
+      .addSuccess(RefreshResponse)
+      .addError(InvalidCredentials, { status: 401 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
   );
 
 const PostsGroup = HttpApiGroup.make("posts")
