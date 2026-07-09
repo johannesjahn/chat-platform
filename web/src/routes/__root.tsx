@@ -50,33 +50,34 @@ function Nav() {
   const unreadCount = useTotalUnreadCount(!!session);
 
   return (
-    <nav className="sticky top-0 z-20 flex items-center gap-4 border-b border-border bg-card/70 px-5 py-3 backdrop-blur">
-      <Link
-        to="/"
-        className="group relative flex items-center gap-2 font-semibold tracking-tight text-foreground"
-      >
-        <MessagesSquare className="size-5 text-primary transition-transform duration-300 ease-out group-hover:scale-105 group-hover:rotate-3" />
-        <GradientText>Chat Platform</GradientText>
-        <span className="pointer-events-none absolute -bottom-1 left-7 h-px w-0 bg-primary transition-all duration-300 ease-out group-hover:w-[calc(100%-1.75rem)]" />
-      </Link>
-      <Button asChild variant="ghost" size="sm" className="relative">
-        <Link to="/chats">
-          <MessagesSquare className="size-4" />
-          Chats
-          {unreadCount > 0 && (
-            <span className="absolute -right-1.5 -top-1.5 flex size-4.5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:duration-300">
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </span>
-          )}
+    <nav className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-card/70 px-4 py-3 backdrop-blur sm:px-5">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+        <Link
+          to="/"
+          className="group relative flex items-center gap-2 font-semibold tracking-tight text-foreground"
+        >
+          <MessagesSquare className="size-5 text-primary transition-transform duration-300 ease-out group-hover:scale-105 group-hover:rotate-3" />
+          <GradientText>Chat Platform</GradientText>
+          <span className="pointer-events-none absolute -bottom-1 left-7 h-px w-0 bg-primary transition-all duration-300 ease-out group-hover:w-[calc(100%-1.75rem)]" />
         </Link>
-      </Button>
-      <Button asChild variant="ghost" size="sm">
-        <Link to="/users">
-          <Users className="size-4" />
-          Users
-        </Link>
-      </Button>
-      <span className="flex-1" />
+        <Button asChild variant="ghost" size="sm" className="relative">
+          <Link to="/chats">
+            <MessagesSquare className="size-4" />
+            Chats
+            {unreadCount > 0 && (
+              <span className="absolute -right-1.5 -top-1.5 flex size-4.5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:duration-300">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
+          </Link>
+        </Button>
+        <Button asChild variant="ghost" size="sm">
+          <Link to="/users">
+            <Users className="size-4" />
+            Users
+          </Link>
+        </Button>
+      </div>
       {session ? (
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground">
