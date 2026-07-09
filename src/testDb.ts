@@ -15,11 +15,13 @@ const createTestDb = async () => {
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 
 // Booting a fresh PGlite instance and replaying every migration costs
-// ~600-900ms — see bunfig.toml's raised test timeout. Each test file that
-// calls `makeTestDbAccessor()` gets one instance shared across all of its
-// own tests (paying that cost once per file instead of once per test), with
-// `resetTestDb` (a plain TRUNCATE, ~5ms) restoring a clean slate between
-// tests so they stay as isolated as if each had gotten a brand new
+// ~600-900ms unloaded, more under CI's `--parallel` contention — see the
+// --timeout flag on the `test` script in package.json (bunfig.toml's
+// timeout config doesn't actually work — see the comment there). Each test
+// file that calls `makeTestDbAccessor()` gets one instance shared across all
+// of its own tests (paying that cost once per file instead of once per
+// test), with `resetTestDb` (a plain TRUNCATE, ~5ms) restoring a clean slate
+// between tests so they stay as isolated as if each had gotten a brand new
 // database.
 //
 // This is deliberately scoped *per file*, not shared process-wide across
