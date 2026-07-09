@@ -46,6 +46,7 @@ const ServerLive = Layer.mergeAll(ApiLive, RealtimeSocketRouteLive).pipe(
   Layer.provide(InMemoryPubSubLive),
   Layer.provide(InMemoryPresenceStoreLive),
   Layer.provide(JwtLive),
+  Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(InMemoryWsTicketLive),
 );
 
@@ -109,6 +110,25 @@ test("GET /ws with an unknown ticket is rejected", async () => {
         "http://localhost/ws?ticket=not-a-real-ticket",
       );
       expect(response.status).toBe(401);
+    }),
+  );
+});
+
+test("GET /ws handshake is rate-limited per IP after repeated attempts", async () => {
+  // WS_HANDSHAKE_MAX_ATTEMPTS_PER_IP is 30 (RealtimeSocket.ts) — the test
+  // harness has no real socket, so every call in this test shares one
+  // "unknown" IP bucket. No ticket is needed: the rate limit is enforced
+  // before the ticket is even checked, same as the Origin check above.
+  await run(
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient;
+      for (let i = 0; i < 30; i++) {
+        const response = yield* client.get("http://localhost/ws");
+        expect(response.status).toBe(401);
+      }
+      const response = yield* client.get("http://localhost/ws");
+      expect(response.status).toBe(429);
+      expect(response.headers["retry-after"]).toBeDefined();
     }),
   );
 });

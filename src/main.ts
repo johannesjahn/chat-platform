@@ -56,6 +56,7 @@ const ServerLive = Layer.mergeAll(
   Layer.provide(PubSubLive),
   Layer.provide(PresenceStoreLive),
   Layer.provide(JwtLive),
+  Layer.provide(RateLimiterLive),
   Layer.provide(WsTicketLive),
   Layer.provide(DbLive),
   Layer.provide(
