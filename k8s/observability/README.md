@@ -101,13 +101,18 @@ about), so it lives wherever you already manage ArgoCD itself (e.g. the
 [Christian Huth's writeup](https://christianhuth.de/deploying-helm-charts-using-argocd-and-helmfile/):
 
 1. Add a `helmfile` sidecar + its plugin config to the `argocd-repo-server`
-   (as `argo-cd` chart values, if that's how ArgoCD is installed):
+   (as `argo-cd` chart values, if that's how ArgoCD is installed). **Pin a
+   current `helmfile` image tag** — `victoria-metrics-k8s-stack` requires
+   Helm ≥3.14.0, and older/pre-v1 `helmfile` image tags bundle an older Helm
+   that doesn't meet that, failing `helmfile template` inside the sidecar
+   with `This chart requires helm version 3.14.0 or higher`. Tags `v1.5.4`
+   and newer bundle Helm v4.2.x, which satisfies it:
 
    ```yaml
    repoServer:
      extraContainers:
        - name: helmfile
-         image: ghcr.io/helmfile/helmfile:v0.157.0
+         image: ghcr.io/helmfile/helmfile:v1.7.0
          command: ["/var/run/argocd/argocd-cmp-server"]
          env:
            - name: HELM_CACHE_HOME
