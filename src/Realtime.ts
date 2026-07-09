@@ -3,10 +3,16 @@ import { PresenceStore } from "./Presence.ts";
 import { PubSub } from "./PubSub.ts";
 
 // Pushed to every participant of a chat whenever something in it changes
-// (new message, read receipt, rename, participants added/removed).
+// (new message, read receipt, rename, participants added/removed). `version`
+// mirrors the chat's `version` column (see db/schema.ts) as of this
+// mutation, letting a client that's tracking the last version it observed
+// for a chat detect deterministically whether it missed an event in between
+// (issue #55) — e.g. a gap wider than one, or a redelivery of a version it's
+// already applied — rather than only being able to refetch blindly.
 export type ChatEvent = {
   readonly type: "chat_updated";
   readonly chatId: number;
+  readonly version: number;
 };
 
 // Pushed to every connected user whenever a post is created, edited, or

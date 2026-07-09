@@ -774,6 +774,79 @@ test("deleteMessage removes the message and its read receipts, and is forbidden 
     }),
   ));
 
+// `version` (see db/schema.ts) is what lets a client detect deterministically
+// that it missed a `chat_updated` event (issue #55) instead of just
+// refetching blind whenever the next one happens to arrive — this pins the
+// exact set of mutations that bump it, and the one case (marking your own
+// message as read is a no-op) that must not.
+test("chat version increments on every participant-visible mutation, and only then", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const carol = yield* registerAndLogin("carol", "pw");
+
+      const created = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Trip planning", participantIds: [bob.user.id] },
+      });
+      expect(created.version).toBe(1);
+
+      const renamed = yield* alice.client.chats.updateChat({
+        path: { id: created.id },
+        payload: { title: "Trip planning v2" },
+      });
+      expect(renamed.version).toBe(2);
+
+      const withCarol = yield* alice.client.chats.addParticipants({
+        path: { id: created.id },
+        payload: { participantIds: [carol.user.id] },
+      });
+      expect(withCarol.version).toBe(3);
+
+      const message = yield* alice.client.chats.createMessage({
+        path: { id: created.id },
+        payload: { contentType: "text", content: "hi" },
+      });
+      expect(
+        (yield* alice.client.chats.getChat({ path: { id: created.id } }))
+          .version,
+      ).toBe(4);
+
+      // Marking your own message as read touches nothing (only messages from
+      // *other* senders count toward the mark-read query) — no event, no
+      // version bump.
+      const noOp = yield* alice.client.chats.markRead({
+        path: { id: created.id },
+        payload: { messageId: message.id },
+      });
+      expect(noOp.version).toBe(4);
+
+      // Bob marking Alice's message as read is a real transition.
+      const afterRead = yield* bob.client.chats.markRead({
+        path: { id: created.id },
+        payload: { messageId: message.id },
+      });
+      expect(afterRead.version).toBe(5);
+
+      yield* alice.client.chats.updateMessage({
+        path: { id: created.id, messageId: message.id },
+        payload: { contentType: "text", content: "hi edited" },
+      });
+      expect(
+        (yield* alice.client.chats.getChat({ path: { id: created.id } }))
+          .version,
+      ).toBe(6);
+
+      yield* alice.client.chats.deleteMessage({
+        path: { id: created.id, messageId: message.id },
+      });
+      expect(
+        (yield* alice.client.chats.getChat({ path: { id: created.id } }))
+          .version,
+      ).toBe(7);
+    }),
+  ));
+
 test("getChat 404s for a missing chat and is forbidden for non-participants", () =>
   run(
     Effect.gen(function* () {

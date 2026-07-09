@@ -478,6 +478,7 @@ export interface components {
             createdBy: number | null;
             createdAt: number;
             updatedAt: number;
+            version: number;
             participants: components["schemas"]["ChatParticipant"][];
             lastMessage: components["schemas"]["Message"] | null;
             unreadCount: number;
@@ -1348,6 +1349,7 @@ export interface operations {
                         createdBy: number | null;
                         createdAt: number;
                         updatedAt: number;
+                        version: number;
                         participants: components["schemas"]["ChatParticipant"][];
                         lastMessage: components["schemas"]["Message"] | null;
                         unreadCount: number;

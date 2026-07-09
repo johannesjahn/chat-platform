@@ -38,10 +38,14 @@ test("notifyUsers delivers only to the listed users, not to everyone connected",
       alice.received.length = 0;
       bob.received.length = 0;
 
-      yield* connections.notifyUsers([1], { type: "chat_updated", chatId: 42 });
+      yield* connections.notifyUsers([1], {
+        type: "chat_updated",
+        chatId: 42,
+        version: 1,
+      });
 
       expect(alice.received).toEqual([
-        JSON.stringify({ type: "chat_updated", chatId: 42 }),
+        JSON.stringify({ type: "chat_updated", chatId: 42, version: 1 }),
       ]);
       expect(bob.received).toEqual([]);
     }),
@@ -59,7 +63,11 @@ test("notifyUsers delivers to every writer registered for a user (multiple tabs)
       tabA.received.length = 0;
       tabB.received.length = 0;
 
-      yield* connections.notifyUsers([1], { type: "chat_updated", chatId: 7 });
+      yield* connections.notifyUsers([1], {
+        type: "chat_updated",
+        chatId: 7,
+        version: 1,
+      });
 
       expect(tabA.received).toHaveLength(1);
       expect(tabB.received).toHaveLength(1);
@@ -78,6 +86,7 @@ test("notifyUsers deduplicates repeated user ids so a writer isn't called twice"
       yield* connections.notifyUsers([1, 1, 1], {
         type: "chat_updated",
         chatId: 1,
+        version: 1,
       });
 
       expect(alice.received).toHaveLength(1);
@@ -94,7 +103,11 @@ test("unregister stops further delivery to that connection", async () => {
       alice.received.length = 0;
 
       unregister();
-      yield* connections.notifyUsers([1], { type: "chat_updated", chatId: 1 });
+      yield* connections.notifyUsers([1], {
+        type: "chat_updated",
+        chatId: 1,
+        version: 1,
+      });
 
       expect(alice.received).toEqual([]);
     }),
@@ -113,7 +126,11 @@ test("unregistering one of a user's two connections leaves the other receiving e
       tabB.received.length = 0;
 
       unregisterA();
-      yield* connections.notifyUsers([1], { type: "chat_updated", chatId: 1 });
+      yield* connections.notifyUsers([1], {
+        type: "chat_updated",
+        chatId: 1,
+        version: 1,
+      });
 
       expect(tabA.received).toEqual([]);
       expect(tabB.received).toHaveLength(1);
@@ -134,6 +151,7 @@ test("a failing writer doesn't stop other writers from being notified", async ()
       yield* connections.notifyUsers([1, 2], {
         type: "chat_updated",
         chatId: 1,
+        version: 1,
       });
 
       expect(alice.received).toHaveLength(1);
@@ -185,6 +203,7 @@ test("notifyUsers is a no-op for a user with no live connection", async () => {
       yield* connections.notifyUsers([1, 2, 3], {
         type: "chat_updated",
         chatId: 1,
+        version: 1,
       });
     }),
   );
@@ -308,7 +327,11 @@ test("different RealtimeConnectionsLive instances don't share state", async () =
   await run(
     Effect.gen(function* () {
       const connections = yield* RealtimeConnections;
-      yield* connections.notifyUsers([1], { type: "chat_updated", chatId: 1 });
+      yield* connections.notifyUsers([1], {
+        type: "chat_updated",
+        chatId: 1,
+        version: 1,
+      });
     }),
   );
 

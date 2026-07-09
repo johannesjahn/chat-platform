@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { API_URL, fetchClient } from "./api";
 import { useSession } from "./auth";
+import { classifyChatVersion, recordChatVersion } from "./chatVersions";
 import {
   chatDetailQueryKey,
   chatMessagesQueryKey,
@@ -12,7 +13,7 @@ import { resetPresence, setUserOnline } from "./presence";
 import { noteTyping } from "./typing";
 
 type RealtimeSocketEvent =
-  | { type: "chat_updated"; chatId: number }
+  | { type: "chat_updated"; chatId: number; version: number }
   | { type: "post_changed"; postId: number }
   | { type: "presence"; userId: number; online: boolean }
   | { type: "typing"; chatId: number; userId: number; username: string };
@@ -96,7 +97,28 @@ export function useRealtimeSocket(enabled: boolean): void {
           return;
         }
         switch (parsed.type) {
-          case "chat_updated":
+          case "chat_updated": {
+            // `version` (see Chat.version, src/db/schema.ts) lets this be
+            // deterministic instead of blindly refetching on every push
+            // (issue #55): a "stale" classification means this event is a
+            // redelivery of something already applied (e.g. after a
+            // Redis/WS reconnect resends what was in flight) and there's
+            // nothing new to fetch; "gap" means at least one update was
+            // missed in between and is logged so it's visible, but the
+            // recovery is the same full refetch either way — there's no
+            // "fetch only the delta" endpoint yet (that's the follow-on
+            // sub-task this one exists to unblock).
+            const classification = classifyChatVersion(
+              parsed.chatId,
+              parsed.version,
+            );
+            if (classification === "stale") break;
+            if (classification === "gap") {
+              console.warn(
+                `Realtime: missed update(s) for chat ${parsed.chatId} (jumped to version ${parsed.version})`,
+              );
+            }
+            recordChatVersion(parsed.chatId, parsed.version);
             void queryClient.invalidateQueries({
               queryKey: chatsListQueryKey,
             });
@@ -107,6 +129,7 @@ export function useRealtimeSocket(enabled: boolean): void {
               queryKey: chatMessagesQueryKey(parsed.chatId),
             });
             break;
+          }
           case "post_changed":
             void queryClient.invalidateQueries({
               queryKey: postsFeedQueryKey,

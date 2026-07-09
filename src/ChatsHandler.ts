@@ -11,6 +11,7 @@ import {
   max,
   ne,
   or,
+  sql,
 } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import {
@@ -64,18 +65,60 @@ const getParticipants = (
       .where(eq(chatParticipants.chatId, chatId)),
   ).pipe(Effect.orDie);
 
+// Increments `chats.version` for every participant-visible mutation other
+// than chat creation (a freshly-created chat's row already carries its
+// initial version, so creation just publishes that as-is — see
+// `createDirectChat`/`createGroupChat`). `createMessage` is the one
+// exception among mutation call sites: it already updates `chats.updatedAt`
+// atomically alongside the message insert (see the `touched` CTE below), so
+// it folds the version bump into that same statement instead of paying for a
+// second UPDATE, and reads the result back with `getChatVersion`.
+const bumpChatVersion = (
+  db: DrizzleDb,
+  chatId: number,
+): Effect.Effect<number> =>
+  Effect.tryPromise(() =>
+    db
+      .update(chats)
+      .set({ version: sql`${chats.version} + 1` })
+      .where(eq(chats.id, chatId))
+      .returning({ version: chats.version }),
+  ).pipe(
+    Effect.orDie,
+    Effect.map((rows) => rows[0]?.version ?? 0),
+  );
+
+const getChatVersion = (db: DrizzleDb, chatId: number): Effect.Effect<number> =>
+  Effect.tryPromise(() =>
+    db
+      .select({ version: chats.version })
+      .from(chats)
+      .where(eq(chats.id, chatId))
+      .limit(1),
+  ).pipe(
+    Effect.orDie,
+    Effect.map((rows) => rows[0]?.version ?? 0),
+  );
+
 // Pushes a `chat_updated` event to every current participant of `chatId` so
 // their chat list / open conversation can refetch instead of polling for it.
 // Takes the participant ids rather than re-deriving them from `chatId` —
 // every call site already has a freshly-fetched participant list on hand for
 // building its own response (see `buildChat`), so this avoids a second
-// `getParticipants` round-trip per mutation.
+// `getParticipants` round-trip per mutation. `version` is whatever the
+// caller determined the chat's post-mutation version to be (see
+// `bumpChatVersion`/`getChatVersion`).
 const notifyChatUpdated = (
   connections: Context.Tag.Service<typeof RealtimeConnections>,
   chatId: number,
+  version: number,
   participantUserIds: ReadonlyArray<number>,
 ): Effect.Effect<void> =>
-  connections.notifyUsers(participantUserIds, { type: "chat_updated", chatId });
+  connections.notifyUsers(participantUserIds, {
+    type: "chat_updated",
+    chatId,
+    version,
+  });
 
 const getLastMessage = (
   db: DrizzleDb,
@@ -358,6 +401,7 @@ const buildChat = (
       createdBy: row.createdBy,
       createdAt: row.createdAt.getTime(),
       updatedAt: row.updatedAt.getTime(),
+      version: row.version,
       participants: [...resolvedParticipants],
       lastMessage,
       unreadCount,
@@ -428,6 +472,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 createdBy: chats.createdBy,
                 createdAt: chats.createdAt,
                 updatedAt: chats.updatedAt,
+                version: chats.version,
               })
               .from(chats)
               .innerJoin(
@@ -473,6 +518,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               createdBy: row.createdBy,
               createdAt: row.createdAt.getTime(),
               updatedAt: row.updatedAt.getTime(),
+              version: row.version,
               participants: participantsByChat.get(row.id) ?? [],
               lastMessage: lastMessageByChat.get(row.id) ?? null,
               unreadCount: unreadByChat.get(row.id) ?? 0,
@@ -586,9 +632,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
 
           const participants = yield* getParticipants(db, chatRow.id);
+          // A freshly created chat's row already carries its initial
+          // version — nothing to bump, every participant is seeing it for
+          // the first time.
           yield* notifyChatUpdated(
             connections,
             chatRow.id,
+            chatRow.version,
             participants.map((p) => p.userId),
           );
           return yield* buildChat(db, chatRow, currentUser.id, participants);
@@ -660,6 +710,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           yield* notifyChatUpdated(
             connections,
             chatRow.id,
+            chatRow.version,
             participants.map((p) => p.userId),
           );
           return yield* buildChat(db, chatRow, currentUser.id, participants);
@@ -694,13 +745,20 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const row = updated[0];
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
+          const version = yield* bumpChatVersion(db, id);
           const participants = yield* getParticipants(db, id);
           yield* notifyChatUpdated(
             connections,
             id,
+            version,
             participants.map((p) => p.userId),
           );
-          return yield* buildChat(db, row, currentUser.id, participants);
+          return yield* buildChat(
+            db,
+            { ...row, version },
+            currentUser.id,
+            participants,
+          );
         }),
       )
       .handle("addParticipants", ({ path: { id }, payload }) =>
@@ -784,13 +842,20 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
+          const version = yield* bumpChatVersion(db, id);
           const participants = yield* getParticipants(db, id);
           yield* notifyChatUpdated(
             connections,
             id,
+            version,
             participants.map((p) => p.userId),
           );
-          return yield* buildChat(db, existing, currentUser.id, participants);
+          return yield* buildChat(
+            db,
+            { ...existing, version },
+            currentUser.id,
+            participants,
+          );
         }),
       )
       .handle("listMessages", ({ path: { id }, urlParams }) =>
@@ -893,15 +958,16 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               })
               .returning(),
           );
-          const touched = db
-            .$with("touched")
-            .as(
-              db
-                .update(chats)
-                .set({ updatedAt: now })
-                .where(eq(chats.id, id))
-                .returning({ id: chats.id }),
-            );
+          // Bumps `version` in the same statement as `updatedAt` — one
+          // UPDATE, atomic with the message insert — rather than a separate
+          // `bumpChatVersion` call after (see that helper's comment).
+          const touched = db.$with("touched").as(
+            db
+              .update(chats)
+              .set({ updatedAt: now, version: sql`${chats.version} + 1` })
+              .where(eq(chats.id, id))
+              .returning({ id: chats.id }),
+          );
           const created = yield* Effect.tryPromise(() =>
             db.with(inserted, touched).select().from(inserted),
           ).pipe(Effect.orDie);
@@ -909,10 +975,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
 
+          const version = yield* getChatVersion(db, id);
           const participants = yield* getParticipants(db, id);
           yield* notifyChatUpdated(
             connections,
             id,
+            version,
             participants.map((p) => p.userId),
           );
           return toApiMessage(row, []);
@@ -995,14 +1063,22 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           }
 
           const participants = yield* getParticipants(db, id);
+          let version = chatRow.version;
           if (unreadUpTo.length > 0) {
+            version = yield* bumpChatVersion(db, id);
             yield* notifyChatUpdated(
               connections,
               id,
+              version,
               participants.map((p) => p.userId),
             );
           }
-          return yield* buildChat(db, chatRow, currentUser.id, participants);
+          return yield* buildChat(
+            db,
+            { ...chatRow, version },
+            currentUser.id,
+            participants,
+          );
         }),
       )
       .handle("updateMessage", ({ path: { id, messageId }, payload }) =>
@@ -1034,10 +1110,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             return yield* Effect.die(new Error("UPDATE returned no rows"));
 
           const readers = yield* getReaders(db, messageId);
+          const version = yield* bumpChatVersion(db, id);
           const participants = yield* getParticipants(db, id);
           yield* notifyChatUpdated(
             connections,
             id,
+            version,
             participants.map((p) => p.userId),
           );
           return toApiMessage(row, readers);
@@ -1062,10 +1140,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             db.delete(messages).where(eq(messages.id, messageId)),
           ).pipe(Effect.orDie);
 
+          const version = yield* bumpChatVersion(db, id);
           const participants = yield* getParticipants(db, id);
           yield* notifyChatUpdated(
             connections,
             id,
+            version,
             participants.map((p) => p.userId),
           );
         }),

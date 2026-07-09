@@ -1068,6 +1068,7 @@
                     "createdBy",
                     "createdAt",
                     "updatedAt",
+                    "version",
                     "participants",
                     "lastMessage",
                     "unreadCount"
@@ -1103,6 +1104,9 @@
                       "type": "number"
                     },
                     "updatedAt": {
+                      "type": "number"
+                    },
+                    "version": {
                       "type": "number"
                     },
                     "participants": {
@@ -2423,6 +2427,7 @@
           "createdBy",
           "createdAt",
           "updatedAt",
+          "version",
           "participants",
           "lastMessage",
           "unreadCount"
@@ -2458,6 +2463,9 @@
             "type": "number"
           },
           "updatedAt": {
+            "type": "number"
+          },
+          "version": {
             "type": "number"
           },
           "participants": {
