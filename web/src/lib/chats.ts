@@ -52,7 +52,7 @@ export function useChatsList(enabled: boolean) {
         signal,
       });
       if (error) throw error;
-      for (const chat of data) recordChatVersion(chat.id, chat.version);
+      for (const chat of data.chats) recordChatVersion(chat.id, chat.version);
       return data;
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
