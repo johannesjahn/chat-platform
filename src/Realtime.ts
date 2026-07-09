@@ -108,10 +108,25 @@ export const RealtimeConnectionsLive = Layer.effect(
     const presenceStore = yield* PresenceStore;
     const byUser = new Map<number, Set<Writer>>();
 
-    const writeAll = (writers: Iterable<Writer>, payload: string) =>
+    // A dead/broken socket write must never fail the mutation that triggered
+    // it (same reasoning as notifyUsers/broadcastAll's Effect.ignore below),
+    // but silently dropping it left no trace a connection had gone bad.
+    // Logging here at least leaves a trail.
+    const logDroppedWrite = (userId: number, error: unknown) =>
+      Effect.logWarning(
+        "RealtimeConnections: dropped delivery, connection write failed",
+      ).pipe(Effect.annotateLogs({ userId, error: String(error) }));
+
+    const writeAll = (
+      writers: Iterable<Writer>,
+      payload: string,
+      userId: number,
+    ) =>
       Effect.gen(function* () {
         for (const write of writers) {
-          yield* write(payload).pipe(Effect.ignore);
+          yield* write(payload).pipe(
+            Effect.catchAll((error) => logDroppedWrite(userId, error)),
+          );
         }
       });
 
@@ -121,8 +136,8 @@ export const RealtimeConnectionsLive = Layer.effect(
         const payload = JSON.stringify(envelope.event);
 
         if (envelope.scope === "all") {
-          for (const writers of byUser.values()) {
-            yield* writeAll(writers, payload);
+          for (const [userId, writers] of byUser) {
+            yield* writeAll(writers, payload, userId);
           }
           return;
         }
@@ -133,7 +148,7 @@ export const RealtimeConnectionsLive = Layer.effect(
           seen.add(userId);
           const writers = byUser.get(userId);
           if (!writers) continue;
-          yield* writeAll(writers, payload);
+          yield* writeAll(writers, payload, userId);
         }
       });
 
@@ -141,30 +156,35 @@ export const RealtimeConnectionsLive = Layer.effect(
 
     // Best-effort, like the local delivery it replaces: a mutation
     // succeeding shouldn't fail just because the realtime push couldn't be
-    // published (e.g. Redis briefly unreachable).
+    // published (e.g. Redis briefly unreachable). Logged rather than plain
+    // `Effect.ignore`d so a publish failure — which drops the event for
+    // every instance, not just this one — leaves a trail.
+    const logPublishFailure = (envelope: Envelope, error: unknown) =>
+      Effect.logWarning(
+        "RealtimeConnections: failed to publish realtime event, delivery dropped",
+      ).pipe(Effect.annotateLogs({ envelope, error: String(error) }));
+
     const notifyUsers: Context.Tag.Service<
       typeof RealtimeConnections
-    >["notifyUsers"] = (userIds, event) =>
-      pubsub
-        .publish(
-          CHANNEL,
-          JSON.stringify({
-            scope: "users",
-            userIds: [...userIds],
-            event,
-          } satisfies Envelope),
-        )
-        .pipe(Effect.ignore);
+    >["notifyUsers"] = (userIds, event) => {
+      const envelope = {
+        scope: "users",
+        userIds: [...userIds],
+        event,
+      } satisfies Envelope;
+      return pubsub
+        .publish(CHANNEL, JSON.stringify(envelope))
+        .pipe(Effect.catchAll((error) => logPublishFailure(envelope, error)));
+    };
 
     const broadcastAll: Context.Tag.Service<
       typeof RealtimeConnections
-    >["broadcastAll"] = (event) =>
-      pubsub
-        .publish(
-          CHANNEL,
-          JSON.stringify({ scope: "all", event } satisfies Envelope),
-        )
-        .pipe(Effect.ignore);
+    >["broadcastAll"] = (event) => {
+      const envelope = { scope: "all", event } satisfies Envelope;
+      return pubsub
+        .publish(CHANNEL, JSON.stringify(envelope))
+        .pipe(Effect.catchAll((error) => logPublishFailure(envelope, error)));
+    };
 
     const register: Context.Tag.Service<
       typeof RealtimeConnections
