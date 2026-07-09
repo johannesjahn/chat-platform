@@ -14,6 +14,8 @@ import {
 import { ChatComposer } from "@/components/ChatComposer";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { MessageBubble } from "@/components/MessageBubble";
+import { PresenceDot } from "@/components/PresenceDot";
+import { TypingDots } from "@/components/reactbits/TypingDots";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -30,6 +32,8 @@ import {
   useChatMessages,
 } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
+import { useIsOnline } from "@/lib/presence";
+import { useTypingUsers } from "@/lib/typing";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { cn } from "@/lib/utils";
 
@@ -60,6 +64,19 @@ function ChatView({ id }: { id: string }) {
     isLoading: messagesLoading,
     loadEarlier,
   } = useChatMessages(chatId, !!session);
+
+  // For a direct chat, "online" is a property of the one other participant;
+  // group chats don't show a single presence dot. Both hooks must run
+  // unconditionally (before the loading/error early returns below), so they
+  // tolerate `chat`/`session` still being undefined.
+  const otherParticipantId =
+    chat?.type === "direct"
+      ? chat.participants.find((p) => p.userId !== session?.user.id)?.userId
+      : undefined;
+  const otherParticipantOnline = useIsOnline(otherParticipantId);
+  const typingUsers = useTypingUsers(chatId).filter(
+    (t) => t.userId !== session?.user.id,
+  );
 
   const sendMessage = $api.useMutation("post", "/chats/{id}/messages");
   const markRead = $api.useMutation("post", "/chats/{id}/read");
@@ -317,18 +334,26 @@ function ChatView({ id }: { id: string }) {
             </Link>
           </Button>
 
-          <div
-            className={cn(
-              "flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
-              chat.type === "group"
-                ? "bg-accent text-accent-foreground"
-                : "bg-primary/15 text-primary",
-            )}
-          >
-            {chat.type === "group" ? (
-              <Users className="size-4" />
-            ) : (
-              name.replace("@", "").slice(0, 1).toUpperCase()
+          <div className="relative shrink-0">
+            <div
+              className={cn(
+                "flex size-9 items-center justify-center rounded-full text-sm font-semibold",
+                chat.type === "group"
+                  ? "bg-accent text-accent-foreground"
+                  : "bg-primary/15 text-primary",
+              )}
+            >
+              {chat.type === "group" ? (
+                <Users className="size-4" />
+              ) : (
+                name.replace("@", "").slice(0, 1).toUpperCase()
+              )}
+            </div>
+            {chat.type === "direct" && (
+              <PresenceDot
+                online={otherParticipantOnline}
+                className="absolute -bottom-0.5 -right-0.5"
+              />
             )}
           </div>
 
@@ -372,7 +397,9 @@ function ChatView({ id }: { id: string }) {
             <span className="truncate text-xs text-muted-foreground">
               {chat.type === "group"
                 ? `${chat.participants.length} participant${chat.participants.length === 1 ? "" : "s"}`
-                : "Direct message"}
+                : otherParticipantOnline
+                  ? "Online"
+                  : "Direct message"}
             </span>
           </div>
 
@@ -520,10 +547,24 @@ function ChatView({ id }: { id: string }) {
                 );
               })
             )}
+
+            {typingUsers.length > 0 && (
+              <div className="flex w-full justify-start motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2 motion-safe:duration-300">
+                <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-border bg-card px-3.5 py-2.5 text-muted-foreground shadow-sm">
+                  <TypingDots />
+                  {chat.type === "group" && (
+                    <span className="text-xs">
+                      {typingUsers.map((t) => `@${t.username}`).join(", ")}{" "}
+                      {typingUsers.length === 1 ? "is" : "are"} typing…
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
 
-        <ChatComposer onSend={handleSend} />
+        <ChatComposer chatId={chatId} onSend={handleSend} />
       </Card>
     </main>
   );

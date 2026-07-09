@@ -32,6 +32,8 @@ test("notifyUsers delivers only to the listed users, not to everyone connected",
       const bob = recordingWriter();
       yield* connections.register(1, alice.write);
       yield* connections.register(2, bob.write);
+      alice.received.length = 0;
+      bob.received.length = 0;
 
       yield* connections.notifyUsers([1], { type: "chat_updated", chatId: 42 });
 
@@ -51,6 +53,8 @@ test("notifyUsers delivers to every writer registered for a user (multiple tabs)
       const tabB = recordingWriter();
       yield* connections.register(1, tabA.write);
       yield* connections.register(1, tabB.write);
+      tabA.received.length = 0;
+      tabB.received.length = 0;
 
       yield* connections.notifyUsers([1], { type: "chat_updated", chatId: 7 });
 
@@ -66,6 +70,7 @@ test("notifyUsers deduplicates repeated user ids so a writer isn't called twice"
       const connections = yield* RealtimeConnections;
       const alice = recordingWriter();
       yield* connections.register(1, alice.write);
+      alice.received.length = 0;
 
       yield* connections.notifyUsers([1, 1, 1], {
         type: "chat_updated",
@@ -83,6 +88,7 @@ test("unregister stops further delivery to that connection", async () => {
       const connections = yield* RealtimeConnections;
       const alice = recordingWriter();
       const unregister = yield* connections.register(1, alice.write);
+      alice.received.length = 0;
 
       unregister();
       yield* connections.notifyUsers([1], { type: "chat_updated", chatId: 1 });
@@ -100,6 +106,8 @@ test("unregistering one of a user's two connections leaves the other receiving e
       const tabB = recordingWriter();
       const unregisterA = yield* connections.register(1, tabA.write);
       yield* connections.register(1, tabB.write);
+      tabA.received.length = 0;
+      tabB.received.length = 0;
 
       unregisterA();
       yield* connections.notifyUsers([1], { type: "chat_updated", chatId: 1 });
@@ -118,6 +126,7 @@ test("a failing writer doesn't stop other writers from being notified", async ()
       const alice = recordingWriter();
       yield* connections.register(1, broken.write);
       yield* connections.register(2, alice.write);
+      alice.received.length = 0;
 
       yield* connections.notifyUsers([1, 2], {
         type: "chat_updated",
@@ -137,6 +146,8 @@ test("broadcastAll reaches every connected user regardless of chat participation
       const bob = recordingWriter();
       yield* connections.register(1, alice.write);
       yield* connections.register(2, bob.write);
+      alice.received.length = 0;
+      bob.received.length = 0;
 
       yield* connections.broadcastAll({ type: "post_changed", postId: 99 });
 
@@ -153,6 +164,7 @@ test("broadcastAll doesn't reach a user who has since unregistered", async () =>
       const connections = yield* RealtimeConnections;
       const alice = recordingWriter();
       const unregister = yield* connections.register(1, alice.write);
+      alice.received.length = 0;
       unregister();
 
       yield* connections.broadcastAll({ type: "post_changed", postId: 1 });
@@ -175,6 +187,105 @@ test("notifyUsers is a no-op for a user with no live connection", async () => {
   );
 });
 
+test("register broadcasts a presence online event the first time a user connects", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const alice = recordingWriter();
+      const bob = recordingWriter();
+      yield* connections.register(1, alice.write);
+      yield* connections.register(2, bob.write);
+
+      expect(alice.received).toEqual([
+        JSON.stringify({ type: "presence", userId: 1, online: true }),
+        JSON.stringify({ type: "presence", userId: 2, online: true }),
+      ]);
+      // Bob wasn't connected yet when Alice's own online transition
+      // broadcast, so he only sees his own.
+      expect(bob.received).toEqual([
+        JSON.stringify({ type: "presence", userId: 2, online: true }),
+      ]);
+    }),
+  );
+});
+
+test("a user's second simultaneous connection doesn't re-broadcast presence", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const tabA = recordingWriter();
+      const tabB = recordingWriter();
+      yield* connections.register(1, tabA.write);
+      yield* connections.register(1, tabB.write);
+
+      const presenceEvents = tabA.received.filter((m) =>
+        m.includes('"type":"presence"'),
+      );
+      expect(presenceEvents).toHaveLength(1);
+    }),
+  );
+});
+
+test("unregistering a user's last connection broadcasts a presence offline event", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const alice = recordingWriter();
+      const bob = recordingWriter();
+      const unregisterAlice = yield* connections.register(1, alice.write);
+      yield* connections.register(2, bob.write);
+
+      unregisterAlice();
+      // The broadcast fires from a sync callback via `Effect.runFork` (see
+      // Realtime.ts), so give the fiber a tick to actually run.
+      yield* Effect.sleep("10 millis");
+
+      expect(bob.received.at(-1)).toEqual(
+        JSON.stringify({ type: "presence", userId: 1, online: false }),
+      );
+    }),
+  );
+});
+
+test("unregistering one of two connections for the same user doesn't broadcast offline", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const bob = recordingWriter();
+      const tabA = recordingWriter();
+      const tabB = recordingWriter();
+      const unregisterA = yield* connections.register(1, tabA.write);
+      yield* connections.register(1, tabB.write);
+      yield* connections.register(2, bob.write);
+      bob.received.length = 0;
+
+      unregisterA();
+      yield* Effect.sleep("10 millis");
+
+      expect(bob.received).toEqual([]);
+    }),
+  );
+});
+
+test("onlineUserIds reflects users with at least one live connection", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const alice = recordingWriter();
+      const bob = recordingWriter();
+      const unregisterAlice = yield* connections.register(1, alice.write);
+      yield* connections.register(2, bob.write);
+
+      expect(new Set(yield* connections.onlineUserIds)).toEqual(
+        new Set([1, 2]),
+      );
+
+      unregisterAlice();
+      expect(yield* connections.onlineUserIds).toEqual([2]);
+    }),
+  );
+});
+
 test("different RealtimeConnectionsLive instances don't share state", async () => {
   // Regression guard for the sharing this feature depends on: main.ts
   // provides one RealtimeConnectionsLive instance to both the chat/post
@@ -189,6 +300,7 @@ test("different RealtimeConnectionsLive instances don't share state", async () =
       yield* connections.register(1, alice.write);
     }).pipe(Effect.provide(TestRealtimeLive)),
   );
+  alice.received.length = 0;
 
   await run(
     Effect.gen(function* () {

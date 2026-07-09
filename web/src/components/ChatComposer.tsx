@@ -1,30 +1,53 @@
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, useRef, useState } from "react";
 import { ImageIcon, Loader2, SendHorizontal, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { $api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   MAX_MESSAGE_CONTENT_LENGTH,
   type MessageContentType,
 } from "@/lib/chats";
 
+// How often a `typing` push (see `POST /chats/:id/typing`) goes out while
+// the user keeps typing without pausing — comfortably under the client-side
+// TYPING_TTL_MS a viewer expires the indicator after (see lib/typing.ts), so
+// continuous typing keeps refreshing it before it would lapse, without
+// firing a request on every keystroke.
+const TYPING_THROTTLE_MS = 2_500;
+
 type ChatComposerProps = {
+  chatId: number;
   onSend: (values: {
     contentType: MessageContentType;
     content: string;
   }) => Promise<void>;
 };
 
-export function ChatComposer({ onSend }: ChatComposerProps) {
+export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
   const [contentType, setContentType] = useState<MessageContentType>("text");
   const [content, setContent] = useState("");
   const [pending, setPending] = useState(false);
+  const lastTypingSentAtRef = useRef(0);
+  const sendTyping = $api.useMutation("post", "/chats/{id}/typing");
 
   const trimmed = content.trim();
   const overLimit = trimmed.length > MAX_MESSAGE_CONTENT_LENGTH;
   const nearLimit = trimmed.length > MAX_MESSAGE_CONTENT_LENGTH * 0.9;
   const canSend = trimmed.length > 0 && !overLimit && !pending;
+
+  function notifyTyping() {
+    const now = Date.now();
+    if (now - lastTypingSentAtRef.current < TYPING_THROTTLE_MS) return;
+    lastTypingSentAtRef.current = now;
+    sendTyping.mutate({ params: { path: { id: String(chatId) } } });
+  }
+
+  function handleContentChange(value: string) {
+    setContent(value);
+    if (value.trim().length > 0) notifyTyping();
+  }
 
   async function submit() {
     if (!canSend) return;
@@ -33,6 +56,7 @@ export function ChatComposer({ onSend }: ChatComposerProps) {
       await onSend({ contentType, content: trimmed });
       setContent("");
       setContentType("text");
+      lastTypingSentAtRef.current = 0;
     } finally {
       setPending(false);
     }
@@ -74,7 +98,7 @@ export function ChatComposer({ onSend }: ChatComposerProps) {
         {contentType === "text" ? (
           <Textarea
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(e) => handleContentChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Write a message… (Enter to send, Shift+Enter for a new line)"
             rows={1}

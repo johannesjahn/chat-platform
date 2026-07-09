@@ -135,9 +135,45 @@
   animation: gradient-shift 6s ease infinite;
 }
 
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* Staggered per-dot via an inline `animation-delay` (see TypingDots) gives
+   the classic three-dot chat "wave" used for typing indicators. */
+@utility animate-typing-bounce {
+  animation: typing-bounce 1.1s ease-in-out infinite;
+}
+
+@keyframes presence-ping {
+  75%,
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+/* A softer, slower ping than Tailwind's built-in `animate-ping` — tuned so
+   the expanding ring behind an online dot (see PresenceDot) reads as an
+   ambient "alive" pulse rather than a notification alert. */
+@utility animate-presence-ping {
+  animation: presence-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skeleton-shimmer,
-  .animate-gradient-shift {
+  .animate-gradient-shift,
+  .animate-typing-bounce,
+  .animate-presence-ping {
     animation: none;
   }
 }

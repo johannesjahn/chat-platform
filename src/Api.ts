@@ -516,6 +516,20 @@ const ChatsGroup = HttpApiGroup.make("chats")
       .middleware(Authentication),
   )
   .add(
+    // Fire-and-forget: pushes a `typing` realtime event (see Realtime.ts) to
+    // every other participant of the chat. No request body and no
+    // meaningful response — the server tracks no "is typing" state at all,
+    // each call is just a transient nudge, and the client-side indicator
+    // times itself out (see web/src/lib/typing.ts) rather than waiting for a
+    // corresponding "stopped typing" signal.
+    HttpApiEndpoint.post("sendTyping", "/chats/:id/typing")
+      .setPath(ChatIdPath)
+      .addSuccess(Schema.Void)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
     // Marks every unread message up to and including `messageId` as read by
     // the current user; returns the chat with its recalculated unread count.
     HttpApiEndpoint.post("markRead", "/chats/:id/read")

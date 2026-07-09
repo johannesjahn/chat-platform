@@ -57,6 +57,20 @@ const wsHandler = Effect.gen(function* () {
   const write = yield* socket.writer;
   const unregister = yield* connections.register(userId, write);
 
+  // `register` only pushes a `presence` event for a state *transition* (see
+  // Realtime.ts), so a client connecting after others are already online
+  // would otherwise never learn about them. This hands the new connection an
+  // explicit snapshot of who's online right now, targeted at just this
+  // socket rather than broadcast — every other connected client already
+  // knows this from the `online: true` transition `register` just triggered
+  // above.
+  const online = yield* connections.onlineUserIds;
+  for (const onlineUserId of online) {
+    yield* write(
+      JSON.stringify({ type: "presence", userId: onlineUserId, online: true }),
+    ).pipe(Effect.ignore);
+  }
+
   // Blocks for the lifetime of the connection — the frontend never sends
   // anything meaningful (a periodic ping to defeat idle timeouts, at most),
   // so incoming messages are ignored.

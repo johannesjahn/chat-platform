@@ -16,10 +16,37 @@ export type PostEvent = {
   readonly postId: number;
 };
 
-// Both event payloads deliberately carry no data beyond an id — clients
-// refetch the affected queries over the existing REST endpoints rather than
-// trusting a duplicated copy of the state pushed over the socket.
-export type RealtimeEvent = ChatEvent | PostEvent;
+// Pushed whenever a user's live-connection count transitions between zero and
+// non-zero (see `register` below) — i.e. on their *first* connection (a tab
+// opened, a page refreshed) or their *last* disconnection (every tab closed),
+// not on every individual socket. Broadcast to everyone rather than scoped to
+// a chat's participants: presence is a property of the user, not of any one
+// conversation, so this mirrors `broadcastAll`'s reasoning for `PostEvent`.
+export type PresenceEvent = {
+  readonly type: "presence";
+  readonly userId: number;
+  readonly online: boolean;
+};
+
+// Pushed to a chat's other participants while `userId` is composing a
+// message in it (see `POST /chats/:id/typing` in ChatsHandler.ts). Purely
+// transient — the server keeps no "is typing" state at all, so there's no
+// corresponding "stopped typing" event; a client that stops receiving fresh
+// pushes for a given chat/user pair is expected to expire the indicator
+// client-side after a short timeout (see web/src/lib/typing.ts).
+export type TypingEvent = {
+  readonly type: "typing";
+  readonly chatId: number;
+  readonly userId: number;
+  readonly username: string;
+};
+
+// Event payloads mostly carry no data beyond an id — clients refetch the
+// affected queries over the existing REST endpoints rather than trusting a
+// duplicated copy of the state pushed over the socket. Presence/typing are
+// the exception: there's no REST resource to refetch for "is this user
+// currently online/typing", so those carry the full, self-contained state.
+export type RealtimeEvent = ChatEvent | PostEvent | PresenceEvent | TypingEvent;
 
 // A connected client's outbound channel — bound to one open `/ws` socket.
 type Writer = (chunk: string) => Effect.Effect<void, unknown>;
@@ -41,6 +68,18 @@ export class RealtimeConnections extends Context.Tag("RealtimeConnections")<
       event: RealtimeEvent,
     ) => Effect.Effect<void>;
     readonly broadcastAll: (event: RealtimeEvent) => Effect.Effect<void>;
+    // Ids of users with a live `/ws` connection registered on *this*
+    // instance right now. Used to hand a freshly-connecting client its
+    // initial presence snapshot (see RealtimeSocket.ts) — after that, live
+    // transitions arrive as `PresenceEvent`s pushed through the usual
+    // broadcast path. Note this is local-process state, same as `byUser`
+    // below (see its comment): under horizontal scaling (`REDIS_URL` set,
+    // multiple instances), a client's initial snapshot only reflects users
+    // connected to the same instance it happened to land on, not the full
+    // cross-instance picture — a gap `PresenceEvent`s (which do fan out via
+    // PubSub) don't close by themselves, since they only fire on that
+    // user's *own* connect/disconnect transition, not retroactively.
+    readonly onlineUserIds: Effect.Effect<ReadonlyArray<number>>;
   }
 >() {}
 
@@ -99,21 +138,6 @@ export const RealtimeConnectionsLive = Layer.effect(
 
     yield* pubsub.subscribe(CHANNEL, deliverLocally);
 
-    const register: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["register"] = (userId, write) =>
-      Effect.sync(() => {
-        const set = byUser.get(userId) ?? new Set();
-        set.add(write);
-        byUser.set(userId, set);
-        return () => {
-          const current = byUser.get(userId);
-          if (!current) return;
-          current.delete(write);
-          if (current.size === 0) byUser.delete(userId);
-        };
-      });
-
     // Best-effort, like the local delivery it replaces: a mutation
     // succeeding shouldn't fail just because the realtime push couldn't be
     // published (e.g. Redis briefly unreachable).
@@ -141,6 +165,42 @@ export const RealtimeConnectionsLive = Layer.effect(
         )
         .pipe(Effect.ignore);
 
-    return { register, notifyUsers, broadcastAll };
+    const register: Context.Tag.Service<
+      typeof RealtimeConnections
+    >["register"] = (userId, write) =>
+      Effect.gen(function* () {
+        const set = byUser.get(userId) ?? new Set();
+        const wasOffline = set.size === 0;
+        set.add(write);
+        byUser.set(userId, set);
+        // Only the transition into "has at least one connection" is a
+        // presence-worthy event — a second tab opening shouldn't re-announce
+        // a user who's already online.
+        if (wasOffline) {
+          yield* broadcastAll({ type: "presence", userId, online: true });
+        }
+        return () => {
+          const current = byUser.get(userId);
+          if (!current) return;
+          current.delete(write);
+          if (current.size === 0) {
+            byUser.delete(userId);
+            // Called from a plain sync cleanup callback
+            // (`Effect.ensuring(Effect.sync(unregister))` in
+            // RealtimeSocket.ts), which can't itself `yield*` — same
+            // `runFork` idiom PubSub.ts's `subscribe` uses to bridge an
+            // Effect into a non-Effect callback.
+            Effect.runFork(
+              broadcastAll({ type: "presence", userId, online: false }),
+            );
+          }
+        };
+      });
+
+    const onlineUserIds: Context.Tag.Service<
+      typeof RealtimeConnections
+    >["onlineUserIds"] = Effect.sync(() => [...byUser.keys()]);
+
+    return { register, notifyUsers, broadcastAll, onlineUserIds };
   }),
 );
