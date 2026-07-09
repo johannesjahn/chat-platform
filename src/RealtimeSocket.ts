@@ -3,10 +3,27 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "@effect/platform";
-import { Context, Effect, type Scope } from "effect";
+import { Context, Effect, Option, type Scope } from "effect";
+import { RateLimiter } from "./RateLimiter.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { allowedOrigins } from "./WebOrigin.ts";
 import { WsTicket } from "./WsTicket.ts";
+
+// Caps handshake attempts per source IP so a connection flood can't exhaust
+// server resources upgrading sockets (see issue #41, sub-task of #25). A
+// window this short is fine for legitimate reconnects (one ticket mint + one
+// upgrade per connection) while still capping a flood tightly.
+const WS_HANDSHAKE_MAX_ATTEMPTS_PER_IP = 30;
+const WS_HANDSHAKE_WINDOW_SECONDS = 60;
+
+// HttpServerRequest.remoteAddress is populated from the real TCP connection
+// by BunHttpServer in production; it's unset in the in-process test harness
+// (see RealtimeSocket.test.ts), where every request falls back to the same
+// bucket (mirrors clientIp in UsersHandler.ts).
+const clientIp = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  return Option.getOrElse(request.remoteAddress, () => "unknown");
+});
 
 // A browser `WebSocket` can't set an `Authorization` header on the handshake
 // request, so authentication travels as a query param instead — a
@@ -36,9 +53,23 @@ const wsHandler = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const wsTicket = yield* WsTicket;
   const connections = yield* RealtimeConnections;
+  const limiter = yield* RateLimiter;
 
   if (!isAllowedOrigin(request.headers["origin"])) {
     return HttpServerResponse.text("Origin not allowed", { status: 403 });
+  }
+
+  const ip = yield* clientIp;
+  const rateLimit = yield* limiter.consume(
+    `ws:handshake:ip:${ip}`,
+    WS_HANDSHAKE_MAX_ATTEMPTS_PER_IP,
+    WS_HANDSHAKE_WINDOW_SECONDS,
+  );
+  if (!rateLimit.allowed) {
+    return HttpServerResponse.text("Too many connection attempts", {
+      status: 429,
+      headers: { "retry-after": String(rateLimit.retryAfterSeconds) },
+    });
   }
 
   const ticket = getTicket(request.originalUrl);
@@ -96,14 +127,17 @@ const wsHandler = Effect.gen(function* () {
 // `Scope`, …) — it can't itself carry extra services like `WsTicket` or
 // `RealtimeConnections` through to the caller. So, the same way
 // `HttpApiBuilder.group` wires up endpoint handlers, this captures the
-// ambient context (which does include `WsTicket`/`RealtimeConnections`,
-// supplied by whoever builds this layer — see main.ts) and merges it back
-// into the handler via `mapInputContext`, turning "needs WsTicket |
-// RealtimeConnections" into "needs nothing more", while still leaving those
-// two as this Layer's own unresolved requirements for main.ts to provide.
+// ambient context (which does include `WsTicket`/`RealtimeConnections`/
+// `RateLimiter`, supplied by whoever builds this layer — see main.ts) and
+// merges it back into the handler via `mapInputContext`, turning "needs
+// WsTicket | RealtimeConnections | RateLimiter" into "needs nothing more",
+// while still leaving those three as this Layer's own unresolved
+// requirements for main.ts to provide.
 export const RealtimeSocketRouteLive = HttpApiBuilder.Router.use((router) =>
   Effect.gen(function* () {
-    const context = yield* Effect.context<WsTicket | RealtimeConnections>();
+    const context = yield* Effect.context<
+      WsTicket | RealtimeConnections | RateLimiter
+    >();
     yield* router.get(
       "/ws",
       wsHandler.pipe(
