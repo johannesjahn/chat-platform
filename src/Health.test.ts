@@ -9,6 +9,7 @@ import { Db, type DrizzleDb } from "./Db.ts";
 import { HealthRouteLive, ReadyRouteLive } from "./Health.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
+import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive, PubSub } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
@@ -74,6 +75,7 @@ const run = async <A, E>(
   ).pipe(
     Layer.provide(RealtimeConnectionsLive),
     Layer.provide(pubSubLive),
+    Layer.provide(InMemoryPresenceStoreLive),
     Layer.provide(dbLive),
   );
 

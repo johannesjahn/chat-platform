@@ -1,13 +1,16 @@
 import { expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
+import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
 import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
 
 // RealtimeConnectionsLive now delivers through PubSub (see Realtime.ts) — the
 // in-memory implementation is the fully correct single-process one, not a
-// stand-in, so these tests stay exactly as fast/synchronous as before.
+// stand-in, so these tests stay exactly as fast/synchronous as before. Same
+// reasoning for InMemoryPresenceStoreLive (see Presence.ts).
 const TestRealtimeLive = RealtimeConnectionsLive.pipe(
   Layer.provide(InMemoryPubSubLive),
+  Layer.provide(InMemoryPresenceStoreLive),
 );
 
 // A writer that just records every chunk it was asked to send, standing in

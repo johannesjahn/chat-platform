@@ -1,4 +1,5 @@
 import { Context, Effect, Layer } from "effect";
+import { PresenceStore } from "./Presence.ts";
 import { PubSub } from "./PubSub.ts";
 
 // Pushed to every participant of a chat whenever something in it changes
@@ -68,17 +69,12 @@ export class RealtimeConnections extends Context.Tag("RealtimeConnections")<
       event: RealtimeEvent,
     ) => Effect.Effect<void>;
     readonly broadcastAll: (event: RealtimeEvent) => Effect.Effect<void>;
-    // Ids of users with a live `/ws` connection registered on *this*
-    // instance right now. Used to hand a freshly-connecting client its
-    // initial presence snapshot (see RealtimeSocket.ts) — after that, live
-    // transitions arrive as `PresenceEvent`s pushed through the usual
-    // broadcast path. Note this is local-process state, same as `byUser`
-    // below (see its comment): under horizontal scaling (`REDIS_URL` set,
-    // multiple instances), a client's initial snapshot only reflects users
-    // connected to the same instance it happened to land on, not the full
-    // cross-instance picture — a gap `PresenceEvent`s (which do fan out via
-    // PubSub) don't close by themselves, since they only fire on that
-    // user's *own* connect/disconnect transition, not retroactively.
+    // Ids of every user with a live `/ws` connection *anywhere* right now
+    // (see PresenceStore, which is what actually answers this — correctly
+    // cross-instance when Redis-backed). Used to hand a freshly-connecting
+    // client its initial presence snapshot (see RealtimeSocket.ts) — after
+    // that, live transitions arrive as `PresenceEvent`s pushed through the
+    // usual broadcast path.
     readonly onlineUserIds: Effect.Effect<ReadonlyArray<number>>;
   }
 >() {}
@@ -97,14 +93,19 @@ type Envelope =
   | { readonly scope: "all"; readonly event: RealtimeEvent };
 
 // Registration (`byUser`) stays local to this process — a `/ws` connection
-// only ever lives on the instance that accepted it — but delivery goes
-// through PubSub (see PubSub.ts) so that a mutation handled by *any*
-// instance reaches participants connected to *any other* instance too, not
-// just the one that happened to process the mutation.
+// only ever lives on the instance that accepted it, and `byUser` exists only
+// to know which local writers to call when a message needs delivering here —
+// but delivery goes through PubSub (see PubSub.ts) so that a mutation
+// handled by *any* instance reaches participants connected to *any other*
+// instance too, not just the one that happened to process the mutation.
+// Whether a *user* (as opposed to one specific connection) is online is a
+// separate question, answered by PresenceStore (see Presence.ts) rather than
+// by the size of this instance's own local `byUser` entry.
 export const RealtimeConnectionsLive = Layer.effect(
   RealtimeConnections,
   Effect.gen(function* () {
     const pubsub = yield* PubSub;
+    const presenceStore = yield* PresenceStore;
     const byUser = new Map<number, Set<Writer>>();
 
     const writeAll = (writers: Iterable<Writer>, payload: string) =>
@@ -170,36 +171,48 @@ export const RealtimeConnectionsLive = Layer.effect(
     >["register"] = (userId, write) =>
       Effect.gen(function* () {
         const set = byUser.get(userId) ?? new Set();
-        const wasOffline = set.size === 0;
         set.add(write);
         byUser.set(userId, set);
-        // Only the transition into "has at least one connection" is a
-        // presence-worthy event — a second tab opening shouldn't re-announce
-        // a user who's already online.
-        if (wasOffline) {
+        // PresenceStore.connect reports whether this was the *global*
+        // transition to online (across every instance), not just whether
+        // this instance's own local set was empty a moment ago — a second
+        // tab landing on a different instance must not re-announce a user
+        // who's already online via the first.
+        const cameOnline = yield* presenceStore.connect(userId);
+        if (cameOnline) {
           yield* broadcastAll({ type: "presence", userId, online: true });
         }
         return () => {
           const current = byUser.get(userId);
-          if (!current) return;
-          current.delete(write);
-          if (current.size === 0) {
-            byUser.delete(userId);
-            // Called from a plain sync cleanup callback
-            // (`Effect.ensuring(Effect.sync(unregister))` in
-            // RealtimeSocket.ts), which can't itself `yield*` — same
-            // `runFork` idiom PubSub.ts's `subscribe` uses to bridge an
-            // Effect into a non-Effect callback.
-            Effect.runFork(
-              broadcastAll({ type: "presence", userId, online: false }),
-            );
+          if (current) {
+            current.delete(write);
+            if (current.size === 0) byUser.delete(userId);
           }
+          // Called from a plain sync cleanup callback
+          // (`Effect.ensuring(Effect.sync(unregister))` in
+          // RealtimeSocket.ts), which can't itself `yield*` — same
+          // `runFork` idiom PubSub.ts's `subscribe` uses to bridge an
+          // Effect into a non-Effect callback. Always tells PresenceStore
+          // about the disconnect (even if this user had other local
+          // connections left on *this* instance) — it's the one that knows
+          // whether any connection, anywhere, is still holding them online.
+          Effect.runFork(
+            presenceStore
+              .disconnect(userId)
+              .pipe(
+                Effect.flatMap((wentOffline) =>
+                  wentOffline
+                    ? broadcastAll({ type: "presence", userId, online: false })
+                    : Effect.void,
+                ),
+              ),
+          );
         };
       });
 
     const onlineUserIds: Context.Tag.Service<
       typeof RealtimeConnections
-    >["onlineUserIds"] = Effect.sync(() => [...byUser.keys()]);
+    >["onlineUserIds"] = presenceStore.onlineUserIds;
 
     return { register, notifyUsers, broadcastAll, onlineUserIds };
   }),
