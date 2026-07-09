@@ -1,0 +1,22 @@
+# Declarative wrapper around the same `victoria-metrics-k8s-stack` install
+# previously run by hand via `helm install`/`helm upgrade` (see README.md) —
+# lets this stack sync the same way as any other Helmfile-managed release,
+# including via ArgoCD's Helmfile Config Management Plugin (see README.md's
+# "Deploying via ArgoCD" section).
+
+repositories:
+  - name: vm
+    url: https://victoriametrics.github.io/helm-charts/
+
+releases:
+  - name: vm-stack
+    namespace: observability
+    createNamespace: true
+    chart: vm/victoria-metrics-k8s-stack
+    # Pinned for reproducible renders (ArgoCD/CI can't tolerate "whatever
+    # `helm repo update` happens to have cached"). Bump deliberately — check
+    # https://github.com/VictoriaMetrics/helm-charts/blob/master/charts/victoria-metrics-k8s-stack/Chart.yaml
+    # for the latest version and changelog first.
+    version: 0.86.0
+    values:
+      - values.yaml
