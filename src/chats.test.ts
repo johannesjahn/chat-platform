@@ -194,18 +194,98 @@ test("listChats only returns chats the current user participates in, newest acti
         payload: { contentType: "text", content: "hi bob" },
       });
 
-      const aliceChats = yield* alice.client.chats.listChats();
-      expect(aliceChats.map((c) => c.id)).toEqual([
+      const aliceChats = yield* alice.client.chats.listChats({
+        urlParams: {},
+      });
+      expect(aliceChats.chats.map((c) => c.id)).toEqual([
         chatWithBob.id,
         chatWithCarol.id,
       ]);
 
-      const bobChats = yield* bob.client.chats.listChats();
-      expect(bobChats.map((c) => c.id)).toEqual([chatWithBob.id]);
+      const bobChats = yield* bob.client.chats.listChats({ urlParams: {} });
+      expect(bobChats.chats.map((c) => c.id)).toEqual([chatWithBob.id]);
 
       const daveResult = yield* registerAndLogin("dave", "pw");
-      const daveChats = yield* daveResult.client.chats.listChats();
-      expect(daveChats).toHaveLength(0);
+      const daveChats = yield* daveResult.client.chats.listChats({
+        urlParams: {},
+      });
+      expect(daveChats.chats).toHaveLength(0);
+    }),
+  ));
+
+test("listChats paginates newest-first with a keyset cursor, without gaps or duplicates", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      // Direct DB inserts (bypassing register, same as
+      // `insertDummyUsers`'s own rationale below) — this test just needs 5
+      // other users to start direct chats with, not accounts that can log
+      // in, and creating 5 more via `register` would trip
+      // `REGISTER_MAX_ATTEMPTS_PER_IP` alongside `alice`'s own registration.
+      const friends = yield* insertDummyUsers(5);
+
+      const created: number[] = [];
+      for (const friend of friends) {
+        const chat = yield* alice.client.chats.createDirectChat({
+          payload: { userId: friend.id },
+        });
+        created.push(chat.id);
+      }
+      // Newest activity sorts first; ties on `updatedAt` (plausible here,
+      // since these are all created back-to-back) are broken by id desc.
+      const expectedOrder = [...created].reverse();
+
+      const firstPage = yield* alice.client.chats.listChats({
+        urlParams: { limit: 2 },
+      });
+      expect(firstPage.chats.map((c) => c.id)).toEqual(
+        expectedOrder.slice(0, 2),
+      );
+      expect(firstPage.limit).toBe(2);
+      expect(firstPage.nextCursor).not.toBeNull();
+
+      const secondPage = yield* alice.client.chats.listChats({
+        urlParams: { limit: 2, cursor: firstPage.nextCursor! },
+      });
+      expect(secondPage.chats.map((c) => c.id)).toEqual(
+        expectedOrder.slice(2, 4),
+      );
+      expect(secondPage.nextCursor).not.toBeNull();
+
+      const thirdPage = yield* alice.client.chats.listChats({
+        urlParams: { limit: 2, cursor: secondPage.nextCursor! },
+      });
+      expect(thirdPage.chats.map((c) => c.id)).toEqual(
+        expectedOrder.slice(4, 5),
+      );
+      expect(thirdPage.nextCursor).toBeNull();
+    }),
+  ));
+
+test("listChats rejects a malformed cursor", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const result = yield* alice.client.chats
+        .listChats({ urlParams: { cursor: "not-a-real-cursor" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+    }),
+  ));
+
+test("listChats rejects a limit above the max", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const result = yield* alice.client.chats
+        .listChats({ urlParams: { limit: 101 } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
     }),
   ));
 
@@ -449,11 +529,15 @@ test("createMessage sends a message, bumps chat activity, and is forbidden for n
       expect(message.content).toBe("hello bob");
       expect(message.readByUserIds).toEqual([]);
 
-      const [aliceChat] = yield* alice.client.chats.listChats();
+      const {
+        chats: [aliceChat],
+      } = yield* alice.client.chats.listChats({ urlParams: {} });
       expect(aliceChat!.lastMessage?.id).toBe(message.id);
       expect(aliceChat!.unreadCount).toBe(0);
 
-      const [bobChat] = yield* bob.client.chats.listChats();
+      const {
+        chats: [bobChat],
+      } = yield* bob.client.chats.listChats({ urlParams: {} });
       expect(bobChat!.unreadCount).toBe(1);
 
       const forbidden = yield* eve.client.chats
@@ -564,7 +648,9 @@ test("markRead marks messages up to a point as read and updates unreadCount + re
         payload: { contentType: "text", content: "three" },
       });
 
-      const [bobChatBefore] = yield* bob.client.chats.listChats();
+      const {
+        chats: [bobChatBefore],
+      } = yield* bob.client.chats.listChats({ urlParams: {} });
       expect(bobChatBefore!.unreadCount).toBe(3);
 
       const afterRead = yield* bob.client.chats.markRead({
@@ -738,8 +824,8 @@ test("createDirectChat does not create duplicate chats when two requests race", 
       );
       expect(second.id).toBe(first.id);
 
-      const aliceChats = yield* alice.client.chats.listChats();
-      expect(aliceChats).toHaveLength(1);
+      const aliceChats = yield* alice.client.chats.listChats({ urlParams: {} });
+      expect(aliceChats.chats).toHaveLength(1);
     }),
   ));
 
@@ -837,7 +923,7 @@ test("every chats endpoint rejects an unauthenticated request", () =>
 
       const results = yield* Effect.all(
         [
-          c.chats.listChats().pipe(Effect.either),
+          c.chats.listChats({ urlParams: {} }).pipe(Effect.either),
           c.chats.getChat({ path: { id: 1 } }).pipe(Effect.either),
           c.chats
             .createDirectChat({ payload: { userId: 1 } })

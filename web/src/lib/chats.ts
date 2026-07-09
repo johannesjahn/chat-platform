@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
@@ -34,15 +34,26 @@ export const chatMessagesQueryKey = (chatId: number) =>
 // consumers see the same data. Kept fresh by `useChatSocket`, which
 // invalidates this key whenever the `/ws` connection reports a `chat_updated`
 // event for any chat the current user is part of — no polling.
+//
+// The server paginates with a keyset cursor rather than returning every chat
+// at once (issue #49), so this is an infinite query: each page carries the
+// cursor for the next one, and `fetchNextPage` walks forward. Callers that
+// just want everything loaded so far (e.g. the unread badge) can flatten
+// `data.pages`.
 export function useChatsList(enabled: boolean) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: chatsListQueryKey,
     enabled,
-    queryFn: async () => {
-      const { data, error } = await fetchClient.GET("/chats", {});
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam, signal }) => {
+      const { data, error } = await fetchClient.GET("/chats", {
+        params: { query: pageParam ? { cursor: pageParam } : {} },
+        signal,
+      });
       if (error) throw error;
       return data;
     },
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }
 
@@ -66,9 +77,18 @@ export function formatChatTimestamp(ms: number): string {
     : date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+// Only sums whichever pages have been fetched so far — for a user with more
+// chats than fit in one page who hasn't opened `/chats` (and so never called
+// `fetchNextPage`), this undercounts against chats past the first page,
+// trading exactness for not re-introducing the unbounded fetch this
+// pagination exists to avoid (issue #49).
 export function useTotalUnreadCount(enabled: boolean): number {
   const { data } = useChatsList(enabled);
-  return (data ?? []).reduce((sum, chat) => sum + chat.unreadCount, 0);
+  return (data?.pages ?? []).reduce(
+    (sum, page) =>
+      sum + page.chats.reduce((pageSum, chat) => pageSum + chat.unreadCount, 0),
+    0,
+  );
 }
 
 export function useChatDetail(chatId: number | undefined, enabled: boolean) {

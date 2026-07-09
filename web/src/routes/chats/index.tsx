@@ -1,5 +1,6 @@
+import { useEffect, useRef } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { MessagesSquare, PlusCircle } from "lucide-react";
+import { Loader2, MessagesSquare, PlusCircle } from "lucide-react";
 import { ChatListItem, ChatListItemSkeleton } from "@/components/ChatListItem";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { GradientText } from "@/components/reactbits/GradientText";
@@ -14,7 +15,31 @@ export const Route = createFileRoute("/chats/")({
 
 function ChatsListPage() {
   const session = useSession();
-  const { data: chats, isLoading, error } = useChatsList(!!session);
+  const {
+    data,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useChatsList(!!session);
+  const chats = data?.pages.flatMap((page) => page.chats) ?? [];
+
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node || !hasNextPage) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+      },
+      { rootMargin: "400px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col items-center gap-6 px-4 py-10">
@@ -48,7 +73,7 @@ function ChatsListPage() {
         <p className="w-full rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           Could not load chats: {errorMessage(error)}
         </p>
-      ) : !chats || chats.length === 0 ? (
+      ) : chats.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No conversations yet — start one with another user.
         </p>
@@ -64,6 +89,17 @@ function ChatsListPage() {
             </li>
           ))}
         </ul>
+      )}
+
+      {session && (
+        <div
+          ref={sentinelRef}
+          data-testid="chats-sentinel"
+          className="h-1 w-full"
+        />
+      )}
+      {isFetchingNextPage && (
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
       )}
     </main>
   );

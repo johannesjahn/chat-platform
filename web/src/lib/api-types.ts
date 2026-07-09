@@ -466,6 +466,11 @@ export interface components {
             /** @enum {string} */
             _tag: "Forbidden";
         };
+        ChatsPage: {
+            chats: components["schemas"]["Chat"][];
+            limit: number;
+            nextCursor: string | null;
+        };
         Chat: {
             id: number;
             type: components["schemas"]["ChatType"];
@@ -495,13 +500,13 @@ export interface components {
         };
         /** @enum {string} */
         MessageContentType: "text" | "image_url";
-        CreateDirectChatBody: {
-            userId: number;
-        };
         InvalidChatRequest: {
             message: string;
             /** @enum {string} */
             _tag: "InvalidChatRequest";
+        };
+        CreateDirectChatBody: {
+            userId: number;
         };
         CreateGroupChatBody: {
             /**
@@ -1106,20 +1111,24 @@ export interface operations {
     };
     "chats.listChats": {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: string;
+                /** @description a string to be decoded into a number */
+                limit?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description ChatsPage */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Chat"][];
+                    "application/json": components["schemas"]["ChatsPage"];
                 };
             };
             /** @description The request did not match the expected schema */
@@ -1128,7 +1137,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
                 };
             };
             /** @description Unauthorized */
