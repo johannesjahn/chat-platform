@@ -33,7 +33,7 @@ import {
 } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
 import { useIsOnline } from "@/lib/presence";
-import { useTypingUsers } from "@/lib/typing";
+import { clearTyping, useTypingUsers } from "@/lib/typing";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { cn } from "@/lib/utils";
 
@@ -122,7 +122,9 @@ function ChatView({ id }: { id: string }) {
 
   const messages = messagesData?.messages ?? [];
 
-  const newestMessageId = messages[messages.length - 1]?.id;
+  const newestMessage = messages[messages.length - 1];
+  const newestMessageId = newestMessage?.id;
+  const newestMessageSenderId = newestMessage?.senderId;
 
   // Auto-scroll to the bottom on first load and whenever the newest message
   // changes — a real new message, not just an earlier page loading in.
@@ -137,6 +139,15 @@ function ChatView({ id }: { id: string }) {
       initializedRef.current = true;
     }
   }, [newestMessageId]);
+
+  // A newly-arrived message means its sender is done typing — clear their
+  // indicator immediately instead of leaving it up until the TTL in
+  // lib/typing.ts lapses on its own, which otherwise left the dots visibly
+  // animating below a message that had already been sent.
+  useEffect(() => {
+    if (newestMessageId == null || newestMessageSenderId == null) return;
+    clearTyping(chatId, newestMessageSenderId);
+  }, [chatId, newestMessageId, newestMessageSenderId]);
 
   // Preserve scroll position when older messages are prepended by the
   // infinite-scroll-to-top loader — without this the view would jump to the

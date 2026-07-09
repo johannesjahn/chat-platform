@@ -27,7 +27,15 @@ function timerKey(chatId: number, userId: number): string {
   return `${chatId}:${userId}`;
 }
 
-function stopTyping(chatId: number, userId: number): void {
+// Also called directly (not just from the TTL timeout below) when a message
+// from this user actually arrives — see `useChatMessages`'s consumer in
+// routes/chats/$id.tsx. That's the common case: the sender's `typing` event
+// TTL (4s) comfortably outlasts the time it takes their message to arrive,
+// so without this the indicator would otherwise sit there for however much
+// of the TTL was left after the message rendered. The stale timer for this
+// key (if any) still fires later, but by then `users.delete` below is
+// already a no-op, so no `clearTimeout` is needed here.
+export function clearTyping(chatId: number, userId: number): void {
   const users = byChat.get(chatId);
   if (!users?.delete(userId)) return;
   if (users.size === 0) byChat.delete(chatId);
@@ -50,7 +58,7 @@ export function noteTyping(
   clearTimeout(timers.get(key));
   timers.set(
     key,
-    setTimeout(() => stopTyping(chatId, userId), TYPING_TTL_MS),
+    setTimeout(() => clearTyping(chatId, userId), TYPING_TTL_MS),
   );
   notify();
 }
