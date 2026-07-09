@@ -82,32 +82,75 @@ export const RedisPubSubLive = Layer.effect(
       subscribe: (
         channel: string,
         onMessage: (message: string) => Effect.Effect<void>,
-      ) =>
-        Effect.promise(() =>
-          subscriber.subscribe(channel, (message) => {
-            // `subscribe`'s callback is a bare Node-style callback, not an
-            // Effect, so the handler has to be forked rather than yielded —
-            // but a bare `runFork` throws the resulting fiber away, silently
-            // swallowing whatever it fails or dies with (e.g. a malformed
-            // envelope). Observe the exit and log failures so a broken
-            // subscriber shows up instead of just dropping the delivery.
-            const fiber = Effect.runFork(onMessage(message));
-            fiber.addObserver((exit) => {
-              if (Exit.isFailure(exit)) {
+      ) => {
+        // `subscribe`'s callback is a bare Node-style callback, not an
+        // Effect, so the handler has to be forked rather than yielded — but
+        // a bare `runFork` throws the resulting fiber away, silently
+        // swallowing whatever it fails or dies with (e.g. a malformed
+        // envelope). Observe the exit and log failures so a broken
+        // subscriber shows up instead of just dropping the delivery.
+        const handleMessage = (message: string) => {
+          const fiber = Effect.runFork(onMessage(message));
+          fiber.addObserver((exit) => {
+            if (Exit.isFailure(exit)) {
+              Effect.runFork(
+                Effect.logWarning(
+                  "PubSub: dropped realtime delivery, subscriber handler failed",
+                ).pipe(
+                  Effect.annotateLogs({
+                    channel,
+                    cause: Cause.pretty(exit.cause),
+                  }),
+                ),
+              );
+            }
+          });
+        };
+
+        return Effect.promise(() =>
+          subscriber.subscribe(channel, handleMessage),
+        ).pipe(
+          Effect.asVoid,
+          Effect.tap(() =>
+            Effect.sync(() => {
+              // Bun's `RedisClient` transparently reconnects the underlying
+              // connection (`autoReconnect`, on by default) after a drop,
+              // but Redis pub/sub subscriptions live on the connection, not
+              // the account — a fresh connection starts with none. Without
+              // this, an instance would silently stop receiving
+              // cross-instance events after any blip until restarted (see
+              // issue #52). `onconnect` fires on every (re)connect
+              // including the very first one, but that one's already
+              // covered by the explicit `subscribe` above, so this handler
+              // only needs to cover the ones after it.
+              subscriber.onconnect = () => {
                 Effect.runFork(
-                  Effect.logWarning(
-                    "PubSub: dropped realtime delivery, subscriber handler failed",
-                  ).pipe(
-                    Effect.annotateLogs({
-                      channel,
-                      cause: Cause.pretty(exit.cause),
-                    }),
+                  // Bun's client-side listener list isn't cleared across
+                  // reconnects, so subscribing again without unsubscribing
+                  // first would register a second listener on the same
+                  // channel — delivering every future message twice (three
+                  // times after the next reconnect, and so on).
+                  Effect.tryPromise(() => subscriber.unsubscribe(channel)).pipe(
+                    Effect.ignore,
+                    Effect.zipRight(
+                      Effect.tryPromise(() =>
+                        subscriber.subscribe(channel, handleMessage),
+                      ),
+                    ),
+                    Effect.catchAll((error) =>
+                      Effect.logWarning(
+                        "PubSub: failed to resubscribe after Redis reconnect",
+                      ).pipe(
+                        Effect.annotateLogs({ channel, error: String(error) }),
+                      ),
+                    ),
                   ),
                 );
-              }
-            });
-          }),
-        ).pipe(Effect.asVoid),
+              };
+            }),
+          ),
+        );
+      },
       ping: Effect.tryPromise(() => publisher.ping()).pipe(Effect.asVoid),
     };
   }),

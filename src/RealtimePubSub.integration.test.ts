@@ -1,7 +1,8 @@
+import { RedisClient } from "bun";
 import { expect, test } from "bun:test";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { RedisPresenceStoreLive } from "./Presence.ts";
-import { RedisPubSubLive } from "./PubSub.ts";
+import { PubSub, RedisPubSubLive } from "./PubSub.ts";
 import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
 
 // Everything else touching Realtime.ts runs against InMemoryPubSubLive /
@@ -29,11 +30,11 @@ const makeInstance = () =>
 // Cross-instance delivery goes over the network — poll rather than assert
 // immediately.
 async function waitFor(
-  predicate: () => boolean,
+  predicate: () => boolean | Promise<boolean>,
   timeoutMs = 5000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (!predicate() && Date.now() < deadline) {
+  while (!(await predicate()) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
@@ -171,6 +172,62 @@ async function waitFor(
     } finally {
       await instanceA.dispose();
       await instanceB.dispose();
+    }
+  },
+);
+
+(redisConfigured ? test : test.skip)(
+  "RedisPubSubLive resubscribes after its connection drops and Bun auto-reconnects (#52)",
+  async () => {
+    const runtime = ManagedRuntime.make(RedisPubSubLive);
+    // A separate, unrelated connection used only to inspect/manipulate the
+    // server from outside RedisPubSubLive — simulating the kind of blip
+    // (network hiccup, Redis restart, idle timeout) that drops the
+    // connection this layer subscribes on.
+    const admin = new RedisClient(process.env.REDIS_URL);
+    const channel = `chat-platform:pubsub-reconnect-test:${Date.now()}`;
+
+    try {
+      const received: string[] = [];
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const pubsub = yield* PubSub;
+          yield* pubsub.subscribe(channel, (message) =>
+            Effect.sync(() => {
+              received.push(message);
+            }),
+          );
+        }),
+      );
+
+      // Find and kill the subscriber's underlying connection from the
+      // server side. At this point in the test it's the only client
+      // connection actively subscribed to a channel (`sub=1`) — the
+      // publisher connection RedisPubSubLive also holds isn't.
+      const clientList = (await admin.send("CLIENT", ["LIST"])) as string;
+      const subscriberLine = clientList
+        .split("\n")
+        .find((line) => line.includes("sub=1"));
+      const clientId = subscriberLine?.match(/id=(\d+)/)?.[1];
+      expect(clientId).toBeDefined();
+      await admin.send("CLIENT", ["KILL", "ID", clientId as string]);
+
+      // Bun's client reconnects the dropped TCP connection automatically,
+      // but a fresh connection has no server-side subscriptions until
+      // RedisPubSubLive's `onconnect` handler re-issues one — wait for that
+      // to land rather than racing it.
+      await waitFor(async () => {
+        const list = (await admin.send("CLIENT", ["LIST"])) as string;
+        return list.split("\n").some((line) => line.includes("sub=1"));
+      });
+
+      await admin.publish(channel, "after-reconnect");
+
+      await waitFor(() => received.length > 0);
+      expect(received).toEqual(["after-reconnect"]);
+    } finally {
+      await runtime.dispose();
+      admin.close();
     }
   },
 );
