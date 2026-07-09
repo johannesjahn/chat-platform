@@ -90,11 +90,16 @@ async function fetchMessagesPage(
   chatId: number,
   offset: number,
   limit: number,
+  includeTotal = false,
 ) {
   const { data, error } = await fetchClient.GET("/chats/{id}/messages", {
     params: {
       path: { id: String(chatId) },
-      query: { offset: String(offset), limit: String(limit) },
+      query: {
+        offset: String(offset),
+        limit: String(limit),
+        ...(includeTotal ? { includeTotal: "true" as const } : {}),
+      },
     },
   });
   if (error) throw error;
@@ -103,7 +108,9 @@ async function fetchMessagesPage(
 
 type ChatMessagesPage = {
   messages: ChatMessage[];
-  total: number;
+  // Whether more (newer) messages exist past this window — derived
+  // server-side from an n+1 fetch rather than a `COUNT(*)` (issue #51).
+  hasMore: boolean;
   offset: number;
   hasEarlier: boolean;
 };
@@ -128,7 +135,6 @@ export function appendSentMessage(
       return {
         ...prev,
         messages: [...prev.messages, message],
-        total: prev.total + 1,
       };
     },
   );
@@ -138,7 +144,9 @@ export function appendSentMessage(
 // pagination) but a conversation should *open* on its newest messages, like
 // WhatsApp/Telegram. So this keeps a "window anchor" — the offset the
 // currently-loaded page starts at — and:
-//  - on first load, probes the total then jumps the anchor to the last
+//  - on first load, probes the exact count (the one place that opts into the
+//    server's `includeTotal`, since every other fetch below only needs
+//    `hasMore` — see issue #51) then jumps the anchor to the last
 //    `MESSAGES_PAGE_SIZE` messages instead of the first;
 //  - on every refetch (triggered by `useChatSocket` invalidating this query
 //    key on a `chat_updated` event), re-fetches from that same anchor with a
@@ -161,12 +169,11 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
   // query". Only the latter should slide the anchor forward to catch up with
   // the tail (see below) — otherwise, in a chat longer than
   // MESSAGES_MAX_LIMIT, *every* `loadEarlier` call would find its new anchor
-  // still can't reach `total` within one MESSAGES_MAX_LIMIT-sized window and
-  // immediately snap the anchor back toward the tail, making it impossible
-  // to ever page past `total - MESSAGES_MAX_LIMIT` and leaving `hasEarlier`
-  // permanently true — so scrolling to the top kept sending pagination
-  // requests to the backend forever, even once the oldest reachable message
-  // was loaded.
+  // still can't reach the tail within one MESSAGES_MAX_LIMIT-sized window
+  // and immediately snap the anchor back toward the tail, making it
+  // impossible to ever page further back and leaving `hasEarlier` permanently
+  // true — so scrolling to the top kept sending pagination requests to the
+  // backend forever, even once the oldest reachable message was loaded.
   const isLoadEarlierFetchRef = useRef(false);
 
   const query = useQuery({
@@ -180,13 +187,16 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       const isLoadEarlierFetch = isLoadEarlierFetchRef.current;
       isLoadEarlierFetchRef.current = false;
       if (anchorRef.current === null) {
-        const probe = await fetchMessagesPage(id, 0, MESSAGES_PAGE_SIZE);
-        anchorRef.current = Math.max(0, probe.total - MESSAGES_PAGE_SIZE);
+        const probe = await fetchMessagesPage(id, 0, MESSAGES_PAGE_SIZE, true);
+        anchorRef.current = Math.max(
+          0,
+          (probe.total ?? 0) - MESSAGES_PAGE_SIZE,
+        );
       }
       const offset = anchorRef.current;
       const page = await fetchMessagesPage(id, offset, MESSAGES_MAX_LIMIT);
       const loadedThrough = page.offset + page.messages.length;
-      if (!isLoadEarlierFetch && loadedThrough < page.total) {
+      if (!isLoadEarlierFetch && page.hasMore) {
         // More messages exist than this window (capped at
         // MESSAGES_MAX_LIMIT) can show from the current anchor — rather than
         // re-requesting the whole window again (this is the common case
@@ -201,7 +211,7 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
         const tail = await fetchMessagesPage(
           id,
           loadedThrough,
-          Math.min(page.total - loadedThrough, MESSAGES_MAX_LIMIT),
+          MESSAGES_MAX_LIMIT,
         );
         const merged = [...page.messages, ...tail.messages].slice(
           -MESSAGES_MAX_LIMIT,
@@ -210,14 +220,14 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
         anchorRef.current = newOffset;
         return {
           messages: merged,
-          total: tail.total,
+          hasMore: tail.hasMore,
           offset: newOffset,
           hasEarlier: newOffset > 0,
         };
       }
       return {
         messages: page.messages,
-        total: page.total,
+        hasMore: page.hasMore,
         offset: page.offset,
         hasEarlier: page.offset > 0,
       };

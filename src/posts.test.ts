@@ -264,7 +264,7 @@ test("listPosts rejects an unauthenticated request", () =>
     }),
   ));
 
-test("listPosts returns a default first page with total count", () =>
+test("listPosts returns a default first page with hasMore", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("olga", "pw");
@@ -278,7 +278,7 @@ test("listPosts returns a default first page with total count", () =>
       const result = yield* authed.posts.listPosts({ urlParams: {} });
       expect(result.offset).toBe(0);
       expect(result.limit).toBe(20);
-      expect(result.total).toBe(3);
+      expect(result.hasMore).toBe(false);
       expect(result.posts).toHaveLength(3);
     }),
   ));
@@ -302,7 +302,7 @@ test("listPosts paginates newest-first using offset and limit query params", () 
       const firstPage = yield* authed.posts.listPosts({
         urlParams: { offset: 0, limit: 2 },
       });
-      expect(firstPage.total).toBe(5);
+      expect(firstPage.hasMore).toBe(true);
       expect(firstPage.posts.map((p) => p.id)).toEqual(
         newestFirst.slice(0, 2).map((p) => p.id),
       );
@@ -310,6 +310,7 @@ test("listPosts paginates newest-first using offset and limit query params", () 
       const secondPage = yield* authed.posts.listPosts({
         urlParams: { offset: 2, limit: 2 },
       });
+      expect(secondPage.hasMore).toBe(true);
       expect(secondPage.posts.map((p) => p.id)).toEqual(
         newestFirst.slice(2, 4).map((p) => p.id),
       );
@@ -317,6 +318,7 @@ test("listPosts paginates newest-first using offset and limit query params", () 
       const thirdPage = yield* authed.posts.listPosts({
         urlParams: { offset: 4, limit: 2 },
       });
+      expect(thirdPage.hasMore).toBe(false);
       expect(thirdPage.posts.map((p) => p.id)).toEqual(
         newestFirst.slice(4, 5).map((p) => p.id),
       );

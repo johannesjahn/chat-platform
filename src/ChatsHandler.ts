@@ -745,22 +745,36 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
 
           const offset = urlParams.offset ?? 0;
           const limit = urlParams.limit ?? DEFAULT_MESSAGES_LIMIT;
-          const rows = yield* Effect.tryPromise(() =>
+          // Fetch one row past `limit` instead of a separate `COUNT(*)` on
+          // every request — this is the hot path (scrolling, socket-triggered
+          // refetches), so it stays cheap no matter how long the chat's
+          // history gets. Callers that need an exact count (only to position
+          // the initial "jump to newest" window — see web/src/lib/chats.ts)
+          // opt in via `includeTotal` instead (issue #51).
+          const fetched = yield* Effect.tryPromise(() =>
             db
               .select()
               .from(messages)
               .where(eq(messages.chatId, id))
               .orderBy(messages.id)
-              .limit(limit)
+              .limit(limit + 1)
               .offset(offset),
           ).pipe(Effect.orDie);
-          const totalRows = yield* Effect.tryPromise(() =>
-            db
-              .select({ total: count() })
-              .from(messages)
-              .where(eq(messages.chatId, id)),
-          ).pipe(Effect.orDie);
-          const total = totalRows[0]?.total ?? 0;
+          const hasMore = fetched.length > limit;
+          const rows = fetched.slice(0, limit);
+
+          const total =
+            urlParams.includeTotal === "true"
+              ? yield* Effect.tryPromise(() =>
+                  db
+                    .select({ total: count() })
+                    .from(messages)
+                    .where(eq(messages.chatId, id)),
+                ).pipe(
+                  Effect.orDie,
+                  Effect.map((totalRows) => totalRows[0]?.total ?? 0),
+                )
+              : undefined;
 
           const messageIds = rows.map((r) => r.id);
           const readRows =
@@ -788,6 +802,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             ),
             offset,
             limit,
+            hasMore,
             total,
           };
         }),

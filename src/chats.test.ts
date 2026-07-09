@@ -511,15 +511,23 @@ test("listMessages paginates oldest-first and is forbidden for non-participants"
         path: { id: chat.id },
         urlParams: { offset: 0, limit: 3 },
       });
-      expect(page.total).toBe(5);
+      expect(page.hasMore).toBe(true);
+      expect(page.total).toBeUndefined();
       expect(page.messages.map((m) => m.id)).toEqual(
         sent.slice(0, 3).map((m) => m.id),
       );
+
+      const pageWithTotal = yield* bob.client.chats.listMessages({
+        path: { id: chat.id },
+        urlParams: { offset: 0, limit: 3, includeTotal: "true" },
+      });
+      expect(pageWithTotal.total).toBe(5);
 
       const nextPage = yield* bob.client.chats.listMessages({
         path: { id: chat.id },
         urlParams: { offset: 3, limit: 3 },
       });
+      expect(nextPage.hasMore).toBe(false);
       expect(nextPage.messages.map((m) => m.id)).toEqual(
         sent.slice(3, 5).map((m) => m.id),
       );
@@ -673,7 +681,7 @@ test("deleteMessage removes the message and its read receipts, and is forbidden 
 
       const page = yield* alice.client.chats.listMessages({
         path: { id: chat.id },
-        urlParams: {},
+        urlParams: { includeTotal: "true" },
       });
       expect(page.messages.map((m) => m.id)).not.toContain(message.id);
       expect(page.total).toBe(0);

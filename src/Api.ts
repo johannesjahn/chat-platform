@@ -187,7 +187,11 @@ export const PostsPage = Schema.Struct({
   posts: Schema.Array(Post),
   offset: Schema.Number,
   limit: Schema.Number,
-  total: Schema.Number,
+  // Derived from fetching one row past `limit` rather than a separate
+  // `COUNT(*)` over the full result set on every request — the feed only
+  // ever needs to know whether another page exists, not the exact remaining
+  // count (issue #51).
+  hasMore: Schema.Boolean,
 }).annotations({ identifier: "PostsPage" });
 
 // A chat is either a "direct" (exactly two participants, no title — the UI
@@ -318,13 +322,23 @@ export const MessagesPageQuery = Schema.Struct({
       Schema.between(1, MAX_MESSAGES_LIMIT),
     ),
   ),
+  // Opts into an exact `COUNT(*)` (see `MessagesPage.total`). Left out of
+  // most requests — the client only needs this once, to position its
+  // "jump to the newest messages" window; every other page fetch (scrolling,
+  // socket-triggered refetches) relies on `hasMore` instead, keeping the
+  // count query off the hot path (issue #51).
+  includeTotal: Schema.optional(Schema.Literal("true")),
 });
 
 export const MessagesPage = Schema.Struct({
   messages: Schema.Array(Message),
   offset: Schema.Number,
   limit: Schema.Number,
-  total: Schema.Number,
+  // Derived from fetching one row past `limit` rather than a `COUNT(*)` —
+  // see `PostsPage.hasMore`.
+  hasMore: Schema.Boolean,
+  // Only populated when the request set `includeTotal`.
+  total: Schema.optional(Schema.Number),
 }).annotations({ identifier: "MessagesPage" });
 
 // Below this, a search isn't narrow enough to be worth running — keeps the
