@@ -1,0 +1,120 @@
+# Values for the community `victoria-metrics-k8s-stack` Helm chart (not
+# vendored into this repo — see README.md in this directory for the
+# `helm repo add` / `helm install` commands). Installs vmsingle + vmagent +
+# kube-state-metrics + node-exporter + Grafana into a dedicated
+# `observability` namespace, scraping the cluster/node metrics needed to
+# close #122.
+#
+# Deliberately out of scope for this pass (see #121, each is its own
+# sub-issue): vmalert/Alertmanager (alerting), bundled Grafana
+# dashboards/rules, and the backend's own /metrics endpoint. All disabled
+# below rather than left running idle.
+
+vmsingle:
+  spec:
+    retentionPeriod: "12" # months of metrics history to keep
+    storage:
+      resources:
+        requests:
+          storage: 10Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+vmagent:
+  spec:
+    scrapeInterval: 30s
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+
+kube-state-metrics:
+  enabled: true
+
+prometheus-node-exporter:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+# Alerting is a separate sub-issue of #121 — disable both the evaluator and
+# Alertmanager rather than run them idle.
+vmalert:
+  enabled: false
+
+alertmanager:
+  enabled: false
+
+# Bundled dashboards/alerting rules are also a separate sub-issue — Explore
+# view queries against the vmsingle datasource (wired up automatically by
+# defaultDatasources below) are enough to satisfy #122's acceptance criteria.
+defaultDashboards:
+  enabled: false
+
+defaultRules:
+  enabled: false
+
+# Auto-provisions the vmsingle datasource into Grafana via the sidecar below
+# — nothing to wire up by hand.
+defaultDatasources:
+  victoriametrics:
+    datasources:
+      - name: VictoriaMetrics
+        type: victoriametrics-datasource
+        access: proxy
+        isDefault: true
+
+grafana:
+  enabled: true
+
+  sidecar:
+    datasources:
+      enabled: true
+
+  # Required — no auto-generated admin password (see k8s/README.md's
+  # existingSecret note for postgres/redis/jwt; same reasoning applies
+  # here). Create once, e.g.:
+  #   kubectl create secret generic grafana-admin -n observability \
+  #     --from-literal=admin-user=admin \
+  #     --from-literal=admin-password="$(openssl rand -base64 24)"
+  admin:
+    existingSecret: "grafana-admin"
+    userKey: admin-user
+    passwordKey: admin-password
+
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClassName: ""
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+    hosts:
+      - grafana.chat-platform.johannes-jahn.com
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - grafana.chat-platform.johannes-jahn.com

@@ -14,6 +14,11 @@ The **frontend** (`../web/`) is deployed differently — as a static SPA on
 not into the cluster. See
 [Frontend: Cloudflare Workers](#frontend-cloudflare-workers) below.
 
+Cluster/node **observability** (VictoriaMetrics + Grafana) lives in a
+separate directory, [`observability/`](observability/), since it's cluster
+infra rather than part of the `chat-platform` application itself — see
+[`observability/README.md`](observability/README.md).
+
 ## What's in the chart
 
 | Component  | Kind                               | Notes                                                                                                                                                                                                                                   |
