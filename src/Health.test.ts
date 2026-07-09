@@ -14,9 +14,11 @@ import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPubSubLive, PubSub } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
+import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
 import * as schema from "./db/schema.ts";
+import { InMemoryWsTicketLive } from "./WsTicket.ts";
 
 // JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
 process.env.JWT_SECRET ??= "test-secret";
@@ -31,9 +33,11 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(PostsHandlerLive),
   Layer.provide(ChatsHandlerLive),
   Layer.provide(VersionHandlerLive),
+  Layer.provide(RealtimeHandlerLive),
   Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
+  Layer.provide(InMemoryWsTicketLive),
 );
 
 const migratedDbLive = Layer.effect(

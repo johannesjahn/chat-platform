@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { API_URL } from "./api";
+import { API_URL, fetchClient } from "./api";
 import { useSession } from "./auth";
 import {
   chatDetailQueryKey,
@@ -21,10 +21,10 @@ const PING_INTERVAL_MS = 30_000;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 15_000;
 
-function realtimeSocketUrl(accessToken: string): string {
+function realtimeSocketUrl(ticket: string): string {
   const url = new URL("/ws", API_URL);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.searchParams.set("token", accessToken);
+  url.searchParams.set("ticket", ticket);
   return url.toString();
 }
 
@@ -54,8 +54,22 @@ export function useRealtimeSocket(enabled: boolean): void {
     let reconnectDelay = RECONNECT_BASE_MS;
     let stopped = false;
 
-    function connect() {
-      socket = new WebSocket(realtimeSocketUrl(accessToken!));
+    async function connect() {
+      // Mint a short-lived, single-use ticket over authenticated REST (see
+      // src/WsTicket.ts) rather than putting the long-lived access token
+      // itself on the `/ws` URL, where it'd be liable to end up in access
+      // logs, proxy logs, or browser history (see issue #26).
+      const { data, error } = await fetchClient.POST("/realtime/ws-ticket");
+      if (stopped) return;
+      if (error || !data) {
+        reconnectTimer = setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+          void connect();
+        }, reconnectDelay);
+        return;
+      }
+
+      socket = new WebSocket(realtimeSocketUrl(data.ticket));
 
       socket.onopen = () => {
         reconnectDelay = RECONNECT_BASE_MS;
@@ -97,12 +111,12 @@ export function useRealtimeSocket(enabled: boolean): void {
         if (stopped) return;
         reconnectTimer = setTimeout(() => {
           reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
-          connect();
+          void connect();
         }, reconnectDelay);
       };
     }
 
-    connect();
+    void connect();
 
     return () => {
       stopped = true;

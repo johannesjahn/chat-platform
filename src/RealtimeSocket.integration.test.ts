@@ -104,12 +104,26 @@ async function registerAndLogin(
   return { id: user.id, accessToken };
 }
 
-function connect(accessToken: string): {
+// Mints a single-use `/ws` ticket over REST with the real bearer access
+// token — mirrors what the frontend does (see web/src/lib/realtimeSocket.ts)
+// now that the WebSocket handshake itself no longer carries that token
+// directly (see issue #26).
+async function mintWsTicket(accessToken: string): Promise<string> {
+  const response = await fetch(`${apiUrl}/realtime/ws-ticket`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const { ticket } = (await response.json()) as { ticket: string };
+  return ticket;
+}
+
+async function connect(accessToken: string): Promise<{
   socket: WebSocket;
   messages: Array<Record<string, unknown>>;
   ready: Promise<void>;
-} {
-  const socket = new WebSocket(`${wsUrl}/ws?token=${accessToken}`);
+}> {
+  const ticket = await mintWsTicket(accessToken);
+  const socket = new WebSocket(`${wsUrl}/ws?ticket=${ticket}`);
   const messages: Array<Record<string, unknown>> = [];
   socket.onmessage = (event) => {
     messages.push(JSON.parse(event.data as string));
@@ -138,8 +152,10 @@ test("a chat event reaches only the chat's participants, and a post event reache
   const bob = await registerAndLogin(`bob_${Date.now()}`);
   const carol = await registerAndLogin(`carol_${Date.now()}`);
 
-  const aliceSocket = connect(alice.accessToken);
-  const carolSocket = connect(carol.accessToken);
+  const [aliceSocket, carolSocket] = await Promise.all([
+    connect(alice.accessToken),
+    connect(carol.accessToken),
+  ]);
   await Promise.all([aliceSocket.ready, carolSocket.ready]);
 
   // Bob starts a direct chat with Alice and sends a message. Carol isn't a

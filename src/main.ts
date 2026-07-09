@@ -11,19 +11,14 @@ import { PostsHandlerLive } from "./PostsHandler.ts";
 import { PubSubLive } from "./PubSub.ts";
 import { RateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
+import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { redactedLogger } from "./RedactedLogger.ts";
 import { RefreshTokenCleanupLive } from "./RefreshTokenCleanup.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
-
-// Allow the web frontend(s) (different origin) to call the API from the
-// browser. WEB_ORIGIN may hold a single origin or a comma-separated list
-// (e.g. a Workers custom domain plus its *.workers.dev URL).
-const allowedOrigins = (process.env.WEB_ORIGIN ?? "http://localhost:3001")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter((origin) => origin.length > 0);
+import { allowedOrigins } from "./WebOrigin.ts";
+import { WsTicketLive } from "./WsTicket.ts";
 
 const CorsLive = HttpApiBuilder.middlewareCors({
   allowedOrigins,
@@ -36,10 +31,12 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(PostsHandlerLive),
   Layer.provide(ChatsHandlerLive),
   Layer.provide(VersionHandlerLive),
+  Layer.provide(RealtimeHandlerLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
   Layer.provide(CorsLive),
   Layer.provide(RateLimiterLive),
+  Layer.provide(WsTicketLive),
 );
 
 const ServerLive = Layer.mergeAll(
@@ -57,6 +54,7 @@ const ServerLive = Layer.mergeAll(
   Layer.provide(RealtimeConnectionsLive),
   Layer.provide(PubSubLive),
   Layer.provide(JwtLive),
+  Layer.provide(WsTicketLive),
   Layer.provide(DbLive),
   Layer.provide(
     Layer.unwrapEffect(

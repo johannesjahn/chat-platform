@@ -1750,6 +1750,61 @@
           }
         }
       }
+    },
+    "/realtime/ws-ticket": {
+      "post": {
+        "tags": [
+          "realtime"
+        ],
+        "operationId": "realtime.createWsTicket",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ticket"
+                  ],
+                  "properties": {
+                    "ticket": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2569,6 +2624,9 @@
     },
     {
       "name": "meta"
+    },
+    {
+      "name": "realtime"
     }
   ]
 }
