@@ -80,6 +80,7 @@ grafana:
   enabled: true
 
   sidecar:
+    skipTlsVerify: true
     datasources:
       enabled: true
 
