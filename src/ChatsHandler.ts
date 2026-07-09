@@ -846,6 +846,26 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           return toApiMessage(row, []);
         }),
       )
+      .handle("sendTyping", ({ path: { id } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+
+          const participants = yield* getParticipants(db, id);
+          const others = participants
+            .map((p) => p.userId)
+            .filter((userId) => userId !== currentUser.id);
+          yield* connections.notifyUsers(others, {
+            type: "typing",
+            chatId: id,
+            userId: currentUser.id,
+            username: currentUser.username,
+          });
+        }),
+      )
       .handle("markRead", ({ path: { id }, payload }) =>
         Effect.gen(function* () {
           const db = yield* Db;

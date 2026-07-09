@@ -8,6 +8,7 @@ import { DbLive } from "./Db.ts";
 import { HealthRouteLive, ReadyRouteLive } from "./Health.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
+import { PresenceStoreLive } from "./Presence.ts";
 import { PubSubLive } from "./PubSub.ts";
 import { RateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
@@ -53,6 +54,7 @@ const ServerLive = Layer.mergeAll(
   Layer.provide(ApiLive),
   Layer.provide(RealtimeConnectionsLive),
   Layer.provide(PubSubLive),
+  Layer.provide(PresenceStoreLive),
   Layer.provide(JwtLive),
   Layer.provide(WsTicketLive),
   Layer.provide(DbLive),

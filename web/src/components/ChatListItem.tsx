@@ -1,8 +1,10 @@
 import type { CSSProperties } from "react";
 import { Link } from "@tanstack/react-router";
 import { ImageIcon, Users } from "lucide-react";
+import { PresenceDot } from "@/components/PresenceDot";
 import { Skeleton } from "@/components/ui/skeleton";
 import { chatDisplayName, formatChatTimestamp, type Chat } from "@/lib/chats";
+import { useIsOnline } from "@/lib/presence";
 import { cn } from "@/lib/utils";
 
 function messagePreview(chat: Chat): string {
@@ -40,6 +42,11 @@ export function ChatListItem({
   const hasUnread = chat.unreadCount > 0;
   const lastMessage = chat.lastMessage;
   const isOwnLastMessage = lastMessage?.senderId === currentUserId;
+  const otherParticipantId =
+    chat.type === "direct"
+      ? chat.participants.find((p) => p.userId !== currentUserId)?.userId
+      : undefined;
+  const otherParticipantOnline = useIsOnline(otherParticipantId);
 
   return (
     <Link
@@ -51,18 +58,26 @@ export function ChatListItem({
         "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500",
       )}
     >
-      <div
-        className={cn(
-          "flex size-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
-          chat.type === "group"
-            ? "bg-accent text-accent-foreground"
-            : "bg-primary/15 text-primary",
-        )}
-      >
-        {chat.type === "group" ? (
-          <Users className="size-4.5" />
-        ) : (
-          name.replace("@", "").slice(0, 1).toUpperCase()
+      <div className="relative shrink-0">
+        <div
+          className={cn(
+            "flex size-11 items-center justify-center rounded-full text-sm font-semibold",
+            chat.type === "group"
+              ? "bg-accent text-accent-foreground"
+              : "bg-primary/15 text-primary",
+          )}
+        >
+          {chat.type === "group" ? (
+            <Users className="size-4.5" />
+          ) : (
+            name.replace("@", "").slice(0, 1).toUpperCase()
+          )}
+        </div>
+        {chat.type === "direct" && (
+          <PresenceDot
+            online={otherParticipantOnline}
+            className="absolute -bottom-0.5 -right-0.5"
+          />
         )}
       </div>
 

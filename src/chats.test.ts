@@ -15,6 +15,7 @@ import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
+import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
@@ -36,6 +37,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
   Layer.provide(InMemoryPubSubLive),
+  Layer.provide(InMemoryPresenceStoreLive),
   Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
@@ -855,6 +857,7 @@ test("every chats endpoint rejects an unauthenticated request", () =>
               payload: { contentType: "text", content: "hi" },
             })
             .pipe(Effect.either),
+          c.chats.sendTyping({ path: { id: 1 } }).pipe(Effect.either),
           c.chats
             .markRead({ path: { id: 1 }, payload: { messageId: 1 } })
             .pipe(Effect.either),
@@ -960,6 +963,53 @@ test("addParticipants rejects adding people to a direct chat", () =>
         expect((result.left as { _tag: string })._tag).toBe(
           "InvalidChatRequest",
         );
+      }
+    }),
+  ));
+
+test("sendTyping succeeds for a participant", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+
+      yield* alice.client.chats.sendTyping({ path: { id: chat.id } });
+    }),
+  ));
+
+test("sendTyping is forbidden for a non-participant", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const eve = yield* registerAndLogin("eve", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+
+      const result = yield* eve.client.chats
+        .sendTyping({ path: { id: chat.id } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+    }),
+  ));
+
+test("sendTyping 404s for a nonexistent chat", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const result = yield* alice.client.chats
+        .sendTyping({ path: { id: 9999 } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("NotFound");
       }
     }),
   ));

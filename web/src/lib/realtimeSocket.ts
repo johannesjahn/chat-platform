@@ -8,10 +8,14 @@ import {
   chatsListQueryKey,
 } from "./chats";
 import { postDetailQueryKeyPrefix, postsFeedQueryKey } from "./posts";
+import { resetPresence, setUserOnline } from "./presence";
+import { noteTyping } from "./typing";
 
 type RealtimeSocketEvent =
   | { type: "chat_updated"; chatId: number }
-  | { type: "post_changed"; postId: number };
+  | { type: "post_changed"; postId: number }
+  | { type: "presence"; userId: number; online: boolean }
+  | { type: "typing"; chatId: number; userId: number; username: string };
 
 // A little more than the default Bun WebSocket idle timeout — sending
 // anything at all (the content is irrelevant, the server ignores incoming
@@ -36,6 +40,9 @@ function realtimeSocketUrl(ticket: string): string {
 // `chat_updated` is scoped server-side to a chat's participants, so this
 // hook doesn't need to filter it. `post_changed` goes out to every connected
 // user — the feed has no notion of participants, anyone signed in sees it.
+// `presence`/`typing` don't touch React Query at all — they update the
+// standalone stores in lib/presence.ts and lib/typing.ts instead, since
+// there's no REST resource behind either to invalidate.
 //
 // Mounted once near the root (see `__root.tsx`'s `Nav`) so the nav's unread
 // badge, the `/chats` list, and the `/` feed all stay live even when the
@@ -74,6 +81,11 @@ export function useRealtimeSocket(enabled: boolean): void {
       socket.onopen = () => {
         reconnectDelay = RECONNECT_BASE_MS;
         pingTimer = setInterval(() => socket?.send("ping"), PING_INTERVAL_MS);
+        // A dropped connection can mean any number of users went
+        // offline/online without this client hearing about it — start
+        // presence clean and let the fresh connection's initial snapshot
+        // (see RealtimeSocket.ts) repopulate it.
+        resetPresence();
       };
 
       socket.onmessage = (event) => {
@@ -102,6 +114,12 @@ export function useRealtimeSocket(enabled: boolean): void {
             void queryClient.invalidateQueries({
               queryKey: postDetailQueryKeyPrefix,
             });
+            break;
+          case "presence":
+            setUserOnline(parsed.userId, parsed.online);
+            break;
+          case "typing":
+            noteTyping(parsed.chatId, parsed.userId, parsed.username);
             break;
         }
       };
