@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { Link } from "@tanstack/react-router";
 import { ImageIcon, Users } from "lucide-react";
+import { Avatar } from "@/components/Avatar";
 import { PresenceDot } from "@/components/PresenceDot";
 import { Skeleton } from "@/components/ui/skeleton";
 import { chatDisplayName, formatChatTimestamp, type Chat } from "@/lib/chats";
@@ -42,46 +43,46 @@ export function ChatListItem({
   const hasUnread = chat.unreadCount > 0;
   const lastMessage = chat.lastMessage;
   const isOwnLastMessage = lastMessage?.senderId === currentUserId;
-  const otherParticipantId =
+  const otherParticipant =
     chat.type === "direct"
-      ? chat.participants.find((p) => p.userId !== currentUserId)?.userId
+      ? chat.participants.find((p) => p.userId !== currentUserId)
       : undefined;
-  const otherParticipantOnline = useIsOnline(otherParticipantId);
+  const otherParticipantOnline = useIsOnline(otherParticipant?.userId);
 
   return (
-    <Link
-      to="/chats/$id"
-      params={{ id: String(chat.id) }}
+    <div
       style={style}
       className={cn(
         "group flex items-center gap-3 rounded-lg border border-border bg-background/40 px-3 py-3 transition-[transform,border-color,background-color] duration-400 ease-out hover:-translate-y-px hover:border-primary/40 hover:bg-background/70",
         "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500",
       )}
     >
-      <div className="relative shrink-0">
-        <div
-          className={cn(
-            "flex size-11 items-center justify-center rounded-full text-sm font-semibold",
-            chat.type === "group"
-              ? "bg-accent text-accent-foreground"
-              : "bg-primary/15 text-primary",
-          )}
+      {chat.type === "direct" && otherParticipant ? (
+        <Link
+          to="/users/$id"
+          params={{ id: String(otherParticipant.userId) }}
+          aria-label={`View ${otherParticipant.username}'s profile`}
+          className="relative shrink-0"
         >
-          {chat.type === "group" ? (
-            <Users className="size-4.5" />
-          ) : (
-            name.replace("@", "").slice(0, 1).toUpperCase()
-          )}
-        </div>
-        {chat.type === "direct" && (
+          <Avatar name={name} size="lg" />
           <PresenceDot
             online={otherParticipantOnline}
             className="absolute -bottom-0.5 -right-0.5"
           />
-        )}
-      </div>
+        </Link>
+      ) : (
+        <div className="relative shrink-0">
+          <div className="flex size-11 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
+            <Users className="size-4.5" />
+          </div>
+        </div>
+      )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <Link
+        to="/chats/$id"
+        params={{ id: String(chat.id) }}
+        className="flex min-w-0 flex-1 flex-col"
+      >
         <div className="flex items-center justify-between gap-2">
           <span className="truncate font-medium">{name}</span>
           {lastMessage && (
@@ -114,7 +115,7 @@ export function ChatListItem({
             </span>
           )}
         </div>
-      </div>
-    </Link>
+      </Link>
+    </div>
   );
 }

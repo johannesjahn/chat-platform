@@ -1,4 +1,5 @@
 import { type CSSProperties, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import {
   Check,
   CheckCheck,
@@ -131,9 +132,13 @@ export function MessageBubble({
         )}
       >
         {senderUsername && !isOwn && (
-          <span className="text-xs font-semibold text-primary">
+          <Link
+            to="/users/$id"
+            params={{ id: String(message.senderId) }}
+            className="w-fit text-xs font-semibold text-primary hover:underline"
+          >
             @{senderUsername}
-          </span>
+          </Link>
         )}
 
         {isEditing ? (

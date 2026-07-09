@@ -109,6 +109,7 @@ function PostsFeedPage() {
             <li key={post.id} className="flex w-full justify-center">
               <PostCard
                 post={post}
+                authorId={post.authorId}
                 authorUsername={
                   usernameById.get(post.authorId) ?? `user #${post.authorId}`
                 }
