@@ -13,10 +13,12 @@ import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
+import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
 import * as schema from "./db/schema.ts";
+import { InMemoryWsTicketLive } from "./WsTicket.ts";
 
 // JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
 process.env.JWT_SECRET ??= "test-secret";
@@ -33,15 +35,18 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(PostsHandlerLive),
   Layer.provide(ChatsHandlerLive),
   Layer.provide(VersionHandlerLive),
+  Layer.provide(RealtimeHandlerLive),
   Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
+  Layer.provide(InMemoryWsTicketLive),
 );
 
 const ServerLive = Layer.mergeAll(ApiLive, RealtimeSocketRouteLive).pipe(
   Layer.provide(RealtimeConnectionsLive),
   Layer.provide(InMemoryPubSubLive),
   Layer.provide(JwtLive),
+  Layer.provide(InMemoryWsTicketLive),
 );
 
 const run = async <A, E>(
@@ -82,7 +87,7 @@ const run = async <A, E>(
   }
 };
 
-test("GET /ws with no token is rejected before any upgrade is attempted", async () => {
+test("GET /ws with no ticket is rejected before any upgrade is attempted", async () => {
   await run(
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
@@ -92,30 +97,32 @@ test("GET /ws with no token is rejected before any upgrade is attempted", async 
   );
 });
 
-test("GET /ws with a garbage token is rejected", async () => {
+test("GET /ws with an unknown ticket is rejected", async () => {
+  // A ticket that was never issued (or was already consumed — see
+  // WsTicket.test.ts for single-use semantics) fails the same as no ticket
+  // at all.
   await run(
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
       const response = yield* client.get(
-        "http://localhost/ws?token=not-a-real-jwt",
+        "http://localhost/ws?ticket=not-a-real-ticket",
       );
       expect(response.status).toBe(401);
     }),
   );
 });
 
-test("GET /ws with an expired-looking token is rejected the same as a missing one", async () => {
-  // A syntactically-plausible but unsigned/garbage JWT should fail signature
-  // verification exactly like a fully-invalid string — this guards against a
-  // regression where malformed-but-3-part tokens slip past `verifyHs256`.
+test("GET /ws from a disallowed Origin is rejected before the ticket is even checked", async () => {
+  // Even with no ticket at all, a request from an origin outside the
+  // WEB_ORIGIN allowlist should fail with 403 (Origin check), not the 401 a
+  // same-origin/no-Origin request with no ticket would get.
   await run(
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
-      const fakeJwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjF9.not-a-real-signature";
-      const response = yield* client.get(
-        `http://localhost/ws?token=${fakeJwt}`,
-      );
-      expect(response.status).toBe(401);
+      const response = yield* client.get("http://localhost/ws", {
+        headers: { origin: "https://evil.example" },
+      });
+      expect(response.status).toBe(403);
     }),
   );
 });

@@ -7,11 +7,15 @@ import {
 import { Context, Effect } from "effect";
 
 // Query params that carry credentials and must never reach logs verbatim.
-// `token` covers the `/ws?token=` handshake (see RealtimeSocket.ts — browsers
-// can't set an Authorization header on a WebSocket upgrade, so the access
-// token travels in the URL instead); the rest are redacted defensively in
-// case a future auth mechanism puts a credential in a query param too.
+// `ticket` covers the `/ws?ticket=` handshake (see RealtimeSocket.ts —
+// browsers can't set an Authorization header on a WebSocket upgrade, so a
+// short-lived single-use ticket travels in the URL instead of the bearer
+// access token itself, see WsTicket.ts); `token` is kept for defense in
+// depth even though nothing issues it anymore; the rest are redacted
+// defensively in case a future auth mechanism puts a credential in a query
+// param too.
 const SENSITIVE_PARAMS = [
+  "ticket",
   "token",
   "access_token",
   "accessToken",
