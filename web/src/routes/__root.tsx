@@ -55,9 +55,9 @@ function Nav() {
         to="/"
         className="group relative flex items-center gap-2 font-semibold tracking-tight text-foreground"
       >
-        <MessagesSquare className="size-5 text-primary transition-transform duration-300 group-hover:scale-110 group-hover:rotate-6" />
+        <MessagesSquare className="size-5 text-primary transition-transform duration-300 ease-out group-hover:scale-105 group-hover:rotate-3" />
         <GradientText>Chat Platform</GradientText>
-        <span className="pointer-events-none absolute -bottom-1 left-7 h-px w-0 bg-primary transition-all duration-300 group-hover:w-[calc(100%-1.75rem)]" />
+        <span className="pointer-events-none absolute -bottom-1 left-7 h-px w-0 bg-primary transition-all duration-300 ease-out group-hover:w-[calc(100%-1.75rem)]" />
       </Link>
       <Button asChild variant="ghost" size="sm" className="relative">
         <Link to="/chats">

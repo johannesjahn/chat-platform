@@ -80,7 +80,7 @@ export function PostCard({
       data-post-id={post.id}
       style={style}
       className={cn(
-        "w-full max-w-xl overflow-hidden py-0 transition-[transform,box-shadow] duration-300 hover:-translate-y-0.5 hover:shadow-lg",
+        "w-full max-w-xl overflow-hidden py-0 transition-[transform,box-shadow] duration-400 ease-out hover:-translate-y-px hover:shadow-lg",
         "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-500",
       )}
     >

@@ -47,7 +47,7 @@ export function ChatListItem({
       params={{ id: String(chat.id) }}
       style={style}
       className={cn(
-        "group flex items-center gap-3 rounded-lg border border-border bg-background/40 px-3 py-3 transition-[transform,border-color,background-color] duration-300 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-background/70",
+        "group flex items-center gap-3 rounded-lg border border-border bg-background/40 px-3 py-3 transition-[transform,border-color,background-color] duration-400 ease-out hover:-translate-y-px hover:border-primary/40 hover:bg-background/70",
         "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500",
       )}
     >
