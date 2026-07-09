@@ -119,6 +119,37 @@ jobs:
             exit 1
           fi
 
+  audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install backend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+        working-directory: web
+
+      # audit-level=high: drizzle-kit currently pulls in a moderate-severity
+      # advisory (GHSA-67mh-4wv8-2f99) via its bundled, deprecated
+      # @esbuild-kit/* deps — a dev-only esbuild dev-server issue with no
+      # upstream fix yet. Gate on high/critical so that's tracked (via
+      # Dependabot) without blocking every PR; raise this back to the
+      # default (moderate) once it's resolved upstream.
+      - name: Audit backend dependencies
+        run: bun audit --audit-level=high
+
+      - name: Audit web dependencies
+        run: bun audit --audit-level=high
+        working-directory: web
+
   chart-version:
     name: Helm chart version
     runs-on: ubuntu-latest

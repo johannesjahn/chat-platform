@@ -209,3 +209,13 @@ generated spec/types weren't regenerated and committed), **unit**
 (`bun test ./src`, which includes `src/openapi.test.ts` validating the spec
 against the `ChatApi` definition), and **e2e** (Playwright). The Bun version
 is pinned once via the workflow-level `BUN_VERSION` env var.
+
+**audit** runs `bun audit --audit-level=high` for both the backend and
+`web/` to catch known-vulnerable dependencies; it's gated to high/critical
+severity because drizzle-kit currently carries a moderate-severity advisory
+via its bundled, deprecated `@esbuild-kit/*` deps with no upstream fix yet
+(see the comment in `ci.yml`) — Dependabot tracks it separately. Static
+security analysis runs in a separate workflow,
+[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) (CodeQL, on
+push/PR/weekly schedule), rather than as a `ci.yml` job, since it uploads to
+the repo's Security tab instead of gating merges.
