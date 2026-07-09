@@ -154,6 +154,20 @@ export function appendSentMessage(
 // than expect this hook to reset itself when `chatId` changes.
 export function useChatMessages(chatId: number | undefined, enabled: boolean) {
   const anchorRef = useRef<number | null>(null);
+  // Set by `loadEarlier` right before it triggers a refetch, and always
+  // cleared by the queryFn below — distinguishes "the user just asked to
+  // page backward" from "something else (the initial load, or a
+  // `chat_updated`-triggered refetch at an unchanged anchor) re-ran this
+  // query". Only the latter should slide the anchor forward to catch up with
+  // the tail (see below) — otherwise, in a chat longer than
+  // MESSAGES_MAX_LIMIT, *every* `loadEarlier` call would find its new anchor
+  // still can't reach `total` within one MESSAGES_MAX_LIMIT-sized window and
+  // immediately snap the anchor back toward the tail, making it impossible
+  // to ever page past `total - MESSAGES_MAX_LIMIT` and leaving `hasEarlier`
+  // permanently true — so scrolling to the top kept sending pagination
+  // requests to the backend forever, even once the oldest reachable message
+  // was loaded.
+  const isLoadEarlierFetchRef = useRef(false);
 
   const query = useQuery({
     queryKey:
@@ -163,6 +177,8 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
     enabled: enabled && chatId != null,
     queryFn: async () => {
       const id = chatId!;
+      const isLoadEarlierFetch = isLoadEarlierFetchRef.current;
+      isLoadEarlierFetchRef.current = false;
       if (anchorRef.current === null) {
         const probe = await fetchMessagesPage(id, 0, MESSAGES_PAGE_SIZE);
         anchorRef.current = Math.max(0, probe.total - MESSAGES_PAGE_SIZE);
@@ -170,7 +186,7 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       const offset = anchorRef.current;
       const page = await fetchMessagesPage(id, offset, MESSAGES_MAX_LIMIT);
       const loadedThrough = page.offset + page.messages.length;
-      if (loadedThrough < page.total) {
+      if (!isLoadEarlierFetch && loadedThrough < page.total) {
         // More messages exist than this window (capped at
         // MESSAGES_MAX_LIMIT) can show from the current anchor — rather than
         // re-requesting the whole window again (this is the common case
@@ -213,6 +229,7 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       0,
       (anchorRef.current ?? 0) - MESSAGES_PAGE_SIZE,
     );
+    isLoadEarlierFetchRef.current = true;
     return query.refetch();
   };
 
