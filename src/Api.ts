@@ -257,6 +257,12 @@ export const Chat = Schema.Struct({
   createdBy: Schema.NullOr(Schema.Number),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
+  // Monotonically increases on every participant-visible change to this chat
+  // (see db/schema.ts). Also carried on the `chat_updated` realtime event, so
+  // a client can compare the two to tell whether it's missed an update
+  // (issue #55) rather than only refetching whenever the next event happens
+  // to arrive.
+  version: Schema.Number,
   participants: Schema.Array(ChatParticipant),
   lastMessage: Schema.NullOr(Message),
   // Messages in this chat sent by someone else that the current user hasn't

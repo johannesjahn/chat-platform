@@ -104,6 +104,14 @@ export const chats = pgTable("chats", {
   updatedAt: timestamp("updated_at", { mode: "date" })
     .notNull()
     .$defaultFn(() => new Date()),
+  // Monotonically incremented on every participant-visible change to this
+  // chat (message sent/edited/deleted, read receipts advancing, rename,
+  // participants added) — see `bumpChatVersion` in ChatsHandler.ts. Carried
+  // on the `chat_updated` realtime event and in the `Chat` API response so
+  // clients can tell exactly when they've missed an event (the version they
+  // observe jumps by more than one) instead of only being able to guess from
+  // a dropped/delayed socket message (issue #55).
+  version: integer("version").notNull().default(1),
 });
 
 export type DbChat = typeof chats.$inferSelect;

@@ -78,13 +78,14 @@ async function waitFor(
           yield* connections.notifyUsers([1], {
             type: "chat_updated",
             chatId: 1,
+            version: 1,
           });
         }),
       );
 
       await waitFor(() => received.length > 0);
       expect(received).toEqual([
-        JSON.stringify({ type: "chat_updated", chatId: 1 }),
+        JSON.stringify({ type: "chat_updated", chatId: 1, version: 1 }),
       ]);
     } finally {
       await instanceA.dispose();

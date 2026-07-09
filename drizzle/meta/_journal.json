@@ -43,6 +43,13 @@
       "when": 1783619587413,
       "tag": "0005_slimy_prima",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783621535106,
+      "tag": "0006_careful_terror",
+      "breakpoints": true
     }
   ]
 }

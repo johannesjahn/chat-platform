@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
+import { recordChatVersion } from "./chatVersions";
 
 export type Chat = components["schemas"]["Chat"];
 export type ChatType = components["schemas"]["ChatType"];
@@ -51,6 +52,7 @@ export function useChatsList(enabled: boolean) {
         signal,
       });
       if (error) throw error;
+      for (const chat of data.chats) recordChatVersion(chat.id, chat.version);
       return data;
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
@@ -101,6 +103,7 @@ export function useChatDetail(chatId: number | undefined, enabled: boolean) {
         params: { path: { id: String(chatId) } },
       });
       if (error) throw error;
+      recordChatVersion(data.id, data.version);
       return data;
     },
   });
