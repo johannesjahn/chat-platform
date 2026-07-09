@@ -15,6 +15,18 @@ export type ChatEvent = {
   readonly version: number;
 };
 
+// Pushed to every user who had access to a chat the moment it's deleted
+// (see `deleteChat`/`leaveChat` in ChatsHandler.ts) — a dedicated event
+// rather than a `chat_updated` with a bumped version because there's no
+// surviving row to bump: the chat, its participants, and its messages are
+// already gone by the time this is published. Clients drop it from any
+// cached list/detail view unconditionally, without going through the
+// version staleness check `chat_updated` uses (issue #66).
+export type ChatDeletedEvent = {
+  readonly type: "chat_deleted";
+  readonly chatId: number;
+};
+
 // Pushed to every connected user whenever a post is created, edited, or
 // deleted — the feed has no notion of "participants", so unlike chat events
 // this goes out to everyone, not a filtered subset.
@@ -53,7 +65,8 @@ export type TypingEvent = {
 // duplicated copy of the state pushed over the socket. Presence/typing are
 // the exception: there's no REST resource to refetch for "is this user
 // currently online/typing", so those carry the full, self-contained state.
-export type RealtimeEvent = ChatEvent | PostEvent | PresenceEvent | TypingEvent;
+export type RealtimeEvent =
+  ChatEvent | ChatDeletedEvent | PostEvent | PresenceEvent | TypingEvent;
 
 // A connected client's outbound channel — bound to one open `/ws` socket.
 type Writer = (chunk: string) => Effect.Effect<void, unknown>;

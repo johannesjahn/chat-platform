@@ -2,7 +2,11 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { API_URL, fetchClient } from "./api";
 import { useSession } from "./auth";
-import { classifyChatVersion, recordChatVersion } from "./chatVersions";
+import {
+  classifyChatVersion,
+  forgetChatVersion,
+  recordChatVersion,
+} from "./chatVersions";
 import {
   chatDetailQueryKey,
   chatMessagesQueryKey,
@@ -14,6 +18,7 @@ import { noteTyping } from "./typing";
 
 type RealtimeSocketEvent =
   | { type: "chat_updated"; chatId: number; version: number }
+  | { type: "chat_deleted"; chatId: number }
   | { type: "post_changed"; postId: number }
   | { type: "presence"; userId: number; online: boolean }
   | { type: "typing"; chatId: number; userId: number; username: string };
@@ -119,6 +124,25 @@ export function useRealtimeSocket(enabled: boolean): void {
               );
             }
             recordChatVersion(parsed.chatId, parsed.version);
+            void queryClient.invalidateQueries({
+              queryKey: chatsListQueryKey,
+            });
+            void queryClient.invalidateQueries({
+              queryKey: chatDetailQueryKey(parsed.chatId),
+            });
+            void queryClient.invalidateQueries({
+              queryKey: chatMessagesQueryKey(parsed.chatId),
+            });
+            break;
+          }
+          case "chat_deleted": {
+            // Unlike `chat_updated`, always actioned regardless of any
+            // tracked version — there's no surviving row to compare against
+            // (see ChatDeletedEvent in src/Realtime.ts). Invalidating the
+            // list drops it from view; invalidating the detail/messages
+            // queries surfaces "Chat not found" if it's the one currently
+            // open, same as navigating to a chat that was never accessible.
+            forgetChatVersion(parsed.chatId);
             void queryClient.invalidateQueries({
               queryKey: chatsListQueryKey,
             });

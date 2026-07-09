@@ -105,6 +105,26 @@ const registerAndLogin = (username: string, password: string) =>
     return { user, accessToken, client: yield* makeAuthedClient(accessToken) };
   });
 
+// Simulates promoting a user to admin out-of-band (there's no API for it —
+// registration always creates a "user") and returns a freshly-authenticated
+// client for them — role is baked into the JWT at sign time, so a promoted
+// user must log in again to get a token reflecting it.
+const promoteToAdmin = (username: string, password: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    yield* Effect.tryPromise(() =>
+      db
+        .update(users)
+        .set({ role: "admin" })
+        .where(eq(users.username, username)),
+    ).pipe(Effect.orDie);
+    const c = yield* makeClient;
+    const { accessToken } = yield* c.users.login({
+      payload: { username, password },
+    });
+    return yield* makeAuthedClient(accessToken);
+  });
+
 test("createDirectChat creates a chat between two users", () =>
   run(
     Effect.gen(function* () {
@@ -1037,6 +1057,14 @@ test("every chats endpoint rejects an unauthenticated request", () =>
           c.chats
             .deleteMessage({ path: { id: 1, messageId: 1 } })
             .pipe(Effect.either),
+          c.chats
+            .removeParticipant({ path: { id: 1, userId: 1 } })
+            .pipe(Effect.either),
+          c.chats.leaveChat({ path: { id: 1 } }).pipe(Effect.either),
+          c.chats.deleteChat({ path: { id: 1 } }).pipe(Effect.either),
+          c.chats
+            .transferOwnership({ path: { id: 1 }, payload: { userId: 1 } })
+            .pipe(Effect.either),
         ],
         { concurrency: "unbounded" },
       );
@@ -1226,5 +1254,353 @@ test("markRead 404s for a missing chat or a message from a different chat", () =
       if (wrongChat._tag === "Left") {
         expect((wrongChat.left as { _tag: string })._tag).toBe("NotFound");
       }
+    }),
+  ));
+
+test("leaveChat lets a non-creator leave, keeping the chat for the rest", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const carol = yield* registerAndLogin("carol", "pw");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: {
+          title: "Group",
+          participantIds: [bob.user.id, carol.user.id],
+        },
+      });
+
+      yield* bob.client.chats.leaveChat({ path: { id: chat.id } });
+
+      const survived = yield* alice.client.chats.getChat({
+        path: { id: chat.id },
+      });
+      expect(survived.participants.map((p) => p.userId).sort()).toEqual(
+        [alice.user.id, carol.user.id].sort(),
+      );
+      expect(survived.createdBy).toBe(alice.user.id);
+
+      // bob is no longer a participant, so the chat still exists but is now
+      // forbidden to him.
+      const afterLeave = yield* bob.client.chats
+        .getChat({ path: { id: chat.id } })
+        .pipe(Effect.either);
+      expect(afterLeave._tag).toBe("Left");
+      if (afterLeave._tag === "Left") {
+        expect((afterLeave.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+    }),
+  ));
+
+test("leaveChat rejects leaving a direct chat", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+
+      const result = yield* alice.client.chats
+        .leaveChat({ path: { id: chat.id } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+    }),
+  ));
+
+test("leaveChat transfers ownership to the longest-standing remaining participant when the creator leaves, and deletes the chat once empty", () =>
+  run(
+    Effect.gen(function* () {
+      // bob and carol are added to the group in the same insert, so they
+      // share a joinedAt — the tie-break (lowest userId) picks bob, since he
+      // registered (and so got his id) before carol.
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const carol = yield* registerAndLogin("carol", "pw");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: {
+          title: "Group",
+          participantIds: [bob.user.id, carol.user.id],
+        },
+      });
+
+      yield* alice.client.chats.leaveChat({ path: { id: chat.id } });
+
+      const afterAliceLeft = yield* bob.client.chats.getChat({
+        path: { id: chat.id },
+      });
+      expect(afterAliceLeft.createdBy).toBe(bob.user.id);
+      expect(afterAliceLeft.participants.map((p) => p.userId).sort()).toEqual(
+        [bob.user.id, carol.user.id].sort(),
+      );
+
+      yield* carol.client.chats.leaveChat({ path: { id: chat.id } });
+      yield* bob.client.chats.leaveChat({ path: { id: chat.id } });
+
+      // Once the last participant leaves, the chat is deleted outright.
+      const gone = yield* bob.client.chats
+        .getChat({ path: { id: chat.id } })
+        .pipe(Effect.either);
+      expect(gone._tag).toBe("Left");
+      if (gone._tag === "Left") {
+        expect((gone.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("removeParticipant lets the creator remove someone, and an admin who isn't a participant too", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const carol = yield* registerAndLogin("carol", "pw");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: {
+          title: "Group",
+          participantIds: [bob.user.id, carol.user.id],
+        },
+      });
+
+      const updated = yield* alice.client.chats.removeParticipant({
+        path: { id: chat.id, userId: bob.user.id },
+      });
+      expect(updated.participants.map((p) => p.userId).sort()).toEqual(
+        [alice.user.id, carol.user.id].sort(),
+      );
+
+      // Non-creator, non-admin can't remove anyone.
+      const forbidden = yield* carol.client.chats
+        .removeParticipant({ path: { id: chat.id, userId: alice.user.id } })
+        .pipe(Effect.either);
+      expect(forbidden._tag).toBe("Left");
+      if (forbidden._tag === "Left") {
+        expect((forbidden.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+
+      yield* registerAndLogin("dave", "pw");
+      const adminClient = yield* promoteToAdmin("dave", "pw");
+      const asAdmin = yield* adminClient.chats.removeParticipant({
+        path: { id: chat.id, userId: carol.user.id },
+      });
+      expect(asAdmin.participants.map((p) => p.userId)).toEqual([
+        alice.user.id,
+      ]);
+    }),
+  ));
+
+test("removeParticipant rejects removing yourself, a non-participant, or the chat's last participant", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const carol = yield* registerAndLogin("carol", "pw");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+
+      const removeSelf = yield* alice.client.chats
+        .removeParticipant({ path: { id: chat.id, userId: alice.user.id } })
+        .pipe(Effect.either);
+      expect(removeSelf._tag).toBe("Left");
+      if (removeSelf._tag === "Left") {
+        expect((removeSelf.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+
+      const removeStranger = yield* alice.client.chats
+        .removeParticipant({ path: { id: chat.id, userId: carol.user.id } })
+        .pipe(Effect.either);
+      expect(removeStranger._tag).toBe("Left");
+      if (removeStranger._tag === "Left") {
+        expect((removeStranger.left as { _tag: string })._tag).toBe("NotFound");
+      }
+
+      // Shrink the chat down to bob alone (ownership transfers to him),
+      // then have an admin try to remove the last remaining participant.
+      yield* alice.client.chats.leaveChat({ path: { id: chat.id } });
+      yield* registerAndLogin("erin", "pw");
+      const adminClient = yield* promoteToAdmin("erin", "pw");
+      const removeLast = yield* adminClient.chats
+        .removeParticipant({ path: { id: chat.id, userId: bob.user.id } })
+        .pipe(Effect.either);
+      expect(removeLast._tag).toBe("Left");
+      if (removeLast._tag === "Left") {
+        expect((removeLast.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+    }),
+  ));
+
+test("removeParticipant transfers ownership when the removed participant was the creator", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const carol = yield* registerAndLogin("carol", "pw");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: {
+          title: "Group",
+          participantIds: [bob.user.id, carol.user.id],
+        },
+      });
+
+      yield* registerAndLogin("dave", "pw");
+      const adminClient = yield* promoteToAdmin("dave", "pw");
+      yield* adminClient.chats.removeParticipant({
+        path: { id: chat.id, userId: alice.user.id },
+      });
+
+      const afterRemoval = yield* bob.client.chats.getChat({
+        path: { id: chat.id },
+      });
+      expect(afterRemoval.createdBy).toBe(bob.user.id);
+      expect(afterRemoval.participants.map((p) => p.userId).sort()).toEqual(
+        [bob.user.id, carol.user.id].sort(),
+      );
+    }),
+  ));
+
+test("deleteChat lets the creator (or an admin) delete a group chat outright", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+
+      const directChat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const directResult = yield* alice.client.chats
+        .deleteChat({ path: { id: directChat.id } })
+        .pipe(Effect.either);
+      expect(directResult._tag).toBe("Left");
+      if (directResult._tag === "Left") {
+        expect((directResult.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+
+      const groupChat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+      const forbidden = yield* bob.client.chats
+        .deleteChat({ path: { id: groupChat.id } })
+        .pipe(Effect.either);
+      expect(forbidden._tag).toBe("Left");
+      if (forbidden._tag === "Left") {
+        expect((forbidden.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+
+      yield* alice.client.chats.deleteChat({ path: { id: groupChat.id } });
+
+      const gone = yield* bob.client.chats
+        .getChat({ path: { id: groupChat.id } })
+        .pipe(Effect.either);
+      expect(gone._tag).toBe("Left");
+      if (gone._tag === "Left") {
+        expect((gone.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("transferOwnership lets the creator hand off ownership, and 404s for a non-participant target", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const carol = yield* registerAndLogin("carol", "pw");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+
+      const missingTarget = yield* alice.client.chats
+        .transferOwnership({
+          path: { id: chat.id },
+          payload: { userId: carol.user.id },
+        })
+        .pipe(Effect.either);
+      expect(missingTarget._tag).toBe("Left");
+      if (missingTarget._tag === "Left") {
+        expect((missingTarget.left as { _tag: string })._tag).toBe("NotFound");
+      }
+
+      const updated = yield* alice.client.chats.transferOwnership({
+        path: { id: chat.id },
+        payload: { userId: bob.user.id },
+      });
+      expect(updated.createdBy).toBe(bob.user.id);
+
+      // Ownership moved — alice can no longer rename, bob now can.
+      const renameByAlice = yield* alice.client.chats
+        .updateChat({ path: { id: chat.id }, payload: { title: "Nope" } })
+        .pipe(Effect.either);
+      expect(renameByAlice._tag).toBe("Left");
+      if (renameByAlice._tag === "Left") {
+        expect((renameByAlice.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+      const renamed = yield* bob.client.chats.updateChat({
+        path: { id: chat.id },
+        payload: { title: "Renamed by bob" },
+      });
+      expect(renamed.title).toBe("Renamed by bob");
+    }),
+  ));
+
+test("transferOwnership: once a chat is ownerless, any participant can claim it, but a non-participant still can't", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const dave = yield* registerAndLogin("dave", "pw");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+
+      // While alice still owns it, bob (a mere participant) can't transfer
+      // ownership.
+      const forbidden = yield* bob.client.chats
+        .transferOwnership({
+          path: { id: chat.id },
+          payload: { userId: bob.user.id },
+        })
+        .pipe(Effect.either);
+      expect(forbidden._tag).toBe("Left");
+      if (forbidden._tag === "Left") {
+        expect((forbidden.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+
+      // Simulate alice's account being deleted — createdBy goes to null
+      // (see db/schema.ts), leaving the group ownerless.
+      const db = yield* Db;
+      yield* Effect.tryPromise(() =>
+        db.delete(users).where(eq(users.id, alice.user.id)),
+      ).pipe(Effect.orDie);
+
+      // dave isn't a participant, so he still can't claim it.
+      const notParticipant = yield* dave.client.chats
+        .transferOwnership({
+          path: { id: chat.id },
+          payload: { userId: bob.user.id },
+        })
+        .pipe(Effect.either);
+      expect(notParticipant._tag).toBe("Left");
+      if (notParticipant._tag === "Left") {
+        expect((notParticipant.left as { _tag: string })._tag).toBe(
+          "Forbidden",
+        );
+      }
+
+      // But bob, a participant of the now-ownerless chat, can claim it.
+      const claimed = yield* bob.client.chats.transferOwnership({
+        path: { id: chat.id },
+        payload: { userId: bob.user.id },
+      });
+      expect(claimed.createdBy).toBe(bob.user.id);
     }),
   ));
