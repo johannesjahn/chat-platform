@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { count, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { ChatApi, DEFAULT_POSTS_LIMIT, Forbidden, NotFound } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
@@ -52,19 +52,21 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const offset = urlParams.offset ?? 0;
           const limit = urlParams.limit ?? DEFAULT_POSTS_LIMIT;
-          const rows = yield* Effect.tryPromise(() =>
+          // Fetch one row past `limit` instead of firing a separate
+          // `COUNT(*)` — whether that extra row came back is all `hasMore`
+          // needs, and unlike a full-table count this stays cheap no matter
+          // how large `posts` grows (issue #51).
+          const fetched = yield* Effect.tryPromise(() =>
             db
               .select()
               .from(posts)
               .orderBy(desc(posts.id))
-              .limit(limit)
+              .limit(limit + 1)
               .offset(offset),
           ).pipe(Effect.orDie);
-          const totalRows = yield* Effect.tryPromise(() =>
-            db.select({ total: count() }).from(posts),
-          ).pipe(Effect.orDie);
-          const total = totalRows[0]?.total ?? 0;
-          return { posts: rows.map(toApiPost), offset, limit, total };
+          const hasMore = fetched.length > limit;
+          const rows = fetched.slice(0, limit);
+          return { posts: rows.map(toApiPost), offset, limit, hasMore };
         }),
       )
       .handle("createPost", ({ payload }) =>

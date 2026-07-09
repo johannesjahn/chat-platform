@@ -1283,6 +1283,17 @@
             },
             "required": false,
             "description": "a string to be decoded into a number"
+          },
+          {
+            "name": "includeTotal",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true"
+              ]
+            },
+            "required": false
           }
         ],
         "security": [
@@ -2272,7 +2283,7 @@
           "posts",
           "offset",
           "limit",
-          "total"
+          "hasMore"
         ],
         "properties": {
           "posts": {
@@ -2287,8 +2298,8 @@
           "limit": {
             "type": "number"
           },
-          "total": {
-            "type": "number"
+          "hasMore": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -2588,7 +2599,7 @@
           "messages",
           "offset",
           "limit",
-          "total"
+          "hasMore"
         ],
         "properties": {
           "messages": {
@@ -2602,6 +2613,9 @@
           },
           "limit": {
             "type": "number"
+          },
+          "hasMore": {
+            "type": "boolean"
           },
           "total": {
             "type": "number"

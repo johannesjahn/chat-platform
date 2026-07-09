@@ -43,9 +43,7 @@ export function usePostsFeed(enabled: boolean) {
       if (error) throw error;
       return data;
     },
-    getNextPageParam: (lastPage) => {
-      const loaded = lastPage.offset + lastPage.posts.length;
-      return loaded < lastPage.total ? loaded : undefined;
-    },
+    getNextPageParam: (lastPage) =>
+      lastPage.hasMore ? lastPage.offset + lastPage.posts.length : undefined,
   });
 }

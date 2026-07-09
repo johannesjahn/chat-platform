@@ -443,7 +443,7 @@ export interface components {
             posts: components["schemas"]["Post"][];
             offset: number;
             limit: number;
-            total: number;
+            hasMore: boolean;
         };
         CreatePostBody: {
             contentType: components["schemas"]["PostContentType"];
@@ -533,7 +533,8 @@ export interface components {
             messages: components["schemas"]["Message"][];
             offset: number;
             limit: number;
-            total: number;
+            hasMore: boolean;
+            total?: number;
         };
         CreateMessageBody: {
             contentType: components["schemas"]["MessageContentType"];
@@ -1442,6 +1443,7 @@ export interface operations {
                 offset?: string;
                 /** @description a string to be decoded into a number */
                 limit?: string;
+                includeTotal?: "true";
             };
             header?: never;
             path: {
