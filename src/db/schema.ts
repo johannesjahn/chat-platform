@@ -57,20 +57,28 @@ export const refreshTokens = pgTable(
 export type DbRefreshToken = typeof refreshTokens.$inferSelect;
 export type NewDbRefreshToken = typeof refreshTokens.$inferInsert;
 
-export const posts = pgTable("posts", {
-  id: serial("id").primaryKey(),
-  authorId: integer("author_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  contentType: text("content_type", { enum: ["text", "image_url"] }).notNull(),
-  content: text("content").notNull(),
-  createdAt: timestamp("created_at", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  updatedAt: timestamp("updated_at", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
+export const posts = pgTable(
+  "posts",
+  {
+    id: serial("id").primaryKey(),
+    authorId: integer("author_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    contentType: text("content_type", {
+      enum: ["text", "image_url"],
+    }).notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  // Postgres doesn't auto-index foreign key columns — without this, cascade
+  // deletes from `users` and any author-filtered listing scan every post.
+  (table) => [index("posts_author_id_idx").on(table.authorId)],
+);
 
 export type DbPost = typeof posts.$inferSelect;
 export type NewDbPost = typeof posts.$inferInsert;
@@ -115,7 +123,14 @@ export const chatParticipants = pgTable(
       .notNull()
       .$defaultFn(() => new Date()),
   },
-  (table) => [unique().on(table.chatId, table.userId)],
+  (table) => [
+    unique().on(table.chatId, table.userId),
+    // The unique constraint above is backed by a (chatId, userId) btree, so
+    // it only serves chatId-first lookups. `listChats` joins on userId
+    // directly (every participant row for a given user), which needs its
+    // own leading index rather than scanning the chatId-first one.
+    index("chat_participants_user_id_idx").on(table.userId),
+  ],
 );
 
 export type DbChatParticipant = typeof chatParticipants.$inferSelect;
@@ -142,11 +157,18 @@ export const messages = pgTable(
       .notNull()
       .$defaultFn(() => new Date()),
   },
-  // `listMessages` filters + orders by (chatId, id) for every page fetch,
-  // and `createMessage`/`markRead` etc. all look up by chatId too —
-  // Postgres doesn't auto-index foreign key columns, so without this every
-  // one of those becomes a sequential scan as the table grows.
-  (table) => [index("messages_chat_id_idx").on(table.chatId, table.id)],
+  (table) => [
+    // `listMessages` filters + orders by (chatId, id) for every page fetch,
+    // and `createMessage`/`markRead` etc. all look up by chatId too —
+    // Postgres doesn't auto-index foreign key columns, so without this every
+    // one of those becomes a sequential scan as the table grows.
+    index("messages_chat_id_idx").on(table.chatId, table.id),
+    // `getUnreadCount`/`getUnreadCountsForChats` filter on
+    // `ne(senderId, userId)` alongside the chatId filter above — a
+    // dedicated index lets Postgres use a bitmap AND of both instead of
+    // falling back to a filter scan over every chatId match.
+    index("messages_sender_id_idx").on(table.senderId),
+  ],
 );
 
 export type DbMessage = typeof messages.$inferSelect;
