@@ -130,7 +130,7 @@ function UsersPage() {
                     );
                   }}
                   style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
-                  className="group relative flex items-center justify-between overflow-hidden rounded-lg border border-border bg-background/40 px-3 py-2.5 text-sm transition-[transform,border-color] duration-300 hover:-translate-y-0.5 hover:border-primary/40 motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500"
+                  className="group relative flex items-center justify-between overflow-hidden rounded-lg border border-border bg-background/40 px-3 py-2.5 text-sm transition-[transform,border-color] duration-400 ease-out hover:-translate-y-px hover:border-primary/40 motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500"
                 >
                   <Spotlight size={220} />
                   <span className="font-medium">@{user.username}</span>
