@@ -42,6 +42,20 @@ const redisConfigured = Boolean(process.env.REDIS_URL);
         }),
       );
 
+      // `register` itself broadcasts a `presence` event over the same real
+      // Redis channel (see Realtime.ts) — that broadcast is also delivered
+      // here, and it's async (unlike the in-memory PubSub), so wait for it
+      // to land and clear it rather than asserting on it below; this test's
+      // subject is `chat_updated` delivery specifically.
+      const presenceDeadline = Date.now() + 5000;
+      while (received.length === 0 && Date.now() < presenceDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(received).toEqual([
+        JSON.stringify({ type: "presence", userId: 1, online: true }),
+      ]);
+      received.length = 0;
+
       // The mutation is handled by instance A.
       await instanceA.runPromise(
         Effect.gen(function* () {
