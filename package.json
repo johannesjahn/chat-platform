@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "bun --hot src/main.ts",
     "start": "bun src/main.ts",
-    "test": "bun test ./src",
+    "test": "bun test ./src --parallel --timeout=15000",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

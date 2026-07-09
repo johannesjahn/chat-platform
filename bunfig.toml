@@ -1,7 +1,9 @@
-[test]
-# PGlite (an embedded real Postgres, used in tests for fidelity with the
-# production PGlite-backed Db.ts) spins up a fresh WASM Postgres instance per
-# test and is noticeably slower to boot than bun:sqlite's in-memory driver
-# was — the default 5s timeout is too tight for that plus argon2id hashing
-# under concurrent test-file load.
-timeout = 15000
+# [test] timeout here would be the obvious place to raise the per-test
+# timeout, but bunfig.toml's `timeout` key is a documented no-op in Bun
+# 1.3.14 — it's silently ignored and every test still gets the 5000ms
+# default regardless of what's set here (https://github.com/oven-sh/bun/issues/7789).
+# We hit this directly: CI failures traced back to a test that took ~8s
+# (PGlite boot, contended under `--parallel`) getting killed at the real
+# 5000ms default despite this file. Use the `--timeout` CLI flag instead —
+# see the `test` script in package.json and the `unit` job in
+# .github/workflows/ci.yml. Revisit once the linked issue is fixed upstream.

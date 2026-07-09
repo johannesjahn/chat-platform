@@ -129,18 +129,34 @@ lint/format from the repo root; run `typecheck` per package.
 
 ## Testing
 
-- **Backend** — `bun test ./src` (Bun's test runner). Tests in
-  [src/users.test.ts](src/users.test.ts) drive the Effect `HttpApi` through an
-  in-process web handler: each `run()` spins up a fresh in-memory PGlite
-  instance, applies the Drizzle migrations from `./drizzle`, and sets a
-  deterministic `JWT_SECRET`. No server or network, fully isolated per test.
-  PGlite is a real (WASM-embedded) Postgres, so it's slower to start per test
-  than `bun:sqlite` was — see `bunfig.toml`'s raised test timeout. Every test
-  file provides `InMemoryPubSubLive` for `RealtimeConnectionsLive`'s `PubSub`
+- **Backend** — `bun test ./src --parallel --timeout=15000` (Bun's test
+  runner; `--parallel` runs test files across worker processes instead of
+  one after another — see below). The `--timeout` flag is load-bearing, not
+  cosmetic: `bunfig.toml`'s `[test] timeout` looks like it should do the same
+  thing but is a documented Bun no-op (every test silently gets the 5000ms
+  default regardless — see the comment in `bunfig.toml`), so the flag on the
+  CLI/script is the only thing actually raising it. Tests in
+  [src/users.test.ts](src/users.test.ts) drive the
+  Effect `HttpApi` through an in-process web handler, with a deterministic
+  `JWT_SECRET`. No server or network, fully isolated per test. Each test
+  file that calls `makeTestDbAccessor()` (see [src/testDb.ts](src/testDb.ts))
+  boots one in-memory PGlite instance shared across that file's tests
+  (migrated once via Drizzle from `./drizzle`), with a plain `TRUNCATE`
+  between tests restoring a clean slate — cheaper than booting a fresh
+  PGlite instance per test while keeping tests isolated as if each had. The
+  instance is closed automatically once the file's tests finish; PGlite is a
+  real (WASM-embedded) Postgres, so the first boot is still slower than
+  `bun:sqlite` was — see the `--timeout` flag noted above. Every test file
+  provides `InMemoryPubSubLive` for `RealtimeConnectionsLive`'s `PubSub`
   dependency, except
   [src/RealtimePubSub.integration.test.ts](src/RealtimePubSub.integration.test.ts),
   which needs a real Redis at `REDIS_URL` (CI provides one as a service
   container — see `.github/workflows/ci.yml`) and skips itself otherwise.
+  `--parallel` is safe here because PGlite instances, ports (integration
+  tests grab a free ephemeral port), and Redis usage (only one file touches
+  it) are all already isolated per file/process — don't add `test.concurrent`
+  within a file, though, since tests sharing one file's PGlite instance still
+  reset it between each other and aren't safe to run concurrently.
 - **E2E** — `cd web && bun run test:e2e` (Playwright, Chromium). The Playwright
   `webServer` config boots the _real_ backend (`bun run start`, cwd `..`, with a
   test `JWT_SECRET`) and the Vite dev server, then drives the browser against

@@ -7,8 +7,6 @@ import {
   HttpClientRequest,
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
-import { drizzle } from "drizzle-orm/pglite";
-import { migrate } from "drizzle-orm/pglite/migrator";
 import { Effect, Layer } from "effect";
 import {
   ChatApi,
@@ -25,9 +23,9 @@ import { InMemoryPubSubLive } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
+import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
-import * as schema from "./db/schema.ts";
 import { InMemoryWsTicketLive } from "./WsTicket.ts";
 
 // JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
@@ -47,17 +45,14 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(InMemoryWsTicketLive),
 );
 
-const run = <A, E>(
+const { getTestDb } = makeTestDbAccessor();
+
+const run = async <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient>,
 ): Promise<A> => {
-  const TestDbLive = Layer.effect(
-    Db,
-    Effect.promise(async () => {
-      const db = drizzle({ schema });
-      await migrate(db, { migrationsFolder: "./drizzle" });
-      return db;
-    }),
-  );
+  const db = await getTestDb();
+  await resetTestDb(db);
+  const TestDbLive = Layer.succeed(Db, db);
 
   const { handler, dispose } = HttpApiBuilder.toWebHandler(
     Layer.mergeAll(
@@ -80,9 +75,13 @@ const run = <A, E>(
     ),
   );
 
-  return Effect.runPromise(
-    effect.pipe(Effect.provide(TestClientLayer)),
-  ).finally(dispose);
+  try {
+    return await Effect.runPromise(
+      effect.pipe(Effect.provide(TestClientLayer)),
+    );
+  } finally {
+    await dispose();
+  }
 };
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });

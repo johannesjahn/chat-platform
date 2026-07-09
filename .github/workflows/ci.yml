@@ -13,6 +13,7 @@ jobs:
   lint:
     name: Lint & format
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -32,6 +33,7 @@ jobs:
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -62,6 +64,7 @@ jobs:
   openapi:
     name: OpenAPI spec & generated types
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -91,6 +94,7 @@ jobs:
   chart-version:
     name: Helm chart version
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -112,6 +116,7 @@ jobs:
   helm:
     name: Helm chart lint & template
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -126,6 +131,7 @@ jobs:
   unit:
     name: Backend tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Only RealtimePubSub.integration.test.ts uses this — it's the one test
     # that proves cross-instance delivery over real Redis Pub/Sub (see
     # src/PubSub.ts). Everything else uses the in-memory PubSub fallback and
@@ -151,13 +157,21 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run backend tests
-        run: bun test ./src
+        # bunfig.toml's [test] timeout is a no-op in this Bun version — the
+        # --timeout flag is what actually raises it above the 5000ms default
+        # (see the comment in bunfig.toml).
+        run: bun test ./src --parallel --timeout=15000
         env:
           REDIS_URL: redis://localhost:6379
 
   e2e:
-    name: E2E tests
+    name: E2E tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -178,15 +192,19 @@ jobs:
         run: bunx playwright install --with-deps chromium
         working-directory: web
 
+      # Each test boots its own backend process (see web/e2e/backend.ts), so
+      # running everything on one runner means all shards' backends and
+      # browsers compete for that runner's cores. Splitting into shards
+      # across separate runners multiplies the CPU budget instead.
       - name: Run Playwright tests
-        run: bun run test:e2e
+        run: bun run test:e2e --shard=${{ matrix.shard }}/${{ strategy.job-total }}
         working-directory: web
 
       - name: Upload Playwright traces
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: playwright-traces
+          name: playwright-traces-${{ matrix.shard }}
           path: web/test-results/
           if-no-files-found: ignore
           retention-days: 7
