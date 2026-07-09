@@ -1,5 +1,5 @@
 import { RedisClient } from "bun";
-import { Context, Effect, Layer } from "effect";
+import { Context, Duration, Effect, Layer, Schedule } from "effect";
 
 // Tracks how many live `/ws` connections each user has *across every app
 // instance* — not just the local one handling a given connect/disconnect.
@@ -75,58 +75,144 @@ export const InMemoryPresenceStoreLive = Layer.sync(PresenceStore, () => {
 // inconsistent count the way two independent local counters could.
 const KEY = "chat-platform:presence:counts";
 
-export const RedisPresenceStoreLive = Layer.sync(PresenceStore, () => {
-  const redis = new RedisClient(process.env.REDIS_URL);
+// Safety net for a hard process kill (SIGKILL — OOM killer, `docker kill`, a
+// spot-instance reclaim): `disconnect` never runs in that case, so nothing
+// would otherwise ever `HDEL` the field this instance incremented, leaking
+// it — and the user showing "online" — forever (issue #102 part 1). Instead,
+// every field an instance is holding a live connection for gets its Redis
+// per-field TTL (`HEXPIRE`, Redis 7.4+) refreshed on a heartbeat (see
+// HEARTBEAT_INTERVAL below) for as long as that instance keeps heartbeating
+// it. A crash just stops the heartbeat, so Redis itself expires the field
+// within one FIELD_TTL_SECONDS window of the last successful refresh — no
+// separate reconciliation job needed to clean it up (issue #102 part 4). A
+// graceful `disconnect` still removes the field immediately via `HDEL`, same
+// as before, so the common case sees no added staleness.
+//
+// The TTL is generous relative to the heartbeat interval so a couple of
+// missed beats (a GC pause, a brief Redis hiccup) can't flip a still-live
+// user offline.
+const FIELD_TTL_SECONDS = 60;
+const HEARTBEAT_INTERVAL = Duration.seconds(20);
 
-  // Best-effort, like the realtime push itself (see Realtime.ts's
-  // notifyUsers/broadcastAll): a `/ws` connection succeeding shouldn't
-  // depend on Redis being reachable, and a transient failure should
-  // conservatively *not* claim a transition happened (suppressing a
-  // presence broadcast) rather than crash connection setup or, worse,
-  // report a wrong transition.
-  const connect: Context.Tag.Service<typeof PresenceStore>["connect"] = (
-    userId,
-  ) =>
-    Effect.tryPromise(() => redis.hincrby(KEY, String(userId), 1)).pipe(
-      Effect.map((count) => count === 1),
-      Effect.orElseSucceed(() => false),
+export const RedisPresenceStoreLive = Layer.scoped(
+  PresenceStore,
+  Effect.gen(function* () {
+    const redis = new RedisClient(process.env.REDIS_URL);
+
+    // Issue #102 part 2: connect/disconnect/onlineUserIds all fail soft
+    // (Redis being unreachable must never fail a `/ws` connection), which
+    // previously meant a Redis blip silently degraded presence with nothing
+    // surfacing it. Logging here at least leaves a trail.
+    const logFallback = (operation: string, error: unknown) =>
+      Effect.logWarning(
+        "PresenceStore: Redis operation failed, presence update suppressed",
+      ).pipe(Effect.annotateLogs({ operation, error: String(error) }));
+
+    // This instance's own view of which users it's currently holding at
+    // least one live `/ws` connection for — separate from (but analogous
+    // to) RealtimeConnections' local `byUser` map (see Realtime.ts).
+    // PresenceStore needs its own so the heartbeat below knows which fields
+    // *this* instance is responsible for keeping alive; a second connection
+    // for the same user landing on this instance must not stop the
+    // heartbeat early just because one of its two connections closed.
+    const localCounts = new Map<number, number>();
+
+    // Always succeeds (failures are logged and swallowed) — a heartbeat
+    // refresh failing must not fail the `connect` call that triggered it,
+    // nor abort the rest of a heartbeat tick over other users.
+    const refreshTtl = (userId: number): Effect.Effect<void> =>
+      Effect.tryPromise(() =>
+        redis.hexpire(KEY, FIELD_TTL_SECONDS, "FIELDS", 1, String(userId)),
+      ).pipe(
+        Effect.asVoid,
+        Effect.catchAll((error) => logFallback("heartbeat", error)),
+      );
+
+    // Best-effort, like the realtime push itself (see Realtime.ts's
+    // notifyUsers/broadcastAll): a `/ws` connection succeeding shouldn't
+    // depend on Redis being reachable, and a transient failure should
+    // conservatively *not* claim a transition happened (suppressing a
+    // presence broadcast) rather than crash connection setup or, worse,
+    // report a wrong transition.
+    const connect: Context.Tag.Service<typeof PresenceStore>["connect"] = (
+      userId,
+    ) =>
+      Effect.tryPromise(() => redis.hincrby(KEY, String(userId), 1)).pipe(
+        Effect.tap(() => {
+          localCounts.set(userId, (localCounts.get(userId) ?? 0) + 1);
+          return refreshTtl(userId);
+        }),
+        Effect.map((count) => count === 1),
+        Effect.catchAll((error) =>
+          logFallback("connect", error).pipe(Effect.as(false)),
+        ),
+      );
+
+    const disconnect: Context.Tag.Service<
+      typeof PresenceStore
+    >["disconnect"] = (userId) =>
+      Effect.tryPromise(() => redis.hincrby(KEY, String(userId), -1)).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            const next = (localCounts.get(userId) ?? 1) - 1;
+            if (next > 0) localCounts.set(userId, next);
+            else localCounts.delete(userId);
+          }),
+        ),
+        Effect.flatMap((count) => {
+          if (count > 0) return Effect.succeed(false);
+          // Back at (or below) zero — remove the field entirely (its TTL
+          // goes with it) rather than leaving a `0` sitting in the hash
+          // forever.
+          //
+          // Unlike InMemoryPresenceStoreLive, this doesn't special-case a
+          // disconnect with no prior connect (that'd need an extra
+          // round-trip to check first), so a stray call like that would
+          // report `true` here instead of `false`. Harmless in practice: it
+          // can't happen via the real call site (Realtime.ts's `register`
+          // cleanup always pairs with a `connect`), and even if it did, a
+          // spurious "offline" broadcast for a user nothing marked online
+          // is a no-op for anyone consuming it (see web/src/lib/presence.ts,
+          // which only reacts to an actual state change).
+          return Effect.tryPromise(() => redis.hdel(KEY, String(userId))).pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => true),
+          );
+        }),
+        Effect.catchAll((error) =>
+          logFallback("disconnect", error).pipe(Effect.as(false)),
+        ),
+      );
+
+    const onlineUserIds: Effect.Effect<ReadonlyArray<number>> =
+      Effect.tryPromise(() => redis.hkeys(KEY)).pipe(
+        Effect.map((fields) => fields.map(Number)),
+        Effect.catchAll((error) =>
+          logFallback("onlineUserIds", error).pipe(
+            Effect.as([] as ReadonlyArray<number>),
+          ),
+        ),
+      );
+
+    // Background heartbeat: every HEARTBEAT_INTERVAL, refresh the TTL of
+    // every field this instance is still holding a connection for.
+    // `Effect.suspend` defers reading `localCounts` to each tick — building
+    // the array eagerly here would freeze on an empty snapshot taken before
+    // any connection ever registered. Tied to this layer's scope so it's
+    // interrupted on shutdown, same as RefreshTokenCleanupLive
+    // (RefreshTokenCleanup.ts).
+    yield* Effect.forkScoped(
+      Effect.suspend(() =>
+        Effect.forEach([...localCounts.keys()], refreshTtl, {
+          concurrency: "unbounded",
+          discard: true,
+        }),
+      ).pipe(Effect.repeat(Schedule.spaced(HEARTBEAT_INTERVAL))),
     );
 
-  const disconnect: Context.Tag.Service<typeof PresenceStore>["disconnect"] = (
-    userId,
-  ) =>
-    Effect.tryPromise(() => redis.hincrby(KEY, String(userId), -1)).pipe(
-      Effect.flatMap((count) => {
-        if (count > 0) return Effect.succeed(false);
-        // Back at (or below) zero — remove the field entirely rather than
-        // leaving a `0` sitting in the hash forever.
-        //
-        // Unlike InMemoryPresenceStoreLive, this doesn't special-case a
-        // disconnect with no prior connect (that'd need an extra
-        // round-trip to check first), so a stray call like that would
-        // report `true` here instead of `false`. Harmless in practice: it
-        // can't happen via the real call site (Realtime.ts's `register`
-        // cleanup always pairs with a `connect`), and even if it did, a
-        // spurious "offline" broadcast for a user nothing marked online
-        // is a no-op for anyone consuming it (see web/src/lib/presence.ts,
-        // which only reacts to an actual state change).
-        return Effect.tryPromise(() => redis.hdel(KEY, String(userId))).pipe(
-          Effect.as(true),
-          Effect.orElseSucceed(() => true),
-        );
-      }),
-      Effect.orElseSucceed(() => false),
-    );
-
-  const onlineUserIds: Effect.Effect<ReadonlyArray<number>> = Effect.tryPromise(
-    () => redis.hkeys(KEY),
-  ).pipe(
-    Effect.map((fields) => fields.map(Number)),
-    Effect.orElseSucceed((): ReadonlyArray<number> => []),
-  );
-
-  return { connect, disconnect, onlineUserIds };
-});
+    return { connect, disconnect, onlineUserIds };
+  }),
+);
 
 // `REDIS_URL` unset — same default-to-local-instance reasoning as
 // PubSubLive — falls back to the in-memory implementation.
