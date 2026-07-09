@@ -738,7 +738,26 @@
           "chats"
         ],
         "operationId": "chats.listChats",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "a string to be decoded into a number"
+            },
+            "required": false,
+            "description": "a string to be decoded into a number"
+          }
+        ],
         "security": [
           {
             "bearer": []
@@ -746,14 +765,11 @@
         ],
         "responses": {
           "200": {
-            "description": "Success",
+            "description": "ChatsPage",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Chat"
-                  }
+                  "$ref": "#/components/schemas/ChatsPage"
                 }
               }
             }
@@ -763,7 +779,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidChatRequest"
+                    }
+                  ]
                 }
               }
             }
@@ -2361,6 +2384,36 @@
         },
         "additionalProperties": false
       },
+      "ChatsPage": {
+        "type": "object",
+        "required": [
+          "chats",
+          "limit",
+          "nextCursor"
+        ],
+        "properties": {
+          "chats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Chat"
+            }
+          },
+          "limit": {
+            "type": "number"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "Chat": {
         "type": "object",
         "required": [
@@ -2502,18 +2555,6 @@
           "image_url"
         ]
       },
-      "CreateDirectChatBody": {
-        "type": "object",
-        "required": [
-          "userId"
-        ],
-        "properties": {
-          "userId": {
-            "type": "number"
-          }
-        },
-        "additionalProperties": false
-      },
       "InvalidChatRequest": {
         "type": "object",
         "required": [
@@ -2529,6 +2570,18 @@
             "enum": [
               "InvalidChatRequest"
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateDirectChatBody": {
+        "type": "object",
+        "required": [
+          "userId"
+        ],
+        "properties": {
+          "userId": {
+            "type": "number"
           }
         },
         "additionalProperties": false

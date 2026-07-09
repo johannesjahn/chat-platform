@@ -453,13 +453,51 @@ const MessageIdPath = Schema.Struct({
   messageId: Schema.NumberFromString,
 });
 
+export const DEFAULT_CHATS_LIMIT = 30;
+export const MAX_CHATS_LIMIT = 100;
+
+// `listChats` sorts by `updated_at desc, id desc`, and a chat's `updated_at`
+// bumps to "now" on every new message — so an OFFSET-based page (like
+// PostsPageQuery/MessagesPageQuery) would see rows shift out from under an
+// in-flight offset as chats jump to the top mid-scroll, producing skipped or
+// duplicated rows across pages. A keyset cursor instead resumes from
+// "everything strictly after the last row I saw", which stays correct
+// regardless of what changes ahead of it (issue #49). The cursor is opaque
+// to clients: it's `<lastRow.updatedAt>:<lastRow.id>`, base64url-encoded, and
+// only ever round-tripped from a previous page's `nextCursor` rather than
+// constructed by hand.
+//
+// Left un-`identifier`-annotated for the same reason as `PostsPageQuery`
+// above (see CLAUDE.md) — it's inlined into query parameters.
+export const ChatsPageQuery = Schema.Struct({
+  cursor: Schema.optional(Schema.String),
+  limit: Schema.optional(
+    Schema.NumberFromString.pipe(
+      Schema.int(),
+      Schema.between(1, MAX_CHATS_LIMIT),
+    ),
+  ),
+});
+
+export const ChatsPage = Schema.Struct({
+  chats: Schema.Array(Chat),
+  limit: Schema.Number,
+  // Opaque cursor for the next page, or null once the current page reaches
+  // the end of the list — mirrors `MessagesPage.hasMore` but carries the
+  // resume point instead of a boolean, since the next request needs it.
+  nextCursor: Schema.NullOr(Schema.String),
+}).annotations({ identifier: "ChatsPage" });
+
 const ChatsGroup = HttpApiGroup.make("chats")
   .add(
     // All chats the current user participates in, newest-activity-first,
     // each carrying its own unread count and last-message preview so the
-    // chat list never needs a request per row.
+    // chat list never needs a request per row. Cursor-paginated (see
+    // `ChatsPageQuery`) rather than returning the full set.
     HttpApiEndpoint.get("listChats", "/chats")
-      .addSuccess(Schema.Array(Chat))
+      .setUrlParams(ChatsPageQuery)
+      .addSuccess(ChatsPage)
+      .addError(InvalidChatRequest, { status: 400 })
       .middleware(Authentication),
   )
   .add(

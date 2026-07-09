@@ -6,13 +6,16 @@ import {
   eq,
   inArray,
   isNull,
+  lt,
   lte,
   max,
   ne,
+  or,
 } from "drizzle-orm";
 import { Context, Effect } from "effect";
 import {
   ChatApi,
+  DEFAULT_CHATS_LIMIT,
   DEFAULT_MESSAGES_LIMIT,
   Forbidden,
   InvalidChatRequest,
@@ -361,6 +364,26 @@ const buildChat = (
     };
   });
 
+// Keyset cursor for `listChats` over its `updated_at desc, id desc` sort —
+// see `ChatsPageQuery` in Api.ts for why this is a cursor rather than an
+// offset. Encodes the last row of a page as `<updatedAtMs>:<id>`,
+// base64url'd (same encoding `Jwt.ts` uses for its segments) so it survives
+// round-tripping through a URL query value.
+const encodeChatsCursor = (row: { updatedAt: Date; id: number }): string =>
+  Buffer.from(`${row.updatedAt.getTime()}:${row.id}`).toString("base64url");
+
+const decodeChatsCursor = (
+  cursor: string,
+): { updatedAt: Date; id: number } | null => {
+  const decoded = Buffer.from(cursor, "base64url").toString();
+  const separator = decoded.indexOf(":");
+  if (separator === -1) return null;
+  const updatedAtMs = Number(decoded.slice(0, separator));
+  const id = Number(decoded.slice(separator + 1));
+  if (!Number.isInteger(updatedAtMs) || !Number.isInteger(id)) return null;
+  return { updatedAt: new Date(updatedAtMs), id };
+};
+
 const existingUserIds = (
   db: DrizzleDb,
   ids: ReadonlyArray<number>,
@@ -379,11 +402,24 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
   "chats",
   (handlers) =>
     handlers
-      .handle("listChats", () =>
+      .handle("listChats", ({ urlParams }) =>
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const rows = yield* Effect.tryPromise(() =>
+          const limit = urlParams.limit ?? DEFAULT_CHATS_LIMIT;
+
+          let after: { updatedAt: Date; id: number } | null = null;
+          if (urlParams.cursor !== undefined) {
+            after = decodeChatsCursor(urlParams.cursor);
+            if (!after)
+              return yield* Effect.fail(
+                new InvalidChatRequest({ message: "Invalid cursor" }),
+              );
+          }
+
+          // Fetch one row past `limit` to derive `nextCursor` without a
+          // separate `COUNT(*)` — same trick as `MessagesPage.hasMore`.
+          const fetched = yield* Effect.tryPromise(() =>
             db
               .select({
                 id: chats.id,
@@ -401,8 +437,25 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                   eq(chatParticipants.userId, currentUser.id),
                 ),
               )
-              .orderBy(desc(chats.updatedAt)),
+              .where(
+                after
+                  ? or(
+                      lt(chats.updatedAt, after.updatedAt),
+                      and(
+                        eq(chats.updatedAt, after.updatedAt),
+                        lt(chats.id, after.id),
+                      ),
+                    )
+                  : undefined,
+              )
+              .orderBy(desc(chats.updatedAt), desc(chats.id))
+              .limit(limit + 1),
           ).pipe(Effect.orDie);
+          const hasMore = fetched.length > limit;
+          const rows = fetched.slice(0, limit);
+          const lastRow = rows[rows.length - 1];
+          const nextCursor =
+            hasMore && lastRow ? encodeChatsCursor(lastRow) : null;
 
           const chatIds = rows.map((row) => row.id);
           const [participantsByChat, lastMessageByChat, unreadByChat] =
@@ -412,17 +465,21 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               getUnreadCountsForChats(db, chatIds, currentUser.id),
             ]);
 
-          return rows.map((row) => ({
-            id: row.id,
-            type: row.type,
-            title: row.title,
-            createdBy: row.createdBy,
-            createdAt: row.createdAt.getTime(),
-            updatedAt: row.updatedAt.getTime(),
-            participants: participantsByChat.get(row.id) ?? [],
-            lastMessage: lastMessageByChat.get(row.id) ?? null,
-            unreadCount: unreadByChat.get(row.id) ?? 0,
-          }));
+          return {
+            chats: rows.map((row) => ({
+              id: row.id,
+              type: row.type,
+              title: row.title,
+              createdBy: row.createdBy,
+              createdAt: row.createdAt.getTime(),
+              updatedAt: row.updatedAt.getTime(),
+              participants: participantsByChat.get(row.id) ?? [],
+              lastMessage: lastMessageByChat.get(row.id) ?? null,
+              unreadCount: unreadByChat.get(row.id) ?? 0,
+            })),
+            limit,
+            nextCursor,
+          };
         }),
       )
       .handle("getChat", ({ path: { id } }) =>
