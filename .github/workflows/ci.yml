@@ -13,6 +13,7 @@ jobs:
   lint:
     name: Lint & format
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -32,6 +33,7 @@ jobs:
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -62,6 +64,7 @@ jobs:
   openapi:
     name: OpenAPI spec & generated types
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -91,6 +94,7 @@ jobs:
   chart-version:
     name: Helm chart version
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -112,6 +116,7 @@ jobs:
   helm:
     name: Helm chart lint & template
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.0
 
@@ -126,6 +131,7 @@ jobs:
   unit:
     name: Backend tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Only RealtimePubSub.integration.test.ts uses this — it's the one test
     # that proves cross-instance delivery over real Redis Pub/Sub (see
     # src/PubSub.ts). Everything else uses the in-memory PubSub fallback and
@@ -161,6 +167,7 @@ jobs:
   e2e:
     name: E2E tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
