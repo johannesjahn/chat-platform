@@ -304,6 +304,10 @@ export const AddParticipantsBody = Schema.Struct({
   ),
 }).annotations({ identifier: "AddParticipantsBody" });
 
+export const TransferOwnershipBody = Schema.Struct({
+  userId: Schema.Number,
+}).annotations({ identifier: "TransferOwnershipBody" });
+
 export const CreateMessageBody = Schema.Struct({
   contentType: MessageContentType,
   content: MessageContent,
@@ -478,6 +482,11 @@ const MessageIdPath = Schema.Struct({
   messageId: Schema.NumberFromString,
 });
 
+const ChatParticipantPath = Schema.Struct({
+  id: Schema.NumberFromString,
+  userId: Schema.NumberFromString,
+});
+
 export const DEFAULT_CHATS_LIMIT = 30;
 export const MAX_CHATS_LIMIT = 100;
 
@@ -567,6 +576,61 @@ const ChatsGroup = HttpApiGroup.make("chats")
     HttpApiEndpoint.post("addParticipants", "/chats/:id/participants")
       .setPath(ChatIdPath)
       .setPayload(AddParticipantsBody)
+      .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Removes a participant from a group chat — the creator or an admin.
+    // Counterpart to `addParticipants`. If this empties the chat, it's
+    // deleted entirely (see `deleteChat`'s cascade). If the removed
+    // participant was the chat's creator, ownership is transferred
+    // automatically to the longest-standing remaining participant so the
+    // group doesn't become unmanageable (mirrors `leaveChat`).
+    HttpApiEndpoint.del("removeParticipant", "/chats/:id/participants/:userId")
+      .setPath(ChatParticipantPath)
+      .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // A participant removes themselves from a group chat. If this empties
+    // the chat, it's deleted entirely. If the leaver was the creator,
+    // ownership transfers automatically to the longest-standing remaining
+    // participant — see `removeParticipant`.
+    HttpApiEndpoint.post("leaveChat", "/chats/:id/leave")
+      .setPath(ChatIdPath)
+      .addSuccess(Schema.Void)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Deletes a group chat outright — the creator or an admin. The
+    // `chats` row's cascading foreign keys (see db/schema.ts) take care of
+    // its participants, messages, and read receipts.
+    HttpApiEndpoint.del("deleteChat", "/chats/:id")
+      .setPath(ChatIdPath)
+      .addSuccess(Schema.Void)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Reassigns a group chat's `createdBy` to another current participant —
+    // the creator or an admin, normally. If the chat has no creator (e.g.
+    // the previous creator's account was deleted, see `Chat.createdBy`),
+    // any current participant may call this to appoint a new owner, so the
+    // group doesn't stay permanently unmanageable.
+    HttpApiEndpoint.post("transferOwnership", "/chats/:id/owner")
+      .setPath(ChatIdPath)
+      .setPayload(TransferOwnershipBody)
       .addSuccess(Chat)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })

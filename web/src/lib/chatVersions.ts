@@ -15,6 +15,13 @@ export function recordChatVersion(chatId: number, version: number): void {
   if (known === undefined || version > known) versions.set(chatId, version);
 }
 
+// Drops a deleted chat's tracked version — called on a `chat_deleted` event
+// (see realtimeSocket.ts) so this map doesn't hold a stale entry forever for
+// a chat that can never be fetched again.
+export function forgetChatVersion(chatId: number): void {
+  versions.delete(chatId);
+}
+
 export type ChatVersionClassification = "stale" | "gap" | "sequential";
 
 // Classifies an incoming `chat_updated` event's version against what's

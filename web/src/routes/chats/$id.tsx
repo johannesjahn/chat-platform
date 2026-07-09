@@ -1,12 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Check,
+  Crown,
   Loader2,
+  LogOut,
   Pencil,
   Search,
+  Trash2,
+  UserMinus,
   UserPlus,
   Users,
   X,
@@ -54,6 +58,7 @@ function ChatView({ id }: { id: string }) {
   const chatId = Number(id);
   const session = useSession();
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   const {
     data: chat,
@@ -83,6 +88,13 @@ function ChatView({ id }: { id: string }) {
   const markRead = $api.useMutation("post", "/chats/{id}/read");
   const updateChat = $api.useMutation("put", "/chats/{id}");
   const addParticipants = $api.useMutation("post", "/chats/{id}/participants");
+  const removeParticipant = $api.useMutation(
+    "delete",
+    "/chats/{id}/participants/{userId}",
+  );
+  const leaveChat = $api.useMutation("post", "/chats/{id}/leave");
+  const deleteChat = $api.useMutation("delete", "/chats/{id}");
+  const transferOwnership = $api.useMutation("post", "/chats/{id}/owner");
   const updateMessage = $api.useMutation(
     "put",
     "/chats/{id}/messages/{messageId}",
@@ -97,6 +109,7 @@ function ChatView({ id }: { id: string }) {
   const [addingParticipants, setAddingParticipants] = useState(false);
   const [addParticipantsSearch, setAddParticipantsSearch] = useState("");
   const [selectedToAdd, setSelectedToAdd] = useState<number[]>([]);
+  const [managingParticipants, setManagingParticipants] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const addParticipantsQuery = useDebouncedValue(
@@ -250,6 +263,15 @@ function ChatView({ id }: { id: string }) {
 
   const name = chatDisplayName(chat, session.user.id);
   const isCreator = chat.createdBy === session.user.id;
+  // Mirrors the backend's `canManageChat` (see ChatsHandler.ts): the
+  // creator, or an admin — an admin only reaches this UI at all once
+  // they're a participant, since `getChat` still requires that.
+  const canManage = isCreator || session.user.role === "admin";
+  // A chat with no creator (its creator's account was deleted — see
+  // `Chat.createdBy`) can be claimed by any participant via
+  // transferOwnership, so it doesn't stay permanently unmanageable
+  // (issue #66).
+  const canClaimOwnership = chat.createdBy === null;
   const canAddMore =
     chat.type === "group" && chat.participants.length < MAX_GROUP_PARTICIPANTS;
   const candidatesToAdd = (userSearchResults ?? []).filter(
@@ -326,6 +348,66 @@ function ChatView({ id }: { id: string }) {
       setSelectedToAdd([]);
       setAddingParticipants(false);
       setAddParticipantsSearch("");
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleRemoveParticipant(userId: number, username: string) {
+    if (!window.confirm(`Remove @${username} from this chat?`)) return;
+    setActionError(null);
+    try {
+      await removeParticipant.mutateAsync({
+        params: { path: { id: String(chatId), userId: String(userId) } },
+      });
+      await queryClient.invalidateQueries({
+        queryKey: chatDetailQueryKey(chatId),
+      });
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleTransferOwnership(userId: number, username: string) {
+    if (!window.confirm(`Make @${username} the owner of this chat?`)) return;
+    setActionError(null);
+    try {
+      await transferOwnership.mutateAsync({
+        params: { path: { id: String(chatId) } },
+        body: { userId },
+      });
+      await queryClient.invalidateQueries({
+        queryKey: chatDetailQueryKey(chatId),
+      });
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleLeave() {
+    if (!window.confirm("Leave this chat?")) return;
+    setActionError(null);
+    try {
+      await leaveChat.mutateAsync({
+        params: { path: { id: String(chatId) } },
+      });
+      await queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
+      await router.navigate({ to: "/chats" });
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm("Delete this chat for everyone? This can't be undone."))
+      return;
+    setActionError(null);
+    try {
+      await deleteChat.mutateAsync({
+        params: { path: { id: String(chatId) } },
+      });
+      await queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
+      await router.navigate({ to: "/chats" });
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -445,7 +527,99 @@ function ChatView({ id }: { id: string }) {
               <UserPlus className="size-4" />
             </Button>
           )}
+          {chat.type === "group" && (
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="Manage participants"
+              onClick={() => setManagingParticipants((v) => !v)}
+            >
+              <Users className="size-4" />
+            </Button>
+          )}
+          {chat.type === "group" && (
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="Leave chat"
+              disabled={leaveChat.isPending}
+              onClick={() => void handleLeave()}
+            >
+              <LogOut className="size-4" />
+            </Button>
+          )}
         </CardHeader>
+
+        {managingParticipants && chat.type === "group" && (
+          <div className="flex flex-col gap-2 border-b border-border bg-accent/20 px-4 py-3">
+            {actionError && (
+              <p className="text-xs text-destructive">{actionError}</p>
+            )}
+            <ul className="flex flex-col gap-1.5">
+              {chat.participants.map((p) => {
+                const isOwner = chat.createdBy === p.userId;
+                const isSelf = p.userId === session.user.id;
+                return (
+                  <li
+                    key={p.userId}
+                    className="flex items-center justify-between gap-2 text-xs"
+                  >
+                    <span className="flex min-w-0 items-center gap-1.5 truncate">
+                      {isOwner && (
+                        <Crown className="size-3.5 shrink-0 text-amber-500" />
+                      )}
+                      <span className="truncate">
+                        @{p.username}
+                        {isSelf ? " (you)" : ""}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      {(canManage || canClaimOwnership) && !isOwner && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-xs"
+                          disabled={transferOwnership.isPending}
+                          onClick={() =>
+                            void handleTransferOwnership(p.userId, p.username)
+                          }
+                        >
+                          Make owner
+                        </Button>
+                      )}
+                      {canManage && !isSelf && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-6"
+                          aria-label={`Remove @${p.username}`}
+                          disabled={removeParticipant.isPending}
+                          onClick={() =>
+                            void handleRemoveParticipant(p.userId, p.username)
+                          }
+                        >
+                          <UserMinus className="size-3.5" />
+                        </Button>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            {canManage && (
+              <Button
+                size="sm"
+                variant="destructive"
+                className="self-end"
+                disabled={deleteChat.isPending}
+                onClick={() => void handleDelete()}
+              >
+                <Trash2 className="size-3.5" />
+                Delete chat
+              </Button>
+            )}
+          </div>
+        )}
 
         {addingParticipants && (
           <div className="flex flex-col gap-2 border-b border-border bg-accent/20 px-4 py-3">

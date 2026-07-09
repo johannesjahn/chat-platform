@@ -380,6 +380,90 @@ const requireParticipant = (db: DrizzleDb, chatId: number, userId: number) =>
       );
   });
 
+// Group-chat management actions (removeParticipant, deleteChat, and
+// transferOwnership's normal path) are gated on this rather than
+// `requireParticipant` — the creator (or an admin, per issue #66) can act
+// even without re-checking plain participation, and an admin may act on a
+// chat they don't participate in at all.
+const canManageChat = (
+  currentUser: { readonly id: number; readonly role: string },
+  chat: { readonly createdBy: number | null },
+): boolean =>
+  currentUser.role === "admin" ||
+  (chat.createdBy !== null && chat.createdBy === currentUser.id);
+
+// Shared by `leaveChat` and `removeParticipant`: removes `departingUserId`
+// from `chatRow`, then either deletes the chat outright (if that emptied it
+// — `chats`'s cascading FKs, see db/schema.ts, take care of the rest) or, if
+// the departing user was the creator, reassigns `createdBy` to the
+// longest-standing remaining participant so the group doesn't become
+// unmanageable (issue #66) — before bumping the version either way. All in
+// one transaction so a concurrent departure/removal can't see a
+// half-updated state.
+const departParticipant = (
+  db: DrizzleDb,
+  chatRow: DbChat,
+  departingUserId: number,
+): Effect.Effect<
+  | { readonly deleted: true }
+  | {
+      readonly deleted: false;
+      readonly chat: DbChat;
+      readonly participants: ReadonlyArray<ChatParticipant>;
+    }
+> =>
+  Effect.gen(function* () {
+    const result = yield* Effect.tryPromise(() =>
+      db.transaction(async (tx) => {
+        await tx
+          .delete(chatParticipants)
+          .where(
+            and(
+              eq(chatParticipants.chatId, chatRow.id),
+              eq(chatParticipants.userId, departingUserId),
+            ),
+          );
+
+        const remaining = await tx
+          .select({
+            userId: chatParticipants.userId,
+            joinedAt: chatParticipants.joinedAt,
+          })
+          .from(chatParticipants)
+          .where(eq(chatParticipants.chatId, chatRow.id));
+
+        if (remaining.length === 0) {
+          await tx.delete(chats).where(eq(chats.id, chatRow.id));
+          return { deleted: true as const };
+        }
+
+        if (chatRow.createdBy === departingUserId) {
+          const newOwner = [...remaining].sort(
+            (a, b) =>
+              a.joinedAt.getTime() - b.joinedAt.getTime() ||
+              a.userId - b.userId,
+          )[0]!;
+          await tx
+            .update(chats)
+            .set({ createdBy: newOwner.userId })
+            .where(eq(chats.id, chatRow.id));
+        }
+
+        const updated = await tx
+          .update(chats)
+          .set({ version: sql`${chats.version} + 1` })
+          .where(eq(chats.id, chatRow.id))
+          .returning();
+
+        return { deleted: false as const, chat: updated[0]! };
+      }),
+    ).pipe(Effect.orDie);
+
+    if (result.deleted) return result;
+    const participants = yield* getParticipants(db, chatRow.id);
+    return { deleted: false as const, chat: result.chat, participants };
+  });
+
 // `participants`, if passed, is used as-is instead of re-fetching — callers
 // that already have a fresh list (e.g. because they just notified over the
 // websocket) can reuse it rather than paying for the join twice.
@@ -856,6 +940,181 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             currentUser.id,
             participants,
           );
+        }),
+      )
+      .handle("removeParticipant", ({ path: { id, userId } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const chatRow = yield* getChatOr404(db, id);
+          if (chatRow.type !== "group")
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "Only group chats can have participants removed",
+              }),
+            );
+          if (!canManageChat(currentUser, chatRow))
+            return yield* Effect.fail(
+              new Forbidden({
+                message: "Only the creator or an admin can remove participants",
+              }),
+            );
+          if (userId === currentUser.id)
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "Use POST /chats/:id/leave to remove yourself",
+              }),
+            );
+
+          const existingParticipants = yield* getParticipants(db, id);
+          if (!existingParticipants.some((p) => p.userId === userId))
+            return yield* Effect.fail(
+              new NotFound({
+                message: `User ${userId} is not a participant of chat ${id}`,
+              }),
+            );
+          if (existingParticipants.length <= 1)
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message:
+                  "Cannot remove the last participant — delete the chat instead",
+              }),
+            );
+
+          const result = yield* departParticipant(db, chatRow, userId);
+          if (result.deleted)
+            return yield* Effect.die(
+              new Error("Chat unexpectedly emptied by removeParticipant"),
+            );
+
+          yield* notifyChatUpdated(connections, id, result.chat.version, [
+            userId,
+            ...result.participants.map((p) => p.userId),
+          ]);
+          return yield* buildChat(
+            db,
+            result.chat,
+            currentUser.id,
+            result.participants,
+          );
+        }),
+      )
+      .handle("leaveChat", ({ path: { id } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const chatRow = yield* getChatOr404(db, id);
+          if (chatRow.type !== "group")
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "Only group chats can be left",
+              }),
+            );
+          yield* requireParticipant(db, id, currentUser.id);
+
+          const result = yield* departParticipant(db, chatRow, currentUser.id);
+          if (result.deleted) {
+            yield* connections.notifyUsers([currentUser.id], {
+              type: "chat_deleted",
+              chatId: id,
+            });
+            return;
+          }
+
+          yield* notifyChatUpdated(connections, id, result.chat.version, [
+            currentUser.id,
+            ...result.participants.map((p) => p.userId),
+          ]);
+        }),
+      )
+      .handle("deleteChat", ({ path: { id } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const chatRow = yield* getChatOr404(db, id);
+          if (chatRow.type !== "group")
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "Only group chats can be deleted",
+              }),
+            );
+          if (!canManageChat(currentUser, chatRow))
+            return yield* Effect.fail(
+              new Forbidden({
+                message: "Only the creator or an admin can delete this chat",
+              }),
+            );
+
+          const participants = yield* getParticipants(db, id);
+          yield* Effect.tryPromise(() =>
+            db.delete(chats).where(eq(chats.id, id)),
+          ).pipe(Effect.orDie);
+
+          yield* connections.notifyUsers(
+            participants.map((p) => p.userId),
+            { type: "chat_deleted", chatId: id },
+          );
+        }),
+      )
+      .handle("transferOwnership", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const chatRow = yield* getChatOr404(db, id);
+          if (chatRow.type !== "group")
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "Only group chats have an owner to transfer",
+              }),
+            );
+
+          // Normally creator/admin-only, but an ownerless chat (createdBy
+          // null — see Chat.createdBy in Api.ts) can be claimed by any
+          // current participant, so it doesn't stay permanently
+          // unmanageable once its creator's account is gone (issue #66).
+          const canClaim =
+            chatRow.createdBy === null &&
+            (yield* isParticipant(db, id, currentUser.id));
+          if (!canManageChat(currentUser, chatRow) && !canClaim)
+            return yield* Effect.fail(
+              new Forbidden({
+                message: "Only the creator or an admin can transfer ownership",
+              }),
+            );
+
+          const participants = yield* getParticipants(db, id);
+          if (!participants.some((p) => p.userId === payload.userId))
+            return yield* Effect.fail(
+              new NotFound({
+                message: `User ${payload.userId} is not a participant of chat ${id}`,
+              }),
+            );
+
+          const updated = yield* Effect.tryPromise(() =>
+            db
+              .update(chats)
+              .set({
+                createdBy: payload.userId,
+                version: sql`${chats.version} + 1`,
+              })
+              .where(eq(chats.id, id))
+              .returning(),
+          ).pipe(Effect.orDie);
+          const row = updated[0];
+          if (!row)
+            return yield* Effect.die(new Error("UPDATE returned no rows"));
+
+          yield* notifyChatUpdated(
+            connections,
+            id,
+            row.version,
+            participants.map((p) => p.userId),
+          );
+          return yield* buildChat(db, row, currentUser.id, participants);
         }),
       )
       .handle("listMessages", ({ path: { id }, urlParams }) =>
