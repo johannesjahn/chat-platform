@@ -1,5 +1,5 @@
 import { RedisClient } from "bun";
-import { Context, Effect, Layer } from "effect";
+import { Cause, Context, Effect, Exit, Layer } from "effect";
 
 // A minimal cross-process publish/subscribe abstraction — just enough for
 // RealtimeConnectionsLive (see Realtime.ts) to fan a realtime event out to
@@ -85,7 +85,27 @@ export const RedisPubSubLive = Layer.effect(
       ) =>
         Effect.promise(() =>
           subscriber.subscribe(channel, (message) => {
-            Effect.runFork(onMessage(message));
+            // `subscribe`'s callback is a bare Node-style callback, not an
+            // Effect, so the handler has to be forked rather than yielded —
+            // but a bare `runFork` throws the resulting fiber away, silently
+            // swallowing whatever it fails or dies with (e.g. a malformed
+            // envelope). Observe the exit and log failures so a broken
+            // subscriber shows up instead of just dropping the delivery.
+            const fiber = Effect.runFork(onMessage(message));
+            fiber.addObserver((exit) => {
+              if (Exit.isFailure(exit)) {
+                Effect.runFork(
+                  Effect.logWarning(
+                    "PubSub: dropped realtime delivery, subscriber handler failed",
+                  ).pipe(
+                    Effect.annotateLogs({
+                      channel,
+                      cause: Cause.pretty(exit.cause),
+                    }),
+                  ),
+                );
+              }
+            });
           }),
         ).pipe(Effect.asVoid),
       ping: Effect.tryPromise(() => publisher.ping()).pipe(Effect.asVoid),
