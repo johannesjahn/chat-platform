@@ -13,5 +13,10 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": [
+    "src",
+    "vite.config.ts",
+    "vite.pwa.config.ts",
+    "vite.pwa-options.ts"
+  ]
 }
