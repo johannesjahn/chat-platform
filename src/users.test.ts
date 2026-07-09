@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import {
   FetchHttpClient,
   HttpApiBuilder,
@@ -45,8 +45,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(InMemoryWsTicketLive),
 );
 
-const { getTestDb, closeTestDb } = makeTestDbAccessor();
-afterAll(closeTestDb);
+const { getTestDb } = makeTestDbAccessor();
 
 const run = async <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient>,

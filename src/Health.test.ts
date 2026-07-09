@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { FetchHttpClient, HttpApiBuilder, HttpClient } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
@@ -38,8 +38,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(InMemoryWsTicketLive),
 );
 
-const { getTestDb, closeTestDb } = makeTestDbAccessor();
-afterAll(closeTestDb);
+const { getTestDb } = makeTestDbAccessor();
 
 const migratedDbLive = Layer.effect(
   Db,

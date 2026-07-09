@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { FetchHttpClient, HttpApiBuilder, HttpClient } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
@@ -47,8 +47,7 @@ const ServerLive = Layer.mergeAll(ApiLive, RealtimeSocketRouteLive).pipe(
   Layer.provide(InMemoryWsTicketLive),
 );
 
-const { getTestDb, closeTestDb } = makeTestDbAccessor();
-afterAll(closeTestDb);
+const { getTestDb } = makeTestDbAccessor();
 
 const run = async <A, E>(
   effect: Effect.Effect<A, E, HttpClient.HttpClient>,

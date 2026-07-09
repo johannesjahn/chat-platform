@@ -1,6 +1,8 @@
+import { afterAll } from "bun:test";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
+import { getTableConfig } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "./Db.ts";
 import * as schema from "./db/schema.ts";
 
@@ -26,8 +28,9 @@ type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 // RealtimePubSub.integration.test.ts's real Redis connections are torn down
 // has been observed to crash the whole `bun test` process on exit (code 99,
 // no test failures — a native-level crash in Bun's WASM runtime, not a bug
-// in any test). Every caller must close its instance in `afterAll` — see
-// `closeTestDb` — so it's dead well before later files run.
+// in any test). `afterAll` is registered here, inside the accessor itself,
+// rather than left for each call site to remember — so every instance is
+// guaranteed dead well before later files run.
 export const makeTestDbAccessor = () => {
   let dbPromise: Promise<TestDb> | undefined;
 
@@ -36,29 +39,28 @@ export const makeTestDbAccessor = () => {
     return dbPromise;
   };
 
-  const closeTestDb = async (): Promise<void> => {
+  afterAll(async () => {
     if (!dbPromise) return;
     const db = await dbPromise;
     await db.$client.close();
-  };
+  });
 
-  return { getTestDb, closeTestDb };
+  return { getTestDb };
 };
 
-// Listed in no particular order — TRUNCATE ... CASCADE takes care of foreign
-// key dependency order itself.
-const TABLES = [
-  "message_reads",
-  "messages",
-  "chat_participants",
-  "chats",
-  "posts",
-  "refresh_tokens",
-  "users",
-];
+// Derived from the schema (rather than hand-listed) so a table added to
+// db/schema.ts is truncated automatically — an omission here wouldn't fail
+// loudly, it would just leak rows across tests in the same file. Order
+// doesn't matter: TRUNCATE ... CASCADE handles foreign key dependencies
+// itself.
+const TABLE_NAMES = Object.values(schema).map(
+  (table) => getTableConfig(table).name,
+);
 
 export const resetTestDb = async (db: DrizzleDb): Promise<void> => {
   await db.execute(
-    sql.raw(`TRUNCATE TABLE ${TABLES.join(", ")} RESTART IDENTITY CASCADE`),
+    sql.raw(
+      `TRUNCATE TABLE ${TABLE_NAMES.join(", ")} RESTART IDENTITY CASCADE`,
+    ),
   );
 };

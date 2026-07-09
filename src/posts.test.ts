@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import {
   FetchHttpClient,
   HttpApiBuilder,
@@ -42,8 +42,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(InMemoryWsTicketLive),
 );
 
-const { getTestDb, closeTestDb } = makeTestDbAccessor();
-afterAll(closeTestDb);
+const { getTestDb } = makeTestDbAccessor();
 
 // `effect` may also require `Db` directly (e.g. to promote a user to admin
 // out-of-band, the way it'd happen in production) — it shares the exact same

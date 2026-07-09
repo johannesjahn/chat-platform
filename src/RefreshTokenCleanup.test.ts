@@ -1,12 +1,11 @@
-import { afterAll, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { Db } from "./Db.ts";
 import { cleanupExpiredRefreshTokens } from "./RefreshTokenCleanup.ts";
 import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
 import { refreshTokens, users } from "./db/schema.ts";
 
-const { getTestDb, closeTestDb } = makeTestDbAccessor();
-afterAll(closeTestDb);
+const { getTestDb } = makeTestDbAccessor();
 
 const run = <A, E>(effect: Effect.Effect<A, E, Db>): Promise<A> => {
   const TestDbLive = Layer.effect(

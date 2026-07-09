@@ -1,7 +1,8 @@
 [test]
 # PGlite (an embedded real Postgres, used in tests for fidelity with the
-# production PGlite-backed Db.ts) spins up a fresh WASM Postgres instance per
-# test and is noticeably slower to boot than bun:sqlite's in-memory driver
-# was — the default 5s timeout is too tight for that plus argon2id hashing
-# under concurrent test-file load.
+# production PGlite-backed Db.ts) is noticeably slower to boot than
+# bun:sqlite's in-memory driver was. Each test file boots one shared PGlite
+# instance (see src/testDb.ts) rather than one per test, but that first boot
+# plus argon2id hashing under concurrent test-file load still means the
+# default 5s timeout is too tight.
 timeout = 15000
