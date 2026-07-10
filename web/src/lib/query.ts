@@ -15,12 +15,26 @@ const PERSIST_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // means a query with no network connection just sits `fetchStatus: "paused"`
 // instead of erroring — the already-rendered/persisted data stays on screen
 // rather than being replaced by an error state.
+//
+// `gcTime` must stay `Infinity` on the server: that's React Query's own
+// built-in default there (see `Removable.updateGcTime` in
+// @tanstack/query-core), specifically because it's the one `gcTime` value
+// `isValidTimeout` treats as "don't schedule a gc timer" at all. Any other
+// finite value — including this one, bumped for the client so persisted
+// queries survive long enough to actually get persisted — schedules a real,
+// unref'd-nothing `setTimeout`, and during this app's SPA prerender
+// (`vite.config.ts`'s `tanstackStart({ spa: { prerender: ... } })`) that
+// timer is created on the Node.js side while rendering "/", which then
+// keeps the build process alive (didn't exit, near-zero CPU) until the
+// timer fires — 24h later — instead of at the end of the build. Overriding
+// it unconditionally is exactly what caused that hang; matching React
+// Query's own server-vs-client branch here avoids it.
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: false,
       networkMode: "online",
-      gcTime: PERSIST_MAX_AGE_MS,
+      gcTime: typeof window === "undefined" ? Infinity : PERSIST_MAX_AGE_MS,
     },
   },
 });
