@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { errorMessage } from "@/lib/errors";
+import { useOnlineStatus } from "@/lib/online";
 import { MAX_POST_CONTENT_LENGTH, type PostContentType } from "@/lib/posts";
 
 // Structural placeholder shown while an existing post is being fetched for
@@ -75,10 +76,11 @@ export function PostForm({
   const [content, setContent] = useState(initialContent);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const isOnline = useOnlineStatus();
 
   const trimmed = content.trim();
   const overLimit = trimmed.length > MAX_POST_CONTENT_LENGTH;
-  const canSubmit = trimmed.length > 0 && !overLimit && !pending;
+  const canSubmit = trimmed.length > 0 && !overLimit && !pending && isOnline;
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 py-10">
@@ -178,7 +180,11 @@ export function PostForm({
 
             <Button type="submit" className="mt-1 w-full" disabled={!canSubmit}>
               {pending && <Loader2 className="size-4 animate-spin" />}
-              {pending ? "Please wait…" : submitLabel}
+              {!isOnline
+                ? "You're offline"
+                : pending
+                  ? "Please wait…"
+                  : submitLabel}
             </Button>
           </form>
         </CardContent>
