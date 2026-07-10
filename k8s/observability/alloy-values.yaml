@@ -48,8 +48,8 @@ alloy:
 
       loki.write "default" {
         endpoint {
-          # `loki` release (loki-values.yaml) with `gateway.enabled: false` —
-          # single-binary Loki's own Service, not a gateway.
+          // `loki` release (loki-values.yaml) with `gateway.enabled: false` —
+          // single-binary Loki's own Service, not a gateway.
           url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
         }
       }
