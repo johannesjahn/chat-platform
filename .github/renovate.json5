@@ -30,6 +30,17 @@
 
   labels: ["dependencies"],
 
+  // k8s/chat-platform/values.yaml's backend.image.tag is this repo's own
+  // release version (kept in sync with package.json's version by
+  // `bun run sync:chart-version` and bumped by tag-release.yml), not a
+  // third-party dependency — the helm-values manager picks it up like any
+  // other `image: {repository, tag}` block since johannesjahn/chat-platform
+  // is a real, pullable Docker Hub tag from that same release pipeline.
+  // Renovate opening its own PRs against it would fight the sync script and
+  // the chart-version CI job that enforces it stays derived from
+  // package.json, not bumped independently.
+  ignoreDeps: ["johannesjahn/chat-platform"],
+
   packageRules: [
     // Mirrors dependabot.yml's per-directory minor-and-patch grouping, so
     // routine bumps still land as one PR per workspace instead of one PR
