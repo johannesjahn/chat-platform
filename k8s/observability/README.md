@@ -29,17 +29,17 @@ below.
 
 ## What's deployed
 
-| Component                  | Role                                                                                                                                                                                                                                                                                                 |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vmsingle`                 | Single-node VictoriaMetrics — metrics storage (Prometheus-compatible). Sized for a microk8s cluster, no `vmcluster` needed.                                                                                                                                                                        |
-| `vmagent`                  | Scrapes kubelet/cAdvisor, `kube-state-metrics`, `node-exporter`, and any `VMServiceScrape` in the cluster (including the backend's, from `../chat-platform/`), remote-writes into `vmsingle`.                                                                                                      |
-| `kube-state-metrics`       | Object-level cluster state — deployments, pod restarts, PVC usage.                                                                                                                                                                                                                                  |
-| `prometheus-node-exporter` | Host-level CPU/mem/disk/network metrics.                                                                                                                                                                                                                                                            |
-| `loki`                     | Single-binary Loki — log storage (LogQL), filesystem storage backend on a PVC. Sized for a microk8s cluster, no scalable/distributed deployment mode needed.                                                                                                                                       |
+| Component                  | Role                                                                                                                                                                                                                                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vmsingle`                 | Single-node VictoriaMetrics — metrics storage (Prometheus-compatible). Sized for a microk8s cluster, no `vmcluster` needed.                                                                                                                                                                       |
+| `vmagent`                  | Scrapes kubelet/cAdvisor, `kube-state-metrics`, `node-exporter`, and any `VMServiceScrape` in the cluster (including the backend's, from `../chat-platform/`), remote-writes into `vmsingle`.                                                                                                     |
+| `kube-state-metrics`       | Object-level cluster state — deployments, pod restarts, PVC usage.                                                                                                                                                                                                                                |
+| `prometheus-node-exporter` | Host-level CPU/mem/disk/network metrics.                                                                                                                                                                                                                                                          |
+| `loki`                     | Single-binary Loki — log storage (LogQL), filesystem storage backend on a PVC. Sized for a microk8s cluster, no scalable/distributed deployment mode needed.                                                                                                                                      |
 | `alloy`                    | Grafana Alloy (Loki's currently-recommended log collector) as a DaemonSet — discovers every pod via the k8s API and tails its logs through the API server (no hostPath mount needed), labeling each entry by namespace/pod/container, and ships them to `loki`.                                   |
 | Grafana                    | Dashboards/Explore UI, pointed at both `vmsingle` and `loki` as datasources (wired up automatically — see `values.yaml`). Auto-loads any dashboard ConfigMap labeled `grafana_dashboard: "1"` across every namespace, including the backend's (see `values.yaml`'s `grafana.sidecar.dashboards`). |
 | `vmalert`                  | Evaluates `VMRule` resources against `vmsingle` (datasource wired up automatically) and fires into `alertmanager` (notifiers wired up automatically) — picks up `VMRule`s cluster-wide, same discovery pattern as `vmagent`'s `VMServiceScrape`s.                                                 |
-| Alertmanager               | Routes/dedupes/notifies on alerts `vmalert` fires. Its config comes from a pre-existing Secret (`alertmanager.spec.configSecret`), not `values.yaml` — see [Alerting](#alerting) below.                                                                                                            |
+| Alertmanager               | Routes/dedupes/notifies on alerts `vmalert` fires. Its config comes from a pre-existing Secret (`alertmanager.spec.configSecret`), not `values.yaml` — see [Alerting](#alerting) below.                                                                                                           |
 
 Loki's log retention is set explicitly (`loki-values.yaml`'s
 `loki.limits_config.retention_period` / `loki.compactor`) rather than left
@@ -240,11 +240,17 @@ Dashboards for components this cluster doesn't run (etcd, kube-scheduler/
 controller-manager/kube-proxy metrics — microk8s doesn't expose these the
 standard way) are individually gated by the chart on their own
 `kubeScheduler.enabled`-style flags, which are unset here, so they don't
-show up and sit empty. On top of those, the "chat-platform app" dashboard
-from #124 is pre-provisioned by `../chat-platform/` — see "Using it" below.
+show up and sit empty.
 
-Log-panel dashboards (Loki) aren't provisioned — #123 (the log stack) isn't
-deployed yet, so there's no Loki datasource to build them on.
+On top of those: the "chat-platform app" dashboard from #124 is
+pre-provisioned by `../chat-platform/` (see "Using it" below), and a
+hand-built "Cluster - Logs" dashboard (log volume by namespace, a live logs
+panel filterable by the `$namespace` template variable, and a backend
+error-log-rate panel) stands in for "Loki's log-panel dashboard" — shipped
+as a ConfigMap in [`values.yaml`](values.yaml)'s `extraObjects`, the same
+provisioning mechanism as the starter alert rules below, since
+`victoria-metrics-k8s-stack`'s own bundled dashboards don't know about a
+Loki datasource it doesn't manage.
 
 ## Alerting
 
@@ -320,6 +326,9 @@ kubectl scale deployment chat-platform-backend -n chat-platform --replicas=2
   rate/latency by route, WS connections, DB/PubSub error rates) is
   pre-provisioned under the "chat-platform" folder — no import needed, see
   `../chat-platform/templates/backend-metrics-grafana-dashboard.yaml`.
+- **Logs dashboard**: a "Cluster - Logs" dashboard (log volume by namespace,
+  a live logs panel, backend error-log rate) is pre-provisioned under the
+  "cluster" folder — see [Dashboards](#dashboards) above.
 - **Alerts**: `kubectl port-forward -n observability svc/vm-stack-vmalert
 8080:8080` then browse `http://localhost:8080/vmalert/alerts` for current
   alert state (pending/firing), or `svc/vm-stack-vmalertmanager 9093:9093`

@@ -127,9 +127,11 @@ defaultDashboards:
 defaultRules:
   enabled: false
 
-# The #125 starter rule set: pod crash-looping (any workload) and node
-# disk/memory pressure and PVC-nearing-capacity (cluster-wide, so it also
-# covers Postgres/Redis's PVCs from ../chat-platform/). The backend-specific
+# Cluster-wide resources #125 needs that don't fit any other release's own
+# templates: the starter VMRule (pod crash-looping (any workload), node
+# disk/memory pressure, PVC-nearing-capacity — covers Postgres/Redis's PVCs
+# from ../chat-platform/ too) and a Loki-backed logs dashboard (now that
+# loki-values.yaml/alloy-values.yaml exist). The backend-specific alert
 # rules (readiness failing, high 5xx rate) live with the backend's other
 # metrics config instead — see
 # ../chat-platform/templates/backend-metrics-alerts.yaml.
@@ -181,6 +183,106 @@ extraObjects:
               annotations:
                 summary: 'PVC {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.persistentvolumeclaim {{ "}}" }} is nearing capacity'
                 description: 'PVC {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.persistentvolumeclaim {{ "}}" }} has been over 85% full for 15m (current: {{ "{{" }} $value | humanizePercentage {{ "}}" }}).'
+  # The "Loki's log-panel dashboard" starting point #125 asks for — a
+  # cluster-wide log-volume-by-namespace panel plus a live logs panel
+  # filterable by the $namespace template variable, and a dedicated
+  # backend-error-log panel (LogQL query strings use Grafana's own `$var`
+  # interpolation here, not Go templates, so no `{{ "{{" }}`-style escaping
+  # needed — only the legend format below does). Picked up by Grafana's
+  # sidecar the same way as ../chat-platform/'s backend dashboard ConfigMap.
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: cluster-logs-dashboard
+      namespace: observability
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        grafana_folder: cluster
+    data:
+      cluster-logs.json: |
+        {
+          "uid": "cluster-logs",
+          "title": "Cluster - Logs",
+          "tags": ["observability", "logs"],
+          "timezone": "browser",
+          "schemaVersion": 39,
+          "version": 1,
+          "refresh": "30s",
+          "time": { "from": "now-1h", "to": "now" },
+          "templating": {
+            "list": [
+              {
+                "current": {},
+                "hide": 0,
+                "label": "Datasource",
+                "name": "datasource",
+                "query": "loki",
+                "refresh": 1,
+                "type": "datasource"
+              },
+              {
+                "current": { "text": "chat-platform", "value": "chat-platform" },
+                "datasource": { "type": "loki", "uid": "${datasource}" },
+                "hide": 0,
+                "label": "Namespace",
+                "name": "namespace",
+                "query": "label_values(namespace)",
+                "refresh": 2,
+                "type": "query"
+              }
+            ]
+          },
+          "panels": [
+            {
+              "id": 1,
+              "type": "timeseries",
+              "title": "Log volume by namespace",
+              "datasource": { "type": "loki", "uid": "${datasource}" },
+              "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
+              "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+              "targets": [
+                {
+                  "datasource": { "type": "loki", "uid": "${datasource}" },
+                  "expr": "sum by (namespace) (count_over_time({namespace=~\".+\"}[$__interval]))",
+                  "legendFormat": "{{ "{{" }}namespace{{ "}}" }}",
+                  "queryType": "range"
+                }
+              ]
+            },
+            {
+              "id": 2,
+              "type": "logs",
+              "title": "Logs — $namespace",
+              "datasource": { "type": "loki", "uid": "${datasource}" },
+              "gridPos": { "x": 0, "y": 8, "w": 24, "h": 10 },
+              "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
+              "targets": [
+                {
+                  "datasource": { "type": "loki", "uid": "${datasource}" },
+                  "expr": "{namespace=\"$namespace\"}",
+                  "queryType": "range"
+                }
+              ]
+            },
+            {
+              "id": 3,
+              "type": "timeseries",
+              "title": "Backend error log rate",
+              "datasource": { "type": "loki", "uid": "${datasource}" },
+              "gridPos": { "x": 0, "y": 18, "w": 24, "h": 8 },
+              "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
+              "targets": [
+                {
+                  "datasource": { "type": "loki", "uid": "${datasource}" },
+                  "expr": "sum(count_over_time({namespace=\"chat-platform\", container=\"backend\"} |= \"error\" [$__interval])) / $__interval_ms * 1000",
+                  "legendFormat": "errors/sec",
+                  "queryType": "range"
+                }
+              ]
+            }
+          ]
+        }
 
 # Auto-provisions the vmsingle datasource into Grafana via the sidecar below
 # — nothing to wire up by hand.
