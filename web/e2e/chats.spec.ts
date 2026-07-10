@@ -342,3 +342,81 @@ test("infinite scroll stops requesting more messages once the oldest one is load
 
   expect(messagesRequestCount).toBe(countOnceOldestLoaded);
 });
+
+test("reopening an already-visited chat still paginates instead of loading its whole history", async ({
+  browser,
+  injectApiUrl,
+  page,
+  request,
+  apiUrl,
+}) => {
+  await registerViaUi(page);
+
+  const otherContext = await browser.newContext();
+  await injectApiUrl(otherContext);
+  const otherPage = await otherContext.newPage();
+  const { username: otherUsername } = await registerViaUi(otherPage);
+  await otherContext.close();
+
+  // Client-side navigation throughout (no `page.goto` after this point) is
+  // essential: the bug only reproduces while the SPA's in-memory React Query
+  // cache survives across a route change, which a `page.goto`/reload would
+  // wipe entirely, masking the issue.
+  await page.goto("/chats/new");
+  await page.getByRole("button", { name: "Direct message" }).click();
+  await page.fill("#user-search", otherUsername);
+  await page.getByRole("button", { name: `@${otherUsername}` }).click();
+  await expect(page).toHaveURL(/\/chats\/\d+/);
+  const chatId = page.url().split("/").pop();
+
+  // This first mount fetches (and caches) the empty message list for this
+  // brand-new chat.
+  await expect(page.getByText("No messages yet")).toBeVisible();
+
+  // Leave the chat (client-side nav back to the list) before seeding, so the
+  // now-unmounted `ChatView`/`useChatMessages` isn't live-reacting to the
+  // seeded messages via WS — only its stale cached page should remain.
+  await page.getByRole("link", { name: "Back to chats" }).click();
+  await expect(page).toHaveURL("/chats");
+
+  // More than MESSAGES_PAGE_SIZE (10) so a "load everything" regression is
+  // visibly distinguishable from the intended small first page, but well
+  // under MESSAGES_MAX_LIMIT (100) so a full-history load would show every
+  // seeded message at once.
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  const totalMessages = 15;
+  for (let i = 0; i < totalMessages; i++) {
+    const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      data: { contentType: "text", content: `Seeded message ${i}` },
+    });
+    expect(response.ok()).toBe(true);
+  }
+
+  const messagesLimits: string[] = [];
+  page.on("request", (req) => {
+    const url = new URL(req.url());
+    if (
+      url.pathname === `/chats/${chatId}/messages` &&
+      req.method() === "GET"
+    ) {
+      messagesLimits.push(url.searchParams.get("limit") ?? "");
+    }
+  });
+
+  // Reopen the same chat via a client-side link click (well within the query
+  // cache's default 5min retention). With the bug, the hook mistook the
+  // leftover cached page for a "re-anchor after MESSAGES_MAX_LIMIT" and
+  // re-fetched with limit=100 instead of the intended 10-message first page,
+  // dumping the whole (short) history in at once.
+  await page
+    .getByRole("link", { name: new RegExp(`@${otherUsername}`) })
+    .click();
+  await expect(page).toHaveURL(`/chats/${chatId}`);
+  await expect(page.getByText("Seeded message 14")).toBeVisible();
+
+  expect(messagesLimits).toEqual(["10"]);
+  await expect(page.getByText("Seeded message 0")).not.toBeVisible();
+});
