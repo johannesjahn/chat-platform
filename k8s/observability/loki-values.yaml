@@ -39,6 +39,8 @@ loki:
     retention_enabled: true
     delete_request_store: filesystem
 
+sidecar:
+  disableX509StrictVerification: true
 deploymentMode: SingleBinary
 
 singleBinary:
