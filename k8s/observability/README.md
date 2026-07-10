@@ -1,39 +1,48 @@
-# Observability: VictoriaMetrics + Grafana
+# Observability: VictoriaMetrics + Loki + Grafana
 
-Cluster and node metrics for the microk8s cluster the [`chat-platform`
-chart](../chat-platform/) runs on, via the community
+Cluster/node metrics and cluster/application logs for the microk8s cluster
+the [`chat-platform` chart](../chat-platform/) runs on, via the community
 [`victoria-metrics-k8s-stack`](https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-metrics-k8s-stack)
-Helm chart — a lighter-weight alternative to `kube-prometheus-stack` for a
-single/small-node cluster (see #121). Sub-task of #121; this covers cluster
-metrics and the Grafana/VictoriaMetrics stack itself — logs and alerting are
-each their own sub-issue and out of scope here. The backend's own
-application-level metrics (issue #124) _are_ covered, but live in
+(metrics — a lighter-weight alternative to `kube-prometheus-stack` for a
+single/small-node cluster), [`loki`](https://github.com/grafana/loki/tree/main/production/helm/loki),
+and [`alloy`](https://github.com/grafana/alloy/tree/main/operations/helm/charts/alloy)
+(logs) Helm charts, sharing one Grafana instance (see #121). Sub-task of
+#121/#123; alerting and log-derived dashboards/alerting rules are each their
+own sub-issue and out of scope here. The backend's own application-level
+metrics (issue #124) _are_ covered, but live in
 [`../chat-platform/`](../chat-platform/) — its `VMServiceScrape` and Grafana
 dashboard ConfigMap are picked up by the `vmagent`/Grafana deployed here
 automatically (see `values.yaml`'s `grafana.sidecar.dashboards`), nothing to
 configure on this side beyond that.
 
-The chart itself isn't vendored into this repo (unlike `../chat-platform/`,
-which this repo owns) — it's installed straight from VictoriaMetrics' Helm
-repo, declared in [`helmfile.yaml`](helmfile.yaml) with
-[`values.yaml`](values.yaml) here as the checked-in override file. Helmfile
-(rather than a plain `helm install`/`upgrade`, as `../chat-platform/`
-documents) makes this stack syncable declaratively, including from ArgoCD —
-see [Deploying via ArgoCD](#deploying-via-argocd) below.
+None of these charts are vendored into this repo (unlike `../chat-platform/`,
+which this repo owns) — they're installed straight from their upstream Helm
+repos, declared in [`helmfile.yaml`](helmfile.yaml) with
+[`values.yaml`](values.yaml) (vm-stack), [`loki-values.yaml`](loki-values.yaml),
+and [`alloy-values.yaml`](alloy-values.yaml) here as the checked-in override
+files. Helmfile (rather than a plain `helm install`/`upgrade`, as
+`../chat-platform/` documents) makes this stack syncable declaratively,
+including from ArgoCD — see [Deploying via ArgoCD](#deploying-via-argocd)
+below.
 
 ## What's deployed
 
-| Component                  | Role                                                                                                                                                                                                                                                                                 |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `vmsingle`                 | Single-node VictoriaMetrics — metrics storage (Prometheus-compatible). Sized for a microk8s cluster, no `vmcluster` needed.                                                                                                                                                          |
-| `vmagent`                  | Scrapes kubelet/cAdvisor, `kube-state-metrics`, `node-exporter`, and any `VMServiceScrape` in the cluster (including the backend's, from `../chat-platform/`), remote-writes into `vmsingle`.                                                                                        |
-| `kube-state-metrics`       | Object-level cluster state — deployments, pod restarts, PVC usage.                                                                                                                                                                                                                   |
-| `prometheus-node-exporter` | Host-level CPU/mem/disk/network metrics.                                                                                                                                                                                                                                             |
-| Grafana                    | Dashboards/Explore UI, pointed at `vmsingle` as its datasource (wired up automatically — see `values.yaml`). Auto-loads any dashboard ConfigMap labeled `grafana_dashboard: "1"` across every namespace, including the backend's (see `values.yaml`'s `grafana.sidecar.dashboards`). |
+| Component                  | Role                                                                                                                                                                                                                                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vmsingle`                 | Single-node VictoriaMetrics — metrics storage (Prometheus-compatible). Sized for a microk8s cluster, no `vmcluster` needed.                                                                                                                                                                       |
+| `vmagent`                  | Scrapes kubelet/cAdvisor, `kube-state-metrics`, `node-exporter`, and any `VMServiceScrape` in the cluster (including the backend's, from `../chat-platform/`), remote-writes into `vmsingle`.                                                                                                     |
+| `kube-state-metrics`       | Object-level cluster state — deployments, pod restarts, PVC usage.                                                                                                                                                                                                                                |
+| `prometheus-node-exporter` | Host-level CPU/mem/disk/network metrics.                                                                                                                                                                                                                                                          |
+| `loki`                     | Single-binary Loki — log storage (LogQL), filesystem storage backend on a PVC. Sized for a microk8s cluster, no scalable/distributed deployment mode needed.                                                                                                                                      |
+| `alloy`                    | Grafana Alloy (Loki's currently-recommended log collector) as a DaemonSet — discovers every pod via the k8s API and tails its logs through the API server (no hostPath mount needed), labeling each entry by namespace/pod/container, and ships them to `loki`.                                   |
+| Grafana                    | Dashboards/Explore UI, pointed at both `vmsingle` and `loki` as datasources (wired up automatically — see `values.yaml`). Auto-loads any dashboard ConfigMap labeled `grafana_dashboard: "1"` across every namespace, including the backend's (see `values.yaml`'s `grafana.sidecar.dashboards`). |
 
 `vmalert`/Alertmanager and bundled Grafana dashboards/alerting rules are
 disabled in `values.yaml` — alerting and dashboards are separate sub-issues
-of #121, not part of this pass.
+of #121, not part of this pass. Loki's log retention is set explicitly
+(`loki-values.yaml`'s `loki.limits_config.retention_period` /
+`loki.compactor`) rather than left at the chart's unbounded default, since
+logs otherwise grow forever on the PVC.
 
 ## Installing
 
@@ -53,12 +62,17 @@ helmfile apply
 secrets — see `../README.md` — so re-running `helmfile apply` never rotates
 or regenerates the Grafana admin password out from under you.)
 
-Notable values (see [`values.yaml`](values.yaml) for the full set, with
-comments):
+Notable values (see [`values.yaml`](values.yaml)/[`loki-values.yaml`](loki-values.yaml)/[`alloy-values.yaml`](alloy-values.yaml)
+for the full set, with comments):
 
 - `vmsingle.spec.retentionPeriod` / `vmsingle.spec.storage.resources.requests.storage`
-  — how much history to keep and how much disk to give it.
+  — how much metrics history to keep and how much disk to give it.
 - `vmagent.spec.scrapeInterval` — how often the cluster is scraped.
+- `loki-values.yaml`'s `loki.limits_config.retention_period` — how much log
+  history to keep (14 days by default); `singleBinary.persistence.size` —
+  how much disk to give it.
+- `alloy-values.yaml`'s `alloy.configMap.content` — the Alloy config
+  (discovery + relabeling + where logs get shipped); rarely needs touching.
 - `grafana.ingress.*` — host, ingress class, and cert-manager annotations.
   Defaults assume a `traefik` `IngressClass` and cert-manager with a
   `letsencrypt` `ClusterIssuer`, matching `../chat-platform/values.yaml`;
@@ -68,7 +82,8 @@ comments):
 - `grafana.admin.existingSecret` — required, the name of a pre-existing
   Secret holding the admin user/password (see above).
 - `grafana.persistence.*` — size and `storageClassName` for Grafana's own
-  DB (dashboards, users, etc. — not metrics, which live in `vmsingle`).
+  DB (dashboards, users, etc. — not metrics/logs, which live in
+  `vmsingle`/`loki`).
 
 ### Upgrading
 
@@ -86,12 +101,14 @@ helmfile template | kubectl apply --dry-run=client -f -
 
 ### Chart version
 
-`helmfile.yaml`'s `releases[].version` pins the `victoria-metrics-k8s-stack`
-chart version — bump it deliberately (check the [upstream
-Chart.yaml](https://github.com/VictoriaMetrics/helm-charts/blob/master/charts/victoria-metrics-k8s-stack/Chart.yaml)
-for the latest version and changelog first) rather than floating on
-whatever `helm repo update` last cached, so renders stay reproducible across
-machines and ArgoCD syncs.
+`helmfile.yaml`'s `releases[].version` pins each chart version — bump
+deliberately (check the upstream Chart.yaml and changelog first) rather than
+floating on whatever `helm repo update` last cached, so renders stay
+reproducible across machines and ArgoCD syncs:
+
+- `victoria-metrics-k8s-stack` — [Chart.yaml](https://github.com/VictoriaMetrics/helm-charts/blob/master/charts/victoria-metrics-k8s-stack/Chart.yaml)
+- `loki` — [Chart.yaml](https://github.com/grafana/loki/blob/main/production/helm/loki/Chart.yaml)
+- `alloy` — [Chart.yaml](https://github.com/grafana/alloy/blob/main/operations/helm/charts/alloy/Chart.yaml)
 
 ## Deploying via ArgoCD
 
@@ -204,15 +221,24 @@ about), so it lives wherever you already manage ArgoCD itself (e.g. the
 
 - **Grafana**: reachable at `grafana.ingress.hosts[0]` (or via the
   `port-forward` command above), logging in with the `grafana-admin` secret's
-  credentials. The `VictoriaMetrics` datasource is provisioned automatically
-  (`defaultDatasources`/`grafana.sidecar.datasources` in `values.yaml`) — no
-  manual datasource setup needed.
+  credentials. Both the `VictoriaMetrics` and `Loki` datasources are
+  provisioned automatically (`defaultDatasources`/`grafana.datasources`/
+  `grafana.sidecar.datasources` in `values.yaml`) — no manual datasource
+  setup needed.
 - **Querying metrics**: Grafana's **Explore** view, datasource
   `VictoriaMetrics`, e.g.:
   - Node CPU: `100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`
   - Node memory used: `node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes`
   - Pod restarts: `kube_pod_container_status_restarts_total`
   - PVC usage: `kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes`
+- **Querying logs**: Grafana's **Explore** view, datasource `Loki`, e.g.:
+  - All backend logs: `{namespace="chat-platform", container="backend"}`
+  - Backend errors only: `{namespace="chat-platform", container="backend"} |= "error"`
+  - Every pod in a namespace: `{namespace="observability"}`
+  - `namespace`/`pod`/`container` are the labels Alloy attaches to every log
+    line (see `alloy-values.yaml`'s `discovery.relabel` block) — use the
+    label browser in Explore to see what else is available on a given
+    stream.
 - **Backend dashboard**: a "Chat Platform - Backend" dashboard (request
   rate/latency by route, WS connections, DB/PubSub error rates) is
   pre-provisioned under the "chat-platform" folder — no import needed, see

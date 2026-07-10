@@ -1,0 +1,87 @@
+# Values for the community `loki` Helm chart (not vendored into this repo —
+# see README.md in this directory for the `helmfile apply` command). Installs
+# Loki in single-binary/monolithic mode into the same `observability`
+# namespace as vm-stack (values.yaml), closing #123. Deliberately not the
+# scalable/distributed deployment mode — overkill for a microk8s-sized
+# cluster, same reasoning as vm-stack's `vmsingle` over a `vmcluster`.
+
+loki:
+  auth_enabled: false
+
+  commonConfig:
+    replication_factor: 1
+
+  # Filesystem storage backend on the PVC below (singleBinary.persistence),
+  # sized similarly to the Postgres/Redis PVCs in
+  # ../chat-platform/values.yaml — no object storage (S3/GCS/MinIO) needed
+  # for a single-node deployment.
+  storage:
+    type: filesystem
+
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+  # Explicit retention rather than relying on chart defaults (unbounded) —
+  # logs otherwise grow forever on the PVC below. 14 days, matching a
+  # reasonable debugging window; bump alongside singleBinary.persistence.size
+  # if this needs to grow.
+  limits_config:
+    retention_period: 336h
+
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+
+deploymentMode: SingleBinary
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+# Everything below is only relevant to the SimpleScalable/Distributed
+# deployment modes — explicitly zeroed out rather than left running
+# alongside singleBinary.
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+# No multi-tenant routing/auth needed in front of a single-binary instance
+# on a single-tenant cluster.
+gateway:
+  enabled: false
+
+# Not part of this pass (see #121) — no ServiceMonitor/PrometheusRule CRDs
+# installed, and no separate self-monitoring/canary components to run
+# alongside the vm-stack already deployed for metrics.
+monitoring:
+  serviceMonitor:
+    enabled: false
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+  lokiCanary:
+    enabled: false
+
+test:
+  enabled: false

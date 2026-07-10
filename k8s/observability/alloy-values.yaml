@@ -1,0 +1,68 @@
+# Values for the community `alloy` Helm chart (not vendored into this repo —
+# see README.md in this directory for the `helmfile apply` command). Ships
+# Grafana Alloy (Loki's currently-recommended log collector, superseding
+# Promtail) as a DaemonSet into the same `observability` namespace as
+# loki-values.yaml, closing #123.
+#
+# Deliberately uses the `loki.source.kubernetes` component (below), which
+# tails container logs through the Kubernetes API server itself, rather than
+# the older hostPath-mount approach (`alloy.mounts.varlog` /
+# `dockercontainers`) — no host filesystem access needed, and it works the
+# same regardless of the node's container runtime/log format.
+
+alloy:
+  # `loki.source.kubernetes` (used in the config below) is public-preview,
+  # not generally-available (the chart's own default) — see
+  # https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.kubernetes/
+  stabilityLevel: public-preview
+
+  configMap:
+    content: |-
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pod_logs.output
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          # `loki` release (loki-values.yaml) with `gateway.enabled: false` —
+          # single-binary Loki's own Service, not a gateway.
+          url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# No ServiceMonitor/PrometheusRule CRDs installed for this pass (see #121) —
+# same reasoning as loki-values.yaml's monitoring block.
+serviceMonitor:
+  enabled: false

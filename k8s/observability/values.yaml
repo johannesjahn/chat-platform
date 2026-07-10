@@ -91,6 +91,21 @@ grafana:
   rbac:
     namespaced: true
 
+  # Wires up the Loki datasource (loki-values.yaml's `loki` release, same
+  # `observability` namespace, `gateway.enabled: false` so this talks to
+  # Loki's own Service directly) alongside the VictoriaMetrics one above —
+  # provisioned via this chart's own sidecar-backed ConfigMap mechanism
+  # rather than `defaultDatasources` (a vm-stack-specific value, not
+  # applicable to a datasource for a chart vm-stack doesn't know about).
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Loki
+          type: loki
+          access: proxy
+          url: http://loki.observability.svc.cluster.local:3100
+
   sidecar:
     skipTlsVerify: true
     datasources:
