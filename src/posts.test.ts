@@ -264,7 +264,7 @@ test("listPosts rejects an unauthenticated request", () =>
     }),
   ));
 
-test("listPosts returns a default first page with hasMore", () =>
+test("listPosts returns a default first page with a null nextCursor", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("olga", "pw");
@@ -276,14 +276,13 @@ test("listPosts returns a default first page with hasMore", () =>
       }
 
       const result = yield* authed.posts.listPosts({ urlParams: {} });
-      expect(result.offset).toBe(0);
       expect(result.limit).toBe(20);
-      expect(result.hasMore).toBe(false);
+      expect(result.nextCursor).toBeNull();
       expect(result.posts).toHaveLength(3);
     }),
   ));
 
-test("listPosts paginates newest-first using offset and limit query params", () =>
+test("listPosts paginates newest-first with a keyset cursor, without gaps or duplicates", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("pete", "pw");
@@ -300,25 +299,25 @@ test("listPosts paginates newest-first using offset and limit query params", () 
       const newestFirst = [...created].reverse();
 
       const firstPage = yield* authed.posts.listPosts({
-        urlParams: { offset: 0, limit: 2 },
+        urlParams: { limit: 2 },
       });
-      expect(firstPage.hasMore).toBe(true);
+      expect(firstPage.nextCursor).not.toBeNull();
       expect(firstPage.posts.map((p) => p.id)).toEqual(
         newestFirst.slice(0, 2).map((p) => p.id),
       );
 
       const secondPage = yield* authed.posts.listPosts({
-        urlParams: { offset: 2, limit: 2 },
+        urlParams: { limit: 2, cursor: firstPage.nextCursor! },
       });
-      expect(secondPage.hasMore).toBe(true);
+      expect(secondPage.nextCursor).not.toBeNull();
       expect(secondPage.posts.map((p) => p.id)).toEqual(
         newestFirst.slice(2, 4).map((p) => p.id),
       );
 
       const thirdPage = yield* authed.posts.listPosts({
-        urlParams: { offset: 4, limit: 2 },
+        urlParams: { limit: 2, cursor: secondPage.nextCursor! },
       });
-      expect(thirdPage.hasMore).toBe(false);
+      expect(thirdPage.nextCursor).toBeNull();
       expect(thirdPage.posts.map((p) => p.id)).toEqual(
         newestFirst.slice(4, 5).map((p) => p.id),
       );
@@ -337,15 +336,20 @@ test("listPosts rejects a limit above the max", () =>
     }),
   ));
 
-test("listPosts rejects a negative offset", () =>
+test("listPosts rejects a malformed cursor", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("ruth", "pw");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
-        .listPosts({ urlParams: { offset: -1 } })
+        .listPosts({ urlParams: { cursor: "not-a-real-cursor" } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidPostsRequest",
+        );
+      }
     }),
   ));
 

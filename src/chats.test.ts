@@ -591,7 +591,7 @@ test("createMessage rejects content over the max length", () =>
     }),
   ));
 
-test("listMessages paginates oldest-first and is forbidden for non-participants", () =>
+test("listMessages returns the newest window by default, oldest-first, and is forbidden for non-participants", () =>
   run(
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw");
@@ -611,29 +611,34 @@ test("listMessages paginates oldest-first and is forbidden for non-participants"
         );
       }
 
+      // No cursor: the newest `limit` messages, still oldest-first.
       const page = yield* bob.client.chats.listMessages({
         path: { id: chat.id },
-        urlParams: { offset: 0, limit: 3 },
+        urlParams: { limit: 3 },
       });
-      expect(page.hasMore).toBe(true);
-      expect(page.total).toBeUndefined();
+      expect(page.hasEarlier).toBe(true);
+      expect(page.hasNewer).toBe(false);
       expect(page.messages.map((m) => m.id)).toEqual(
-        sent.slice(0, 3).map((m) => m.id),
+        sent.slice(2, 5).map((m) => m.id),
       );
 
-      const pageWithTotal = yield* bob.client.chats.listMessages({
+      const earlierPage = yield* bob.client.chats.listMessages({
         path: { id: chat.id },
-        urlParams: { offset: 0, limit: 3, includeTotal: "true" },
+        urlParams: { limit: 3, before: page.earliestCursor! },
       });
-      expect(pageWithTotal.total).toBe(5);
+      expect(earlierPage.hasEarlier).toBe(false);
+      expect(earlierPage.hasNewer).toBe(true);
+      expect(earlierPage.messages.map((m) => m.id)).toEqual(
+        sent.slice(0, 2).map((m) => m.id),
+      );
 
-      const nextPage = yield* bob.client.chats.listMessages({
+      const laterPage = yield* bob.client.chats.listMessages({
         path: { id: chat.id },
-        urlParams: { offset: 3, limit: 3 },
+        urlParams: { limit: 3, after: earlierPage.latestCursor! },
       });
-      expect(nextPage.hasMore).toBe(false);
-      expect(nextPage.messages.map((m) => m.id)).toEqual(
-        sent.slice(3, 5).map((m) => m.id),
+      expect(laterPage.hasNewer).toBe(false);
+      expect(laterPage.messages.map((m) => m.id)).toEqual(
+        sent.slice(2, 5).map((m) => m.id),
       );
 
       const forbidden = yield* eve.client.chats
@@ -642,6 +647,49 @@ test("listMessages paginates oldest-first and is forbidden for non-participants"
       expect(forbidden._tag).toBe("Left");
       if (forbidden._tag === "Left") {
         expect((forbidden.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+    }),
+  ));
+
+test("listMessages rejects a malformed cursor and setting both before and after", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "hi" },
+      });
+      const validCursor = (yield* alice.client.chats.listMessages({
+        path: { id: chat.id },
+        urlParams: {},
+      })).latestCursor!;
+
+      const badCursor = yield* alice.client.chats
+        .listMessages({
+          path: { id: chat.id },
+          urlParams: { before: "not-a-real-cursor" },
+        })
+        .pipe(Effect.either);
+      expect(badCursor._tag).toBe("Left");
+      if (badCursor._tag === "Left") {
+        expect((badCursor.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+
+      const both = yield* alice.client.chats
+        .listMessages({
+          path: { id: chat.id },
+          urlParams: { before: validCursor, after: validCursor },
+        })
+        .pipe(Effect.either);
+      expect(both._tag).toBe("Left");
+      if (both._tag === "Left") {
+        expect((both.left as { _tag: string })._tag).toBe("InvalidChatRequest");
       }
     }),
   ));
@@ -787,10 +835,10 @@ test("deleteMessage removes the message and its read receipts, and is forbidden 
 
       const page = yield* alice.client.chats.listMessages({
         path: { id: chat.id },
-        urlParams: { includeTotal: "true" },
+        urlParams: {},
       });
       expect(page.messages.map((m) => m.id)).not.toContain(message.id);
-      expect(page.total).toBe(0);
+      expect(page.messages).toHaveLength(0);
     }),
   ));
 

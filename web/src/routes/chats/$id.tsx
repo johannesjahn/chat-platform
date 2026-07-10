@@ -139,6 +139,7 @@ function ChatView({ id }: { id: string }) {
   const newestMessage = messages[messages.length - 1];
   const newestMessageId = newestMessage?.id;
   const newestMessageSenderId = newestMessage?.senderId;
+  const oldestMessageId = messages[0]?.id;
 
   // Auto-scroll to the bottom on first load and whenever the newest message
   // changes — a real new message, not just an earlier page loading in.
@@ -175,7 +176,7 @@ function ChatView({ id }: { id: string }) {
       scrollRef.current.scrollTop += delta;
       prevScrollHeightRef.current = null;
     }
-  }, [messagesData?.offset]);
+  }, [oldestMessageId]);
 
   // Infinite scroll: reaching near the top of the scroll container loads the
   // previous page of older messages, anchored so scroll position is preserved

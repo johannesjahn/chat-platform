@@ -1,5 +1,9 @@
 import { useRef } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
@@ -23,6 +27,8 @@ export const MESSAGE_COLLAPSE_THRESHOLD = 300;
 
 const MESSAGES_PAGE_SIZE = 10;
 const MESSAGES_MAX_LIMIT = 100;
+
+type MessagesPageResponse = components["schemas"]["MessagesPage"];
 
 export const chatsListQueryKey = ["chats", "list"] as const;
 export const chatDetailQueryKey = (chatId: number) =>
@@ -109,19 +115,23 @@ export function useChatDetail(chatId: number | undefined, enabled: boolean) {
   });
 }
 
+// No cursor at all returns the newest window; `before`/`after` walk
+// backward/forward from a previous page's `earliestCursor`/`latestCursor`
+// (issue #50) — see `MessagesPageQuery` in src/Api.ts.
 async function fetchMessagesPage(
   chatId: number,
-  offset: number,
-  limit: number,
-  includeTotal = false,
-) {
+  cursor:
+    | { before: string; limit: number }
+    | { after: string; limit: number }
+    | { limit: number },
+): Promise<MessagesPageResponse> {
   const { data, error } = await fetchClient.GET("/chats/{id}/messages", {
     params: {
       path: { id: String(chatId) },
       query: {
-        offset: String(offset),
-        limit: String(limit),
-        ...(includeTotal ? { includeTotal: "true" as const } : {}),
+        limit: String(cursor.limit),
+        ...("before" in cursor ? { before: cursor.before } : {}),
+        ...("after" in cursor ? { after: cursor.after } : {}),
       },
     },
   });
@@ -131,10 +141,6 @@ async function fetchMessagesPage(
 
 type ChatMessagesPage = {
   messages: ChatMessage[];
-  // Whether more (newer) messages exist past this window — derived
-  // server-side from an n+1 fetch rather than a `COUNT(*)` (issue #51).
-  hasMore: boolean;
-  offset: number;
   hasEarlier: boolean;
 };
 
@@ -163,105 +169,101 @@ export function appendSentMessage(
   );
 }
 
-// Chats read oldest-first server-side (offset/limit, same shape as posts'
-// pagination) but a conversation should *open* on its newest messages, like
-// WhatsApp/Telegram. So this keeps a "window anchor" — the offset the
-// currently-loaded page starts at — and:
-//  - on first load, probes the exact count (the one place that opts into the
-//    server's `includeTotal`, since every other fetch below only needs
-//    `hasMore` — see issue #51) then jumps the anchor to the last
-//    `MESSAGES_PAGE_SIZE` messages instead of the first;
+// The server paginates messages with a keyset cursor rather than
+// offset/limit (issue #50), keyed off the previous page's opaque
+// `earliestCursor`/`latestCursor`. A conversation should *open* on its
+// newest messages, like WhatsApp/Telegram, and the no-cursor request
+// (`fetchMessagesPage(id, { limit })`) does exactly that server-side, so
+// there's no equivalent of the old offset anchor to precompute — this hook
+// just tracks the cursors bounding the currently-loaded window and:
+//  - on first load, fetches the newest `MESSAGES_PAGE_SIZE` messages;
 //  - on every refetch (triggered by `useChatSocket` invalidating this query
-//    key on a `chat_updated` event), re-fetches from that same anchor with a
-//    generous limit, so newly arrived messages are picked up without moving
-//    the anchor;
-//  - if the window fills up, slides the anchor forward to keep pace with the
-//    newest messages;
-//  - `loadEarlier` walks the anchor backward a page at a time.
+//    key on a `chat_updated` event), fetches only what's newer than the last
+//    message already loaded (`after`) and appends it;
+//  - if that would grow the window past `MESSAGES_MAX_LIMIT`, re-anchors with
+//    a fresh newest-window fetch instead of trimming — a cursor for wherever
+//    the trimmed-to front would land isn't something the client can
+//    construct itself (cursors are opaque, server-issued only);
+//  - `loadEarlier` fetches the page immediately before the oldest message
+//    already loaded (`before`) and prepends it.
 //
-// The anchor lives in a ref that's only ever mutated from the query/callback
-// functions below, never during render — so the caller must mount a fresh
-// component instance per chat (e.g. `<ChatView key={chatId} .../>`) rather
-// than expect this hook to reset itself when `chatId` changes.
+// The cursor refs are only ever mutated from the query/callback functions
+// below, never during render — so the caller must mount a fresh component
+// instance per chat (e.g. `<ChatView key={chatId} .../>`) rather than expect
+// this hook to reset itself when `chatId` changes.
 export function useChatMessages(chatId: number | undefined, enabled: boolean) {
-  const anchorRef = useRef<number | null>(null);
+  const queryClient = useQueryClient();
+  const oldestCursorRef = useRef<string | null>(null);
+  const newestCursorRef = useRef<string | null>(null);
   // Set by `loadEarlier` right before it triggers a refetch, and always
   // cleared by the queryFn below — distinguishes "the user just asked to
   // page backward" from "something else (the initial load, or a
-  // `chat_updated`-triggered refetch at an unchanged anchor) re-ran this
-  // query". Only the latter should slide the anchor forward to catch up with
-  // the tail (see below) — otherwise, in a chat longer than
-  // MESSAGES_MAX_LIMIT, *every* `loadEarlier` call would find its new anchor
-  // still can't reach the tail within one MESSAGES_MAX_LIMIT-sized window
-  // and immediately snap the anchor back toward the tail, making it
-  // impossible to ever page further back and leaving `hasEarlier` permanently
-  // true — so scrolling to the top kept sending pagination requests to the
-  // backend forever, even once the oldest reachable message was loaded.
+  // `chat_updated`-triggered refetch at an unchanged window) re-ran this
+  // query". Only the latter should catch up on newer messages — otherwise, in
+  // a chat longer than MESSAGES_MAX_LIMIT, *every* `loadEarlier` call would
+  // also race a forward catch-up fetch, making it impossible to ever page
+  // further back and leaving `hasEarlier` permanently true — so scrolling to
+  // the top kept sending pagination requests to the backend forever, even
+  // once the oldest reachable message was loaded.
   const isLoadEarlierFetchRef = useRef(false);
 
+  const queryKey =
+    chatId != null
+      ? chatMessagesQueryKey(chatId)
+      : (["chats", "messages", "none"] as const);
+
   const query = useQuery({
-    queryKey:
-      chatId != null
-        ? chatMessagesQueryKey(chatId)
-        : ["chats", "messages", "none"],
+    queryKey,
     enabled: enabled && chatId != null,
-    queryFn: async () => {
+    queryFn: async (): Promise<ChatMessagesPage> => {
       const id = chatId!;
       const isLoadEarlierFetch = isLoadEarlierFetchRef.current;
       isLoadEarlierFetchRef.current = false;
-      if (anchorRef.current === null) {
-        const probe = await fetchMessagesPage(id, 0, MESSAGES_PAGE_SIZE, true);
-        anchorRef.current = Math.max(
-          0,
-          (probe.total ?? 0) - MESSAGES_PAGE_SIZE,
-        );
-      }
-      const offset = anchorRef.current;
-      const page = await fetchMessagesPage(id, offset, MESSAGES_MAX_LIMIT);
-      const loadedThrough = page.offset + page.messages.length;
-      if (!isLoadEarlierFetch && page.hasMore) {
-        // More messages exist than this window (capped at
-        // MESSAGES_MAX_LIMIT) can show from the current anchor — rather than
-        // re-requesting the whole window again (this is the common case
-        // once a chat has grown past MESSAGES_MAX_LIMIT and the anchor sits
-        // pinned to the tail, since *any* new message re-triggers it), fetch
-        // only the rows past what was just loaded and merge them in. Sliding
-        // all the way back to the last page here (instead of by the max
-        // limit) is what caused the anchor tracked for the *next*
-        // `loadEarlier` call to diverge from what was actually rendered,
-        // producing both a scroll jump to the newest messages and a
-        // subsequent re-fetch of a range that had already been loaded.
-        const tail = await fetchMessagesPage(
-          id,
-          loadedThrough,
-          MESSAGES_MAX_LIMIT,
-        );
-        const merged = [...page.messages, ...tail.messages].slice(
-          -MESSAGES_MAX_LIMIT,
-        );
-        const newOffset = tail.offset + tail.messages.length - merged.length;
-        anchorRef.current = newOffset;
+      const prev = queryClient.getQueryData<ChatMessagesPage>(queryKey);
+
+      if (isLoadEarlierFetch && prev && oldestCursorRef.current) {
+        const page = await fetchMessagesPage(id, {
+          before: oldestCursorRef.current,
+          limit: MESSAGES_PAGE_SIZE,
+        });
+        oldestCursorRef.current = page.earliestCursor;
         return {
-          messages: merged,
-          hasMore: tail.hasMore,
-          offset: newOffset,
-          hasEarlier: newOffset > 0,
+          messages: [...page.messages, ...prev.messages],
+          hasEarlier: page.hasEarlier,
         };
       }
-      return {
-        messages: page.messages,
-        hasMore: page.hasMore,
-        offset: page.offset,
-        hasEarlier: page.offset > 0,
-      };
+
+      if (prev && newestCursorRef.current) {
+        const page = await fetchMessagesPage(id, {
+          after: newestCursorRef.current,
+          limit: MESSAGES_MAX_LIMIT,
+        });
+        if (page.messages.length === 0) return prev;
+        if (prev.messages.length + page.messages.length <= MESSAGES_MAX_LIMIT) {
+          newestCursorRef.current = page.latestCursor;
+          return {
+            messages: [...prev.messages, ...page.messages],
+            hasEarlier: prev.hasEarlier,
+          };
+        }
+        // Falls through to a fresh newest-window fetch below — see the
+        // function comment on why this doesn't just trim client-side.
+      }
+
+      // True first load for this chat: only the newest small batch — a full
+      // history isn't needed until the user scrolls up. A re-anchor after
+      // outgrowing MESSAGES_MAX_LIMIT (the fallthrough above) instead re-fills
+      // the full capped window, so the chat doesn't visibly shrink back down
+      // to MESSAGES_PAGE_SIZE messages mid-conversation.
+      const limit = prev ? MESSAGES_MAX_LIMIT : MESSAGES_PAGE_SIZE;
+      const page = await fetchMessagesPage(id, { limit });
+      oldestCursorRef.current = page.earliestCursor;
+      newestCursorRef.current = page.latestCursor;
+      return { messages: page.messages, hasEarlier: page.hasEarlier };
     },
   });
 
   const loadEarlier = () => {
-    anchorRef.current = Math.max(
-      0,
-      (anchorRef.current ?? 0) - MESSAGES_PAGE_SIZE,
-    );
     isLoadEarlierFetchRef.current = true;
     return query.refetch();
   };
