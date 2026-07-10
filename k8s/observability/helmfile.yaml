@@ -7,6 +7,8 @@
 repositories:
   - name: vm
     url: https://victoriametrics.github.io/helm-charts/
+  - name: grafana
+    url: https://grafana.github.io/helm-charts
 
 releases:
   - name: vm-stack
@@ -20,3 +22,27 @@ releases:
     version: 0.86.0
     values:
       - values.yaml
+
+  - name: loki
+    namespace: observability
+    createNamespace: true
+    chart: grafana/loki
+    # Pinned for the same reason as vm-stack above — bump deliberately, check
+    # https://github.com/grafana/loki/blob/main/production/helm/loki/Chart.yaml
+    # for the latest version and changelog first.
+    version: 7.1.0
+    values:
+      - loki-values.yaml
+
+  - name: alloy
+    namespace: observability
+    createNamespace: true
+    chart: grafana/alloy
+    # Same pinning rationale as above — check
+    # https://github.com/grafana/alloy/blob/main/operations/helm/charts/alloy/Chart.yaml
+    # for the latest version and changelog first.
+    version: 1.10.1
+    values:
+      - alloy-values.yaml
+    needs:
+      - observability/loki
