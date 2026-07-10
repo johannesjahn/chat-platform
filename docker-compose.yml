@@ -44,7 +44,17 @@ services:
       retries: 20
 
   app:
-    build: .
+    build:
+      context: .
+      # Only consulted when building through buildx bake (CI sets
+      # COMPOSE_BAKE=true and registers a GHA-backed builder via
+      # docker/setup-buildx-action — see .github/workflows/ci.yml's `docker`
+      # job); plain `docker compose build` on a dev machine ignores these
+      # and just uses the local Docker build cache as before.
+      cache_from:
+        - type=gha
+      cache_to:
+        - type=gha,mode=max
     ports:
       - "3000:3000"
     environment:
