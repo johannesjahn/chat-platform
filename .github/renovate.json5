@@ -3,10 +3,12 @@
 
   // Supersedes .github/dependabot.yml (removed alongside this file) — see
   // issue #151. Dependabot only ever covered npm (root + web) and
-  // github-actions, leaving Bun's version, Docker base images, Helm chart
-  // versions, and a few hand-duplicated strings entirely unmanaged or
-  // synced by hand. Renovate covers all of it — npm and github-actions
-  // (matching Dependabot's previous behavior), plus Docker (Dockerfile +
+  // github-actions, leaving Bun's own version, Docker base images, Helm
+  // chart versions, and a few hand-duplicated strings entirely unmanaged or
+  // synced by hand. Renovate covers all of it — root/web JS dependencies
+  // (via its "bun" manager, since this repo's only lockfiles are bun.lock —
+  // see the packageRules comment below) and github-actions (matching
+  // Dependabot's previous behavior), plus Docker (Dockerfile +
   // docker-compose.yml), Helm values (k8s/chat-platform/values.yaml), and
   // Helmfile (k8s/observability/helmfile.yaml), all auto-detected by their
   // respective managers with no extra config below, plus the custom regex
@@ -44,15 +46,20 @@
   packageRules: [
     // Mirrors dependabot.yml's per-directory minor-and-patch grouping, so
     // routine bumps still land as one PR per workspace instead of one PR
-    // per package.
+    // per package. This repo has no package-lock.json/yarn.lock/
+    // pnpm-lock.yaml, only bun.lock — Renovate's "bun" manager (not "npm")
+    // is what actually claims package.json/web/package.json here (the npm
+    // manager explicitly steps aside for a package.json already claimed by
+    // the bun manager, per its docs), so these rules must match "bun" or
+    // they silently match nothing.
     {
-      matchManagers: ["npm"],
+      matchManagers: ["bun"],
       matchFileNames: ["package.json"],
       matchUpdateTypes: ["minor", "patch"],
       groupName: "backend minor and patch dependencies",
     },
     {
-      matchManagers: ["npm"],
+      matchManagers: ["bun"],
       matchFileNames: ["web/package.json"],
       matchUpdateTypes: ["minor", "patch"],
       groupName: "web minor and patch dependencies",
