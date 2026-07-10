@@ -1,0 +1,143 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  // Supersedes .github/dependabot.yml (removed alongside this file) — see
+  // issue #151. Dependabot only ever covered npm (root + web) and
+  // github-actions, leaving Bun's own version, Docker base images, Helm
+  // chart versions, and a few hand-duplicated strings entirely unmanaged or
+  // synced by hand. Renovate covers all of it — root/web JS dependencies
+  // (via its "bun" manager, since this repo's only lockfiles are bun.lock —
+  // see the packageRules comment below) and github-actions (matching
+  // Dependabot's previous behavior), plus Docker (Dockerfile +
+  // docker-compose.yml), Helm values (k8s/chat-platform/values.yaml), and
+  // Helmfile (k8s/observability/helmfile.yaml), all auto-detected by their
+  // respective managers with no extra config below, plus the custom regex
+  // managers further down for the version strings none of those managers
+  // read. One tool for every technology in the repo instead of two.
+  extends: [
+    "config:recommended",
+    // Every `uses: owner/action@vX` across the workflows is already pinned
+    // to a full-length commit SHA with the version kept as a trailing
+    // comment (`uses: owner/action@<sha> # vX`) — done by hand in the same
+    // change that added this file, resolving both issue #151's SHA-pinning
+    // proposal and the inconsistent major-only pins (`@v4`, `@v5`, `@v1`)
+    // some actions had (mutable tags don't protect against a tag being
+    // force-moved upstream, and mixing pin precision across actions was its
+    // own inconsistency). This preset's job from here on is just to keep
+    // the SHA and the version comment in sync together on every future
+    // bump, the same way it would have produced the initial pin if it had
+    // been enabled first.
+    "helpers:pinGitHubActionDigests",
+  ],
+
+  labels: ["dependencies"],
+
+  // k8s/chat-platform/values.yaml's backend.image.tag is this repo's own
+  // release version (kept in sync with package.json's version by
+  // `bun run sync:chart-version` and bumped by tag-release.yml), not a
+  // third-party dependency — the helm-values manager picks it up like any
+  // other `image: {repository, tag}` block since johannesjahn/chat-platform
+  // is a real, pullable Docker Hub tag from that same release pipeline.
+  // Renovate opening its own PRs against it would fight the sync script and
+  // the chart-version CI job that enforces it stays derived from
+  // package.json, not bumped independently.
+  ignoreDeps: ["johannesjahn/chat-platform"],
+
+  packageRules: [
+    // Mirrors dependabot.yml's per-directory minor-and-patch grouping, so
+    // routine bumps still land as one PR per workspace instead of one PR
+    // per package. This repo has no package-lock.json/yarn.lock/
+    // pnpm-lock.yaml, only bun.lock — Renovate's "bun" manager (not "npm")
+    // is what actually claims package.json/web/package.json here (the npm
+    // manager explicitly steps aside for a package.json already claimed by
+    // the bun manager, per its docs), so these rules must match "bun" or
+    // they silently match nothing.
+    {
+      matchManagers: ["bun"],
+      matchFileNames: ["package.json"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "backend minor and patch dependencies",
+    },
+    {
+      matchManagers: ["bun"],
+      matchFileNames: ["web/package.json"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "web minor and patch dependencies",
+    },
+    {
+      matchManagers: ["github-actions"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "GitHub Actions minor and patch updates",
+    },
+
+    // k8s/observability/helmfile.yaml's chart versions are pinned
+    // deliberately (see the comments in that file: check the upstream
+    // changelog and bump by hand). Require approval via the Dependency
+    // Dashboard issue instead of raising a PR unprompted on every upstream
+    // chart release, so "bump deliberately" stays true as a review policy.
+    {
+      matchManagers: ["helmfile"],
+      dependencyDashboardApproval: true,
+    },
+
+    // The Bun version is hand-duplicated in three places (Dockerfile's
+    // `FROM oven/bun:...`, and the separate BUN_VERSION copies in ci.yml
+    // and tag-release.yml — see issue #151) with nothing keeping them in
+    // sync. Group every source of the oven/bun Docker Hub tag — the
+    // Dockerfile (picked up automatically by the docker manager) and the
+    // two BUN_VERSION regex managers below — into one PR so all three move
+    // together.
+    {
+      matchDatasources: ["docker"],
+      matchPackageNames: ["oven/bun"],
+      groupName: "Bun version",
+    },
+
+    // The helmfile CLI version is hand-duplicated in ci.yml's install step
+    // and k8s/observability/README.md's ArgoCD sidecar example (see issue
+    // #151) — group the two regex managers below so both move together.
+    {
+      matchDatasources: ["github-releases"],
+      matchPackageNames: ["helmfile/helmfile"],
+      groupName: "helmfile CLI version",
+    },
+  ],
+
+  customManagers: [
+    // Tracks BUN_VERSION in ci.yml and tag-release.yml against the same
+    // Docker Hub oven/bun tags the Dockerfile's FROM line tracks (grouped
+    // with it above) — none of the npm/github-actions/docker/helm-values
+    // managers read a bare `BUN_VERSION: X.Y.Z` env value.
+    {
+      customType: "regex",
+      managerFilePatterns: [
+        "/^\\.github/workflows/ci\\.yml$/",
+        "/^\\.github/workflows/tag-release\\.yml$/",
+      ],
+      matchStrings: ["BUN_VERSION:\\s*(?<currentValue>[0-9.]+)"],
+      depNameTemplate: "oven/bun",
+      datasourceTemplate: "docker",
+    },
+
+    // Tracks the helmfile CLI version pinned in ci.yml's install step
+    // (grouped with the README copy below).
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^\\.github/workflows/ci\\.yml$/"],
+      matchStrings: [
+        "helmfile/helmfile/releases/download/(?<currentValue>v[0-9.]+)/helmfile_[0-9.]+_linux_amd64\\.tar\\.gz",
+      ],
+      depNameTemplate: "helmfile/helmfile",
+      datasourceTemplate: "github-releases",
+    },
+    // Tracks the same version pinned in the README's ArgoCD CMP sidecar
+    // image tag example (grouped with the ci.yml copy above).
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^k8s/observability/README\\.md$/"],
+      matchStrings: ["ghcr\\.io/helmfile/helmfile:(?<currentValue>v[0-9.]+)"],
+      depNameTemplate: "helmfile/helmfile",
+      datasourceTemplate: "github-releases",
+    },
+  ],
+}

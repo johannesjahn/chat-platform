@@ -227,3 +227,14 @@ security analysis runs in a separate workflow,
 [`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) (CodeQL, on
 push/PR/weekly schedule), rather than as a `ci.yml` job, since it uploads to
 the repo's Security tab instead of gating merges.
+
+**Dependency updates**: [`.github/renovate.json5`](.github/renovate.json5)
+configures Renovate as the single tool covering every pinned/floating
+version in the repo — npm (root + web), GitHub Actions (pinned to commit
+SHA via the `helpers:pinGitHubActionDigests` preset), Docker (`Dockerfile` +
+`docker-compose.yml`), Helm values (`k8s/chat-platform/values.yaml`), and
+Helmfile chart versions (`k8s/observability/helmfile.yaml`), plus custom
+regex managers keeping the hand-duplicated Bun version (`Dockerfile`,
+`ci.yml`, `tag-release.yml`) and helmfile CLI version (`ci.yml`,
+`k8s/observability/README.md`) in sync. There is no `dependabot.yml` —
+Renovate replaced it entirely rather than running alongside it.
