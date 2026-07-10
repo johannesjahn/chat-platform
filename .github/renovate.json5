@@ -14,12 +14,17 @@
   // read. One tool for every technology in the repo instead of two.
   extends: [
     "config:recommended",
-    // Converts every `uses: owner/action@vX` across the workflows to a
-    // pinned full-length commit SHA with the version kept as a trailing
-    // comment (`uses: owner/action@<sha> # vX`) on first run, then keeps
-    // the SHA and the comment in sync together on every future bump. See
-    // issue #151's GitHub Actions section: tag pinning alone doesn't
-    // protect against a tag being force-moved upstream.
+    // Every `uses: owner/action@vX` across the workflows is already pinned
+    // to a full-length commit SHA with the version kept as a trailing
+    // comment (`uses: owner/action@<sha> # vX`) — done by hand in the same
+    // change that added this file, resolving both issue #151's SHA-pinning
+    // proposal and the inconsistent major-only pins (`@v4`, `@v5`, `@v1`)
+    // some actions had (mutable tags don't protect against a tag being
+    // force-moved upstream, and mixing pin precision across actions was its
+    // own inconsistency). This preset's job from here on is just to keep
+    // the SHA and the version comment in sync together on every future
+    // bump, the same way it would have produced the initial pin if it had
+    // been enabled first.
     "helpers:pinGitHubActionDigests",
   ],
 
