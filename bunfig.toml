@@ -7,3 +7,12 @@
 # 5000ms default despite this file. Use the `--timeout` CLI flag instead —
 # see the `test` script in package.json and the `unit` job in
 # .github/workflows/ci.yml. Revisit once the linked issue is fixed upstream.
+#
+# coverageThreshold, unlike timeout above, is actually honored: `bun test
+# --coverage` fails the run (non-zero exit) once either figure drops below
+# its threshold. Current coverage sits around 84% lines / 75% functions (see
+# `bun run test:coverage`); thresholds are set a few points below that as a
+# regression guard, not a target — raise them as coverage genuinely improves
+# rather than lowering them to make a drop pass.
+[test]
+coverageThreshold = { line = 0.80, function = 0.70 }

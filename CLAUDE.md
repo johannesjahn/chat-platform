@@ -157,6 +157,12 @@ lint/format from the repo root; run `typecheck` per package.
   it) are all already isolated per file/process — don't add `test.concurrent`
   within a file, though, since tests sharing one file's PGlite instance still
   reset it between each other and aren't safe to run concurrently.
+- **Coverage** — `bun run test:coverage` runs the same suite as `test` with
+  `--coverage` added, writing a text summary plus `lcov.info` to `coverage/`
+  (gitignored). Unlike `timeout`, `bunfig.toml`'s `[test] coverageThreshold`
+  _is_ honored — the run fails once line or function coverage drops below
+  it, so CI's `unit` job enforces coverage as a regression gate, not just a
+  report, and uploads `coverage/` as the `coverage-report` build artifact.
 - **E2E** — `cd web && bun run test:e2e` (Playwright, Chromium). The Playwright
   `webServer` config boots the _real_ backend (`bun run start`, cwd `..`, with a
   test `JWT_SECRET`) and the Vite dev server, then drives the browser against
@@ -206,9 +212,11 @@ and all PRs, with five parallel jobs: **lint** (`format:check` + `lint`),
 (regenerates `openapi.json` and `web/src/lib/api-types.ts` via `gen:types` and
 fails if that produces a diff, i.e. catches a backend API change whose
 generated spec/types weren't regenerated and committed), **unit**
-(`bun test ./src`, which includes `src/openapi.test.ts` validating the spec
-against the `ChatApi` definition), and **e2e** (Playwright). The Bun version
-is pinned once via the workflow-level `BUN_VERSION` env var.
+(`bun run test:coverage`, which includes `src/openapi.test.ts` validating the
+spec against the `ChatApi` definition, enforces `bunfig.toml`'s coverage
+thresholds, and uploads the `coverage-report` artifact — see Testing above),
+and **e2e** (Playwright). The Bun version is pinned once via the
+workflow-level `BUN_VERSION` env var.
 
 **audit** runs `bun audit --audit-level=high` for both the backend and
 `web/` to catch known-vulnerable dependencies; it's gated to high/critical
