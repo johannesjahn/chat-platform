@@ -1,19 +1,19 @@
 # Values for the community `victoria-metrics-k8s-stack` Helm chart (not
 # vendored into this repo — see README.md in this directory for the
 # `helm repo add` / `helm install` commands). Installs vmsingle + vmagent +
-# kube-state-metrics + node-exporter + Grafana into a dedicated
-# `observability` namespace, scraping the cluster/node metrics needed to
-# close #122.
+# kube-state-metrics + node-exporter + Grafana + vmalert + Alertmanager into
+# a dedicated `observability` namespace (see #122, #125).
 #
-# Deliberately out of scope for this pass (see #121, each is its own
-# sub-issue): vmalert/Alertmanager (alerting) and this chart's own bundled
-# Grafana dashboards/rules — disabled below rather than left running idle.
-# The backend's own /metrics endpoint (issue #124) *is* wired up though: its
+# The backend's own /metrics endpoint (issue #124) is wired up too: its
 # chart (../chat-platform/) ships a VMServiceScrape (picked up automatically
 # — this chart's vmagent defaults to `selectAllByDefault: true`, watching
 # every namespace with no selector needed) and a Grafana dashboard ConfigMap
 # (picked up via grafana.sidecar.dashboards below, since that one — unlike
 # vmagent's own discovery — defaults to this chart's own namespace only).
+#
+# Out of scope here: Loki/log-derived dashboards and alerts — the log stack
+# (#123) isn't deployed yet, so there's nothing to build them on. Revisit
+# once #123 lands.
 
 vmsingle:
   spec:
@@ -54,22 +54,235 @@ prometheus-node-exporter:
       cpu: 100m
       memory: 64Mi
 
-# Alerting is a separate sub-issue of #121 — disable both the evaluator and
-# Alertmanager rather than run them idle.
+# vmalert evaluates VMRules (the starter rule set below, via `extraObjects`,
+# plus the backend-specific rules shipped by ../chat-platform/) against
+# vmsingle and fires into Alertmanager. Both `spec.datasource` (→ vmsingle)
+# and `spec.notifiers` (→ the alertmanager release below) are wired up
+# automatically by this chart when both are enabled in the same release —
+# same "nothing to configure" pattern as vmagent → vmsingle and Grafana →
+# vmsingle above. Verify with `helmfile template` after changing either.
 vmalert:
-  enabled: false
+  enabled: true
+  spec:
+    selectAllByDefault: true
+    evaluationInterval: 30s
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
 
+# `configSecret` (rather than the chart's own `alertmanager.config`) mirrors
+# the `existingSecret` pattern used for grafana-admin/postgres-password/etc
+# elsewhere in this repo — the real notification-channel config (webhook
+# URL, or an email/SMTP receiver, possibly carrying a token) never gets
+# committed to git. Create the Secret once, e.g. a minimal webhook receiver:
+#   cat <<'EOF' > alertmanager.yaml
+#   route:
+#     receiver: webhook
+#     group_by: ["alertname", "namespace", "severity"]
+#     group_wait: 30s
+#     group_interval: 5m
+#     repeat_interval: 4h
+#   receivers:
+#     - name: webhook
+#       webhook_configs:
+#         - url: "https://<your-webhook-receiver>"
+#           send_resolved: true
+#   EOF
+#   kubectl create secret generic alertmanager-config -n observability \
+#     --from-file=alertmanager.yaml=./alertmanager.yaml
+# (see README.md's "Alerting" section for more on picking a receiver).
 alertmanager:
-  enabled: false
+  enabled: true
+  spec:
+    replicaCount: 1
+    configSecret: "alertmanager-config"
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
 
-# Bundled dashboards/alerting rules are also a separate sub-issue — Explore
-# view queries against the vmsingle datasource (wired up automatically by
-# defaultDatasources below) are enough to satisfy #122's acceptance criteria.
+# Community dashboards (node-exporter's standard dashboard, kube-state-metrics
+# cluster views) as a starting point for the "cluster overview" acceptance
+# criterion of #125. Dashboards for components this cluster doesn't run
+# (etcd, kube-scheduler/controller-manager/proxy metrics — not exposed the
+# standard way on microk8s) are self-gated by the chart on their own
+# `kubeScheduler.enabled`-style flags, which stay false/unset here, so they
+# don't show up empty.
 defaultDashboards:
-  enabled: false
+  enabled: true
 
+# The chart's own bundled alerting rules pull in a large upstream set (etcd,
+# kube-apiserver SLO burn-rate chains, vmcluster, ...) sized for a full
+# kube-prometheus-stack install, most of it irrelevant noise on a
+# single-node microk8s cluster running vmsingle (not vmcluster). Left off in
+# favor of the small, explicit "starter rule set" from #125 below instead —
+# easier to audit and tuned to what's actually running here.
 defaultRules:
   enabled: false
+
+# Cluster-wide resources #125 needs that don't fit any other release's own
+# templates: the starter VMRule (pod crash-looping (any workload), node
+# disk/memory pressure, PVC-nearing-capacity — covers Postgres/Redis's PVCs
+# from ../chat-platform/ too) and a Loki-backed logs dashboard (now that
+# loki-values.yaml/alloy-values.yaml exist). The backend-specific alert
+# rules (readiness failing, high 5xx rate) live with the backend's other
+# metrics config instead — see
+# ../chat-platform/templates/backend-metrics-alerts.yaml.
+extraObjects:
+  - apiVersion: operator.victoriametrics.com/v1beta1
+    kind: VMRule
+    metadata:
+      name: cluster-starter-alerts
+      namespace: observability
+      labels:
+        app.kubernetes.io/part-of: observability
+    spec:
+      groups:
+        - name: workload-health
+          rules:
+            - alert: PodCrashLooping
+              expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+              for: 5m
+              labels:
+                severity: critical
+              annotations:
+                summary: 'Pod {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} is crash-looping'
+                description: 'Container {{ "{{" }} $labels.container {{ "}}" }} in pod {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} has restarted {{ "{{" }} $value | humanize {{ "}}" }} times in the last 15m.'
+        - name: node-health
+          rules:
+            - alert: NodeMemoryPressure
+              expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.10
+              for: 10m
+              labels:
+                severity: warning
+              annotations:
+                summary: 'Node {{ "{{" }} $labels.instance {{ "}}" }} is low on memory'
+                description: 'Node {{ "{{" }} $labels.instance {{ "}}" }} has had less than 10% memory available for 10m (current: {{ "{{" }} $value | humanizePercentage {{ "}}" }}).'
+            - alert: NodeDiskPressure
+              expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) < 0.10
+              for: 10m
+              labels:
+                severity: warning
+              annotations:
+                summary: 'Node {{ "{{" }} $labels.instance {{ "}}" }} filesystem {{ "{{" }} $labels.mountpoint {{ "}}" }} is low on disk space'
+                description: 'Filesystem {{ "{{" }} $labels.mountpoint {{ "}}" }} on {{ "{{" }} $labels.instance {{ "}}" }} has had less than 10% free space for 10m (current: {{ "{{" }} $value | humanizePercentage {{ "}}" }}).'
+        - name: storage-capacity
+          rules:
+            - alert: PVCNearingCapacity
+              expr: (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) > 0.85
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: 'PVC {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.persistentvolumeclaim {{ "}}" }} is nearing capacity'
+                description: 'PVC {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.persistentvolumeclaim {{ "}}" }} has been over 85% full for 15m (current: {{ "{{" }} $value | humanizePercentage {{ "}}" }}).'
+  # The "Loki's log-panel dashboard" starting point #125 asks for — a
+  # cluster-wide log-volume-by-namespace panel plus a live logs panel
+  # filterable by the $namespace template variable, and a dedicated
+  # backend-error-log panel (LogQL query strings use Grafana's own `$var`
+  # interpolation here, not Go templates, so no `{{ "{{" }}`-style escaping
+  # needed — only the legend format below does). Picked up by Grafana's
+  # sidecar the same way as ../chat-platform/'s backend dashboard ConfigMap.
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: cluster-logs-dashboard
+      namespace: observability
+      labels:
+        grafana_dashboard: "1"
+      annotations:
+        grafana_folder: cluster
+    data:
+      cluster-logs.json: |
+        {
+          "uid": "cluster-logs",
+          "title": "Cluster - Logs",
+          "tags": ["observability", "logs"],
+          "timezone": "browser",
+          "schemaVersion": 39,
+          "version": 1,
+          "refresh": "30s",
+          "time": { "from": "now-1h", "to": "now" },
+          "templating": {
+            "list": [
+              {
+                "current": {},
+                "hide": 0,
+                "label": "Datasource",
+                "name": "datasource",
+                "query": "loki",
+                "refresh": 1,
+                "type": "datasource"
+              },
+              {
+                "current": { "text": "chat-platform", "value": "chat-platform" },
+                "datasource": { "type": "loki", "uid": "${datasource}" },
+                "hide": 0,
+                "label": "Namespace",
+                "name": "namespace",
+                "query": "label_values(namespace)",
+                "refresh": 2,
+                "type": "query"
+              }
+            ]
+          },
+          "panels": [
+            {
+              "id": 1,
+              "type": "timeseries",
+              "title": "Log volume by namespace",
+              "datasource": { "type": "loki", "uid": "${datasource}" },
+              "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
+              "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+              "targets": [
+                {
+                  "datasource": { "type": "loki", "uid": "${datasource}" },
+                  "expr": "sum by (namespace) (count_over_time({namespace=~\".+\"}[$__interval]))",
+                  "legendFormat": "{{ "{{" }}namespace{{ "}}" }}",
+                  "queryType": "range"
+                }
+              ]
+            },
+            {
+              "id": 2,
+              "type": "logs",
+              "title": "Logs — $namespace",
+              "datasource": { "type": "loki", "uid": "${datasource}" },
+              "gridPos": { "x": 0, "y": 8, "w": 24, "h": 10 },
+              "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
+              "targets": [
+                {
+                  "datasource": { "type": "loki", "uid": "${datasource}" },
+                  "expr": "{namespace=\"$namespace\"}",
+                  "queryType": "range"
+                }
+              ]
+            },
+            {
+              "id": 3,
+              "type": "timeseries",
+              "title": "Backend error log rate",
+              "datasource": { "type": "loki", "uid": "${datasource}" },
+              "gridPos": { "x": 0, "y": 18, "w": 24, "h": 8 },
+              "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
+              "targets": [
+                {
+                  "datasource": { "type": "loki", "uid": "${datasource}" },
+                  "expr": "sum(count_over_time({namespace=\"chat-platform\", container=\"backend\"} |= \"error\" [$__interval])) / $__interval_ms * 1000",
+                  "legendFormat": "errors/sec",
+                  "queryType": "range"
+                }
+              ]
+            }
+          ]
+        }
 
 # Auto-provisions the vmsingle datasource into Grafana via the sidecar below
 # — nothing to wire up by hand.
