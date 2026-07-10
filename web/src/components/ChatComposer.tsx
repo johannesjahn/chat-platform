@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { $api } from "@/lib/api";
+import { useOnlineStatus } from "@/lib/online";
 import { cn } from "@/lib/utils";
 import {
   MAX_MESSAGE_CONTENT_LENGTH,
@@ -31,11 +32,12 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
   const [pending, setPending] = useState(false);
   const lastTypingSentAtRef = useRef(0);
   const sendTyping = $api.useMutation("post", "/chats/{id}/typing");
+  const isOnline = useOnlineStatus();
 
   const trimmed = content.trim();
   const overLimit = trimmed.length > MAX_MESSAGE_CONTENT_LENGTH;
   const nearLimit = trimmed.length > MAX_MESSAGE_CONTENT_LENGTH * 0.9;
-  const canSend = trimmed.length > 0 && !overLimit && !pending;
+  const canSend = trimmed.length > 0 && !overLimit && !pending && isOnline;
 
   function notifyTyping() {
     const now = Date.now();
@@ -126,7 +128,8 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
           size="icon"
           disabled={!canSend}
           onClick={() => void submit()}
-          aria-label="Send message"
+          aria-label={isOnline ? "Send message" : "Send message (offline)"}
+          title={isOnline ? undefined : "You're offline"}
           className="shrink-0"
         >
           {pending ? (
@@ -136,15 +139,21 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
           )}
         </Button>
       </div>
-      {(nearLimit || overLimit) && (
-        <span
-          className={cn(
-            "self-end text-xs",
-            overLimit ? "text-destructive" : "text-muted-foreground",
-          )}
-        >
-          {trimmed.length}/{MAX_MESSAGE_CONTENT_LENGTH}
+      {!isOnline ? (
+        <span className="self-end text-xs text-muted-foreground">
+          You&apos;re offline — sending is disabled until you reconnect.
         </span>
+      ) : (
+        (nearLimit || overLimit) && (
+          <span
+            className={cn(
+              "self-end text-xs",
+              overLimit ? "text-destructive" : "text-muted-foreground",
+            )}
+          >
+            {trimmed.length}/{MAX_MESSAGE_CONTENT_LENGTH}
+          </span>
+        )
       )}
     </div>
   );

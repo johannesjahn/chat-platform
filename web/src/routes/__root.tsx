@@ -6,17 +6,18 @@ import {
   Scripts,
   useRouter,
 } from "@tanstack/react-router";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { LogOut, MessagesSquare, Settings, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { PwaUpdatePrompt } from "@/components/PwaUpdatePrompt";
 import { VersionFooter } from "@/components/VersionFooter";
 import { logout } from "../lib/api";
 import { useSession } from "../lib/auth";
 import { useTotalUnreadCount } from "../lib/chats";
-import { queryClient } from "../lib/query";
+import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
 import appCss from "../styles.css?url";
 
@@ -47,12 +48,16 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <RootDocument>
-      <QueryClientProvider client={queryClient}>
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={persistOptions}
+      >
         <Nav />
+        <OfflineBanner />
         <Outlet />
         <VersionFooter />
         <PwaUpdatePrompt />
-      </QueryClientProvider>
+      </PersistQueryClientProvider>
     </RootDocument>
   );
 }
