@@ -30,7 +30,7 @@ releases:
     # Pinned for the same reason as vm-stack above — bump deliberately, check
     # https://github.com/grafana/loki/blob/main/production/helm/loki/Chart.yaml
     # for the latest version and changelog first.
-    version: 7.1.0
+    version: 7.0.0
     values:
       - loki-values.yaml
 
