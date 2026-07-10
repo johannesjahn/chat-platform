@@ -231,6 +231,81 @@ jobs:
         env:
           REDIS_URL: redis://localhost:6379
 
+  migrate-postgres:
+    name: Migrate against real Postgres
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Tests migrate PGlite (an embedded, WASM Postgres) per test file, but
+    # production runs the same migrations via Bun.sql against a real
+    # wire-protocol Postgres (DbLive's DATABASE_URL branch, see src/Db.ts).
+    # Boot the real backend against a Postgres service container — like the
+    # `unit` job does for `redis` above — so a migration that happens to
+    # work on PGlite but not real Postgres is caught here instead of only
+    # showing up once deployed.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: chat_platform
+          POSTGRES_PASSWORD: chat_platform
+          POSTGRES_DB: chat_platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chat_platform"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun install cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # DbLive (src/Db.ts) runs the Drizzle migrations against DATABASE_URL
+      # before the server starts accepting requests, and /ready (see
+      # src/Health.ts) executes a real query against Db — so a migration
+      # that's invalid against real Postgres fails this step instead of
+      # only surfacing once deployed. REDIS_URL is left unset so PubSub
+      # falls back to its in-memory implementation, which /ready always
+      # reports as reachable (see src/PubSub.ts) — only the DB check is
+      # meaningful here.
+      - name: Boot the backend against real Postgres and wait for /ready
+        run: |
+          bun run start &
+          pid=$!
+          trap 'kill $pid 2>/dev/null' EXIT
+
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/ready > /dev/null; then
+              echo "Backend is ready; migrations applied successfully."
+              exit 0
+            fi
+            if ! kill -0 $pid 2>/dev/null; then
+              echo "::error::Backend process exited before becoming ready (migration likely failed)."
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "::error::Backend did not become ready in time."
+          exit 1
+        env:
+          DATABASE_URL: postgres://chat_platform:chat_platform@localhost:5432/chat_platform
+          JWT_SECRET: ci-migrate-postgres-test-secret
+
   e2e:
     name: E2E tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
