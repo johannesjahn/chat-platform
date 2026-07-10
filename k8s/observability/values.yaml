@@ -290,7 +290,7 @@ defaultDatasources:
   victoriametrics:
     datasources:
       - name: VictoriaMetrics
-        type: victoriametrics-datasource
+        type: victoriametrics-metrics-datasource
         access: proxy
         isDefault: true
 
@@ -304,7 +304,7 @@ grafana:
   rbac:
     namespaced: true
   plugins:
-    - victoriametrics-datasource
+    - victoriametrics-metrics-datasource
 
   # Wires up the Loki datasource (loki-values.yaml's `loki` release, same
   # `observability` namespace, `gateway.enabled: false` so this talks to
