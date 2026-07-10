@@ -88,7 +88,7 @@ backend:
 postgres:
   image:
     repository: postgres
-    tag: "17-alpine"
+    tag: "18-alpine"
 
   auth:
     username: chat_platform
