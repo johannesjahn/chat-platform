@@ -8,6 +8,7 @@
     "dev": "bun --hot src/main.ts",
     "start": "bun src/main.ts",
     "test": "bun test ./src --parallel --timeout=15000",
+    "test:coverage": "bun test ./src --parallel --timeout=15000 --coverage --coverage-reporter=text --coverage-reporter=lcov",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
