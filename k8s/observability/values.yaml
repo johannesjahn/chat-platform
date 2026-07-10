@@ -6,9 +6,14 @@
 # close #122.
 #
 # Deliberately out of scope for this pass (see #121, each is its own
-# sub-issue): vmalert/Alertmanager (alerting), bundled Grafana
-# dashboards/rules, and the backend's own /metrics endpoint. All disabled
-# below rather than left running idle.
+# sub-issue): vmalert/Alertmanager (alerting) and this chart's own bundled
+# Grafana dashboards/rules — disabled below rather than left running idle.
+# The backend's own /metrics endpoint (issue #124) *is* wired up though: its
+# chart (../chat-platform/) ships a VMServiceScrape (picked up automatically
+# — this chart's vmagent defaults to `selectAllByDefault: true`, watching
+# every namespace with no selector needed) and a Grafana dashboard ConfigMap
+# (picked up via grafana.sidecar.dashboards below, since that one — unlike
+# vmagent's own discovery — defaults to this chart's own namespace only).
 
 vmsingle:
   spec:
@@ -82,6 +87,20 @@ grafana:
   sidecar:
     datasources:
       enabled: true
+    dashboards:
+      # `enabled: true` is this chart's own default, so left unset here —
+      # only overriding what actually needs to differ. `searchNamespace`
+      # defaults to this chart's own namespace, which wouldn't see
+      # ../chat-platform/'s dashboard ConfigMap (a different namespace) —
+      # widens the sidecar's ConfigMap read RBAC from a namespaced Role to a
+      # cluster-wide ClusterRole (list/watch everywhere). Fine for a
+      # single-tenant cluster; narrow this to an explicit namespace list
+      # (comma-separated) if that ever changes.
+      searchNamespace: ALL
+      # Groups it under a named folder in the Grafana UI instead of the
+      # flat default — the dashboard ConfigMap sets this via a
+      # `grafana_folder` annotation.
+      folderAnnotation: grafana_folder
 
   # Required — no auto-generated admin password (see k8s/README.md's
   # existingSecret note for postgres/redis/jwt; same reasoning applies

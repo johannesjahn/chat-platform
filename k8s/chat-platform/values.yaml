@@ -61,6 +61,16 @@ backend:
       # disable if installing this chart without that stack.
       enabled: true
 
+    grafanaDashboard:
+      # Ships a pre-built Grafana dashboard for these metrics as a labeled
+      # ConfigMap (see backend-metrics-grafana-dashboard.yaml) that
+      # ../observability/'s Grafana sidecar auto-loads — no manual import.
+      # Requires that sidecar to be enabled and watching this namespace
+      # (true by default once ../observability/'s stack is deployed — see
+      # its values.yaml's grafana.sidecar.dashboards) — disable if
+      # installing this chart without that stack.
+      enabled: true
+
   podAnnotations: {}
   nodeSelector: {}
   tolerations: []
