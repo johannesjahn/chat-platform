@@ -663,14 +663,12 @@
         "operationId": "posts.listPosts",
         "parameters": [
           {
-            "name": "offset",
+            "name": "cursor",
             "in": "query",
             "schema": {
-              "type": "string",
-              "description": "a string to be decoded into a number"
+              "type": "string"
             },
-            "required": false,
-            "description": "a string to be decoded into a number"
+            "required": false
           },
           {
             "name": "limit",
@@ -704,7 +702,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidPostsRequest"
+                    }
+                  ]
                 }
               }
             }
@@ -1695,14 +1700,20 @@
             "required": true
           },
           {
-            "name": "offset",
+            "name": "before",
             "in": "query",
             "schema": {
-              "type": "string",
-              "description": "a string to be decoded into a number"
+              "type": "string"
             },
-            "required": false,
-            "description": "a string to be decoded into a number"
+            "required": false
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
           },
           {
             "name": "limit",
@@ -1713,17 +1724,6 @@
             },
             "required": false,
             "description": "a string to be decoded into a number"
-          },
-          {
-            "name": "includeTotal",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "true"
-              ]
-            },
-            "required": false
           }
         ],
         "security": [
@@ -1747,7 +1747,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidChatRequest"
+                    }
+                  ]
                 }
               }
             }
@@ -2733,9 +2740,8 @@
         "type": "object",
         "required": [
           "posts",
-          "offset",
           "limit",
-          "hasMore"
+          "nextCursor"
         ],
         "properties": {
           "posts": {
@@ -2744,14 +2750,37 @@
               "$ref": "#/components/schemas/Post"
             }
           },
-          "offset": {
-            "type": "number"
-          },
           "limit": {
             "type": "number"
           },
-          "hasMore": {
-            "type": "boolean"
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "InvalidPostsRequest": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "InvalidPostsRequest"
+            ]
           }
         },
         "additionalProperties": false
@@ -3095,9 +3124,11 @@
         "type": "object",
         "required": [
           "messages",
-          "offset",
           "limit",
-          "hasMore"
+          "hasEarlier",
+          "hasNewer",
+          "earliestCursor",
+          "latestCursor"
         ],
         "properties": {
           "messages": {
@@ -3106,17 +3137,34 @@
               "$ref": "#/components/schemas/Message"
             }
           },
-          "offset": {
-            "type": "number"
-          },
           "limit": {
             "type": "number"
           },
-          "hasMore": {
+          "hasEarlier": {
             "type": "boolean"
           },
-          "total": {
-            "type": "number"
+          "hasNewer": {
+            "type": "boolean"
+          },
+          "earliestCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latestCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false

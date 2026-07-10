@@ -122,6 +122,13 @@ export class InvalidChatRequest extends Schema.TaggedError<InvalidChatRequest>()
   { message: Schema.String },
 ) {}
 
+// Raised for a malformed `listPosts` pagination cursor — mirrors
+// `InvalidChatRequest`'s role for `listChats`/`listMessages`.
+export class InvalidPostsRequest extends Schema.TaggedError<InvalidPostsRequest>()(
+  "InvalidPostsRequest",
+  { message: Schema.String },
+) {}
+
 // Content types a post's body can hold. Extend this union (and the handler's
 // per-type validation, if any is ever needed) to support new post kinds.
 export const PostContentType = Schema.Literal("text", "image_url").annotations({
@@ -160,10 +167,19 @@ export const UpdatePostBody = Schema.Struct({
 export const DEFAULT_POSTS_LIMIT = 20;
 export const MAX_POSTS_LIMIT = 100;
 
-// `offset`/`limit` (rather than `page`/`pageSize`) so a caller can request
+// `limit` (rather than `page`/`pageSize`) so a caller can request
 // irregularly-sized batches — e.g. an infinite-scroll feed that loads 5 posts
 // up front and 3 at a time thereafter — without the batch size having to stay
 // constant across requests.
+//
+// `posts` is ordered newest-first (`id desc`) and never mutates an existing
+// row's position (posts aren't reordered by edits, unlike chats), so a plain
+// single-column keyset cursor — "give me the next `limit` posts with
+// `id < cursor`" — is enough; no OFFSET, so deep pages don't scan and discard
+// skipped rows (issue #50). The cursor is opaque to clients: it's the last
+// row's id, base64url-encoded (same encoding `Jwt.ts` uses for its segments),
+// and only ever round-tripped from a previous page's `nextCursor` rather than
+// constructed by hand.
 //
 // Left plain-optional (rather than `optionalWith` + `default`) because a
 // schema default only fills in on *decode* — an HttpApiClient caller encoding
@@ -177,9 +193,7 @@ export const MAX_POSTS_LIMIT = 100;
 // (see `processParameters` in `OpenApi.ts`), producing an operation with no
 // documented/typed query params at all.
 export const PostsPageQuery = Schema.Struct({
-  offset: Schema.optional(
-    Schema.NumberFromString.pipe(Schema.int(), Schema.greaterThanOrEqualTo(0)),
-  ),
+  cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
     Schema.NumberFromString.pipe(
       Schema.int(),
@@ -190,13 +204,12 @@ export const PostsPageQuery = Schema.Struct({
 
 export const PostsPage = Schema.Struct({
   posts: Schema.Array(Post),
-  offset: Schema.Number,
   limit: Schema.Number,
-  // Derived from fetching one row past `limit` rather than a separate
-  // `COUNT(*)` over the full result set on every request — the feed only
-  // ever needs to know whether another page exists, not the exact remaining
-  // count (issue #51).
-  hasMore: Schema.Boolean,
+  // Opaque cursor for the next page, or null once the current page reaches
+  // the end of the list. Derived from fetching one row past `limit` rather
+  // than a separate `COUNT(*)` over the full result set — the feed only ever
+  // needs to know whether another page exists (issue #51).
+  nextCursor: Schema.NullOr(Schema.String),
 }).annotations({ identifier: "PostsPage" });
 
 // A chat is either a "direct" (exactly two participants, no title — the UI
@@ -325,35 +338,40 @@ export const MarkReadBody = Schema.Struct({
 export const DEFAULT_MESSAGES_LIMIT = 30;
 export const MAX_MESSAGES_LIMIT = 100;
 
-// Left un-`identifier`-annotated for the same reason as `PostsPageQuery`
-// above (see CLAUDE.md) — it's inlined into path/query parameters.
+// `messages` is ordered oldest-first (`id asc`) within a chat. Unlike
+// `PostsPageQuery`'s single forward cursor, the chat view needs to page in
+// both directions — backward for "load earlier" (infinite-scroll-to-top) and
+// forward to catch up on newly-arrived messages without re-fetching the whole
+// window — plus land directly on the newest messages on first open without a
+// separate `COUNT(*)` to compute an OFFSET into. So this takes an optional
+// `before` *or* `after` cursor instead of `offset`: neither set returns the
+// newest page, `before` returns the `limit` messages immediately preceding
+// that cursor, and `after` returns the `limit` messages immediately
+// following it (issue #50). At most one of `before`/`after` may be set.
+// Cursors are opaque to clients — see `PostsPageQuery` above.
 export const MessagesPageQuery = Schema.Struct({
-  offset: Schema.optional(
-    Schema.NumberFromString.pipe(Schema.int(), Schema.greaterThanOrEqualTo(0)),
-  ),
+  before: Schema.optional(Schema.String),
+  after: Schema.optional(Schema.String),
   limit: Schema.optional(
     Schema.NumberFromString.pipe(
       Schema.int(),
       Schema.between(1, MAX_MESSAGES_LIMIT),
     ),
   ),
-  // Opts into an exact `COUNT(*)` (see `MessagesPage.total`). Left out of
-  // most requests — the client only needs this once, to position its
-  // "jump to the newest messages" window; every other page fetch (scrolling,
-  // socket-triggered refetches) relies on `hasMore` instead, keeping the
-  // count query off the hot path (issue #51).
-  includeTotal: Schema.optional(Schema.Literal("true")),
 });
 
 export const MessagesPage = Schema.Struct({
   messages: Schema.Array(Message),
-  offset: Schema.Number,
   limit: Schema.Number,
-  // Derived from fetching one row past `limit` rather than a `COUNT(*)` —
-  // see `PostsPage.hasMore`.
-  hasMore: Schema.Boolean,
-  // Only populated when the request set `includeTotal`.
-  total: Schema.optional(Schema.Number),
+  // Whether messages exist before/after the first/last row in this page —
+  // derived from fetching one row past `limit` rather than a `COUNT(*)`, same
+  // trick as `PostsPage.nextCursor` (issue #51).
+  hasEarlier: Schema.Boolean,
+  hasNewer: Schema.Boolean,
+  // Opaque cursors for the adjacent pages, or null once there's nothing more
+  // in that direction to fetch.
+  earliestCursor: Schema.NullOr(Schema.String),
+  latestCursor: Schema.NullOr(Schema.String),
 }).annotations({ identifier: "MessagesPage" });
 
 // Below this, a search isn't narrow enough to be worth running — keeps the
@@ -449,6 +467,7 @@ const PostsGroup = HttpApiGroup.make("posts")
     HttpApiEndpoint.get("listPosts", "/posts")
       .setUrlParams(PostsPageQuery)
       .addSuccess(PostsPage)
+      .addError(InvalidPostsRequest, { status: 400 })
       .middleware(Authentication),
   )
   .add(
@@ -645,6 +664,7 @@ const ChatsGroup = HttpApiGroup.make("chats")
       .addSuccess(MessagesPage)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })
+      .addError(InvalidChatRequest, { status: 400 })
       .middleware(Authentication),
   )
   .add(

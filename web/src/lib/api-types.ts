@@ -517,9 +517,13 @@ export interface components {
         PostContentType: "text" | "image_url";
         PostsPage: {
             posts: components["schemas"]["Post"][];
-            offset: number;
             limit: number;
-            hasMore: boolean;
+            nextCursor: string | null;
+        };
+        InvalidPostsRequest: {
+            message: string;
+            /** @enum {string} */
+            _tag: "InvalidPostsRequest";
         };
         CreatePostBody: {
             contentType: components["schemas"]["PostContentType"];
@@ -616,10 +620,11 @@ export interface components {
         };
         MessagesPage: {
             messages: components["schemas"]["Message"][];
-            offset: number;
             limit: number;
-            hasMore: boolean;
-            total?: number;
+            hasEarlier: boolean;
+            hasNewer: boolean;
+            earliestCursor: string | null;
+            latestCursor: string | null;
         };
         CreateMessageBody: {
             contentType: components["schemas"]["MessageContentType"];
@@ -1151,8 +1156,7 @@ export interface operations {
     "posts.listPosts": {
         parameters: {
             query?: {
-                /** @description a string to be decoded into a number */
-                offset?: string;
+                cursor?: string;
                 /** @description a string to be decoded into a number */
                 limit?: string;
             };
@@ -1177,7 +1181,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidPostsRequest"];
                 };
             };
             /** @description Unauthorized */
@@ -1813,11 +1817,10 @@ export interface operations {
     "chats.listMessages": {
         parameters: {
             query?: {
-                /** @description a string to be decoded into a number */
-                offset?: string;
+                before?: string;
+                after?: string;
                 /** @description a string to be decoded into a number */
                 limit?: string;
-                includeTotal?: "true";
             };
             header?: never;
             path: {
@@ -1842,7 +1845,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
                 };
             };
             /** @description Unauthorized */

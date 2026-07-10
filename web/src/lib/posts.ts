@@ -28,22 +28,30 @@ export const postDetailQueryKeyPrefix = ["get", "/posts/{id}"] as const;
 // query param driving pagination — it can't express a batch size that varies
 // between the first page and subsequent ones. So this talks to `fetchClient`
 // (the same client `$api` wraps, auth header and all) directly instead.
+//
+// The server paginates with a keyset cursor rather than offset/limit (issue
+// #50), so `pageParam` carries the opaque cursor for the next page (`null`
+// for the first) instead of a numeric offset.
 export function usePostsFeed(enabled: boolean) {
   return useInfiniteQuery({
     queryKey: postsFeedQueryKey,
     enabled,
-    initialPageParam: 0,
+    initialPageParam: null as string | null,
     queryFn: async ({ pageParam, signal }) => {
       const limit =
-        pageParam === 0 ? INITIAL_POSTS_LIMIT : LOAD_MORE_POSTS_LIMIT;
+        pageParam === null ? INITIAL_POSTS_LIMIT : LOAD_MORE_POSTS_LIMIT;
       const { data, error } = await fetchClient.GET("/posts", {
-        params: { query: { offset: String(pageParam), limit: String(limit) } },
+        params: {
+          query: {
+            limit: String(limit),
+            ...(pageParam !== null ? { cursor: pageParam } : {}),
+          },
+        },
         signal,
       });
       if (error) throw error;
       return data;
     },
-    getNextPageParam: (lastPage) =>
-      lastPage.hasMore ? lastPage.offset + lastPage.posts.length : undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }

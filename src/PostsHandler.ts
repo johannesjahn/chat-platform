@@ -1,7 +1,13 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, lt } from "drizzle-orm";
 import { Effect } from "effect";
-import { ChatApi, DEFAULT_POSTS_LIMIT, Forbidden, NotFound } from "./Api.ts";
+import {
+  ChatApi,
+  DEFAULT_POSTS_LIMIT,
+  Forbidden,
+  InvalidPostsRequest,
+  NotFound,
+} from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db } from "./Db.ts";
 import { RealtimeConnections } from "./Realtime.ts";
@@ -21,6 +27,18 @@ const canModify = (
   currentUser: { readonly id: number; readonly role: string },
   post: { readonly authorId: number },
 ): boolean => currentUser.role === "admin" || post.authorId === currentUser.id;
+
+// Keyset cursor for `listPosts` over its `id desc` sort — see
+// `PostsPageQuery` in Api.ts for why this is a cursor rather than an offset.
+// Posts are never reordered by edits, so the last row's id alone is enough
+// (no tie-breaker column needed, unlike `listChats`'s cursor).
+const encodePostsCursor = (id: number): string =>
+  Buffer.from(String(id)).toString("base64url");
+
+const decodePostsCursor = (cursor: string): number | null => {
+  const id = Number(Buffer.from(cursor, "base64url").toString());
+  return Number.isInteger(id) ? id : null;
+};
 
 const getPostOr404 = (id: number) =>
   Effect.gen(function* () {
@@ -50,23 +68,35 @@ export const PostsHandlerLive = HttpApiBuilder.group(
       .handle("listPosts", ({ urlParams }) =>
         Effect.gen(function* () {
           const db = yield* Db;
-          const offset = urlParams.offset ?? 0;
           const limit = urlParams.limit ?? DEFAULT_POSTS_LIMIT;
+
+          let after: number | null = null;
+          if (urlParams.cursor !== undefined) {
+            after = decodePostsCursor(urlParams.cursor);
+            if (after === null)
+              return yield* Effect.fail(
+                new InvalidPostsRequest({ message: "Invalid cursor" }),
+              );
+          }
+
           // Fetch one row past `limit` instead of firing a separate
-          // `COUNT(*)` — whether that extra row came back is all `hasMore`
-          // needs, and unlike a full-table count this stays cheap no matter
-          // how large `posts` grows (issue #51).
+          // `COUNT(*)` — whether that extra row came back is all
+          // `nextCursor` needs, and unlike a full-table count this stays
+          // cheap no matter how large `posts` grows (issue #51).
           const fetched = yield* Effect.tryPromise(() =>
             db
               .select()
               .from(posts)
+              .where(after !== null ? lt(posts.id, after) : undefined)
               .orderBy(desc(posts.id))
-              .limit(limit + 1)
-              .offset(offset),
+              .limit(limit + 1),
           ).pipe(Effect.orDie);
           const hasMore = fetched.length > limit;
           const rows = fetched.slice(0, limit);
-          return { posts: rows.map(toApiPost), offset, limit, hasMore };
+          const lastRow = rows[rows.length - 1];
+          const nextCursor =
+            hasMore && lastRow ? encodePostsCursor(lastRow.id) : null;
+          return { posts: rows.map(toApiPost), limit, nextCursor };
         }),
       )
       .handle("createPost", ({ payload }) =>

@@ -4,6 +4,7 @@ import {
   count,
   desc,
   eq,
+  gt,
   inArray,
   isNull,
   lt,
@@ -510,6 +511,19 @@ const decodeChatsCursor = (
   const id = Number(decoded.slice(separator + 1));
   if (!Number.isInteger(updatedAtMs) || !Number.isInteger(id)) return null;
   return { updatedAt: new Date(updatedAtMs), id };
+};
+
+// Keyset cursor for `listMessages` over its per-chat `id asc` sort — see
+// `MessagesPageQuery` in Api.ts for why this takes a `before`/`after` cursor
+// rather than an offset. A message's id alone is enough (no tie-breaker
+// column needed, unlike `listChats`'s cursor), since messages are never
+// reordered by edits.
+const encodeMessagesCursor = (id: number): string =>
+  Buffer.from(String(id)).toString("base64url");
+
+const decodeMessagesCursor = (cursor: string): number | null => {
+  const id = Number(Buffer.from(cursor, "base64url").toString());
+  return Number.isInteger(id) ? id : null;
 };
 
 const existingUserIds = (
@@ -1124,38 +1138,84 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
 
-          const offset = urlParams.offset ?? 0;
+          if (urlParams.before !== undefined && urlParams.after !== undefined)
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "Cannot set both before and after",
+              }),
+            );
+
           const limit = urlParams.limit ?? DEFAULT_MESSAGES_LIMIT;
+          let before: number | null = null;
+          let after: number | null = null;
+          if (urlParams.before !== undefined) {
+            before = decodeMessagesCursor(urlParams.before);
+            if (before === null)
+              return yield* Effect.fail(
+                new InvalidChatRequest({ message: "Invalid cursor" }),
+              );
+          } else if (urlParams.after !== undefined) {
+            after = decodeMessagesCursor(urlParams.after);
+            if (after === null)
+              return yield* Effect.fail(
+                new InvalidChatRequest({ message: "Invalid cursor" }),
+              );
+          }
+
           // Fetch one row past `limit` instead of a separate `COUNT(*)` on
           // every request — this is the hot path (scrolling, socket-triggered
           // refetches), so it stays cheap no matter how long the chat's
-          // history gets. Callers that need an exact count (only to position
-          // the initial "jump to newest" window — see web/src/lib/chats.ts)
-          // opt in via `includeTotal` instead (issue #51).
-          const fetched = yield* Effect.tryPromise(() =>
-            db
-              .select()
-              .from(messages)
-              .where(eq(messages.chatId, id))
-              .orderBy(messages.id)
-              .limit(limit + 1)
-              .offset(offset),
-          ).pipe(Effect.orDie);
-          const hasMore = fetched.length > limit;
-          const rows = fetched.slice(0, limit);
-
-          const total =
-            urlParams.includeTotal === "true"
-              ? yield* Effect.tryPromise(() =>
-                  db
-                    .select({ total: count() })
-                    .from(messages)
-                    .where(eq(messages.chatId, id)),
-                ).pipe(
-                  Effect.orDie,
-                  Effect.map((totalRows) => totalRows[0]?.total ?? 0),
+          // history gets (issue #51).
+          let rows: Array<typeof messages.$inferSelect>;
+          let hasEarlier: boolean;
+          let hasNewer: boolean;
+          if (after !== null) {
+            // Forward page: whatever arrived after a previously-loaded
+            // window's newest message (catching up after a `chat_updated`
+            // event) — ascending, same direction as the base sort.
+            const fetched = yield* Effect.tryPromise(() =>
+              db
+                .select()
+                .from(messages)
+                .where(and(eq(messages.chatId, id), gt(messages.id, after)))
+                .orderBy(messages.id)
+                .limit(limit + 1),
+            ).pipe(Effect.orDie);
+            hasNewer = fetched.length > limit;
+            rows = fetched.slice(0, limit);
+            // `after`'s own message (older than everything returned here) is
+            // guaranteed to exist, so there's always something earlier.
+            hasEarlier = true;
+          } else {
+            // Backward-oriented page: the newest window (no cursor) or the
+            // `limit` messages immediately preceding `before` (paging up) —
+            // fetched newest-first so `limit + 1` finds the right end of the
+            // window, then reversed back to the base oldest-first order.
+            const fetched = yield* Effect.tryPromise(() =>
+              db
+                .select()
+                .from(messages)
+                .where(
+                  before !== null
+                    ? and(eq(messages.chatId, id), lt(messages.id, before))
+                    : eq(messages.chatId, id),
                 )
-              : undefined;
+                .orderBy(desc(messages.id))
+                .limit(limit + 1),
+            ).pipe(Effect.orDie);
+            hasEarlier = fetched.length > limit;
+            rows = fetched.slice(0, limit).reverse();
+            // `before`'s own message (newer than everything returned here) is
+            // guaranteed to exist, so there's always something newer.
+            hasNewer = before !== null;
+          }
+
+          const earliestCursor = rows[0]
+            ? encodeMessagesCursor(rows[0].id)
+            : null;
+          const latestCursor = rows[rows.length - 1]
+            ? encodeMessagesCursor(rows[rows.length - 1]!.id)
+            : null;
 
           const messageIds = rows.map((r) => r.id);
           const readRows =
@@ -1181,10 +1241,11 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             messages: rows.map((row) =>
               toApiMessage(row, readersByMessage.get(row.id) ?? []),
             ),
-            offset,
             limit,
-            hasMore,
-            total,
+            hasEarlier,
+            hasNewer,
+            earliestCursor,
+            latestCursor,
           };
         }),
       )
