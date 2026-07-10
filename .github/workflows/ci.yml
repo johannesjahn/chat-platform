@@ -187,6 +187,37 @@ jobs:
       - name: Helm template (default values)
         run: helm template k8s/chat-platform
 
+  helmfile:
+    name: Observability stack lint & template
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - uses: azure/setup-helm@v5
+
+      # Same helmfile version pinned in k8s/observability/README.md's ArgoCD
+      # CMP sidecar example — keep the two in sync. No official setup-helmfile
+      # GitHub Action exists, so install straight from the goreleaser-published
+      # binary tarball, same artifact the README's ArgoCD sidecar image wraps.
+      - name: Install helmfile
+        run: |
+          curl -sSL https://github.com/helmfile/helmfile/releases/download/v1.7.0/helmfile_1.7.0_linux_amd64.tar.gz \
+            | tar -xz helmfile
+          sudo install helmfile /usr/local/bin/helmfile
+          helmfile version
+
+      # k8s/observability's charts (victoria-metrics-k8s-stack, loki, alloy)
+      # aren't vendored — helmfile fetches them from the upstream repos
+      # declared in helmfile.yaml, same as a real `helmfile apply` would.
+      - name: Helmfile lint
+        run: helmfile lint
+        working-directory: k8s/observability
+
+      - name: Helmfile template (default values)
+        run: helmfile template --include-crds > /dev/null
+        working-directory: k8s/observability
+
   unit:
     name: Backend tests
     runs-on: ubuntu-latest
