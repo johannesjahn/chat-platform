@@ -337,6 +337,51 @@ jobs:
           DATABASE_URL: postgres://chat_platform:chat_platform@localhost:5432/chat_platform
           JWT_SECRET: ci-migrate-postgres-test-secret
 
+  docker:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Build images
+        run: docker compose build
+        env:
+          POSTGRES_PASSWORD: ci-docker-build-test-secret
+          REDIS_PASSWORD: ci-docker-build-test-secret
+          JWT_SECRET: ci-docker-build-test-secret
+
+      # Boots the full docker-compose.yml stack (Postgres + Redis + the image
+      # built from the Dockerfile) and waits for the `app` service's own
+      # healthcheck (/ready, see src/Health.ts) to pass. Catches a broken
+      # COPY, a `--production` install dropping a needed dep, or a
+      # Dockerfile/compose wiring mismatch that unit tests against PGlite
+      # can't see, instead of only surfacing once deployed.
+      - name: Boot the stack and wait for the app to become healthy
+        run: |
+          docker compose up -d
+          trap 'docker compose logs; docker compose down -v' EXIT
+
+          for i in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q app)" 2>/dev/null || echo starting)
+            if [ "$status" = "healthy" ]; then
+              echo "App is healthy."
+              exit 0
+            fi
+            if [ "$status" = "unhealthy" ]; then
+              echo "::error::App container reported unhealthy."
+              exit 1
+            fi
+            sleep 2
+          done
+
+          echo "::error::App did not become healthy in time."
+          exit 1
+        env:
+          POSTGRES_PASSWORD: ci-docker-build-test-secret
+          REDIS_PASSWORD: ci-docker-build-test-secret
+          JWT_SECRET: ci-docker-build-test-secret
+
   e2e:
     name: E2E tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
