@@ -76,6 +76,11 @@ defaultDatasources:
         access: proxy
         isDefault: true
 
+victoria-metrics-operator:
+  admissionWebhooks:
+    certManager:
+      enabled: true
+
 grafana:
   enabled: true
   rbac:
