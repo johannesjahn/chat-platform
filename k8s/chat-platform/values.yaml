@@ -46,25 +46,20 @@ backend:
       enabled: true
       secretName: chat-platform-api-tls
 
-    # GET /metrics (issue #124) is unauthenticated at the application level,
-    # same as /health and /ready — but unlike those two it leaks operational
-    # detail (request rates/latencies by route, DB error counts, ...), and
-    # it's meant for vmagent, which reaches the backend Service directly
-    # in-cluster and never goes through this Ingress at all. Left unset by
-    # default so upgrading this chart doesn't suddenly start 401ing an
-    # existing install's /metrics; set `existingSecret` to start requiring
-    # HTTP basic auth on that one path (see backend-ingress-metrics.yaml) —
-    # a more specific Traefik route than the general "/" prefix above, so it
-    # takes over just that path without touching the main Ingress. Give
-    # vmagent's own scrape config the matching plaintext credentials via its
-    # `basic_auth` block.
-    metrics:
-      # Name of a pre-existing Secret holding htpasswd-format credentials
-      # (see https://doc.traefik.io/traefik/middlewares/http/basicauth/),
-      # e.g.:
-      #   htpasswd -nbB vmagent '<password>' | \
-      #     kubectl create secret generic chat-platform-metrics-auth --from-file=users=/dev/stdin
-      existingSecret: ""
+  # GET /metrics (issue #124) — vmagent (see ../observability/) scrapes it
+  # via the backend Service directly in-cluster, never through the Ingress
+  # above, so it stays unauthenticated at the application level, same as
+  # /health and /ready.
+  metrics:
+    serviceScrape:
+      # Registers a VMServiceScrape (the VictoriaMetrics Operator CRD,
+      # analogous to Prometheus Operator's ServiceMonitor — see
+      # backend-metrics-servicescrape.yaml) so vmagent picks up
+      # backend-service.yaml's Service automatically. Requires the VM
+      # Operator CRDs to already be installed (true once
+      # ../observability/'s victoria-metrics-k8s-stack is deployed) —
+      # disable if installing this chart without that stack.
+      enabled: true
 
   podAnnotations: {}
   nodeSelector: {}
