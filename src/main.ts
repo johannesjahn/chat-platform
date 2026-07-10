@@ -7,6 +7,7 @@ import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
 import { HealthRouteLive, ReadyRouteLive } from "./Health.ts";
 import { JwtLive } from "./Jwt.ts";
+import { MetricsRouteLive, recordHttpMetrics } from "./Metrics.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { PresenceStoreLive } from "./Presence.ts";
 import { PubSubLive } from "./PubSub.ts";
@@ -41,14 +42,19 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
 );
 
 const ServerLive = Layer.mergeAll(
-  HttpApiBuilder.serve(redactedLogger),
+  // recordHttpMetrics wraps redactedLogger (both attach the same way,
+  // around the whole router) so every request's count/duration lands in
+  // `/metrics` regardless of whether access logging is disabled for it.
+  HttpApiBuilder.serve((httpApp) => redactedLogger(recordHttpMetrics(httpApp))),
   HttpApiSwagger.layer({ path: "/docs" }),
   // Raw `/ws` route, attached to the same shared router as `ChatApi` — see
   // RealtimeSocket.ts for why this can't be a typed HttpApiEndpoint.
   RealtimeSocketRouteLive,
-  // Raw `/health` (liveness) and `/ready` (readiness) routes — see Health.ts.
+  // Raw `/health` (liveness), `/ready` (readiness), and `/metrics` routes —
+  // see Health.ts/Metrics.ts.
   HealthRouteLive,
   ReadyRouteLive,
+  MetricsRouteLive,
   RefreshTokenCleanupLive,
 ).pipe(
   Layer.provide(ApiLive),

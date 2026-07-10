@@ -1,0 +1,28 @@
+{{- if .Values.backend.metrics.serviceScrape.enabled -}}
+# Tells vmagent (see ../observability/) to scrape backend-service.yaml's
+# Service for GET /metrics (issue #124) — VictoriaMetrics Operator resolves
+# this to each backend Pod behind the Service individually (standard k8s
+# Endpoints-based discovery, same as Prometheus Operator's ServiceMonitor),
+# so every replica's own counters/gauges get scraped rather than only
+# whichever one the Service's ClusterIP happens to round-robin to.
+#
+# Assumes ../observability/'s vmagent selects VMServiceScrapes across every
+# namespace with no extra label requirements — the victoria-metrics-k8s-stack
+# chart's default (`vmagent.spec.selectAllByDefault`, not overridden in
+# ../observability/values.yaml). If that's been narrowed, this also needs
+# whatever labels/namespace vmagent's selector expects.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-backend
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  selector:
+    matchLabels:
+      {{- include "chat-platform.selectorLabels" (dict "Release" .Release "Chart" .Chart "component" "backend") | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+{{- end }}

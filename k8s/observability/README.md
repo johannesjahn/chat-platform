@@ -4,9 +4,14 @@ Cluster and node metrics for the microk8s cluster the [`chat-platform`
 chart](../chat-platform/) runs on, via the community
 [`victoria-metrics-k8s-stack`](https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-metrics-k8s-stack)
 Helm chart — a lighter-weight alternative to `kube-prometheus-stack` for a
-single/small-node cluster (see #121). Sub-task of #121; this covers metrics
-only — logs, application-level metrics, dashboards, and alerting are each
-their own sub-issue and out of scope here.
+single/small-node cluster (see #121). Sub-task of #121; this covers cluster
+metrics and the Grafana/VictoriaMetrics stack itself — logs and alerting are
+each their own sub-issue and out of scope here. The backend's own
+application-level metrics (issue #124) _are_ covered, but live in
+[`../chat-platform/`](../chat-platform/) — its `VMServiceScrape` and Grafana
+dashboard ConfigMap are picked up by the `vmagent`/Grafana deployed here
+automatically (see `values.yaml`'s `grafana.sidecar.dashboards`), nothing to
+configure on this side beyond that.
 
 The chart itself isn't vendored into this repo (unlike `../chat-platform/`,
 which this repo owns) — it's installed straight from VictoriaMetrics' Helm
@@ -18,13 +23,13 @@ see [Deploying via ArgoCD](#deploying-via-argocd) below.
 
 ## What's deployed
 
-| Component                  | Role                                                                                                                        |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `vmsingle`                 | Single-node VictoriaMetrics — metrics storage (Prometheus-compatible). Sized for a microk8s cluster, no `vmcluster` needed. |
-| `vmagent`                  | Scrapes kubelet/cAdvisor, `kube-state-metrics`, and `node-exporter`, remote-writes into `vmsingle`.                         |
-| `kube-state-metrics`       | Object-level cluster state — deployments, pod restarts, PVC usage.                                                          |
-| `prometheus-node-exporter` | Host-level CPU/mem/disk/network metrics.                                                                                    |
-| Grafana                    | Dashboards/Explore UI, pointed at `vmsingle` as its datasource (wired up automatically — see `values.yaml`).                |
+| Component                  | Role                                                                                                                                                                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `vmsingle`                 | Single-node VictoriaMetrics — metrics storage (Prometheus-compatible). Sized for a microk8s cluster, no `vmcluster` needed.                                                                                                                                                          |
+| `vmagent`                  | Scrapes kubelet/cAdvisor, `kube-state-metrics`, `node-exporter`, and any `VMServiceScrape` in the cluster (including the backend's, from `../chat-platform/`), remote-writes into `vmsingle`.                                                                                        |
+| `kube-state-metrics`       | Object-level cluster state — deployments, pod restarts, PVC usage.                                                                                                                                                                                                                   |
+| `prometheus-node-exporter` | Host-level CPU/mem/disk/network metrics.                                                                                                                                                                                                                                             |
+| Grafana                    | Dashboards/Explore UI, pointed at `vmsingle` as its datasource (wired up automatically — see `values.yaml`). Auto-loads any dashboard ConfigMap labeled `grafana_dashboard: "1"` across every namespace, including the backend's (see `values.yaml`'s `grafana.sidecar.dashboards`). |
 
 `vmalert`/Alertmanager and bundled Grafana dashboards/alerting rules are
 disabled in `values.yaml` — alerting and dashboards are separate sub-issues
@@ -208,3 +213,7 @@ about), so it lives wherever you already manage ArgoCD itself (e.g. the
   - Node memory used: `node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes`
   - Pod restarts: `kube_pod_container_status_restarts_total`
   - PVC usage: `kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes`
+- **Backend dashboard**: a "Chat Platform - Backend" dashboard (request
+  rate/latency by route, WS connections, DB/PubSub error rates) is
+  pre-provisioned under the "chat-platform" folder — no import needed, see
+  `../chat-platform/templates/backend-metrics-grafana-dashboard.yaml`.

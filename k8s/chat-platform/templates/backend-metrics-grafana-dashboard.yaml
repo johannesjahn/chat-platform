@@ -1,0 +1,181 @@
+{{- if .Values.backend.metrics.grafanaDashboard.enabled -}}
+# A Grafana dashboard for the backend's own /metrics (issue #124), shipped
+# as a labeled ConfigMap rather than imported by hand — Grafana's sidecar
+# (see ../observability/values.yaml's grafana.sidecar.dashboards) watches
+# for the `grafana_dashboard: "1"` label and loads whatever's under this
+# ConfigMap's `.json` data key automatically, re-provisioning in place
+# (fixed `uid` below) on every `helm upgrade` rather than duplicating.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-backend-dashboard
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: chat-platform
+data:
+  chat-platform-backend.json: |
+    {
+      "uid": "chat-platform-backend",
+      "title": "Chat Platform - Backend",
+      "tags": ["chat-platform"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "templating": {
+        "list": [
+          {
+            "current": {},
+            "hide": 0,
+            "label": "Datasource",
+            "name": "datasource",
+            "query": "victoriametrics-datasource",
+            "refresh": 1,
+            "type": "datasource"
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "row",
+          "title": "HTTP",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Request rate by route",
+          "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 0, "y": 1, "w": 12, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+              "expr": "sum(rate(http_requests_total[5m])) by (route)",
+              "legendFormat": "{{ "{{" }}route{{ "}}" }}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "Request rate by status code",
+          "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 12, "y": 1, "w": 12, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+              "expr": "sum(rate(http_requests_total[5m])) by (status)",
+              "legendFormat": "{{ "{{" }}status{{ "}}" }}"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "5xx error rate",
+          "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 0, "y": 9, "w": 12, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "percent", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+              "expr": "100 * sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+              "legendFormat": "5xx %"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Request duration (p50 / p95 / p99)",
+          "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 12, "y": 9, "w": 12, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p50"
+            },
+            {
+              "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p95"
+            },
+            {
+              "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+              "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p99"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "row",
+          "title": "Realtime & dependencies",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 17, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Active WebSocket connections",
+          "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 0, "y": 18, "w": 8, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+              "expr": "sum(websocket_connections_active)",
+              "legendFormat": "connections"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "DB query error rate",
+          "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 8, "y": 18, "w": 8, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+              "expr": "sum(rate(db_query_errors_total[5m]))",
+              "legendFormat": "errors/sec"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "PubSub publish/subscribe rate by outcome",
+          "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 16, "y": 18, "w": 8, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+              "expr": "sum(rate(pubsub_publish_total[5m])) by (outcome)",
+              "legendFormat": "publish {{ "{{" }}outcome{{ "}}" }}"
+            },
+            {
+              "datasource": { "type": "victoriametrics-datasource", "uid": "${datasource}" },
+              "expr": "sum(rate(pubsub_subscribe_total[5m])) by (outcome)",
+              "legendFormat": "subscribe {{ "{{" }}outcome{{ "}}" }}"
+            }
+          ]
+        }
+      ]
+    }
+{{- end }}

@@ -1,5 +1,23 @@
 import { RedisClient } from "bun";
-import { Cause, Context, Effect, Exit, Layer } from "effect";
+import { Cause, Context, Effect, Exit, Layer, Metric } from "effect";
+import { pubsubPublishTotal, pubsubSubscribeTotal } from "./Metrics.ts";
+
+// Tags `pubsub_publish_total`/`pubsub_subscribe_total` (see Metrics.ts) with
+// their outcome and records it — shared by both PubSub implementations
+// below so publish/subscribe success and failure counts (issue #124) are
+// consistent regardless of which one's active.
+const trackOutcome = <A, E>(
+  metric: typeof pubsubPublishTotal,
+  effect: Effect.Effect<A, E>,
+): Effect.Effect<A, E> =>
+  effect.pipe(
+    Effect.tap(() =>
+      Metric.update(Metric.tagged(metric, "outcome", "success"), 1),
+    ),
+    Effect.tapError(() =>
+      Metric.update(Metric.tagged(metric, "outcome", "failure"), 1),
+    ),
+  );
 
 // A minimal cross-process publish/subscribe abstraction — just enough for
 // RealtimeConnectionsLive (see Realtime.ts) to fan a realtime event out to
@@ -46,17 +64,23 @@ export const InMemoryPubSubLive = Layer.sync(PubSub, () => {
 
   return {
     publish: (channel, message) =>
-      Effect.gen(function* () {
-        for (const onMessage of subscribers.get(channel) ?? []) {
-          yield* onMessage(message);
-        }
-      }),
+      trackOutcome(
+        pubsubPublishTotal,
+        Effect.gen(function* () {
+          for (const onMessage of subscribers.get(channel) ?? []) {
+            yield* onMessage(message);
+          }
+        }),
+      ),
     subscribe: (channel, onMessage) =>
-      Effect.sync(() => {
-        const listeners = subscribers.get(channel) ?? new Set();
-        listeners.add(onMessage);
-        subscribers.set(channel, listeners);
-      }),
+      trackOutcome(
+        pubsubSubscribeTotal,
+        Effect.sync(() => {
+          const listeners = subscribers.get(channel) ?? new Set();
+          listeners.add(onMessage);
+          subscribers.set(channel, listeners);
+        }),
+      ),
     // No external dependency to lose — a single process is always ready to
     // fan out to its own local subscribers.
     ping: Effect.void,
@@ -76,8 +100,11 @@ export const RedisPubSubLive = Layer.effect(
 
     return {
       publish: (channel: string, message: string) =>
-        Effect.tryPromise(() => publisher.publish(channel, message)).pipe(
-          Effect.asVoid,
+        trackOutcome(
+          pubsubPublishTotal,
+          Effect.tryPromise(() => publisher.publish(channel, message)).pipe(
+            Effect.asVoid,
+          ),
         ),
       subscribe: (
         channel: string,
@@ -107,47 +134,55 @@ export const RedisPubSubLive = Layer.effect(
           });
         };
 
-        return Effect.promise(() =>
-          subscriber.subscribe(channel, handleMessage),
-        ).pipe(
-          Effect.asVoid,
-          Effect.tap(() =>
-            Effect.sync(() => {
-              // Bun's `RedisClient` transparently reconnects the underlying
-              // connection (`autoReconnect`, on by default) after a drop,
-              // but Redis pub/sub subscriptions live on the connection, not
-              // the account — a fresh connection starts with none. Without
-              // this, an instance would silently stop receiving
-              // cross-instance events after any blip until restarted (see
-              // issue #52). `onconnect` fires on every (re)connect
-              // including the very first one, but that one's already
-              // covered by the explicit `subscribe` above, so this handler
-              // only needs to cover the ones after it.
-              subscriber.onconnect = () => {
-                Effect.runFork(
-                  // Bun's client-side listener list isn't cleared across
-                  // reconnects, so subscribing again without unsubscribing
-                  // first would register a second listener on the same
-                  // channel — delivering every future message twice (three
-                  // times after the next reconnect, and so on).
-                  Effect.tryPromise(() => subscriber.unsubscribe(channel)).pipe(
-                    Effect.ignore,
-                    Effect.zipRight(
-                      Effect.tryPromise(() =>
-                        subscriber.subscribe(channel, handleMessage),
+        return trackOutcome(
+          pubsubSubscribeTotal,
+          Effect.promise(() =>
+            subscriber.subscribe(channel, handleMessage),
+          ).pipe(
+            Effect.asVoid,
+            Effect.tap(() =>
+              Effect.sync(() => {
+                // Bun's `RedisClient` transparently reconnects the underlying
+                // connection (`autoReconnect`, on by default) after a drop,
+                // but Redis pub/sub subscriptions live on the connection, not
+                // the account — a fresh connection starts with none. Without
+                // this, an instance would silently stop receiving
+                // cross-instance events after any blip until restarted (see
+                // issue #52). `onconnect` fires on every (re)connect
+                // including the very first one, but that one's already
+                // covered by the explicit `subscribe` above, so this handler
+                // only needs to cover the ones after it.
+                subscriber.onconnect = () => {
+                  Effect.runFork(
+                    // Bun's client-side listener list isn't cleared across
+                    // reconnects, so subscribing again without unsubscribing
+                    // first would register a second listener on the same
+                    // channel — delivering every future message twice (three
+                    // times after the next reconnect, and so on).
+                    Effect.tryPromise(() =>
+                      subscriber.unsubscribe(channel),
+                    ).pipe(
+                      Effect.ignore,
+                      Effect.zipRight(
+                        Effect.tryPromise(() =>
+                          subscriber.subscribe(channel, handleMessage),
+                        ),
+                      ),
+                      Effect.catchAll((error) =>
+                        Effect.logWarning(
+                          "PubSub: failed to resubscribe after Redis reconnect",
+                        ).pipe(
+                          Effect.annotateLogs({
+                            channel,
+                            error: String(error),
+                          }),
+                        ),
                       ),
                     ),
-                    Effect.catchAll((error) =>
-                      Effect.logWarning(
-                        "PubSub: failed to resubscribe after Redis reconnect",
-                      ).pipe(
-                        Effect.annotateLogs({ channel, error: String(error) }),
-                      ),
-                    ),
-                  ),
-                );
-              };
-            }),
+                  );
+                };
+              }),
+            ),
           ),
         );
       },

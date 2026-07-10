@@ -12,7 +12,7 @@ backend:
     # Build & push the repo-root Dockerfile to a registry this cluster can
     # pull from, then point this at it (e.g. ghcr.io/<you>/chat-platform).
     repository: johannesjahn/chat-platform
-    tag: "0.5.0"
+    tag: "0.6.0"
     pullPolicy: IfNotPresent
 
   replicaCount: 2
@@ -45,6 +45,31 @@ backend:
     tls:
       enabled: true
       secretName: chat-platform-api-tls
+
+  # GET /metrics (issue #124) — vmagent (see ../observability/) scrapes it
+  # via the backend Service directly in-cluster, never through the Ingress
+  # above, so it stays unauthenticated at the application level, same as
+  # /health and /ready.
+  metrics:
+    serviceScrape:
+      # Registers a VMServiceScrape (the VictoriaMetrics Operator CRD,
+      # analogous to Prometheus Operator's ServiceMonitor — see
+      # backend-metrics-servicescrape.yaml) so vmagent picks up
+      # backend-service.yaml's Service automatically. Requires the VM
+      # Operator CRDs to already be installed (true once
+      # ../observability/'s victoria-metrics-k8s-stack is deployed) —
+      # disable if installing this chart without that stack.
+      enabled: true
+
+    grafanaDashboard:
+      # Ships a pre-built Grafana dashboard for these metrics as a labeled
+      # ConfigMap (see backend-metrics-grafana-dashboard.yaml) that
+      # ../observability/'s Grafana sidecar auto-loads — no manual import.
+      # Requires that sidecar to be enabled and watching this namespace
+      # (true by default once ../observability/'s stack is deployed — see
+      # its values.yaml's grafana.sidecar.dashboards) — disable if
+      # installing this chart without that stack.
+      enabled: true
 
   podAnnotations: {}
   nodeSelector: {}

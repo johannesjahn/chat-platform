@@ -1,4 +1,5 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Metric } from "effect";
+import { websocketConnectionsActive } from "./Metrics.ts";
 import { PresenceStore } from "./Presence.ts";
 import { PubSub } from "./PubSub.ts";
 
@@ -212,6 +213,11 @@ export const RealtimeConnectionsLive = Layer.effect(
         const set = byUser.get(userId) ?? new Set();
         set.add(write);
         byUser.set(userId, set);
+        // One live `/ws` socket on this instance, for VictoriaMetrics'
+        // `websocket_connections_active` gauge (see Metrics.ts) — a count of
+        // *connections*, not of online *users* (PresenceStore, below, is the
+        // latter): a user with two tabs open holds two of these.
+        yield* Metric.increment(websocketConnectionsActive);
         // PresenceStore.connect reports whether this was the *global*
         // transition to online (across every instance), not just whether
         // this instance's own local set was empty a moment ago — a second
@@ -227,6 +233,7 @@ export const RealtimeConnectionsLive = Layer.effect(
             current.delete(write);
             if (current.size === 0) byUser.delete(userId);
           }
+          Effect.runFork(Metric.incrementBy(websocketConnectionsActive, -1));
           // Called from a plain sync cleanup callback
           // (`Effect.ensuring(Effect.sync(unregister))` in
           // RealtimeSocket.ts), which can't itself `yield*` — same
