@@ -37,6 +37,7 @@ import {
   useChatMessages,
 } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
+import { useOnlineStatus } from "@/lib/online";
 import { useIsOnline } from "@/lib/presence";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
@@ -59,6 +60,7 @@ function ChatView({ id }: { id: string }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const router = useRouter();
+  const isOnline = useOnlineStatus();
 
   const {
     data: chat,
@@ -245,16 +247,35 @@ function ChatView({ id }: { id: string }) {
     );
   }
 
-  if (chatError || !chat) {
+  if (!chat) {
+    // Deliberately keyed on `!chat`, not `chatError || !chat`: once a chat
+    // has been loaded (or restored from the persisted cache — see
+    // query.ts), a *background* refetch failing (e.g. a WS-triggered
+    // invalidation racing a connectivity drop) must not blank the whole
+    // conversation behind this fallback — the stale-but-real `chat` and
+    // its messages should just stay on screen instead. This branch is only
+    // for when there's truly nothing to show yet.
+    //
+    // A network-level failure (offline, unreachable server) throws a plain
+    // `Error`/`TypeError` from the fetch itself; a real "not found"/"not a
+    // participant" response decodes into the API's typed `{ message }` error
+    // body instead (see errorMessage.ts's own instanceof check for the same
+    // distinction) — so this is the one case that's actually a 403/404, not
+    // a connectivity problem, and worth showing the server's own wording for.
+    const isApiError = chatError != null && !(chatError instanceof Error);
     return (
       <main className="mx-auto w-full max-w-2xl px-4 py-10">
         <Card>
           <CardHeader>
-            <p className="text-lg font-semibold">Chat not found</p>
+            <p className="text-lg font-semibold">
+              {isApiError ? "Chat not found" : "Can't load this conversation"}
+            </p>
             <p className="text-sm text-muted-foreground">
-              {chatError
+              {isApiError
                 ? errorMessage(chatError)
-                : "This conversation may not exist, or you're not part of it."}
+                : isOnline
+                  ? "Something went wrong reaching the server. Try again in a moment."
+                  : "You're offline, and this conversation hasn't been loaded on this device yet."}
             </p>
           </CardHeader>
         </Card>

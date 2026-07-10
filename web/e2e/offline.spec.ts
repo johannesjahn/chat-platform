@@ -53,6 +53,69 @@ test("losing connectivity mid-session keeps already-loaded messages on screen an
   await contextB.close();
 });
 
+test("visiting a chat with no cached data during a connectivity failure shows an offline-specific message, not a generic not-found", async ({
+  page,
+  apiUrl,
+}) => {
+  // `context.setOffline` blocks the dev server's own asset requests too (no
+  // service worker in this dev-server e2e setup to serve the app shell —
+  // see the reload test above), so a real full-page `goto` while offline
+  // can't be driven here at all. Aborting just the one API request instead
+  // reproduces the same network-level failure (a rejected `fetch()`, not a
+  // decoded HTTP error) that a genuinely offline, never-cached visit hits.
+  await registerViaUi(page);
+  await page.route(`${apiUrl}/chats/999999`, (route) => route.abort("failed"));
+  await page.goto("/chats/999999");
+
+  await expect(page.getByText("Can't load this conversation")).toBeVisible();
+  await expect(
+    page.getByText(
+      "You're offline, and this conversation hasn't been loaded on this device yet.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("This conversation may not exist")).toHaveCount(
+    0,
+  );
+});
+
+test("a failed request doesn't blank already-loaded posts behind an error message", async ({
+  page,
+  apiUrl,
+}) => {
+  await registerViaUi(page);
+  await page.goto("/posts/new");
+  await page.getByRole("button", { name: "Text" }).click();
+  await page.fill("#content", "Post loaded before the network hiccup");
+  await page.getByRole("button", { name: "Post" }).click();
+  await expect(page).toHaveURL("/");
+  await expect(
+    page.getByText("Post loaded before the network hiccup"),
+  ).toBeVisible();
+
+  // The sync persister throttles writes (default 1s, see query.ts) — wait
+  // for it to actually flush before reloading, or the persisted snapshot
+  // a reload restores from wouldn't have the post yet regardless of this
+  // test's fix.
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("chat-platform-query-cache")),
+    )
+    .toContain("Post loaded before the network hiccup");
+
+  // A real network-level failure (server unreachable while the browser
+  // still thinks it's online) throws instead of the pause `setOffline`
+  // (used above) produces — that used to replace the already-rendered feed
+  // with "Could not load posts: Failed to fetch" instead of leaving it in
+  // place.
+  await page.route(`${apiUrl}/posts*`, (route) => route.abort("failed"));
+  await page.reload();
+
+  await expect(
+    page.getByText("Post loaded before the network hiccup"),
+  ).toBeVisible();
+  await expect(page.getByText("Could not load posts:")).toHaveCount(0);
+});
+
 test("the composer disables sending while offline instead of failing the request", async ({
   browser,
   injectApiUrl,
