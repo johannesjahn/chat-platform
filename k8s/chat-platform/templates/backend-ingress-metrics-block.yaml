@@ -1,0 +1,57 @@
+{{- if .Values.backend.ingress.enabled -}}
+# GET /metrics (issue #124) must never be reachable through the public
+# Ingress — vmagent (see ../observability/) scrapes it via
+# backend-service.yaml's Service directly, in-cluster, so nothing
+# legitimate needs it exposed here at all, authenticated or not.
+#
+# backend-ingress.yaml's `path: /, pathType: Prefix` rule technically
+# matches /metrics too (a plain core Ingress can't express "/ minus
+# /metrics"), so this registers a more specific `/metrics` route on the same
+# host, pointed at a Service with no `selector` and therefore no Endpoints,
+# ever — Traefik returns 503 for it instead of proxying to the real
+# backend. Ingress controllers (Traefik included) prioritize the more
+# specific path over the general "/" prefix regardless of which Ingress
+# object declares which, so this "wins" for exactly /metrics while
+# backend-ingress.yaml keeps serving every other path unaffected. No `tls`
+# block needed here — Traefik attaches a loaded certificate per host, not
+# per Ingress object, so this rides on the certificate backend-ingress.yaml
+# already requests for the same host.
+#
+# Deliberately not behind its own values.yaml toggle — this needs to hold
+# whenever the Ingress itself is enabled, not be something an install can
+# forget to turn on (see issue #124's public-exposure follow-up).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-backend-metrics-block
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  ports:
+    - port: {{ .Values.backend.service.port }}
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-backend-metrics-block
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  {{- if .Values.backend.ingress.className }}
+  ingressClassName: {{ .Values.backend.ingress.className }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.backend.ingress.host }}
+      http:
+        paths:
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "chat-platform.fullname" . }}-backend-metrics-block
+                port:
+                  number: {{ .Values.backend.service.port }}
+{{- end }}
