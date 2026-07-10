@@ -71,6 +71,15 @@ backend:
       # installing this chart without that stack.
       enabled: true
 
+    alerts:
+      # Ships the backend-specific half of #125's starter alert rule set
+      # (readiness failing, high 5xx rate) as a VMRule (see
+      # backend-metrics-alerts.yaml) — picked up by ../observability/'s
+      # vmalert automatically, same reasoning as serviceScrape above.
+      # Requires ../observability/'s vmalert to be enabled — disable if
+      # installing this chart without that stack.
+      enabled: true
+
   podAnnotations: {}
   nodeSelector: {}
   tolerations: []

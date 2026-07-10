@@ -1,19 +1,21 @@
 # Observability: VictoriaMetrics + Loki + Grafana
 
-Cluster/node metrics and cluster/application logs for the microk8s cluster
-the [`chat-platform` chart](../chat-platform/) runs on, via the community
+Cluster/node metrics, cluster/application logs, dashboards, and alerting for
+the microk8s cluster the [`chat-platform` chart](../chat-platform/) runs on,
+via the community
 [`victoria-metrics-k8s-stack`](https://github.com/VictoriaMetrics/helm-charts/tree/master/charts/victoria-metrics-k8s-stack)
-(metrics — a lighter-weight alternative to `kube-prometheus-stack` for a
-single/small-node cluster), [`loki`](https://github.com/grafana/loki/tree/main/production/helm/loki),
-and [`alloy`](https://github.com/grafana/alloy/tree/main/operations/helm/charts/alloy)
-(logs) Helm charts, sharing one Grafana instance (see #121). Sub-task of
-#121/#123; alerting and log-derived dashboards/alerting rules are each their
-own sub-issue and out of scope here. The backend's own application-level
-metrics (issue #124) _are_ covered, but live in
-[`../chat-platform/`](../chat-platform/) — its `VMServiceScrape` and Grafana
-dashboard ConfigMap are picked up by the `vmagent`/Grafana deployed here
-automatically (see `values.yaml`'s `grafana.sidecar.dashboards`), nothing to
-configure on this side beyond that.
+(metrics + vmalert/Alertmanager + dashboards — a lighter-weight alternative
+to `kube-prometheus-stack` for a single/small-node cluster),
+[`loki`](https://github.com/grafana/loki/tree/main/production/helm/loki), and
+[`alloy`](https://github.com/grafana/alloy/tree/main/operations/helm/charts/alloy)
+(logs) Helm charts, sharing one Grafana instance (see #121, #122, #123,
+#125). The backend's own application-level metrics (issue #124) _are_
+covered, but live in [`../chat-platform/`](../chat-platform/) — its
+`VMServiceScrape`, Grafana dashboard ConfigMap, and `VMRule` (alert rules)
+are picked up by the `vmagent`/Grafana/`vmalert` deployed here automatically
+(see `values.yaml`'s `grafana.sidecar.dashboards` and
+`vmalert.spec.selectAllByDefault`), nothing to configure on this side beyond
+that.
 
 None of these charts are vendored into this repo (unlike `../chat-platform/`,
 which this repo owns) — they're installed straight from their upstream Helm
@@ -27,22 +29,25 @@ below.
 
 ## What's deployed
 
-| Component                  | Role                                                                                                                                                                                                                                                                                              |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vmsingle`                 | Single-node VictoriaMetrics — metrics storage (Prometheus-compatible). Sized for a microk8s cluster, no `vmcluster` needed.                                                                                                                                                                       |
-| `vmagent`                  | Scrapes kubelet/cAdvisor, `kube-state-metrics`, `node-exporter`, and any `VMServiceScrape` in the cluster (including the backend's, from `../chat-platform/`), remote-writes into `vmsingle`.                                                                                                     |
-| `kube-state-metrics`       | Object-level cluster state — deployments, pod restarts, PVC usage.                                                                                                                                                                                                                                |
-| `prometheus-node-exporter` | Host-level CPU/mem/disk/network metrics.                                                                                                                                                                                                                                                          |
-| `loki`                     | Single-binary Loki — log storage (LogQL), filesystem storage backend on a PVC. Sized for a microk8s cluster, no scalable/distributed deployment mode needed.                                                                                                                                      |
+| Component                  | Role                                                                                                                                                                                                                                                                                                 |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vmsingle`                 | Single-node VictoriaMetrics — metrics storage (Prometheus-compatible). Sized for a microk8s cluster, no `vmcluster` needed.                                                                                                                                                                        |
+| `vmagent`                  | Scrapes kubelet/cAdvisor, `kube-state-metrics`, `node-exporter`, and any `VMServiceScrape` in the cluster (including the backend's, from `../chat-platform/`), remote-writes into `vmsingle`.                                                                                                      |
+| `kube-state-metrics`       | Object-level cluster state — deployments, pod restarts, PVC usage.                                                                                                                                                                                                                                  |
+| `prometheus-node-exporter` | Host-level CPU/mem/disk/network metrics.                                                                                                                                                                                                                                                            |
+| `loki`                     | Single-binary Loki — log storage (LogQL), filesystem storage backend on a PVC. Sized for a microk8s cluster, no scalable/distributed deployment mode needed.                                                                                                                                       |
 | `alloy`                    | Grafana Alloy (Loki's currently-recommended log collector) as a DaemonSet — discovers every pod via the k8s API and tails its logs through the API server (no hostPath mount needed), labeling each entry by namespace/pod/container, and ships them to `loki`.                                   |
 | Grafana                    | Dashboards/Explore UI, pointed at both `vmsingle` and `loki` as datasources (wired up automatically — see `values.yaml`). Auto-loads any dashboard ConfigMap labeled `grafana_dashboard: "1"` across every namespace, including the backend's (see `values.yaml`'s `grafana.sidecar.dashboards`). |
+| `vmalert`                  | Evaluates `VMRule` resources against `vmsingle` (datasource wired up automatically) and fires into `alertmanager` (notifiers wired up automatically) — picks up `VMRule`s cluster-wide, same discovery pattern as `vmagent`'s `VMServiceScrape`s.                                                 |
+| Alertmanager               | Routes/dedupes/notifies on alerts `vmalert` fires. Its config comes from a pre-existing Secret (`alertmanager.spec.configSecret`), not `values.yaml` — see [Alerting](#alerting) below.                                                                                                            |
 
-`vmalert`/Alertmanager and bundled Grafana dashboards/alerting rules are
-disabled in `values.yaml` — alerting and dashboards are separate sub-issues
-of #121, not part of this pass. Loki's log retention is set explicitly
-(`loki-values.yaml`'s `loki.limits_config.retention_period` /
-`loki.compactor`) rather than left at the chart's unbounded default, since
-logs otherwise grow forever on the PVC.
+Loki's log retention is set explicitly (`loki-values.yaml`'s
+`loki.limits_config.retention_period` / `loki.compactor`) rather than left
+at the chart's unbounded default, since logs otherwise grow forever on the
+PVC. Bundled community Grafana dashboards (`defaultDashboards.enabled`) are
+on; the `victoria-metrics-k8s-stack` chart's own bundled alerting rule
+bundle (`defaultRules.enabled`) is off in favor of the smaller, explicit
+rule set below — see [Dashboards](#dashboards) and [Alerting](#alerting).
 
 ## Installing
 
@@ -55,12 +60,19 @@ kubectl create secret generic grafana-admin -n observability --create-namespace 
   --from-literal=admin-user=admin \
   --from-literal=admin-password="$(openssl rand -base64 24)"
 
+# See "Alerting" below for what goes in alertmanager.yaml — a minimal
+# starting point (an unauthenticated webhook receiver) is shown there.
+kubectl create secret generic alertmanager-config -n observability \
+  --from-file=alertmanager.yaml=./alertmanager.yaml
+
 helmfile apply
 ```
 
-(same `existingSecret` reasoning as `../chat-platform/`'s Postgres/Redis/JWT
-secrets — see `../README.md` — so re-running `helmfile apply` never rotates
-or regenerates the Grafana admin password out from under you.)
+(same `existingSecret`/`configSecret` reasoning as `../chat-platform/`'s
+Postgres/Redis/JWT secrets — see `../README.md` — so re-running `helmfile
+apply` never rotates or regenerates the Grafana admin password, and never
+overwrites your real Alertmanager receiver config with a placeholder, out
+from under you.)
 
 Notable values (see [`values.yaml`](values.yaml)/[`loki-values.yaml`](loki-values.yaml)/[`alloy-values.yaml`](alloy-values.yaml)
 for the full set, with comments):
@@ -217,6 +229,71 @@ about), so it lives wherever you already manage ArgoCD itself (e.g. the
    ArgoCD manages the Helmfile-rendered resources, not that one-time manual
    step (see Installing above).
 
+## Dashboards
+
+`defaultDashboards.enabled: true` provisions `victoria-metrics-k8s-stack`'s
+bundled community dashboards — `node-exporter-full` (per-node CPU/mem/disk/
+network, the "node-exporter's standard dashboard" #125 asks for) and the
+`kubernetes-views-*` set (cluster/namespace/pod/node overviews, standing in
+for a kube-state-metrics cluster-overview dashboard) chief among them.
+Dashboards for components this cluster doesn't run (etcd, kube-scheduler/
+controller-manager/kube-proxy metrics — microk8s doesn't expose these the
+standard way) are individually gated by the chart on their own
+`kubeScheduler.enabled`-style flags, which are unset here, so they don't
+show up and sit empty. On top of those, the "chat-platform app" dashboard
+from #124 is pre-provisioned by `../chat-platform/` — see "Using it" below.
+
+Log-panel dashboards (Loki) aren't provisioned — #123 (the log stack) isn't
+deployed yet, so there's no Loki datasource to build them on.
+
+## Alerting
+
+`vmalert` evaluates `VMRule` resources (cluster-wide, no namespace
+restriction) against `vmsingle` and fires into Alertmanager, which routes
+notifications per `alertmanager-config`'s config (see Installing above — not
+`values.yaml`, so a real receiver URL/token never ends up in git).
+
+The #125 starter rule set ships as two `VMRule`s:
+
+| Rule                                      | Where                                                                                                                    | Fires when                                                                  |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `PodCrashLooping`                         | [`values.yaml`](values.yaml)'s `extraObjects` (cluster-wide, any workload)                                               | A container restarts more than 3 times in 15m, sustained 5m.                |
+| `NodeMemoryPressure` / `NodeDiskPressure` | [`values.yaml`](values.yaml)'s `extraObjects` (cluster-wide, any node)                                                   | Under 10% memory/disk free for 10m.                                         |
+| `PVCNearingCapacity`                      | [`values.yaml`](values.yaml)'s `extraObjects` (cluster-wide, any PVC — covers Postgres/Redis's from `../chat-platform/`) | Over 85% used for 15m.                                                      |
+| `BackendReadinessFailing`                 | `../chat-platform/templates/backend-metrics-alerts.yaml`                                                                 | The backend's `/ready` probe (see `src/Health.ts`) has been failing for 5m. |
+| `BackendHighErrorRate`                    | `../chat-platform/templates/backend-metrics-alerts.yaml`                                                                 | The backend's 5xx response rate is over 5% for 5m.                          |
+
+Pod-crash-loop/memory/disk/PVC rules aren't specific to `chat-platform`
+namespace by design — they'll also catch, e.g., a crash-looping
+`kube-system` pod. The backend rules are release-scoped (`.Release.Namespace`),
+so they only ever match this chart's own backend Deployment.
+
+Every alert carries a `severity` label (`critical`/`warning`) and a
+`summary`/`description` annotation — `alertmanager-config`'s `route.group_by`
+should include `severity` if you want to route/silence by it.
+
+**Notification channel**: deliberately minimal per #125 — a webhook receiver
+(see the `alertmanager.yaml` snippet in Installing above). Point
+`webhook_configs[].url` at whatever's convenient (a self-hosted receiver, a
+service like [ntfy.sh](https://ntfy.sh) or ansible-webhook, ...); Slack/
+PagerDuty-style routing is a later add-on, not blocking this pass. Swap the
+whole `receivers`/`route` block for Alertmanager's `email_configs` instead if
+you'd rather get alerts by email — same Secret, different content.
+
+**Verifying an alert actually fires** (per #125's acceptance criteria — do
+this once after installing, on the real cluster):
+
+```bash
+kubectl scale deployment chat-platform-backend -n chat-platform --replicas=0
+# wait a few minutes past the 5m `for:` on BackendReadinessFailing / the
+# pod-restart window on PodCrashLooping — whichever the scale-to-zero trips
+# first depends on how the remaining replicas wind down
+kubectl port-forward -n observability svc/vm-stack-vmalert 8080:8080
+# browse http://localhost:8080/vmalert/alerts — the rule should show "firing"
+# and the configured webhook/email receiver should have gotten a notification
+kubectl scale deployment chat-platform-backend -n chat-platform --replicas=2
+```
+
 ## Using it
 
 - **Grafana**: reachable at `grafana.ingress.hosts[0]` (or via the
@@ -243,3 +320,9 @@ about), so it lives wherever you already manage ArgoCD itself (e.g. the
   rate/latency by route, WS connections, DB/PubSub error rates) is
   pre-provisioned under the "chat-platform" folder — no import needed, see
   `../chat-platform/templates/backend-metrics-grafana-dashboard.yaml`.
+- **Alerts**: `kubectl port-forward -n observability svc/vm-stack-vmalert
+8080:8080` then browse `http://localhost:8080/vmalert/alerts` for current
+  alert state (pending/firing), or `svc/vm-stack-vmalertmanager 9093:9093`
+  and `http://localhost:9093` for Alertmanager's own UI (silences, routing).
+  See [Alerting](#alerting) above for the rule set and how to verify one
+  actually fires end-to-end.

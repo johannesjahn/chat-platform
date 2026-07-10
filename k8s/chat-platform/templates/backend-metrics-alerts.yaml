@@ -1,0 +1,39 @@
+{{- if .Values.backend.metrics.alerts.enabled -}}
+# The #125 starter rule set's backend-specific half (see
+# ../observability/values.yaml's `extraObjects` for the cluster-wide half —
+# crash-looping, node pressure, PVC capacity): readiness failing and a high
+# 5xx rate, both scoped to this release's own backend Deployment. Picked up
+# by ../observability/'s vmalert the same way backend-metrics-servicescrape.yaml
+# is picked up by vmagent — VMRule selection defaults to every namespace.
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-backend
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  groups:
+    - name: backend-health
+      rules:
+        - alert: BackendReadinessFailing
+          # kube_pod_status_ready reports one row per condition value, gauge
+          # 1 for whichever is currently true — condition="false" flips to 1
+          # exactly when the pod (its /ready probe, see
+          # backend-deployment.yaml) has been failing readiness.
+          expr: max by (namespace, pod) (kube_pod_status_ready{namespace="{{ .Release.Namespace }}", condition="false", pod=~"{{ include "chat-platform.fullname" . }}-backend-.*"}) == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backend pod {{ "{{" }} $labels.pod {{ "}}" }} is not ready"
+            description: "Backend pod {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} has failed its /ready probe for over 5m."
+        - alert: BackendHighErrorRate
+          expr: 100 * sum(rate(http_requests_total{status=~"5..", namespace="{{ .Release.Namespace }}"}[5m])) / sum(rate(http_requests_total{namespace="{{ .Release.Namespace }}"}[5m])) > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Backend 5xx error rate above 5%"
+            description: "The chat-platform backend's 5xx response rate has been above 5% for over 5m (current: {{ "{{" }} $value | humanize {{ "}}" }}%)."
+{{- end }}
