@@ -220,6 +220,16 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       const isLoadEarlierFetch = isLoadEarlierFetchRef.current;
       isLoadEarlierFetchRef.current = false;
       const prev = queryClient.getQueryData<ChatMessagesPage>(queryKey);
+      // Whether *this hook instance* has already established a window,
+      // rather than whether the query cache happens to have data — the
+      // cache can outlive the instance (it survives for the default 5min
+      // `gcTime` after `ChatView` unmounts, e.g. navigating to the chat list
+      // and back), but the refs are reset on every fresh mount. Using `prev`
+      // here instead would treat "reopening a chat visited earlier this
+      // session" the same as "re-anchoring after outgrowing
+      // MESSAGES_MAX_LIMIT", fetching a 100-message window on every reopen
+      // instead of the intended 10-message first page.
+      const hasWindowThisMount = newestCursorRef.current != null;
 
       if (isLoadEarlierFetch && prev && oldestCursorRef.current) {
         const page = await fetchMessagesPage(id, {
@@ -255,7 +265,9 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       // outgrowing MESSAGES_MAX_LIMIT (the fallthrough above) instead re-fills
       // the full capped window, so the chat doesn't visibly shrink back down
       // to MESSAGES_PAGE_SIZE messages mid-conversation.
-      const limit = prev ? MESSAGES_MAX_LIMIT : MESSAGES_PAGE_SIZE;
+      const limit = hasWindowThisMount
+        ? MESSAGES_MAX_LIMIT
+        : MESSAGES_PAGE_SIZE;
       const page = await fetchMessagesPage(id, { limit });
       oldestCursorRef.current = page.earliestCursor;
       newestCursorRef.current = page.latestCursor;
