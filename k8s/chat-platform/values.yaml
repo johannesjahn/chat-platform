@@ -12,7 +12,7 @@ backend:
     # Build & push the repo-root Dockerfile to a registry this cluster can
     # pull from, then point this at it (e.g. ghcr.io/<you>/chat-platform).
     repository: johannesjahn/chat-platform
-    tag: "0.6.2"
+    tag: "0.7.0"
     pullPolicy: IfNotPresent
 
   replicaCount: 2
