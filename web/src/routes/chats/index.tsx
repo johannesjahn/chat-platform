@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth";
 import { useChatsList } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
+import { useOnlineStatus } from "@/lib/online";
 
 export const Route = createFileRoute("/chats/")({
   component: ChatsListPage,
@@ -15,6 +16,7 @@ export const Route = createFileRoute("/chats/")({
 
 function ChatsListPage() {
   const session = useSession();
+  const isOnline = useOnlineStatus();
   const {
     data,
     isLoading,
@@ -69,9 +71,22 @@ function ChatsListPage() {
             <ChatListItemSkeleton key={i} />
           ))}
         </div>
-      ) : error ? (
+      ) : chats.length === 0 && error && !(error instanceof Error) ? (
+        // A decoded API error body (not a raw `Error`) only happens for a
+        // real server-side failure — a network-level failure (offline,
+        // unreachable server) throws a plain Error instead and is handled
+        // by the offline branch below, not here (see errorMessage.ts's own
+        // instanceof check for the same distinction).
         <p className="w-full rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           Could not load chats: {errorMessage(error)}
+        </p>
+      ) : chats.length === 0 && (!isOnline || error) ? (
+        // Already-loaded chats (persisted across reloads — see query.ts)
+        // stay on screen even if a background refresh just failed; this is
+        // only reached when there's truly nothing cached yet.
+        <p className="text-sm text-muted-foreground">
+          You&apos;re offline, and your chats haven&apos;t been loaded on this
+          device yet.
         </p>
       ) : chats.length === 0 ? (
         <p className="text-sm text-muted-foreground">

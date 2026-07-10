@@ -5,6 +5,7 @@
 import createFetchClient from "openapi-fetch";
 import createQueryClient from "openapi-react-query";
 import { clearSession, getSession, setSession } from "./auth";
+import { reportConnectivity } from "./online";
 import type { components, paths } from "./api-types";
 
 // `__E2E_API_URL__` is injected by Playwright (see `web/e2e/fixtures.ts`) so
@@ -84,8 +85,21 @@ fetchClient.use({
     return request;
   },
   onResponse({ response }) {
+    // Any response at all — including error statuses — means the request
+    // made it to the server and back, so the network path is up right now
+    // (see reportConnectivity in lib/online.ts for why this matters more
+    // than the browser's own online/offline events).
+    reportConnectivity(true);
     if (response.status === 401) clearSession();
     return response;
+  },
+  onError({ error }) {
+    // A deliberately aborted request (component unmount, query cancellation)
+    // isn't a connectivity failure — only a genuine network-level failure
+    // (the fetch itself rejecting) means we're offline.
+    if (!(error instanceof DOMException && error.name === "AbortError")) {
+      reportConnectivity(false);
+    }
   },
 });
 
