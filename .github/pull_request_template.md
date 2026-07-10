@@ -15,6 +15,10 @@ Fixes #
 - [ ] CI / tooling
 - [ ] Other (describe above)
 
+## Manual steps
+
+<!-- Anything CI won't do for you: migrations to run, config/secrets to set, a manual deploy step, etc. Leave as "None" if not applicable. -->
+
 ## Checklist
 
 - [ ] Tests pass (`bun test ./src --parallel --timeout=15000` and, if applicable, `cd web && bun run test:e2e`)
