@@ -19,7 +19,7 @@ services:
       retries: 20
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.7-alpine
     command:
       [
         "redis-server",
