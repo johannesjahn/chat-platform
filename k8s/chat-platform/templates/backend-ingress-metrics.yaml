@@ -1,0 +1,52 @@
+{{- if and .Values.backend.ingress.enabled .Values.backend.ingress.metrics.existingSecret -}}
+# Locks GET /metrics (see values.yaml's backend.ingress.metrics comment) behind
+# HTTP basic auth, without touching the general backend-ingress.yaml Ingress.
+# A `path: /metrics, pathType: Exact` route is more specific than that one's
+# `path: /, pathType: Prefix`, so Traefik prioritizes this router for that
+# path — the general Ingress keeps handling everything else untouched.
+#
+# `traefik.io/v1alpha1` is the current CRD group (Traefik 2.10+); an older
+# Traefik install needs `traefik.containo.us/v1alpha1` here instead.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-metrics-auth
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  basicAuth:
+    secret: {{ .Values.backend.ingress.metrics.existingSecret }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-backend-metrics
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+  annotations:
+    {{- with .Values.backend.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ include "chat-platform.fullname" . }}-metrics-auth@kubernetescrd
+spec:
+  ingressClassName: {{ .Values.backend.ingress.className }}
+  {{- if .Values.backend.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.backend.ingress.host }}
+      secretName: {{ .Values.backend.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.backend.ingress.host }}
+      http:
+        paths:
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "chat-platform.fullname" . }}-backend
+                port:
+                  number: {{ .Values.backend.service.port }}
+{{- end }}
