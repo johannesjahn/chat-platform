@@ -291,9 +291,12 @@ this once after installing, on the real cluster):
 
 ```bash
 kubectl scale deployment chat-platform-backend -n chat-platform --replicas=0
-# wait a few minutes past the 5m `for:` on BackendReadinessFailing / the
-# pod-restart window on PodCrashLooping — whichever the scale-to-zero trips
-# first depends on how the remaining replicas wind down
+# wait past the 5m `for:` on BackendReadinessFailing — its
+# kube_deployment_status_replicas_available{...} == 0 clause is what fires
+# here (scaling to 0 deletes the pod outright rather than leaving it running
+# and failing its probe, so the other clause, kube_pod_status_ready
+# condition="false", never sees a row — see the comment in
+# backend-metrics-alerts.yaml)
 kubectl port-forward -n observability svc/vm-stack-vmalert 8080:8080
 # browse http://localhost:8080/vmalert/alerts — the rule should show "firing"
 # and the configured webhook/email receiver should have gotten a notification

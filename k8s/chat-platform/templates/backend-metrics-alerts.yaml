@@ -17,11 +17,22 @@ spec:
     - name: backend-health
       rules:
         - alert: BackendReadinessFailing
-          # kube_pod_status_ready reports one row per condition value, gauge
-          # 1 for whichever is currently true — condition="false" flips to 1
-          # exactly when the pod (its /ready probe, see
-          # backend-deployment.yaml) has been failing readiness.
-          expr: max by (namespace, pod) (kube_pod_status_ready{namespace="{{ .Release.Namespace }}", condition="false", pod=~"{{ include "chat-platform.fullname" . }}-backend-.*"}) == 1
+          # Two conditions, OR'd together. kube_pod_status_ready reports one
+          # row per condition value, gauge 1 for whichever is currently true
+          # — condition="false" flips to 1 exactly when a *running* pod (its
+          # /ready probe, see backend-deployment.yaml) has been failing
+          # readiness. But that metric's row disappears entirely rather than
+          # reporting failure once the pod is gone (scaled to 0,
+          # crash-looped out, evicted, ...) — the worse failure mode — so
+          # the second clause catches "zero available replicas" on the
+          # Deployment directly. This also means `kubectl scale deployment
+          # {{ include "chat-platform.fullname" . }}-backend --replicas=0`
+          # (see ../observability/README.md's alert-verification steps)
+          # actually fires this alert.
+          expr: |
+            max by (namespace, pod) (kube_pod_status_ready{namespace="{{ .Release.Namespace }}", condition="false", pod=~"{{ include "chat-platform.fullname" . }}-backend-.*"}) == 1
+            or
+            kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}", deployment="{{ include "chat-platform.fullname" . }}-backend"} == 0
           for: 5m
           labels:
             severity: critical
