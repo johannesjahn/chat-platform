@@ -81,6 +81,38 @@ jobs:
         run: bun run typecheck
         working-directory: web
 
+  build-web:
+    name: Web production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun install cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+        working-directory: web
+
+      # `typecheck` only tsc --noEmit's web/; that catches type errors but not
+      # a bundler failure (e.g. an unresolvable import, an invalid Vite/Rollup
+      # config) that only vite build itself would hit. Run the same production
+      # build used to ship (web/package.json's "build" script, both the
+      # TanStack Start client/SSR build and the vite-plugin-pwa build).
+      - name: Build web
+        run: bun run build
+        working-directory: web
+
   openapi:
     name: OpenAPI spec & generated types
     runs-on: ubuntu-latest
