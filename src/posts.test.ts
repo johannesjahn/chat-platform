@@ -10,7 +10,7 @@ import { BunHttpServer } from "@effect/platform-bun";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
-import { AuthenticationLive } from "./Auth.ts";
+import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
@@ -40,6 +40,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(InMemoryPresenceStoreLive),
   Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
+  Layer.provide(TokenVersionCacheLive),
   Layer.provide(JwtLive),
   Layer.provide(InMemoryWsTicketLive),
 );

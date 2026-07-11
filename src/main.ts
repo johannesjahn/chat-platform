@@ -2,7 +2,7 @@ import { HttpApiBuilder, HttpApiSwagger } from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Config, Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
-import { AuthenticationLive } from "./Auth.ts";
+import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
 import { HealthRouteLive, ReadyRouteLive } from "./Health.ts";
@@ -35,6 +35,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(VersionHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(AuthenticationLive),
+  Layer.provide(TokenVersionCacheLive),
   Layer.provide(JwtLive),
   Layer.provide(CorsLive),
   Layer.provide(RateLimiterLive),

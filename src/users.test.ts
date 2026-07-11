@@ -7,14 +7,14 @@ import {
   HttpClientRequest,
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
-import { Effect, Layer } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import {
   ChatApi,
   MAX_PASSWORD_LENGTH,
   MAX_USER_SEARCH_QUERY_LENGTH,
   MAX_USERNAME_LENGTH,
 } from "./Api.ts";
-import { AuthenticationLive } from "./Auth.ts";
+import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
@@ -28,6 +28,8 @@ import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
 import { InMemoryWsTicketLive } from "./WsTicket.ts";
+import { users } from "./db/schema.ts";
+import { eq } from "drizzle-orm";
 
 // JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
 process.env.JWT_SECRET ??= "test-secret";
@@ -43,6 +45,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(InMemoryPresenceStoreLive),
   Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
+  Layer.provide(TokenVersionCacheLive),
   Layer.provide(JwtLive),
   Layer.provide(InMemoryWsTicketLive),
 );
@@ -1008,6 +1011,53 @@ test("refresh is rate-limited per IP after repeated attempts", () =>
         const left = result.left as { _tag: string; retryAfterSeconds: number };
         expect(left._tag).toBe("TooManyRequests");
         expect(left.retryAfterSeconds).toBeGreaterThan(0);
+      }
+    }),
+  ));
+
+test("authentication token version check is cached for 5 seconds and respects expiration", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "cachetest", password: "pw-cachetest" },
+      });
+      const { user, accessToken } = yield* c.users.login({
+        payload: { username: "cachetest", password: "pw-cachetest" },
+      });
+
+      const authed = yield* makeAuthedClient(accessToken);
+
+      // 1. First request: should succeed and populate cache.
+      const firstResult = yield* authed.users.getUser({
+        path: { id: user.id },
+      });
+      expect(firstResult.username).toBe("cachetest");
+
+      // 2. Directly bump tokenVersion in the database behind the scenes (bypassing invalidation).
+      const db = yield* Effect.promise(getTestDb);
+      yield* Effect.tryPromise(() =>
+        db.update(users).set({ tokenVersion: 1 }).where(eq(users.id, user.id)),
+      ).pipe(Effect.orDie);
+
+      // 3. Second request: within the cache TTL (5s), it should STILL succeed since cache hasn't expired.
+      const secondResult = yield* authed.users.getUser({
+        path: { id: user.id },
+      });
+      expect(secondResult.username).toBe("cachetest");
+
+      // 4. Sleep for 6 seconds to let the cache entry expire.
+      yield* Effect.sleep(Duration.seconds(6));
+
+      // 5. Third request: after cache expiration, it must fetch from DB, find the bumped version (1 !== 0), and reject as Unauthorized.
+      const thirdResult = yield* authed.users
+        .getUser({ path: { id: user.id } })
+        .pipe(Effect.either);
+      expect(thirdResult._tag).toBe("Left");
+      if (thirdResult._tag === "Left") {
+        expect((thirdResult.left as { _tag: string })._tag).toBe(
+          "Unauthorized",
+        );
       }
     }),
   ));

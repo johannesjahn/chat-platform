@@ -3,7 +3,7 @@ import { FetchHttpClient, HttpApiBuilder, HttpClient } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
-import { AuthenticationLive } from "./Auth.ts";
+import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { HealthRouteLive, ReadyRouteLive } from "./Health.ts";
@@ -35,6 +35,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
+  Layer.provide(TokenVersionCacheLive),
   Layer.provide(JwtLive),
   Layer.provide(InMemoryWsTicketLive),
 );

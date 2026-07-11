@@ -8,7 +8,7 @@ import {
   TooManyRequests,
   UsernameTaken,
 } from "./Api.ts";
-import { CurrentUser } from "./Auth.ts";
+import { CurrentUser, TokenVersionCache } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
 import { RateLimiter } from "./RateLimiter.ts";
@@ -411,6 +411,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const jwt = yield* Jwt;
+          const tokenVersionCache = yield* TokenVersionCache;
 
           // A token that's already invalid, expired, or unrecognized has
           // nothing to revoke — treat logout as a no-op success rather than
@@ -440,6 +441,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                   .delete(refreshTokens)
                   .where(eq(refreshTokens.jti, tokenUser.jti)),
           ).pipe(Effect.orDie);
+
+          yield* tokenVersionCache.invalidate(tokenUser.id);
         }),
       )
       .handle("changePassword", ({ payload }) =>
@@ -448,6 +451,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const jwt = yield* Jwt;
           const limiter = yield* RateLimiter;
           const currentUser = yield* CurrentUser;
+          const tokenVersionCache = yield* TokenVersionCache;
 
           yield* enforceRateLimit(
             limiter,
@@ -504,6 +508,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
           if (!updated)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
+
+          yield* tokenVersionCache.invalidate(currentUser.id);
 
           // Reissue a fresh pair for this session — otherwise the caller
           // would be logged out by the very request that changed their
