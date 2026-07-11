@@ -591,6 +591,68 @@ test("createMessage rejects content over the max length", () =>
     }),
   ));
 
+test("createMessage creates an image_url message from an allowlisted host", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const message = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: {
+          contentType: "image_url",
+          content: "https://picsum.photos/200",
+        },
+      });
+      expect(message.contentType).toBe("image_url");
+      expect(message.content).toBe("https://picsum.photos/200");
+    }),
+  ));
+
+test("createMessage rejects an image_url from a non-allowlisted host", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const result = yield* alice.client.chats
+        .createMessage({
+          path: { id: chat.id },
+          payload: {
+            contentType: "image_url",
+            content: "https://evil.example.com/cat.png",
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("createMessage rejects a data: image_url", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const result = yield* alice.client.chats
+        .createMessage({
+          path: { id: chat.id },
+          payload: {
+            contentType: "image_url",
+            content: "data:image/png;base64,iVBORw0KGgo=",
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
 test("listMessages returns the newest window by default, oldest-first, and is forbidden for non-participants", () =>
   run(
     Effect.gen(function* () {

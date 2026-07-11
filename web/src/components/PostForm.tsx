@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { errorMessage } from "@/lib/errors";
+import { isAllowedImageUrl } from "@/lib/imageHosts";
 import { useOnlineStatus } from "@/lib/online";
 import { MAX_POST_CONTENT_LENGTH, type PostContentType } from "@/lib/posts";
 
@@ -80,7 +81,16 @@ export function PostForm({
 
   const trimmed = content.trim();
   const overLimit = trimmed.length > MAX_POST_CONTENT_LENGTH;
-  const canSubmit = trimmed.length > 0 && !overLimit && !pending && isOnline;
+  const invalidImageUrl =
+    contentType === "image_url" &&
+    trimmed.length > 0 &&
+    !isAllowedImageUrl(trimmed);
+  const canSubmit =
+    trimmed.length > 0 &&
+    !overLimit &&
+    !invalidImageUrl &&
+    !pending &&
+    isOnline;
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 py-10">
@@ -155,10 +165,16 @@ export function PostForm({
                   type="url"
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  placeholder="https://example.com/photo.jpg"
+                  placeholder="https://picsum.photos/id/1/600/800"
                   required
-                  aria-invalid={overLimit}
+                  aria-invalid={invalidImageUrl}
                 />
+              )}
+              {invalidImageUrl && (
+                <p className="text-xs text-destructive">
+                  Image URLs must be https:// links from a supported image host
+                  (e.g. picsum.photos, imgur.com, unsplash.com).
+                </p>
               )}
               <span
                 className={
@@ -169,13 +185,16 @@ export function PostForm({
               >
                 {trimmed.length}/{MAX_POST_CONTENT_LENGTH}
               </span>
-              {contentType === "image_url" && trimmed && !overLimit && (
-                <img
-                  src={trimmed}
-                  alt="Preview"
-                  className="aspect-4/5 w-full rounded-md border border-border bg-muted object-cover"
-                />
-              )}
+              {contentType === "image_url" &&
+                trimmed &&
+                !overLimit &&
+                !invalidImageUrl && (
+                  <img
+                    src={trimmed}
+                    alt="Preview"
+                    className="aspect-4/5 w-full rounded-md border border-border bg-muted object-cover"
+                  />
+                )}
             </div>
 
             <Button type="submit" className="mt-1 w-full" disabled={!canSubmit}>
