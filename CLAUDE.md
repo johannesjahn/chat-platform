@@ -116,7 +116,13 @@ This is a two-package repo:
   are _not_ run on boot (to avoid race conditions with multiple Kubernetes
   replicas — see issue #178). Run `bun run db:migrate` to apply migrations
   standalone; the Helm chart handles this automatically via a pre-upgrade Job
-  (`backend-migration-job.yaml`). Realtime (chat/post) events fan out through
+  (`backend-migration-job.yaml`), and `docker-compose.yml` runs a `db-migrate`
+  one-shot service before booting the app. **Caveat:** this only prevents
+  concurrent migration races — it does _not_ solve schema forward/backward
+  compatibility during rolling deploys. Old-code replicas still run briefly
+  against the already-migrated schema, so migrations must stay
+  additive/backward-compatible (expand-contract pattern). Realtime (chat/post)
+  events fan out through
   [`src/PubSub.ts`](src/PubSub.ts): an in-memory implementation by default
   (correct for a single process), or Redis Pub/Sub (`Bun.redis`) when
   `REDIS_URL` is set, so multiple horizontally-scaled instances share events

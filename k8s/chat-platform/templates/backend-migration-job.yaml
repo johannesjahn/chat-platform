@@ -2,6 +2,11 @@
 # Runs Drizzle migrations to completion before Helm installs or upgrades the
 # backend Deployment, so replica pods never race each other on schema changes.
 # See issue #178 and scripts/migrate.ts.
+#
+# NOTE: this only solves the *concurrent-migration-race* problem, not schema
+# forward/backward compatibility during a rolling deploy — old-code replicas
+# still run briefly against the already-migrated schema, so migrations need
+# to stay additive/backward-compatible (expand-contract pattern).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -14,10 +19,6 @@ metadata:
     # this Job to succeed before proceeding with the main release.
     helm.sh/hook: pre-install,pre-upgrade
     helm.sh/hook-weight: "0"
-    # Delete the previous Job before creating a new one (each revision gets a
-    # unique name via Release.Revision, but this keeps things tidy if the
-    # chart is re-installed from scratch).
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
   backoffLimit: 3
   ttlSecondsAfterFinished: 300
@@ -38,17 +39,7 @@ spec:
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
           command: ["bun", "run", "db:migrate"]
           env:
-            - name: POSTGRES_USER
-              value: {{ .Values.postgres.auth.username | quote }}
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "chat-platform.postgresSecretName" . }}
-                  key: {{ include "chat-platform.postgresSecretKey" . }}
-            - name: POSTGRES_DB
-              value: {{ .Values.postgres.auth.database | quote }}
-            - name: DATABASE_URL
-              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ $fullname }}-postgres:5432/$(POSTGRES_DB)"
+            {{- include "chat-platform.postgresEnv" . | nindent 12 }}
           resources:
             requests:
               cpu: 100m
