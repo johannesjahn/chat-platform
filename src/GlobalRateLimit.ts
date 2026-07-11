@@ -4,7 +4,8 @@ import {
   HttpServerResponse,
   type HttpApp,
 } from "@effect/platform";
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
+import { clientIp } from "./ClientIp.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 
 // Global per-IP request-rate ceiling (issue #40, sub-task of #25) — a single
@@ -42,7 +43,7 @@ export const globalRateLimit = HttpMiddleware.make(
       if (EXEMPT_PATHS.has(pathnameOf(request.url))) return yield* httpApp;
 
       const limiter = yield* RateLimiter;
-      const ip = Option.getOrElse(request.remoteAddress, () => "unknown");
+      const ip = yield* clientIp;
       const result = yield* limiter.consume(
         `global:${ip}`,
         GLOBAL_MAX_REQUESTS_PER_IP,

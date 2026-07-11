@@ -3,7 +3,8 @@ import {
   HttpServerRequest,
   HttpServerResponse,
 } from "@effect/platform";
-import { Context, Effect, Option, type Scope } from "effect";
+import { Context, Effect, type Scope } from "effect";
+import { clientIp } from "./ClientIp.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { allowedOrigins } from "./WebOrigin.ts";
@@ -15,15 +16,6 @@ import { WsTicket } from "./WsTicket.ts";
 // upgrade per connection) while still capping a flood tightly.
 const WS_HANDSHAKE_MAX_ATTEMPTS_PER_IP = 30;
 const WS_HANDSHAKE_WINDOW_SECONDS = 60;
-
-// HttpServerRequest.remoteAddress is populated from the real TCP connection
-// by BunHttpServer in production; it's unset in the in-process test harness
-// (see RealtimeSocket.test.ts), where every request falls back to the same
-// bucket (mirrors clientIp in UsersHandler.ts).
-const clientIp = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  return Option.getOrElse(request.remoteAddress, () => "unknown");
-});
 
 // A browser `WebSocket` can't set an `Authorization` header on the handshake
 // request, so authentication travels as a query param instead — a

@@ -50,6 +50,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "chat-platform.jwtSecretName" . }}
                   key: {{ include "chat-platform.jwtSecretKey" . }}
+            - name: TRUST_PROXY
+              value: {{ .Values.backend.trustProxy | quote }}
           # See src/Health.ts: /health is liveness-only (no dependency
           # checks), /ready additionally confirms Postgres and Redis are
           # reachable.

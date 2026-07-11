@@ -36,6 +36,13 @@ backend:
       cpu: 500m
       memory: 512Mi
 
+  # Trust client IP headers (X-Forwarded-For, X-Real-IP) from these proxies
+  # (issue #172). Set to true/false, or a comma-separated list of trusted
+  # IPs/CIDRs. In Kubernetes, the ingress controller typically resides in
+  # one of the private subnet ranges; trusting these subnets allows resolving
+  # the real client IP for rate limiting, while preventing IP spoofing.
+  trustProxy: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,loopback"
+
   ingress:
     enabled: true
     className: "traefik"
