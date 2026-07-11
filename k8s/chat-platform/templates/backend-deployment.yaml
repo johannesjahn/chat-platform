@@ -37,21 +37,7 @@ spec:
               value: {{ .Values.backend.port | quote }}
             - name: WEB_ORIGIN
               value: {{ .Values.backend.webOrigin | quote }}
-            - name: POSTGRES_USER
-              value: {{ .Values.postgres.auth.username | quote }}
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "chat-platform.postgresSecretName" . }}
-                  key: {{ include "chat-platform.postgresSecretKey" . }}
-            - name: POSTGRES_DB
-              value: {{ .Values.postgres.auth.database | quote }}
-            # Composed from the vars above via Kubernetes' `$(VAR)` env
-            # substitution (supported for `env[].value`, referencing earlier
-            # entries in this same list) — src/Db.ts just wants one
-            # connection-string env var.
-            - name: DATABASE_URL
-              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ $fullname }}-postgres:5432/$(POSTGRES_DB)"
+            {{- include "chat-platform.postgresEnv" . | nindent 12 }}
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:

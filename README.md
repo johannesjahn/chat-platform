@@ -39,13 +39,17 @@ root [`Dockerfile`](Dockerfile)) connected to both via `DATABASE_URL`/
 `REDIS_URL` — see [`docker-compose.yml`](docker-compose.yml). A `db-upgrade`
 service runs first and pg_upgrades the `pgdata` volume in place if it's still
 on a previous Postgres major version (a no-op otherwise) — see the comments
-above that service in `docker-compose.yml`. Migrations run automatically on
-startup, same as the PGlite path. The backend is on
+above that service in `docker-compose.yml`. A `db-migrate` service then
+applies Drizzle migrations before the `app` boots (see issue #178 — migrations
+are no longer run automatically on startup when `DATABASE_URL` is set, to
+avoid race conditions in multi-replica Kubernetes deployments; `bun run
+db:migrate` can also be run standalone). The backend is on
 http://localhost:3000; set `DATABASE_URL`/`REDIS_URL` yourself (see
 [`.env.example`](.env.example)) to point `bun run dev`/`start` at that same
 Postgres/Redis instead of the in-process defaults (embedded PGlite, and an
 in-memory realtime fan-out that only works for a single instance — see
-[`src/PubSub.ts`](src/PubSub.ts)).
+[`src/PubSub.ts`](src/PubSub.ts)). When running directly with `DATABASE_URL`,
+remember to run `bun run db:migrate` first.
 
 ## Testing
 

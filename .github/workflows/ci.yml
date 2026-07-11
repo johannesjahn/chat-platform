@@ -357,14 +357,16 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # DbLive (src/Db.ts) runs the Drizzle migrations against DATABASE_URL
-      # before the server starts accepting requests, and /ready (see
-      # src/Health.ts) executes a real query against Db — so a migration
-      # that's invalid against real Postgres fails this step instead of
-      # only surfacing once deployed. REDIS_URL is left unset so PubSub
-      # falls back to its in-memory implementation, which /ready always
-      # reports as reachable (see src/PubSub.ts) — only the DB check is
-      # meaningful here.
+      # DATABASE_URL mode no longer auto-migrates on boot (see issue #178),
+      # so run the standalone migration first. REDIS_URL is left unset so
+      # PubSub falls back to its in-memory implementation, which /ready
+      # always reports as reachable (see src/PubSub.ts) — only the DB
+      # migration and subsequent readiness check are meaningful here.
+      - name: Run migrations against real Postgres
+        run: bun run db:migrate
+        env:
+          DATABASE_URL: postgres://chat_platform:chat_platform@localhost:5432/chat_platform
+
       - name: Boot the backend against real Postgres and wait for /ready
         run: |
           bun run start &

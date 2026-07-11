@@ -80,6 +80,21 @@ services:
       timeout: 5s
       retries: 20
 
+  # Runs Drizzle migrations to completion before the `app` service boots,
+  # matching the Helm chart's pre-upgrade migration Job (see issue #178).
+  # DATABASE_URL mode no longer auto-migrates on boot — this one-shot
+  # service handles it instead so `docker compose up` just works.
+  db-migrate:
+    build:
+      context: .
+    command: ["bun", "run", "db:migrate"]
+    environment:
+      DATABASE_URL: postgres://chat_platform:${POSTGRES_PASSWORD}@db:5432/chat_platform
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   app:
     build:
       context: .
@@ -103,8 +118,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a long random secret before running docker compose up}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3001}
     depends_on:
-      db:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     # Readiness (see src/Health.ts's `/ready`), not just liveness — confirms
