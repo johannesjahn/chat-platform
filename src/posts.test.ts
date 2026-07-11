@@ -163,11 +163,62 @@ test("createPost creates an image_url post", () =>
       const post = yield* authed.posts.createPost({
         payload: {
           contentType: "image_url",
-          content: "https://example.com/cat.png",
+          content: "https://picsum.photos/200",
         },
       });
       expect(post.contentType).toBe("image_url");
-      expect(post.content).toBe("https://example.com/cat.png");
+      expect(post.content).toBe("https://picsum.photos/200");
+    }),
+  ));
+
+test("createPost rejects an image_url from a non-allowlisted host", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("bobby", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.posts
+        .createPost({
+          payload: {
+            contentType: "image_url",
+            content: "https://evil.example.com/cat.png",
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("createPost rejects a non-https image_url", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("bobbi", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.posts
+        .createPost({
+          payload: {
+            contentType: "image_url",
+            content: "http://picsum.photos/200",
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("createPost rejects a javascript: image_url", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("bobette", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.posts
+        .createPost({
+          payload: {
+            contentType: "image_url",
+            content: "javascript:alert(1)",
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
     }),
   ));
 
@@ -379,11 +430,14 @@ test("updatePost allows the author to edit their post", () =>
 
       const updated = yield* authed.posts.updatePost({
         path: { id: created.id },
-        payload: { contentType: "image_url", content: "https://x.test/i" },
+        payload: {
+          contentType: "image_url",
+          content: "https://picsum.photos/id/1/200",
+        },
       });
       expect(updated.id).toBe(created.id);
       expect(updated.contentType).toBe("image_url");
-      expect(updated.content).toBe("https://x.test/i");
+      expect(updated.content).toBe("https://picsum.photos/id/1/200");
       expect(updated.updatedAt).toBeGreaterThanOrEqual(created.updatedAt);
     }),
   ));
