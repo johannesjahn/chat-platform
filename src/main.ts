@@ -40,6 +40,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(CorsLive),
   Layer.provide(RateLimiterLive),
   Layer.provide(WsTicketLive),
+  Layer.provide(PubSubLive),
 );
 
 const ServerLive = Layer.mergeAll(

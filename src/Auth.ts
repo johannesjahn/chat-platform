@@ -14,6 +14,7 @@ import {
   Schema,
 } from "effect";
 import { Db } from "./Db.ts";
+import { PubSub } from "./PubSub.ts";
 import { users } from "./db/schema.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
 
@@ -51,7 +52,8 @@ export const TokenVersionCacheLive = Layer.effect(
   TokenVersionCache,
   Effect.gen(function* () {
     const db = yield* Db;
-    return yield* Cache.make({
+    const pubsub = yield* PubSub;
+    const cache = yield* Cache.make({
       capacity: 10000,
       timeToLive: Duration.seconds(5),
       lookup: (userId: number) =>
@@ -66,6 +68,17 @@ export const TokenVersionCacheLive = Layer.effect(
           return rows[0]?.tokenVersion ?? -1;
         }),
     });
+
+    yield* pubsub.subscribe("auth:invalidation", (userIdStr) =>
+      Effect.gen(function* () {
+        const userId = Number(userIdStr);
+        if (!isNaN(userId)) {
+          yield* cache.invalidate(userId);
+        }
+      }),
+    );
+
+    return cache;
   }),
 );
 

@@ -36,11 +36,10 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(VersionHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(InMemoryPubSubLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(TokenVersionCacheLive),
+  Layer.provide(InMemoryPresenceStoreLive),
+  Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(JwtLive),
   Layer.provide(InMemoryWsTicketLive),
 );
@@ -56,7 +55,10 @@ const run = async <A, E>(
 
   const { handler, dispose } = HttpApiBuilder.toWebHandler(
     Layer.mergeAll(
-      ApiLive.pipe(Layer.provide(TestDbLive)),
+      ApiLive.pipe(
+        Layer.provide(TestDbLive),
+        Layer.provide(InMemoryPubSubLive),
+      ),
       BunHttpServer.layerContext,
     ),
   );
