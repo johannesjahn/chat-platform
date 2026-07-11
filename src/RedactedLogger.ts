@@ -4,7 +4,7 @@ import {
   HttpServerRequest,
   type HttpApp,
 } from "@effect/platform";
-import { Context, Effect } from "effect";
+import { Context, Effect, FiberRef } from "effect";
 import crypto from "crypto";
 import { clientIp } from "./ClientIp.ts";
 
@@ -59,9 +59,14 @@ export const hashIp = (ip: string): string => {
     .slice(0, 16);
 };
 
+// FiberRef used to store the authenticated username for logging in redactedLogger.
+export const currentLogUser = FiberRef.unsafeMake<string | undefined>(
+  undefined,
+);
+
 // A drop-in replacement for `HttpMiddleware.logger` that redacts credential
-// query params (see SENSITIVE_PARAMS) from the logged URL and appends a hashed
-// representation of the resolved client IP (using an ephemeral salt).
+// query params (see SENSITIVE_PARAMS) from the logged URL, appends a hashed
+// representation of the resolved client IP, and appends the authenticated username if available.
 // Only the log annotation is redacted — the request passed to `httpApp` is untouched.
 export const redactedLogger = HttpMiddleware.make(
   <E, R>(httpApp: HttpApp.Default<E, R>): HttpApp.Default<E, R> => {
@@ -78,34 +83,36 @@ export const redactedLogger = HttpMiddleware.make(
           Effect.flatMap(Effect.exit(httpApp), (exit) => {
             if (fiber.getFiberRef(HttpMiddleware.loggerDisabled)) {
               return exit;
-            } else if (exit._tag === "Failure") {
-              const [response, cause] = HttpServerError.causeResponseStripped(
-                exit.cause,
-              );
-              return Effect.zipRight(
-                Effect.annotateLogs(
-                  Effect.log(
-                    cause._tag === "Some" ? cause.value : "Sent HTTP Response",
-                  ),
-                  {
-                    "http.method": request.method,
-                    "http.url": url,
-                    "http.status": response.status,
-                    "http.client_ip_hash": clientIpHash,
-                  },
-                ),
-                exit,
-              );
             }
-            return Effect.zipRight(
-              Effect.annotateLogs(Effect.log("Sent HTTP response"), {
+
+            return Effect.flatMap(FiberRef.get(currentLogUser), (username) => {
+              const [response, cause] =
+                exit._tag === "Failure"
+                  ? HttpServerError.causeResponseStripped(exit.cause)
+                  : [exit.value, undefined];
+
+              const annotations: Record<string, string | number> = {
                 "http.method": request.method,
                 "http.url": url,
-                "http.status": exit.value.status,
+                "http.status": response.status,
                 "http.client_ip_hash": clientIpHash,
-              }),
-              exit,
-            );
+              };
+              if (username !== undefined) {
+                annotations["http.username"] = username;
+              }
+
+              const logMsg =
+                exit._tag === "Failure"
+                  ? cause?._tag === "Some"
+                    ? cause.value
+                    : "Sent HTTP Response"
+                  : "Sent HTTP response";
+
+              return Effect.zipRight(
+                Effect.annotateLogs(Effect.log(logMsg), annotations),
+                exit,
+              );
+            });
           }),
           `http.span.${++counter}`,
         );

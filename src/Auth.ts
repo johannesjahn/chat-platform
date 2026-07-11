@@ -9,6 +9,7 @@ import {
   Context,
   Duration,
   Effect,
+  FiberRef,
   Layer,
   Redacted,
   Schema,
@@ -17,6 +18,7 @@ import { Db } from "./Db.ts";
 import { PubSub } from "./PubSub.ts";
 import { users } from "./db/schema.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
+import { currentLogUser } from "./RedactedLogger.ts";
 
 // Returned (401) when a protected endpoint is called without a valid access
 // token. Deliberately generic so it doesn't reveal why the token was rejected.
@@ -101,6 +103,8 @@ export const AuthenticationLive = Layer.effect(
           const currentVersion = yield* cache.get(tokenUser.id);
           if (currentVersion !== tokenUser.tokenVersion)
             return yield* Effect.fail(invalid);
+
+          yield* FiberRef.set(currentLogUser, tokenUser.username);
 
           return tokenUser;
         }),

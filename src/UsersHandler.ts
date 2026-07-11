@@ -1,6 +1,7 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { and, eq, ilike, isNull, sql } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context, Effect, FiberRef } from "effect";
+import { currentLogUser } from "./RedactedLogger.ts";
 import {
   ChatApi,
   InvalidCredentials,
@@ -243,6 +244,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
           if (!rows[0])
             return yield* Effect.die(new Error("INSERT returned no rows"));
+          yield* FiberRef.set(currentLogUser, rows[0].username);
           return rows[0];
         }),
       )
@@ -292,6 +294,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const tokenUser = { ...publicUser, tokenVersion: user.tokenVersion };
           const accessToken = yield* jwt.signAccessToken(tokenUser);
           const refreshToken = yield* issueRefreshToken(db, jwt, tokenUser);
+          yield* FiberRef.set(currentLogUser, user.username);
           return { user: publicUser, accessToken, refreshToken };
         }),
       )
