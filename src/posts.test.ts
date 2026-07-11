@@ -280,6 +280,11 @@ test("HttpApiDecodeError response replaces a structural type mismatch with a gen
         _tag: "HttpApiDecodeError",
         message: "Invalid request",
       });
+      // Regression test: the per-issue `message` must be sanitized too, not
+      // just the top-level one — the frontend's errorMessage() reads
+      // straight from `issues`, so a leftover raw message there would still
+      // reach the user even with a clean top-level `message`.
+      expect(JSON.stringify(body)).not.toContain("Expected string");
     }),
   ));
 
