@@ -1,5 +1,6 @@
 import { HttpServerRequest } from "@effect/platform";
-import { Effect, Option } from "effect";
+import { Config, Effect, Option } from "effect";
+import { isIP } from "net";
 
 /**
  * Normalizes an IP address by stripping IPv6-mapped IPv4 prefix (::ffff:)
@@ -24,8 +25,10 @@ function parseIpv4(ip: string): number | null {
   for (let i = 0; i < 4; i++) {
     const partStr = parts[i];
     if (partStr === undefined) return null;
+    if (!/^\d{1,3}$/.test(partStr)) return null;
     const part = parseInt(partStr, 10);
-    if (isNaN(part) || part < 0 || part > 255) return null;
+    if (part < 0 || part > 255) return null;
+    if (String(part) !== partStr) return null;
     num = (num << 8) + part;
   }
   return num >>> 0;
@@ -35,10 +38,12 @@ function parseIpv4(ip: string): number | null {
  * Checks if a normalized IPv4 address matches an IPv4 CIDR range.
  */
 export function isIpv4InCidr(ip: string, cidr: string): boolean {
+  if (isIP(ip) !== 4) return false;
   const parts = cidr.split("/");
   const subnetStr = parts[0];
   const maskStr = parts[1];
   if (subnetStr === undefined) return false;
+  if (isIP(subnetStr) !== 4) return false;
 
   const ipNum = parseIpv4(ip);
   const subnetNum = parseIpv4(subnetStr);
@@ -59,15 +64,9 @@ export function isIpv4InCidr(ip: string, cidr: string): boolean {
  * Checks if a client IP matches the configured TRUST_PROXY environment rules.
  */
 export function isTrustedProxy(ip: string, trustProxyEnv: string): boolean {
-  const normalized = trustProxyEnv.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1") {
-    return true;
-  }
-  if (normalized === "false" || normalized === "0") {
-    return false;
-  }
+  if (isIP(ip) === 0) return false;
 
-  const rules = normalized.split(",").map((r) => r.trim());
+  const rules = trustProxyEnv.split(",").map((r) => r.trim());
   for (const rule of rules) {
     if (rule === "loopback") {
       if (ip === "127.0.0.1" || ip === "::1" || ip.startsWith("127.")) {
@@ -79,6 +78,7 @@ export function isTrustedProxy(ip: string, trustProxyEnv: string): boolean {
       return true;
     }
     if (rule.includes("/")) {
+      // TODO: Support IPv6 CIDR parsing and matching
       if (isIpv4InCidr(ip, rule)) {
         return true;
       }
@@ -95,47 +95,49 @@ export function getClientIp(
   headers: Record<string, string | undefined>,
   trustProxyEnv: string | undefined,
 ): string {
-  const ip = remoteAddress ? normalizeIp(remoteAddress) : "unknown";
+  const fallbackIp = remoteAddress ? normalizeIp(remoteAddress) : "unknown";
+  const initialIp = isIP(fallbackIp) !== 0 ? fallbackIp : "unknown";
+
   if (trustProxyEnv === undefined || trustProxyEnv === "") {
-    return ip;
+    return initialIp;
   }
 
   const trustProxy = trustProxyEnv;
-  if (!isTrustedProxy(ip, trustProxy)) {
-    return ip;
+  if (initialIp === "unknown" || !isTrustedProxy(initialIp, trustProxy)) {
+    return initialIp;
   }
 
   const xForwardedFor = headers["x-forwarded-for"];
   if (xForwardedFor) {
     const ips = xForwardedFor.split(",").map((item) => normalizeIp(item));
-    const normalizedTrustProxy = trustProxy.trim().toLowerCase();
-    if (normalizedTrustProxy === "true" || normalizedTrustProxy === "1") {
-      const first = ips[0];
-      if (first !== undefined) {
-        return first;
-      }
-    } else {
-      // Right-to-left traversal of proxies in the chain.
-      // The leftmost non-matching IP is the client IP.
-      for (let i = ips.length - 1; i >= 0; i--) {
-        const currentIp = ips[i];
-        if (currentIp !== undefined && !isTrustedProxy(currentIp, trustProxy)) {
+    // Right-to-left traversal of proxies in the chain.
+    // The leftmost non-matching IP is the client IP.
+    for (let i = ips.length - 1; i >= 0; i--) {
+      const currentIp = ips[i];
+      if (currentIp !== undefined && isIP(currentIp) !== 0) {
+        if (!isTrustedProxy(currentIp, trustProxy)) {
           return currentIp;
         }
       }
-      const first = ips[0];
-      if (first !== undefined) {
-        return first;
+    }
+    // Fallback: if all valid IPs in the chain were trusted proxies, return the leftmost valid IP.
+    for (let i = 0; i < ips.length; i++) {
+      const currentIp = ips[i];
+      if (currentIp !== undefined && isIP(currentIp) !== 0) {
+        return currentIp;
       }
     }
   }
 
   const xRealIp = headers["x-real-ip"];
   if (xRealIp) {
-    return normalizeIp(xRealIp);
+    const parsedXRealIp = normalizeIp(xRealIp);
+    if (isIP(parsedXRealIp) !== 0) {
+      return parsedXRealIp;
+    }
   }
 
-  return ip;
+  return initialIp;
 }
 
 /**
@@ -143,7 +145,11 @@ export function getClientIp(
  */
 export const clientIp = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
-  const trustProxyEnv = process.env.TRUST_PROXY;
+  const trustProxyEnv = yield* Config.string("TRUST_PROXY").pipe(
+    Config.option,
+    Effect.catchAll(() => Effect.succeed(Option.none())),
+    Effect.map(Option.getOrUndefined),
+  );
   const remoteAddress = Option.getOrUndefined(request.remoteAddress);
   return getClientIp(remoteAddress, request.headers, trustProxyEnv);
 });

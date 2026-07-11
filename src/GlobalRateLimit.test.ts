@@ -1,6 +1,6 @@
 import { afterAll, expect, test } from "bun:test";
 import { HttpServerRequest, HttpServerResponse } from "@effect/platform";
-import { Effect, Layer, ManagedRuntime, Option } from "effect";
+import { ConfigProvider, Effect, Layer, ManagedRuntime, Option } from "effect";
 import { globalRateLimit } from "./GlobalRateLimit.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 
@@ -88,47 +88,47 @@ test("/health, /ready, and /metrics are exempt from the ceiling and never consum
 });
 
 test("respects TRUST_PROXY environment variable for resolving client IP in globalRateLimit", async () => {
-  process.env.TRUST_PROXY = "10.0.0.0/8,loopback";
-  try {
-    const requestWithXFF = (
-      path: string,
-      remoteAddress: string,
-      headers: Record<string, string>,
-    ): Promise<HttpServerResponse.HttpServerResponse> =>
-      runtime.runPromise(
-        globalRateLimit(okApp).pipe(
-          Effect.provide(requestLive(path, remoteAddress, headers)),
-        ),
-      );
+  const testConfigProvider = ConfigProvider.fromMap(
+    new Map([["TRUST_PROXY", "10.0.0.0/8,loopback"]]),
+  );
 
-    // Case A: remoteAddress is 8.8.8.8 (not trusted proxy).
-    // Send 1001 requests with X-Forwarded-For: 9.9.9.9, 10.0.0.9.
-    // Since 8.8.8.8 is not trusted, the IP resolves to 8.8.8.8.
-    for (let i = 0; i < 1000; i++) {
-      const res = await requestWithXFF("/version", "8.8.8.8", {
-        "x-forwarded-for": "9.9.9.9, 10.0.0.9",
-      });
-      expect(res.status).toBe(200);
-    }
-    const resTripped = await requestWithXFF("/version", "8.8.8.8", {
+  const requestWithXFF = (
+    path: string,
+    remoteAddress: string,
+    headers: Record<string, string>,
+  ): Promise<HttpServerResponse.HttpServerResponse> =>
+    runtime.runPromise(
+      globalRateLimit(okApp).pipe(
+        Effect.provide(requestLive(path, remoteAddress, headers)),
+        Effect.provide(Layer.setConfigProvider(testConfigProvider)),
+      ),
+    );
+
+  // Case A: remoteAddress is 8.8.8.8 (not trusted proxy).
+  // Send 1001 requests with X-Forwarded-For: 9.9.9.9, 10.0.0.9.
+  // Since 8.8.8.8 is not trusted, the IP resolves to 8.8.8.8.
+  for (let i = 0; i < 1000; i++) {
+    const res = await requestWithXFF("/version", "8.8.8.8", {
       "x-forwarded-for": "9.9.9.9, 10.0.0.9",
     });
-    expect(resTripped.status).toBe(429); // 8.8.8.8 is rate limited
-
-    // Case B: remoteAddress is 10.0.0.1 (trusted proxy), XFF is "9.9.9.9, 10.0.0.9"
-    // Since 10.0.0.1 and 10.0.0.9 are trusted, the IP resolves to 9.9.9.9.
-    // Send 1001 requests. 9.9.9.9 should be rate limited, but NOT 10.0.0.1.
-    for (let i = 0; i < 1000; i++) {
-      const res = await requestWithXFF("/version", "10.0.0.1", {
-        "x-forwarded-for": "9.9.9.9, 10.0.0.9",
-      });
-      expect(res.status).toBe(200);
-    }
-    const resTrippedB = await requestWithXFF("/version", "10.0.0.1", {
-      "x-forwarded-for": "9.9.9.9, 10.0.0.9",
-    });
-    expect(resTrippedB.status).toBe(429); // 9.9.9.9 is rate limited
-  } finally {
-    delete process.env.TRUST_PROXY;
+    expect(res.status).toBe(200);
   }
+  const resTripped = await requestWithXFF("/version", "8.8.8.8", {
+    "x-forwarded-for": "9.9.9.9, 10.0.0.9",
+  });
+  expect(resTripped.status).toBe(429); // 8.8.8.8 is rate limited
+
+  // Case B: remoteAddress is 10.0.0.1 (trusted proxy), XFF is "9.9.9.9, 10.0.0.9"
+  // Since 10.0.0.1 and 10.0.0.9 are trusted, the IP resolves to 9.9.9.9.
+  // Send 1001 requests. 9.9.9.9 should be rate limited, but NOT 10.0.0.1.
+  for (let i = 0; i < 1000; i++) {
+    const res = await requestWithXFF("/version", "10.0.0.1", {
+      "x-forwarded-for": "9.9.9.9, 10.0.0.9",
+    });
+    expect(res.status).toBe(200);
+  }
+  const resTrippedB = await requestWithXFF("/version", "10.0.0.1", {
+    "x-forwarded-for": "9.9.9.9, 10.0.0.9",
+  });
+  expect(resTrippedB.status).toBe(429); // 9.9.9.9 is rate limited
 });

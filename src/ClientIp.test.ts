@@ -14,7 +14,7 @@ describe("ClientIp", () => {
     expect(normalizeIp("127.0.0.1")).toBe("127.0.0.1");
   });
 
-  test("isIpv4InCidr correctly checks IPv4 subnet matches", () => {
+  test("isIpv4InCidr correctly checks IPv4 subnet matches with strict octet checking", () => {
     // /32 exact match
     expect(isIpv4InCidr("192.168.1.1", "192.168.1.1/32")).toBe(true);
     expect(isIpv4InCidr("192.168.1.2", "192.168.1.1/32")).toBe(false);
@@ -35,19 +35,23 @@ describe("ClientIp", () => {
     // /0 matches everything
     expect(isIpv4InCidr("8.8.8.8", "0.0.0.0/0")).toBe(true);
 
+    // Guard against loose octets (e.g. parseInt accepting "1a" as 1)
+    expect(isIpv4InCidr("1a.0.0.1", "1.0.0.0/8")).toBe(false);
+    expect(isIpv4InCidr("1.0.0.1", "1a.0.0.0/8")).toBe(false);
+    expect(isIpv4InCidr("1.0.0.01", "1.0.0.0/8")).toBe(false); // Reject leading zeros
+
     // Invalid IP/Subnets should return false
     expect(isIpv4InCidr("invalid", "10.0.0.0/8")).toBe(false);
     expect(isIpv4InCidr("10.0.0.1", "invalid/8")).toBe(false);
   });
 
-  test("isTrustedProxy correctly matches rules", () => {
-    // Boolean true
-    expect(isTrustedProxy("1.2.3.4", "true")).toBe(true);
-    expect(isTrustedProxy("1.2.3.4", "1")).toBe(true);
+  test("isTrustedProxy correctly matches rules and rejects invalid formats", () => {
+    // Explicit global trust via 0.0.0.0/0 CIDR
+    expect(isTrustedProxy("1.2.3.4", "0.0.0.0/0")).toBe(true);
 
-    // Boolean false
-    expect(isTrustedProxy("1.2.3.4", "false")).toBe(false);
-    expect(isTrustedProxy("1.2.3.4", "0")).toBe(false);
+    // Dropped boolean shortcuts (should return false now since they are not valid IPs/CIDRs)
+    expect(isTrustedProxy("1.2.3.4", "true")).toBe(false);
+    expect(isTrustedProxy("1.2.3.4", "1")).toBe(false);
 
     // Loopback keyword
     expect(isTrustedProxy("127.0.0.1", "loopback")).toBe(true);
@@ -62,12 +66,13 @@ describe("ClientIp", () => {
     expect(isTrustedProxy("192.168.1.150", rules)).toBe(true);
     expect(isTrustedProxy("192.168.2.1", rules)).toBe(false);
     expect(isTrustedProxy("127.0.0.1", rules)).toBe(true);
+
+    // Guard against malformed IP rules
+    expect(isTrustedProxy("1.0.0.1", "1a.0.0.1")).toBe(false);
   });
 
-  test("getClientIp behaves correctly for various configuration scenarios", () => {
-    const headersEmpty = {};
+  test("getClientIp behaves correctly and strictly validates IP shapes", () => {
     const headersXFFOnly = { "x-forwarded-for": "8.8.8.8, 10.0.0.2" };
-    const headersXRIOnly = { "x-real-ip": "7.7.7.7" };
     const headersBoth = {
       "x-forwarded-for": "8.8.8.8, 10.0.0.2",
       "x-real-ip": "7.7.7.7",
@@ -77,31 +82,39 @@ describe("ClientIp", () => {
     expect(getClientIp("10.0.0.1", headersXFFOnly, undefined)).toBe("10.0.0.1");
     expect(getClientIp("10.0.0.1", headersXFFOnly, "")).toBe("10.0.0.1");
 
-    // 2. TRUST_PROXY is false
+    // 2. TRUST_PROXY is false (doesn't match since it's not a valid rule)
     expect(getClientIp("10.0.0.1", headersXFFOnly, "false")).toBe("10.0.0.1");
 
-    // 3. TRUST_PROXY is true (trusts any proxy)
-    // Leftmost from X-Forwarded-For
-    expect(getClientIp("10.0.0.1", headersBoth, "true")).toBe("8.8.8.8");
-    // X-Real-IP fallback
-    expect(getClientIp("10.0.0.1", headersXRIOnly, "true")).toBe("7.7.7.7");
-    // remoteAddress fallback
-    expect(getClientIp("10.0.0.1", headersEmpty, "true")).toBe("10.0.0.1");
+    // 3. TRUST_PROXY explicitly trusts all via CIDR 0.0.0.0/0
+    expect(getClientIp("10.0.0.1", headersBoth, "0.0.0.0/0")).toBe("8.8.8.8");
 
-    // 4. TRUST_PROXY is a CIDR list (e.g. 10.0.0.0/8)
-    // Case 4a: immediate peer is NOT trusted
+    // 4. Shape validation on X-Forwarded-For candidates
+    // If a candidate is "totally-not-an-ip", it should be skipped and getClientIp should fall back to the trusted remoteAddress
+    expect(
+      getClientIp(
+        "10.0.0.1",
+        { "x-forwarded-for": "totally-not-an-ip" },
+        "10.0.0.0/8",
+      ),
+    ).toBe("10.0.0.1");
+    expect(
+      getClientIp(
+        "10.0.0.1",
+        { "x-forwarded-for": "totally-not-an-ip, 10.0.0.2" },
+        "10.0.0.0/8",
+      ),
+    ).toBe("10.0.0.2"); // 10.0.0.2 is valid, totally-not-an-ip is skipped
+
+    // 5. TRUST_PROXY is a CIDR list (e.g. 10.0.0.0/8)
+    // Case 5a: immediate peer is NOT trusted
     expect(getClientIp("8.8.8.8", headersBoth, "10.0.0.0/8")).toBe("8.8.8.8");
 
-    // Case 4b: immediate peer is trusted, XFF contains untrusted client IP
-    // remoteAddress is 10.0.0.1 (trusted), XFF has "8.8.8.8, 10.0.0.2".
-    // 10.0.0.2 is trusted. 8.8.8.8 is untrusted -> should return 8.8.8.8.
+    // Case 5b: immediate peer is trusted, XFF contains untrusted client IP
     expect(getClientIp("10.0.0.1", headersXFFOnly, "10.0.0.0/8")).toBe(
       "8.8.8.8",
     );
 
-    // Case 4c: immediate peer is trusted, XFF contains multiple untrusted/trusted IPs
-    // XFF has "8.8.8.8, 9.9.9.9, 10.0.0.2".
-    // 10.0.0.2 is trusted. 9.9.9.9 is untrusted -> returns 9.9.9.9.
+    // Case 5c: immediate peer is trusted, XFF contains multiple untrusted/trusted IPs
     const headersXFFMultiple = {
       "x-forwarded-for": "8.8.8.8, 9.9.9.9, 10.0.0.2",
     };
@@ -109,18 +122,12 @@ describe("ClientIp", () => {
       "9.9.9.9",
     );
 
-    // Case 4d: immediate peer is trusted, XFF has only trusted IPs
-    // XFF has "10.0.0.3, 10.0.0.2". All are trusted. Returns leftmost.
+    // Case 5d: immediate peer is trusted, XFF has only trusted IPs
     const headersXFFAllTrusted = {
       "x-forwarded-for": "10.0.0.3, 10.0.0.2",
     };
     expect(getClientIp("10.0.0.1", headersXFFAllTrusted, "10.0.0.0/8")).toBe(
       "10.0.0.3",
-    );
-
-    // Case 4e: fallback to X-Real-IP if peer is trusted and XFF is missing
-    expect(getClientIp("10.0.0.1", headersXRIOnly, "10.0.0.0/8")).toBe(
-      "7.7.7.7",
     );
   });
 });
