@@ -190,7 +190,12 @@ export function PostForm({
                 !overLimit &&
                 !invalidImageUrl && (
                   <img
-                    src={trimmed}
+                    // Re-parsed rather than passed through raw: `invalidImageUrl`
+                    // already proved `trimmed` is an https:// URL on the
+                    // allowlist (see isAllowedImageUrl), but `.href` also
+                    // canonicalizes/percent-encodes it so the DOM never sees
+                    // the user's original unescaped input verbatim.
+                    src={new URL(trimmed).href}
                     alt="Preview"
                     className="aspect-4/5 w-full rounded-md border border-border bg-muted object-cover"
                   />
