@@ -123,7 +123,7 @@ postgres:
 redis:
   image:
     repository: redis
-    tag: "7.4.9-alpine"
+    tag: "8.8.0-alpine"
 
   auth:
     # Required — see postgres.auth.existingSecret above for why.

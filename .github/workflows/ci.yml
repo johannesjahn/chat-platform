@@ -268,7 +268,7 @@ jobs:
     # doesn't touch it.
     services:
       redis:
-        image: redis:7.4.9-alpine
+        image: redis:8.8.0-alpine
         ports:
           - 6379:6379
         options: >-
