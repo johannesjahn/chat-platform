@@ -9,6 +9,7 @@ RUN bun install --frozen-lockfile --production
 
 COPY drizzle ./drizzle
 COPY drizzle.config.ts ./
+COPY scripts ./scripts
 COPY src ./src
 
 # Run as the non-root `bun` user the base image ships with, rather than root.

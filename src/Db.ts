@@ -23,12 +23,17 @@ export class Db extends Context.Tag("Db")<Db, DrizzleDb>() {}
 // falls back to PGlite (an embedded Postgres), so there's no external
 // service to run: `DB_PATH` is then a data *directory* PGlite persists its
 // files under (unset = in-memory, thrown away on exit).
+//
+// When DATABASE_URL is set, migrations are NOT run on boot — use
+// `bun run db:migrate` (or the Helm chart's pre-upgrade Job) to apply them
+// separately. This avoids race conditions when multiple Kubernetes replicas
+// boot concurrently. PGlite (local/test) still auto-migrates since it's
+// always single-process.
 export const DbLive = Layer.effect(
   Db,
   Effect.promise(async (): Promise<DrizzleDb> => {
     if (process.env.DATABASE_URL) {
       const db = drizzleBunSql(process.env.DATABASE_URL, { schema });
-      await migrateBunSql(db, { migrationsFolder: "./drizzle" });
       return db;
     }
     const client = await PGlite.create(process.env.DB_PATH);
@@ -37,3 +42,18 @@ export const DbLive = Layer.effect(
     return db;
   }),
 );
+
+// Standalone migration entry point — used by `bun run db:migrate`
+// (scripts/migrate.ts) and the Helm chart's pre-upgrade Job. Connects,
+// migrates, and returns; the caller is responsible for exiting the process.
+export const runMigrations = async (): Promise<void> => {
+  if (process.env.DATABASE_URL) {
+    const db = drizzleBunSql(process.env.DATABASE_URL, { schema });
+    await migrateBunSql(db, { migrationsFolder: "./drizzle" });
+  } else {
+    const client = await PGlite.create(process.env.DB_PATH);
+    const db = drizzlePglite({ client, schema });
+    await migratePglite(db, { migrationsFolder: "./drizzle" });
+    await client.close();
+  }
+};

@@ -144,6 +144,62 @@ const PostContent = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_POST_CONTENT_LENGTH),
 );
 
+// Hosting domains a post/message's `image_url` content is allowed to point
+// at (issue #47): `content` is rendered directly as an `<img src>`
+// (MessageBubble.tsx, PostCard.tsx), so without this an author could embed a
+// `javascript:`/`data:` URL, silently track viewers via an arbitrary
+// third-party host, or serve mixed (non-https) content. Matches the domain
+// itself or any subdomain, e.g. "i.imgur.com" matches "imgur.com".
+export const ALLOWED_IMAGE_HOST_DOMAINS = [
+  "picsum.photos",
+  "imgur.com",
+  "unsplash.com",
+  "gravatar.com",
+  "githubusercontent.com",
+  "imgbb.com",
+  "ibb.co",
+  "cloudinary.com",
+  "googleusercontent.com",
+  "discordapp.com",
+  "discordapp.net",
+  "staticflickr.com",
+  "wikimedia.org",
+  "pexels.com",
+  "pixabay.com",
+] as const;
+
+const isAllowedImageHost = (hostname: string): boolean => {
+  const lower = hostname.toLowerCase();
+  return ALLOWED_IMAGE_HOST_DOMAINS.some(
+    (domain) => lower === domain || lower.endsWith(`.${domain}`),
+  );
+};
+
+// A well-formed `https://` URL (rejects `data:`, `javascript:`, plain
+// `http:`, and unparseable strings) whose host is on the allowlist above.
+export const isAllowedImageUrl = (value: string): boolean => {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && isAllowedImageHost(url.hostname);
+};
+
+const IMAGE_URL_FILTER_MESSAGE =
+  "content must be an https:// URL from an allowed image-hosting domain";
+
+// Cross-field check shared by post/message create+update bodies: only
+// applies when `contentType` is "image_url" — text content is unaffected.
+const requireAllowedImageUrl = (body: {
+  readonly contentType: string;
+  readonly content: string;
+}): string | undefined =>
+  body.contentType === "image_url" && !isAllowedImageUrl(body.content)
+    ? IMAGE_URL_FILTER_MESSAGE
+    : undefined;
+
 export const Post = Schema.Struct({
   id: Schema.Number,
   authorId: Schema.Number,
@@ -157,12 +213,16 @@ export type Post = typeof Post.Type;
 export const CreatePostBody = Schema.Struct({
   contentType: PostContentType,
   content: PostContent,
-}).annotations({ identifier: "CreatePostBody" });
+})
+  .pipe(Schema.filter(requireAllowedImageUrl))
+  .annotations({ identifier: "CreatePostBody" });
 
 export const UpdatePostBody = Schema.Struct({
   contentType: PostContentType,
   content: PostContent,
-}).annotations({ identifier: "UpdatePostBody" });
+})
+  .pipe(Schema.filter(requireAllowedImageUrl))
+  .annotations({ identifier: "UpdatePostBody" });
 
 export const DEFAULT_POSTS_LIMIT = 20;
 export const MAX_POSTS_LIMIT = 100;
@@ -324,12 +384,16 @@ export const TransferOwnershipBody = Schema.Struct({
 export const CreateMessageBody = Schema.Struct({
   contentType: MessageContentType,
   content: MessageContent,
-}).annotations({ identifier: "CreateMessageBody" });
+})
+  .pipe(Schema.filter(requireAllowedImageUrl))
+  .annotations({ identifier: "CreateMessageBody" });
 
 export const UpdateMessageBody = Schema.Struct({
   contentType: MessageContentType,
   content: MessageContent,
-}).annotations({ identifier: "UpdateMessageBody" });
+})
+  .pipe(Schema.filter(requireAllowedImageUrl))
+  .annotations({ identifier: "UpdateMessageBody" });
 
 export const MarkReadBody = Schema.Struct({
   messageId: Schema.Number,

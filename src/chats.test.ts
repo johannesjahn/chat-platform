@@ -10,9 +10,10 @@ import { BunHttpServer } from "@effect/platform-bun";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi, MAX_GROUP_PARTICIPANTS } from "./Api.ts";
-import { AuthenticationLive } from "./Auth.ts";
+import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
+import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
@@ -36,11 +37,12 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(VersionHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(InMemoryPubSubLive),
+  Layer.provide(AuthenticationLive),
+  Layer.provide(TokenVersionCacheLive),
   Layer.provide(InMemoryPresenceStoreLive),
   Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
+  Layer.provide(SanitizeDecodeErrorsLive),
   Layer.provide(InMemoryWsTicketLive),
 );
 
@@ -55,7 +57,10 @@ const run = async <A, E>(
 
   const { handler, dispose } = HttpApiBuilder.toWebHandler(
     Layer.mergeAll(
-      ApiLive.pipe(Layer.provide(TestDbLive)),
+      ApiLive.pipe(
+        Layer.provide(TestDbLive),
+        Layer.provide(InMemoryPubSubLive),
+      ),
       BunHttpServer.layerContext,
     ),
   );
@@ -585,6 +590,68 @@ test("createMessage rejects content over the max length", () =>
         .createMessage({
           path: { id: chat.id },
           payload: { contentType: "text", content: "x".repeat(4001) },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("createMessage creates an image_url message from an allowlisted host", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const message = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: {
+          contentType: "image_url",
+          content: "https://picsum.photos/200",
+        },
+      });
+      expect(message.contentType).toBe("image_url");
+      expect(message.content).toBe("https://picsum.photos/200");
+    }),
+  ));
+
+test("createMessage rejects an image_url from a non-allowlisted host", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const result = yield* alice.client.chats
+        .createMessage({
+          path: { id: chat.id },
+          payload: {
+            contentType: "image_url",
+            content: "https://evil.example.com/cat.png",
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("createMessage rejects a data: image_url", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw");
+      const bob = yield* registerAndLogin("bob", "pw");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const result = yield* alice.client.chats
+        .createMessage({
+          path: { id: chat.id },
+          payload: {
+            contentType: "image_url",
+            content: "data:image/png;base64,iVBORw0KGgo=",
+          },
         })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");

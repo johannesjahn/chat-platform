@@ -10,9 +10,10 @@ import { BunHttpServer } from "@effect/platform-bun";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
-import { AuthenticationLive } from "./Auth.ts";
+import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
+import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
@@ -36,11 +37,12 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(VersionHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(InMemoryPubSubLive),
+  Layer.provide(AuthenticationLive),
+  Layer.provide(TokenVersionCacheLive),
   Layer.provide(InMemoryPresenceStoreLive),
   Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
+  Layer.provide(SanitizeDecodeErrorsLive),
   Layer.provide(InMemoryWsTicketLive),
 );
 
@@ -58,7 +60,10 @@ const run = async <A, E>(
 
   const { handler, dispose } = HttpApiBuilder.toWebHandler(
     Layer.mergeAll(
-      ApiLive.pipe(Layer.provide(TestDbLive)),
+      ApiLive.pipe(
+        Layer.provide(TestDbLive),
+        Layer.provide(InMemoryPubSubLive),
+      ),
       BunHttpServer.layerContext,
     ),
   );
@@ -163,11 +168,126 @@ test("createPost creates an image_url post", () =>
       const post = yield* authed.posts.createPost({
         payload: {
           contentType: "image_url",
-          content: "https://example.com/cat.png",
+          content: "https://picsum.photos/200",
         },
       });
       expect(post.contentType).toBe("image_url");
-      expect(post.content).toBe("https://example.com/cat.png");
+      expect(post.content).toBe("https://picsum.photos/200");
+    }),
+  ));
+
+test("createPost rejects an image_url from a non-allowlisted host", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("bobby", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.posts
+        .createPost({
+          payload: {
+            contentType: "image_url",
+            content: "https://evil.example.com/cat.png",
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("createPost rejects a non-https image_url", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("bobbi", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.posts
+        .createPost({
+          payload: {
+            contentType: "image_url",
+            content: "http://picsum.photos/200",
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("createPost rejects a javascript: image_url", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("bobette", "pw");
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.posts
+        .createPost({
+          payload: {
+            contentType: "image_url",
+            content: "javascript:alert(1)",
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+// Regression tests for issue #171. The typed client above encodes payloads
+// through the same schema the server decodes with, so a refinement failure
+// like the image_url allowlist above never actually reaches the server —
+// `HttpApiClient` catches it while encoding the request, before anything is
+// sent. Sending a raw, hand-built request instead (as any non-browser client
+// could) is the only way to exercise the server's actual decode-error
+// response, i.e. what SanitizeDecodeErrorsLive (DecodeErrorSanitizer.ts) is
+// there to clean up.
+test("HttpApiDecodeError response keeps a Schema.filter refinement's own message", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("rawbobby", "pw");
+      const client = yield* HttpClient.HttpClient;
+      const request = HttpClientRequest.post("http://localhost/posts", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).pipe(
+        HttpClientRequest.bodyUnsafeJson({
+          contentType: "image_url",
+          content: "https://evil.example.com/cat.png",
+        }),
+      );
+      const response = yield* client.execute(request);
+      expect(response.status).toBe(400);
+      const body = yield* response.json;
+      expect(body).toMatchObject({
+        _tag: "HttpApiDecodeError",
+        message:
+          "content must be an https:// URL from an allowed image-hosting domain",
+      });
+    }),
+  ));
+
+test("HttpApiDecodeError response replaces a structural type mismatch with a generic message", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("rawbobbi", "pw");
+      const client = yield* HttpClient.HttpClient;
+      const request = HttpClientRequest.post("http://localhost/posts", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).pipe(
+        HttpClientRequest.bodyUnsafeJson({
+          contentType: "text",
+          // Wrong type entirely (not a filter/refinement violation) — no
+          // hand-authored message exists for this, so the sanitized
+          // response must fall back to a generic message instead of
+          // leaking the raw "Expected string, received number" trace.
+          content: 12345,
+        }),
+      );
+      const response = yield* client.execute(request);
+      expect(response.status).toBe(400);
+      const body = yield* response.json;
+      expect(body).toMatchObject({
+        _tag: "HttpApiDecodeError",
+        message: "Invalid request",
+      });
+      // Regression test: the per-issue `message` must be sanitized too, not
+      // just the top-level one — the frontend's errorMessage() reads
+      // straight from `issues`, so a leftover raw message there would still
+      // reach the user even with a clean top-level `message`.
+      expect(JSON.stringify(body)).not.toContain("Expected string");
     }),
   ));
 
@@ -379,11 +499,14 @@ test("updatePost allows the author to edit their post", () =>
 
       const updated = yield* authed.posts.updatePost({
         path: { id: created.id },
-        payload: { contentType: "image_url", content: "https://x.test/i" },
+        payload: {
+          contentType: "image_url",
+          content: "https://picsum.photos/id/1/200",
+        },
       });
       expect(updated.id).toBe(created.id);
       expect(updated.contentType).toBe("image_url");
-      expect(updated.content).toBe("https://x.test/i");
+      expect(updated.content).toBe("https://picsum.photos/id/1/200");
       expect(updated.updatedAt).toBeGreaterThanOrEqual(created.updatedAt);
     }),
   ));
