@@ -8,9 +8,10 @@ import {
   TooManyRequests,
   UsernameTaken,
 } from "./Api.ts";
-import { CurrentUser } from "./Auth.ts";
+import { CurrentUser, TokenVersionCache } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
+import { PubSub } from "./PubSub.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { refreshTokens, users } from "./db/schema.ts";
 
@@ -411,6 +412,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const jwt = yield* Jwt;
+          const tokenVersionCache = yield* TokenVersionCache;
+          const pubsub = yield* PubSub;
 
           // A token that's already invalid, expired, or unrecognized has
           // nothing to revoke — treat logout as a no-op success rather than
@@ -440,6 +443,11 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                   .delete(refreshTokens)
                   .where(eq(refreshTokens.jti, tokenUser.jti)),
           ).pipe(Effect.orDie);
+
+          yield* tokenVersionCache.invalidate(tokenUser.id);
+          yield* pubsub
+            .publish("auth:invalidation", String(tokenUser.id))
+            .pipe(Effect.ignore);
         }),
       )
       .handle("changePassword", ({ payload }) =>
@@ -448,6 +456,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const jwt = yield* Jwt;
           const limiter = yield* RateLimiter;
           const currentUser = yield* CurrentUser;
+          const tokenVersionCache = yield* TokenVersionCache;
+          const pubsub = yield* PubSub;
 
           yield* enforceRateLimit(
             limiter,
@@ -504,6 +514,11 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
           if (!updated)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
+
+          yield* tokenVersionCache.invalidate(currentUser.id);
+          yield* pubsub
+            .publish("auth:invalidation", String(currentUser.id))
+            .pipe(Effect.ignore);
 
           // Reissue a fresh pair for this session — otherwise the caller
           // would be logged out by the very request that changed their

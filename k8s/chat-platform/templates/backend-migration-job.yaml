@@ -1,0 +1,49 @@
+{{- $fullname := include "chat-platform.fullname" . -}}
+# Runs Drizzle migrations to completion before Helm installs or upgrades the
+# backend Deployment, so replica pods never race each other on schema changes.
+# See issue #178 and scripts/migrate.ts.
+#
+# NOTE: this only solves the *concurrent-migration-race* problem, not schema
+# forward/backward compatibility during a rolling deploy — old-code replicas
+# still run briefly against the already-migrated schema, so migrations need
+# to stay additive/backward-compatible (expand-contract pattern).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    # Run before the backend Deployment is created/updated — Helm waits for
+    # this Job to succeed before proceeding with the main release.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        {{- include "chat-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          command: ["bun", "run", "db:migrate"]
+          env:
+            {{- include "chat-platform.postgresEnv" . | nindent 12 }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

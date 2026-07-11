@@ -1,6 +1,6 @@
 {
   "name": "chat-platform",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "module": "src/main.ts",
   "type": "module",
   "private": true,
@@ -16,7 +16,8 @@
     "format:check": "prettier --check .",
     "gen:openapi": "bun run scripts/gen-openapi.ts",
     "sync:chart-version": "bun run scripts/sync-chart-version.ts",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun run scripts/migrate.ts"
   },
   "dependencies": {
     "@effect/platform": "0.96.2",

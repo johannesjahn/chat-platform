@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { $api } from "@/lib/api";
+import { isAllowedImageUrl } from "@/lib/imageHosts";
 import { useOnlineStatus } from "@/lib/online";
 import { cn } from "@/lib/utils";
 import {
@@ -37,7 +38,16 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
   const trimmed = content.trim();
   const overLimit = trimmed.length > MAX_MESSAGE_CONTENT_LENGTH;
   const nearLimit = trimmed.length > MAX_MESSAGE_CONTENT_LENGTH * 0.9;
-  const canSend = trimmed.length > 0 && !overLimit && !pending && isOnline;
+  const invalidImageUrl =
+    contentType === "image_url" &&
+    trimmed.length > 0 &&
+    !isAllowedImageUrl(trimmed);
+  const canSend =
+    trimmed.length > 0 &&
+    !overLimit &&
+    !invalidImageUrl &&
+    !pending &&
+    isOnline;
 
   function notifyTyping() {
     const now = Date.now();
@@ -118,8 +128,8 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
                 void submit();
               }
             }}
-            placeholder="https://example.com/photo.jpg"
-            aria-invalid={overLimit}
+            placeholder="https://picsum.photos/id/1/600/800"
+            aria-invalid={invalidImageUrl}
           />
         )}
 
@@ -139,6 +149,12 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
           )}
         </Button>
       </div>
+      {invalidImageUrl && (
+        <span className="self-end text-xs text-destructive">
+          Must be an https:// link from a supported image host (e.g.
+          picsum.photos, imgur.com, unsplash.com).
+        </span>
+      )}
       {!isOnline ? (
         <span className="self-end text-xs text-muted-foreground">
           You&apos;re offline — sending is disabled until you reconnect.

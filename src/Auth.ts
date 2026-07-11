@@ -4,8 +4,17 @@ import {
   HttpApiSecurity,
 } from "@effect/platform";
 import { eq } from "drizzle-orm";
-import { Context, Effect, Layer, Redacted, Schema } from "effect";
+import {
+  Cache,
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Redacted,
+  Schema,
+} from "effect";
 import { Db } from "./Db.ts";
+import { PubSub } from "./PubSub.ts";
 import { users } from "./db/schema.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
 
@@ -34,11 +43,50 @@ export class Authentication extends HttpApiMiddleware.Tag<Authentication>()(
   },
 ) {}
 
+export class TokenVersionCache extends Context.Tag("TokenVersionCache")<
+  TokenVersionCache,
+  Cache.Cache<number, number, never>
+>() {}
+
+export const TokenVersionCacheLive = Layer.effect(
+  TokenVersionCache,
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const pubsub = yield* PubSub;
+    const cache = yield* Cache.make({
+      capacity: 10000,
+      timeToLive: Duration.seconds(5),
+      lookup: (userId: number) =>
+        Effect.gen(function* () {
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select({ tokenVersion: users.tokenVersion })
+              .from(users)
+              .where(eq(users.id, userId))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          return rows[0]?.tokenVersion ?? -1;
+        }),
+    });
+
+    yield* pubsub.subscribe("auth:invalidation", (userIdStr) =>
+      Effect.gen(function* () {
+        const userId = Number(userIdStr);
+        if (!isNaN(userId)) {
+          yield* cache.invalidate(userId);
+        }
+      }),
+    );
+
+    return cache;
+  }),
+);
+
 export const AuthenticationLive = Layer.effect(
   Authentication,
   Effect.gen(function* () {
     const jwt = yield* Jwt;
-    const db = yield* Db;
+    const cache = yield* TokenVersionCache;
     const invalid = new Unauthorized({ message: "Invalid or expired token" });
     return {
       bearer: (token) =>
@@ -50,14 +98,8 @@ export const AuthenticationLive = Layer.effect(
           // Reject a token signed before the user's token_version was last
           // bumped (forced logout, future password change) — otherwise it
           // would keep working up to its own TTL despite the bump.
-          const rows = yield* Effect.tryPromise(() =>
-            db
-              .select({ tokenVersion: users.tokenVersion })
-              .from(users)
-              .where(eq(users.id, tokenUser.id))
-              .limit(1),
-          ).pipe(Effect.orDie);
-          if (rows[0]?.tokenVersion !== tokenUser.tokenVersion)
+          const currentVersion = yield* cache.get(tokenUser.id);
+          if (currentVersion !== tokenUser.tokenVersion)
             return yield* Effect.fail(invalid);
 
           return tokenUser;
