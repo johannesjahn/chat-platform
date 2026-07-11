@@ -5,6 +5,7 @@ import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
+import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { HealthRouteLive, ReadyRouteLive } from "./Health.ts";
 import { JwtLive } from "./Jwt.ts";
 import { MetricsRouteLive, recordHttpMetrics } from "./Metrics.ts";
@@ -37,6 +38,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
   Layer.provide(CorsLive),
+  Layer.provide(SanitizeDecodeErrorsLive),
   Layer.provide(RateLimiterLive),
   Layer.provide(WsTicketLive),
 );

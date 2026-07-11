@@ -13,6 +13,7 @@ import { ChatApi, MAX_GROUP_PARTICIPANTS } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
+import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
@@ -41,6 +42,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
+  Layer.provide(SanitizeDecodeErrorsLive),
   Layer.provide(InMemoryWsTicketLive),
 );
 
