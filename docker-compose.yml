@@ -1,12 +1,40 @@
 services:
+  # Postgres major versions aren't on-disk compatible — starting the new
+  # major version's image straight against an existing volume from the
+  # previous major version refuses to boot. This one-shot service runs
+  # first, using pgautoupgrade (https://github.com/pgautoupgrade/docker-pgautoupgrade,
+  # a wrapper around the official image that bundles both major versions'
+  # binaries) to pg_upgrade the volume in place if it finds old-version data,
+  # then exits; a no-op if the volume's already on the current major version.
+  # `db` only starts once this exits successfully.
+  db-upgrade:
+    image: pgautoupgrade/pgautoupgrade:18-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a long random secret before running docker compose up}
+      # Postgres 18's image defaults PGDATA to a version-specific
+      # subdirectory (.../18/docker) instead of the flat layout every prior
+      # major version (and this volume) used — pin it explicitly so both
+      # this and `db` below keep using the same path this volume has always
+      # had, instead of silently treating it as a fresh, empty volume.
+      PGDATA: /var/lib/postgresql/data
+      PGAUTO_ONESHOT: "yes"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: "no"
+
   db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: chat_platform
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a long random secret before running docker compose up}
       POSTGRES_DB: chat_platform
+      # See db-upgrade's PGDATA comment above.
+      PGDATA: /var/lib/postgresql/data
     volumes:
       - pgdata:/var/lib/postgresql/data
+    depends_on:
+      db-upgrade:
+        condition: service_completed_successfully
     # Bound to localhost only — the `app` service reaches this over the
     # compose network regardless; this port is for local debugging (e.g.
     # `psql -h localhost`), not for exposing Postgres to the network.

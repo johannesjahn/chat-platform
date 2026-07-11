@@ -327,7 +327,7 @@ jobs:
     # showing up once deployed.
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: chat_platform
           POSTGRES_PASSWORD: chat_platform
