@@ -10,7 +10,16 @@ services:
   db-upgrade:
     image: pgautoupgrade/pgautoupgrade:18-alpine
     environment:
+      # On a brand new volume (nothing to upgrade — e.g. first-ever `docker
+      # compose up`, or CI, which always starts from an empty volume),
+      # pgautoupgrade falls back to running initdb itself. It needs
+      # POSTGRES_USER/POSTGRES_DB for that fresh init to create the same
+      # role/database `db` below expects — without them it initializes a
+      # bare cluster, and `db` then finds the directory already initialized
+      # and skips its own init, leaving the chat_platform role missing.
+      POSTGRES_USER: chat_platform
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a long random secret before running docker compose up}
+      POSTGRES_DB: chat_platform
       # Postgres 18's image defaults PGDATA to a version-specific
       # subdirectory (.../18/docker) instead of the flat layout every prior
       # major version (and this volume) used — pin it explicitly so both

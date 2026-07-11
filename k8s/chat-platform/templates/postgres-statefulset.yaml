@@ -31,6 +31,17 @@ spec:
         - name: postgres-upgrade
           image: "{{ .Values.postgres.upgradeImage.repository }}:{{ .Values.postgres.image.tag }}"
           env:
+            # On a brand new PVC (nothing to upgrade — e.g. first-ever
+            # `helm install`), pgautoupgrade falls back to running initdb
+            # itself. It needs POSTGRES_USER/POSTGRES_DB for that fresh init
+            # to create the same role/database the `postgres` container
+            # below expects — without them it initializes a bare cluster,
+            # and `postgres` then finds the directory already initialized
+            # and skips its own init, leaving that role missing.
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.auth.username | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.auth.database | quote }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
