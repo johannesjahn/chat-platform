@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { HttpServerRequest, HttpServerResponse } from "@effect/platform";
-import { Effect, HashMap, Logger } from "effect";
+import { ConfigProvider, Effect, HashMap, Layer, Logger, Option } from "effect";
 import { redactedLogger, redactUrl } from "./RedactedLogger.ts";
 
 test("redactUrl masks credential query params but leaves the rest untouched", () => {
@@ -24,7 +24,9 @@ test("redactedLogger logs a redacted URL while the handler still sees the real o
   const mockRequest = {
     url: "/ws?token=super-secret",
     method: "GET",
-  } as HttpServerRequest.HttpServerRequest;
+    remoteAddress: Option.none(),
+    headers: {},
+  } as unknown as HttpServerRequest.HttpServerRequest;
 
   const handler = Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
@@ -40,4 +42,44 @@ test("redactedLogger logs a redacted URL while the handler still sees the real o
   );
 
   expect(loggedUrls).toEqual(["/ws?token=REDACTED"]);
+});
+
+test("redactedLogger appends a hashed representation of the resolved client IP", async () => {
+  const loggedIpHashes: string[] = [];
+  const captureLogger = Logger.make(({ annotations }) => {
+    const hash = HashMap.get(annotations, "http.client_ip_hash");
+    if (hash._tag === "Some") loggedIpHashes.push(hash.value as string);
+  });
+
+  const mockRequest = {
+    url: "/api/test",
+    method: "GET",
+    remoteAddress: Option.some("1.2.3.4"),
+    headers: {
+      "x-forwarded-for": "9.9.9.9, 10.0.0.1",
+    },
+  } as unknown as HttpServerRequest.HttpServerRequest;
+
+  const handler = Effect.succeed(HttpServerResponse.text("ok"));
+
+  // Use ConfigProvider to mock TRUST_PROXY
+  const testConfigProvider = ConfigProvider.fromMap(
+    new Map([["TRUST_PROXY", "10.0.0.0/8"]]),
+  );
+
+  await Effect.runPromise(
+    redactedLogger(handler).pipe(
+      Effect.provideService(HttpServerRequest.HttpServerRequest, mockRequest),
+      Effect.provide(Logger.replace(Logger.defaultLogger, captureLogger)),
+      Effect.provide(Layer.setConfigProvider(testConfigProvider)),
+    ),
+  );
+
+  expect(loggedIpHashes.length).toBe(1);
+  const resolvedHash = loggedIpHashes[0];
+  expect(resolvedHash).toBeDefined();
+  expect(resolvedHash).not.toBe("unknown");
+  expect(resolvedHash).not.toBe("1.2.3.4");
+  expect(resolvedHash).not.toBe("9.9.9.9");
+  expect(resolvedHash).toMatch(/^[0-9a-f]{16}$/); // 16-character hex
 });
