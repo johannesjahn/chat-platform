@@ -5,6 +5,8 @@ import {
   type HttpApp,
 } from "@effect/platform";
 import { Context, Effect } from "effect";
+import crypto from "crypto";
+import { clientIp } from "./ClientIp.ts";
 
 // Query params that carry credentials and must never reach logs verbatim.
 // `ticket` covers the `/ws?ticket=` handshake (see RealtimeSocket.ts —
@@ -41,53 +43,73 @@ export const redactUrl = (url: string): string => {
   return redacted ? `${url.slice(0, queryIndex)}?${params.toString()}` : url;
 };
 
+// Ephemeral salt generated randomly on startup to prevent dictionary attacks
+// on IPv4 hashes while still allowing request correlation during the process lifetime.
+const IP_HASH_SALT = crypto.randomBytes(16).toString("hex");
+
+/**
+ * Hashes a resolved client IP with an ephemeral salt.
+ */
+export const hashIp = (ip: string): string => {
+  if (ip === "unknown") return "unknown";
+  return crypto
+    .createHash("sha256")
+    .update(ip + IP_HASH_SALT)
+    .digest("hex")
+    .slice(0, 16);
+};
+
 // A drop-in replacement for `HttpMiddleware.logger` that redacts credential
-// query params (see SENSITIVE_PARAMS) from the logged URL. Only the log
-// annotation is redacted — the request passed to `httpApp` is untouched, so
-// route matching, query-param decoding, and handlers like the `/ws` token
-// check still see the real URL.
+// query params (see SENSITIVE_PARAMS) from the logged URL and appends a hashed
+// representation of the resolved client IP (using an ephemeral salt).
+// Only the log annotation is redacted — the request passed to `httpApp` is untouched.
 export const redactedLogger = HttpMiddleware.make(
   <E, R>(httpApp: HttpApp.Default<E, R>): HttpApp.Default<E, R> => {
     let counter = 0;
-    return Effect.withFiberRuntime((fiber) => {
-      const request = Context.unsafeGet(
-        fiber.currentContext,
-        HttpServerRequest.HttpServerRequest,
-      );
-      const url = redactUrl(request.url);
-      return Effect.withLogSpan(
-        Effect.flatMap(Effect.exit(httpApp), (exit) => {
-          if (fiber.getFiberRef(HttpMiddleware.loggerDisabled)) {
-            return exit;
-          } else if (exit._tag === "Failure") {
-            const [response, cause] = HttpServerError.causeResponseStripped(
-              exit.cause,
-            );
-            return Effect.zipRight(
-              Effect.annotateLogs(
-                Effect.log(
-                  cause._tag === "Some" ? cause.value : "Sent HTTP Response",
+    return Effect.flatMap(clientIp, (ip) => {
+      const clientIpHash = hashIp(ip);
+      return Effect.withFiberRuntime((fiber) => {
+        const request = Context.unsafeGet(
+          fiber.currentContext,
+          HttpServerRequest.HttpServerRequest,
+        );
+        const url = redactUrl(request.url);
+        return Effect.withLogSpan(
+          Effect.flatMap(Effect.exit(httpApp), (exit) => {
+            if (fiber.getFiberRef(HttpMiddleware.loggerDisabled)) {
+              return exit;
+            } else if (exit._tag === "Failure") {
+              const [response, cause] = HttpServerError.causeResponseStripped(
+                exit.cause,
+              );
+              return Effect.zipRight(
+                Effect.annotateLogs(
+                  Effect.log(
+                    cause._tag === "Some" ? cause.value : "Sent HTTP Response",
+                  ),
+                  {
+                    "http.method": request.method,
+                    "http.url": url,
+                    "http.status": response.status,
+                    "http.client_ip_hash": clientIpHash,
+                  },
                 ),
-                {
-                  "http.method": request.method,
-                  "http.url": url,
-                  "http.status": response.status,
-                },
-              ),
+                exit,
+              );
+            }
+            return Effect.zipRight(
+              Effect.annotateLogs(Effect.log("Sent HTTP response"), {
+                "http.method": request.method,
+                "http.url": url,
+                "http.status": exit.value.status,
+                "http.client_ip_hash": clientIpHash,
+              }),
               exit,
             );
-          }
-          return Effect.zipRight(
-            Effect.annotateLogs(Effect.log("Sent HTTP response"), {
-              "http.method": request.method,
-              "http.url": url,
-              "http.status": exit.value.status,
-            }),
-            exit,
-          );
-        }),
-        `http.span.${++counter}`,
-      );
+          }),
+          `http.span.${++counter}`,
+        );
+      });
     });
   },
 );
