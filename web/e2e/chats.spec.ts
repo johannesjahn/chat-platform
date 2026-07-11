@@ -1,3 +1,4 @@
+import type { WebSocketRoute } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { registerViaUi } from "./helpers";
 
@@ -419,4 +420,80 @@ test("reopening an already-visited chat still paginates instead of loading its w
 
   expect(messagesLimits).toEqual(["10"]);
   await expect(page.getByText("Seeded message 0")).not.toBeVisible();
+});
+
+test("a client that missed a chat_updated push while its socket was down catches up via a full refetch on reconnect (issue #54)", async ({
+  browser,
+  injectApiUrl,
+}) => {
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+
+  // Intercepts A's `/ws` connection so it can be dropped on demand instead
+  // of relying on real network timing (e.g. `context.setOffline`, which can
+  // take an unpredictable amount of time for the browser to notice an
+  // already-open socket has gone dead). The first connection is forwarded to
+  // the real backend immediately; every reconnect after that is held open
+  // (never forwarded) until `releaseReconnect` is called, so the test can
+  // deterministically keep A's client disconnected for exactly as long as it
+  // takes B to send a message, rather than racing the client's own
+  // (RECONNECT_BASE_MS-paced) reconnect attempt.
+  let currentServer: WebSocketRoute | undefined;
+  let connectionCount = 0;
+  let releaseReconnect: () => void = () => {};
+  const reconnectGate = new Promise<void>((resolve) => {
+    releaseReconnect = resolve;
+  });
+  await pageA.routeWebSocket(
+    (url) => url.pathname === "/ws",
+    async (ws) => {
+      connectionCount++;
+      if (connectionCount > 1) await reconnectGate;
+      currentServer = ws.connectToServer();
+    },
+  );
+
+  const { username: usernameA } = await registerViaUi(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const { username: usernameB } = await registerViaUi(pageB);
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Direct message" }).click();
+  await pageA.fill("#user-search", usernameB);
+  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+  const chatId = pageA.url().split("/").pop();
+  await expect(pageA.getByText("No messages yet")).toBeVisible();
+
+  // Drop A's live connection — its client notices via `onclose` and starts
+  // reconnecting (see RECONNECT_BASE_MS in realtimeSocket.ts), but the
+  // reconnect attempt is held open by the gate above, so A stays
+  // disconnected until `releaseReconnect` is called below.
+  await currentServer?.close();
+
+  // While A has no live connection, B sends a message in the same chat. The
+  // `chat_updated` push for it is never delivered to A — there's nothing
+  // listening — so without a reconnect-triggered refetch, A would only see
+  // it once some *later* event happened to touch this chat again.
+  await pageB.goto(`/chats/${chatId}`);
+  await expect(pageB.getByText(`@${usernameA}`)).toBeVisible();
+  await pageB.fill("textarea", "Sent while A's socket was down");
+  await pageB.keyboard.press("Enter");
+  await expect(pageB.getByText("Sent while A's socket was down")).toBeVisible();
+
+  // Now let A's reconnect through. The message shows up from the full
+  // refetch `useRealtimeSocket` does on every `onopen`, without a page
+  // reload — there was no live push to trigger the usual version-checked
+  // path (issue #55).
+  releaseReconnect();
+  await expect(pageA.getByText("Sent while A's socket was down")).toBeVisible({
+    timeout: 10_000,
+  });
+
+  await contextA.close();
+  await contextB.close();
 });

@@ -92,6 +92,21 @@ export function useRealtimeSocket(enabled: boolean): void {
         // presence clean and let the fresh connection's initial snapshot
         // (see RealtimeSocket.ts) repopulate it.
         resetPresence();
+        // Events are best-effort (see RealtimeEvent in src/Realtime.ts) — one
+        // dropped while this client was disconnected (or never sent because
+        // publish failed) would otherwise sit unnoticed until the next event
+        // for the same query happens to arrive. A full refetch of every query
+        // an event could have touched makes each (re)connect, including the
+        // very first one (which can be rehydrating a stale persisted cache
+        // from a previous session — see query.ts), self-healing regardless of
+        // what was missed (issue #54). `chat_updated`'s per-chat version
+        // check (issue #55) still avoids redundant refetches on top of this
+        // for the common case of a single missed push.
+        void queryClient.invalidateQueries({ queryKey: ["chats"] });
+        void queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
+        void queryClient.invalidateQueries({
+          queryKey: postDetailQueryKeyPrefix,
+        });
       };
 
       socket.onmessage = (event) => {
