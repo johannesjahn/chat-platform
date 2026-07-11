@@ -64,8 +64,22 @@
       matchUpdateTypes: ["minor", "patch"],
       groupName: "web minor and patch dependencies",
     },
+    // depTypes: ["action"] scopes this to actual `uses: owner/action@...`
+    // pins. The github-actions manager also extracts ci.yml's `services:`
+    // block images (redis/postgres, depType "service") as its own
+    // dependencies — without this scoping, this rule swept those into the
+    // GitHub Actions group too, splitting a redis/postgres patch bump into
+    // two separate PRs (one for ci.yml via this group, one for
+    // docker-compose.yml + values.yaml via the default cross-manager
+    // grouping by depName) instead of the one PR all three files should
+    // land in together. Confirmed by two real Renovate PRs, #158 and #159,
+    // both bumping redis to the same 7.4.9 patch but split exactly this
+    // way — the major-bump PR (#163) wasn't affected since major isn't in
+    // matchUpdateTypes here, so it fell through to the default grouping
+    // and correctly covered all three files in one PR.
     {
       matchManagers: ["github-actions"],
+      matchDepTypes: ["action"],
       matchUpdateTypes: ["minor", "patch"],
       groupName: "GitHub Actions minor and patch updates",
     },
