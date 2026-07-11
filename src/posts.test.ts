@@ -13,6 +13,7 @@ import { ChatApi } from "./Api.ts";
 import { AuthenticationLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
+import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { JwtLive } from "./Jwt.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
@@ -41,6 +42,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
+  Layer.provide(SanitizeDecodeErrorsLive),
   Layer.provide(InMemoryWsTicketLive),
 );
 
@@ -219,6 +221,65 @@ test("createPost rejects a javascript: image_url", () =>
         })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
+    }),
+  ));
+
+// Regression tests for issue #171. The typed client above encodes payloads
+// through the same schema the server decodes with, so a refinement failure
+// like the image_url allowlist above never actually reaches the server —
+// `HttpApiClient` catches it while encoding the request, before anything is
+// sent. Sending a raw, hand-built request instead (as any non-browser client
+// could) is the only way to exercise the server's actual decode-error
+// response, i.e. what SanitizeDecodeErrorsLive (DecodeErrorSanitizer.ts) is
+// there to clean up.
+test("HttpApiDecodeError response keeps a Schema.filter refinement's own message", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("rawbobby", "pw");
+      const client = yield* HttpClient.HttpClient;
+      const request = HttpClientRequest.post("http://localhost/posts", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).pipe(
+        HttpClientRequest.bodyUnsafeJson({
+          contentType: "image_url",
+          content: "https://evil.example.com/cat.png",
+        }),
+      );
+      const response = yield* client.execute(request);
+      expect(response.status).toBe(400);
+      const body = yield* response.json;
+      expect(body).toMatchObject({
+        _tag: "HttpApiDecodeError",
+        message:
+          "content must be an https:// URL from an allowed image-hosting domain",
+      });
+    }),
+  ));
+
+test("HttpApiDecodeError response replaces a structural type mismatch with a generic message", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("rawbobbi", "pw");
+      const client = yield* HttpClient.HttpClient;
+      const request = HttpClientRequest.post("http://localhost/posts", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).pipe(
+        HttpClientRequest.bodyUnsafeJson({
+          contentType: "text",
+          // Wrong type entirely (not a filter/refinement violation) — no
+          // hand-authored message exists for this, so the sanitized
+          // response must fall back to a generic message instead of
+          // leaking the raw "Expected string, received number" trace.
+          content: 12345,
+        }),
+      );
+      const response = yield* client.execute(request);
+      expect(response.status).toBe(400);
+      const body = yield* response.json;
+      expect(body).toMatchObject({
+        _tag: "HttpApiDecodeError",
+        message: "Invalid request",
+      });
     }),
   ));
 
