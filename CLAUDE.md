@@ -112,7 +112,11 @@ This is a two-package repo:
   by default (an embedded Postgres — `DB_PATH` data directory, unset =
   in-memory, auto-migrated on startup). Set `DATABASE_URL` to instead connect
   to a real Postgres over the wire via `drizzle-orm/bun-sql` (`Bun.sql`) — see
-  [`src/Db.ts`](src/Db.ts). Realtime (chat/post) events fan out through
+  [`src/Db.ts`](src/Db.ts). **Note:** when `DATABASE_URL` is set, migrations
+  are _not_ run on boot (to avoid race conditions with multiple Kubernetes
+  replicas — see issue #178). Run `bun run db:migrate` to apply migrations
+  standalone; the Helm chart handles this automatically via a pre-upgrade Job
+  (`backend-migration-job.yaml`). Realtime (chat/post) events fan out through
   [`src/PubSub.ts`](src/PubSub.ts): an in-memory implementation by default
   (correct for a single process), or Redis Pub/Sub (`Bun.redis`) when
   `REDIS_URL` is set, so multiple horizontally-scaled instances share events
