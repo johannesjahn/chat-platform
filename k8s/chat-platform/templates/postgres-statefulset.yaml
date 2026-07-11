@@ -18,6 +18,46 @@ spec:
         {{- include "chat-platform.labels" . | nindent 8 }}
         app.kubernetes.io/component: postgres
     spec:
+      # Postgres major versions aren't on-disk compatible — starting the
+      # `postgres` container's new major version straight against a PVC
+      # from the previous major version refuses to boot. This runs first,
+      # using pgautoupgrade (a wrapper around the official image bundling
+      # both major versions' binaries) to pg_upgrade the PVC in place if it
+      # finds old-version data at PGDATA, then exits; a no-op if the PVC's
+      # already on the current major version. `runAsUser: 0` matches
+      # pgautoupgrade's own documented Kubernetes guidance, needed to
+      # restore file ownership after the upgrade.
+      initContainers:
+        - name: postgres-upgrade
+          image: "{{ .Values.postgres.upgradeImage.repository }}:{{ .Values.postgres.image.tag }}"
+          env:
+            # On a brand new PVC (nothing to upgrade — e.g. first-ever
+            # `helm install`), pgautoupgrade falls back to running initdb
+            # itself. It needs POSTGRES_USER/POSTGRES_DB for that fresh init
+            # to create the same role/database the `postgres` container
+            # below expects — without them it initializes a bare cluster,
+            # and `postgres` then finds the directory already initialized
+            # and skips its own init, leaving that role missing.
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.auth.username | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.auth.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "chat-platform.postgresSecretName" . }}
+                  key: {{ include "chat-platform.postgresSecretKey" . }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: PGAUTO_ONESHOT
+              value: "yes"
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
       containers:
         - name: postgres
           image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"

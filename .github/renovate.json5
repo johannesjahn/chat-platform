@@ -126,6 +126,20 @@
       matchPackageNames: ["helmfile/helmfile"],
       groupName: "helmfile CLI version",
     },
+
+    // docker-compose.yml's db-upgrade service and the k8s chart's
+    // postgres-upgrade initContainer (postgres.upgradeImage in values.yaml)
+    // both run pgautoupgrade/pgautoupgrade at the same tag as the `db` /
+    // `postgres` container's own postgres image, to pg_upgrade the volume
+    // in place across a major-version bump (see PR #162). The two images
+    // have different depNames, so without this they'd land in separate
+    // PRs on the next major bump — group them so upgrader and target
+    // version can never drift apart.
+    {
+      matchDatasources: ["docker"],
+      matchPackageNames: ["postgres", "pgautoupgrade/pgautoupgrade"],
+      groupName: "Postgres major version",
+    },
   ],
 
   customManagers: [

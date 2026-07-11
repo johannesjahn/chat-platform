@@ -88,7 +88,15 @@ backend:
 postgres:
   image:
     repository: postgres
-    tag: "17-alpine"
+    tag: "18-alpine"
+
+  # Runs once as an initContainer ahead of the `postgres` container below
+  # (see postgres-statefulset.yaml) to pg_upgrade the PVC in place before a
+  # major-version bump — a no-op if it's already on the current major
+  # version. Tag tracks postgres.image.tag so the two never drift apart;
+  # see pgautoupgrade's own tags at https://hub.docker.com/r/pgautoupgrade/pgautoupgrade.
+  upgradeImage:
+    repository: pgautoupgrade/pgautoupgrade
 
   auth:
     username: chat_platform

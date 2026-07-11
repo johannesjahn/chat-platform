@@ -36,8 +36,11 @@ file in the repo root automatically.
 
 Starts a real Postgres and Redis container plus the backend (built from the
 root [`Dockerfile`](Dockerfile)) connected to both via `DATABASE_URL`/
-`REDIS_URL` — see [`docker-compose.yml`](docker-compose.yml). Migrations run
-automatically on startup, same as the PGlite path. The backend is on
+`REDIS_URL` — see [`docker-compose.yml`](docker-compose.yml). A `db-upgrade`
+service runs first and pg_upgrades the `pgdata` volume in place if it's still
+on a previous Postgres major version (a no-op otherwise) — see the comments
+above that service in `docker-compose.yml`. Migrations run automatically on
+startup, same as the PGlite path. The backend is on
 http://localhost:3000; set `DATABASE_URL`/`REDIS_URL` yourself (see
 [`.env.example`](.env.example)) to point `bun run dev`/`start` at that same
 Postgres/Redis instead of the in-process defaults (embedded PGlite, and an

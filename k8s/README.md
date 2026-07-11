@@ -105,6 +105,16 @@ helm upgrade chat-platform ./chat-platform -n chat-platform \
 Secrets aren't managed by this chart at all (see `existingSecret` above), so
 there's nothing for `helm upgrade` to rotate or regenerate.
 
+**Bumping `postgres.image.tag` to a new major version** (e.g. `17-alpine` →
+`18-alpine`): a `postgres-upgrade` initContainer (see
+`templates/postgres-statefulset.yaml`, image from `postgres.upgradeImage`)
+runs [pgautoupgrade](https://github.com/pgautoupgrade/docker-pgautoupgrade)
+ahead of the `postgres` container on every pod (re)start, pg_upgrading the
+PVC in place if it's still on the previous major version — a no-op once it's
+current. This runs against your live production data with no separate
+staging step, so back up the PVC (e.g. `kubectl exec` a `pg_dumpall` off the
+running pod) before rolling out a major-version bump.
+
 ### Chart version
 
 `Chart.yaml`'s `version`/`appVersion`, `values.yaml`'s
