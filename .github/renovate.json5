@@ -84,6 +84,17 @@
       groupName: "GitHub Actions minor and patch updates",
     },
 
+    // omegion/argocd-actions resolves its own ghcr.io image tag from the
+    // ref it's checked out at (see the comment on its `uses:` line in
+    // tag-release.yml), so it can't be SHA-pinned like every other action
+    // here — override the pinGitHubActionDigests preset just for this one
+    // dep so Renovate doesn't re-pin it on the next bump.
+    {
+      matchManagers: ["github-actions"],
+      matchPackageNames: ["omegion/argocd-actions"],
+      pinDigests: false,
+    },
+
     // k8s/observability/helmfile.yaml's chart versions are pinned
     // deliberately (see the comments in that file: check the upstream
     // changelog and bump by hand). Require approval via the Dependency

@@ -122,8 +122,15 @@ jobs:
     needs: docker
     runs-on: ubuntu-latest
     steps:
+      # Not SHA-pinned like the other actions in this file: its action.yml
+      # derives the ghcr.io image tag it docker-pulls from the *name of its
+      # own checkout directory* (i.e. the ref you pin it to), rather than a
+      # hardcoded version — pinning to a commit SHA makes it try to pull a
+      # `ghcr.io/omegion/argocd-actions:<sha>` tag that doesn't exist
+      # ("manifest unknown"). See renovate.json5's matching packageRule,
+      # which keeps Renovate from re-pinning this one.
       - name: Sync ArgoCD Application
-        uses: omegion/argocd-actions@be84a9874fc4087113236886422d37b61155937a # v1
+        uses: omegion/argocd-actions@v1
         with:
           address: ${{ vars.ARGOCD_ADDRESS }}
           token: ${{ secrets.ARGOCD_TOKEN }}
