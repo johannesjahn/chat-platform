@@ -41,8 +41,8 @@ test("a request under the ceiling passes through untouched", async () => {
 });
 
 test("the ceiling trips after GLOBAL_MAX_REQUESTS_PER_IP requests from the same IP, returning 429 with a Retry-After hint", async () => {
-  // GLOBAL_MAX_REQUESTS_PER_IP is 300 (GlobalRateLimit.ts).
-  for (let i = 0; i < 300; i++) {
+  // GLOBAL_MAX_REQUESTS_PER_IP is 1000 (GlobalRateLimit.ts).
+  for (let i = 0; i < 1000; i++) {
     const response = await request("/version", "2.2.2.2");
     expect(response.status).toBe(200);
   }
@@ -55,7 +55,7 @@ test("the ceiling trips after GLOBAL_MAX_REQUESTS_PER_IP requests from the same 
 
 test("a different source IP gets its own, independent bucket", async () => {
   // Trip the ceiling for one IP...
-  for (let i = 0; i < 301; i++) {
+  for (let i = 0; i < 1001; i++) {
     await request("/version", "3.3.3.3");
   }
   const trippedForFirstIp = await request("/version", "3.3.3.3");
@@ -68,7 +68,7 @@ test("a different source IP gets its own, independent bucket", async () => {
 
 test("/health, /ready, and /metrics are exempt from the ceiling and never consume its budget", async () => {
   const ip = "5.5.5.5";
-  for (let i = 0; i < 301; i++) {
+  for (let i = 0; i < 1001; i++) {
     const health = await request("/health", ip);
     expect(health.status).toBe(200);
     const ready = await request("/ready", ip);

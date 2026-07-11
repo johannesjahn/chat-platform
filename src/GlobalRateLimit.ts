@@ -13,8 +13,12 @@ import { RateLimiter } from "./RateLimiter.ts";
 // limits on auth routes (see UsersHandler.ts). Those exist to stop
 // brute-forcing/spam on specific endpoints; this exists purely to blunt a
 // flood hitting the API from one source, and shouldn't otherwise be
-// noticeable during normal use.
-const GLOBAL_MAX_REQUESTS_PER_IP = 300;
+// noticeable during normal use. Deliberately generous (~17 requests/sec
+// sustained) — many legitimate clients share one IP (NAT, a corporate
+// proxy, this repo's own e2e suite running several browser sessions
+// against one local backend), and this ceiling only needs to catch actual
+// floods, not ordinary concurrent bursts.
+const GLOBAL_MAX_REQUESTS_PER_IP = 1000;
 const GLOBAL_WINDOW_SECONDS = 60;
 
 // Raw orchestrator/scraper routes (see Health.ts/Metrics.ts) are exempt: a
