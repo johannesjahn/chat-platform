@@ -10,7 +10,7 @@ import { BunHttpServer } from "@effect/platform-bun";
 import { eq } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
-import { AuthenticationLive } from "./Auth.ts";
+import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
@@ -37,10 +37,10 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(VersionHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(InMemoryPubSubLive),
+  Layer.provide(AuthenticationLive),
+  Layer.provide(TokenVersionCacheLive),
   Layer.provide(InMemoryPresenceStoreLive),
   Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(AuthenticationLive),
   Layer.provide(JwtLive),
   Layer.provide(SanitizeDecodeErrorsLive),
   Layer.provide(InMemoryWsTicketLive),
@@ -60,7 +60,10 @@ const run = async <A, E>(
 
   const { handler, dispose } = HttpApiBuilder.toWebHandler(
     Layer.mergeAll(
-      ApiLive.pipe(Layer.provide(TestDbLive)),
+      ApiLive.pipe(
+        Layer.provide(TestDbLive),
+        Layer.provide(InMemoryPubSubLive),
+      ),
       BunHttpServer.layerContext,
     ),
   );
