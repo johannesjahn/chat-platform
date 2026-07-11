@@ -243,7 +243,9 @@ export const renderPrometheusExposition: Effect.Effect<string> = Effect.map(
 // generated frontend client. Unauthenticated like `/health`/`/ready` —
 // vmagent scrapes this directly and can't present a bearer token — and logs
 // disabled for the same reason those two do (a scraper polls this on its
-// own short interval for the app's whole lifetime).
+// own short interval for the app's whole lifetime). Also exempt from the
+// global rate-limit ceiling (see GlobalRateLimit.ts), which hardcodes this
+// path for the same reason.
 export const MetricsRouteLive = HttpApiBuilder.Router.use((router) =>
   router.get(
     "/metrics",

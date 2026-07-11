@@ -6,6 +6,7 @@ import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
+import { globalRateLimit } from "./GlobalRateLimit.ts";
 import { HealthRouteLive, ReadyRouteLive } from "./Health.ts";
 import { JwtLive } from "./Jwt.ts";
 import { MetricsRouteLive, recordHttpMetrics } from "./Metrics.ts";
@@ -46,10 +47,12 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
 );
 
 const ServerLive = Layer.mergeAll(
-  // recordHttpMetrics wraps redactedLogger (both attach the same way,
-  // around the whole router) so every request's count/duration lands in
-  // `/metrics` regardless of whether access logging is disabled for it.
-  HttpApiBuilder.serve((httpApp) => redactedLogger(recordHttpMetrics(httpApp))),
+  // globalRateLimit sits innermost (closest to the actual router) so a
+  // request it rejects still gets logged and counted in `/metrics` like any
+  // other response, rather than disappearing before either wrapper sees it.
+  HttpApiBuilder.serve((httpApp) =>
+    redactedLogger(recordHttpMetrics(globalRateLimit(httpApp))),
+  ),
   HttpApiSwagger.layer({ path: "/docs" }),
   // Raw `/ws` route, attached to the same shared router as `ChatApi` — see
   // RealtimeSocket.ts for why this can't be a typed HttpApiEndpoint.

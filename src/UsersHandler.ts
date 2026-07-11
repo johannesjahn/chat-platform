@@ -1,6 +1,6 @@
-import { HttpApiBuilder, HttpServerRequest } from "@effect/platform";
+import { HttpApiBuilder } from "@effect/platform";
 import { and, eq, ilike, isNull, sql } from "drizzle-orm";
-import { Context, Effect, Option } from "effect";
+import { Context, Effect } from "effect";
 import {
   ChatApi,
   InvalidCredentials,
@@ -12,6 +12,7 @@ import { CurrentUser, TokenVersionCache } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
 import { PubSub } from "./PubSub.ts";
+import { clientIp } from "./ClientIp.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { refreshTokens, users } from "./db/schema.ts";
 
@@ -48,14 +49,6 @@ const CHANGE_PASSWORD_WINDOW_SECONDS = 15 * 60;
 // query containing "%" or "_" is matched literally instead of as a wildcard.
 const escapeLikePattern = (value: string): string =>
   value.replace(/[\\%_]/g, (char) => `\\${char}`);
-
-// HttpServerRequest.remoteAddress is populated from the real TCP connection
-// by BunHttpServer in production; it's unset in the in-process test harness
-// (see users.test.ts), where every request falls back to the same bucket.
-const clientIp = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  return Option.getOrElse(request.remoteAddress, () => "unknown");
-});
 
 // Consumes `key` from the rate limiter and fails with TooManyRequests if the
 // caller has exceeded `limit` calls within `windowSeconds`. The failure

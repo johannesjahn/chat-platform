@@ -14,7 +14,9 @@ import { PubSub } from "./PubSub.ts";
 // OpenApi.fromApi/the generated frontend client. Both routes disable the
 // access logger (see RedactedLogger.ts) — a pod polls these every few
 // seconds for its whole lifetime, and logging each hit just drowns real
-// request logs in noise without carrying any signal of its own.
+// request logs in noise without carrying any signal of its own. Both are
+// also exempt from the global rate-limit ceiling (see GlobalRateLimit.ts),
+// which hardcodes these paths for the same reason.
 
 // Liveness: the process is up and can handle an HTTP request at all. No
 // dependency checks on purpose — this only answers "should the orchestrator
