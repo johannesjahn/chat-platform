@@ -341,6 +341,23 @@ test("register with a duplicate username returns a 409 conflict", () =>
     }),
   ));
 
+test("register with a username differing only by case from an existing one returns a 409 conflict", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "Bob", password: "pw1" },
+      });
+      const result = yield* c.users
+        .register({ payload: { username: "bob", password: "pw2" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { message: string }).message).toContain("bob");
+      }
+    }),
+  ));
+
 const decodeClaims = (token: string) => {
   const parts = token.split(".");
   expect(parts).toHaveLength(3);
@@ -411,6 +428,20 @@ test("login fails for an unknown username", () =>
         .login({ payload: { username: "ghost", password: "whatever" } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("login succeeds regardless of the casing used, matching the registered account", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "Isabel", password: "pw-isabel" },
+      });
+      const { user } = yield* c.users.login({
+        payload: { username: "isabel", password: "pw-isabel" },
+      });
+      expect(user.username).toBe("Isabel");
     }),
   ));
 

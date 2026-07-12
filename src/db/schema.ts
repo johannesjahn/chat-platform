@@ -6,21 +6,32 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
-export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  username: text("username").notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
-  role: text("role", { enum: ["user", "admin"] })
-    .notNull()
-    .default("user"),
-  // Bumped on password change or forced logout to immediately invalidate
-  // every outstanding access + refresh token, rather than waiting for each
-  // to hit its own TTL — embedded in issued tokens and compared against this
-  // column on every verification (src/Jwt.ts, src/UsersHandler.ts).
-  tokenVersion: integer("token_version").notNull().default(0),
-});
+export const users = pgTable(
+  "users",
+  {
+    id: serial("id").primaryKey(),
+    username: text("username").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    role: text("role", { enum: ["user", "admin"] })
+      .notNull()
+      .default("user"),
+    // Bumped on password change or forced logout to immediately invalidate
+    // every outstanding access + refresh token, rather than waiting for each
+    // to hit its own TTL — embedded in issued tokens and compared against this
+    // column on every verification (src/Jwt.ts, src/UsersHandler.ts).
+    tokenVersion: integer("token_version").notNull().default(0),
+  },
+  (table) => [
+    // Case-insensitive uniqueness: `Alice` and `alice` must not both be
+    // registerable, since login rate-limiting and lookups already treat
+    // usernames case-insensitively (see issue #175).
+    uniqueIndex("users_username_lower_idx").on(sql`lower(${table.username})`),
+  ],
+);
 
 export type DbUser = typeof users.$inferSelect;
 export type NewDbUser = typeof users.$inferInsert;
