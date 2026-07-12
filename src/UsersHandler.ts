@@ -214,7 +214,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             db
               .select({ id: users.id })
               .from(users)
-              .where(eq(users.username, payload.username))
+              .where(
+                eq(
+                  sql`lower(${users.username})`,
+                  payload.username.toLowerCase(),
+                ),
+              )
               .limit(1),
           ).pipe(Effect.orDie);
           if (existing[0])
@@ -270,7 +275,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             db
               .select()
               .from(users)
-              .where(eq(users.username, payload.username))
+              .where(
+                eq(
+                  sql`lower(${users.username})`,
+                  payload.username.toLowerCase(),
+                ),
+              )
               .limit(1),
           ).pipe(Effect.orDie);
 
