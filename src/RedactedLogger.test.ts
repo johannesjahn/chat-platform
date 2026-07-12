@@ -1,7 +1,15 @@
 import { expect, test } from "bun:test";
 import { HttpServerRequest, HttpServerResponse } from "@effect/platform";
-import { ConfigProvider, Effect, HashMap, Layer, Logger, Option } from "effect";
-import { redactedLogger, redactUrl } from "./RedactedLogger.ts";
+import {
+  ConfigProvider,
+  Effect,
+  HashMap,
+  FiberRef,
+  Layer,
+  Logger,
+  Option,
+} from "effect";
+import { redactedLogger, redactUrl, currentLogUser } from "./RedactedLogger.ts";
 
 test("redactUrl masks credential query params but leaves the rest untouched", () => {
   expect(redactUrl("/ws?token=secret123")).toBe("/ws?token=REDACTED");
@@ -82,4 +90,35 @@ test("redactedLogger appends a hashed representation of the resolved client IP",
   expect(resolvedHash).not.toBe("1.2.3.4");
   expect(resolvedHash).not.toBe("9.9.9.9");
   expect(resolvedHash).toMatch(/^[0-9a-f]{16}$/); // 16-character hex
+});
+
+test("redactedLogger appends the authenticated username if available in currentLogUser FiberRef", async () => {
+  const loggedUsernames: string[] = [];
+  const captureLogger = Logger.make(({ annotations }) => {
+    const username = HashMap.get(annotations, "http.username");
+    if (username._tag === "Some")
+      loggedUsernames.push(username.value as string);
+  });
+
+  const mockRequest = {
+    url: "/api/posts",
+    method: "GET",
+    remoteAddress: Option.some("1.2.3.4"),
+    headers: {},
+  } as unknown as HttpServerRequest.HttpServerRequest;
+
+  // Set the currentLogUser FiberRef to "testuser"
+  const handler = Effect.gen(function* () {
+    yield* FiberRef.set(currentLogUser, "testuser");
+    return HttpServerResponse.text("ok");
+  });
+
+  await Effect.runPromise(
+    redactedLogger(handler).pipe(
+      Effect.provideService(HttpServerRequest.HttpServerRequest, mockRequest),
+      Effect.provide(Logger.replace(Logger.defaultLogger, captureLogger)),
+    ),
+  );
+
+  expect(loggedUsernames).toEqual(["testuser"]);
 });
