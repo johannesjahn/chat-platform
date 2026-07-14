@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest an idea or enhancement for the chat platform
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement! Please fill out the sections below as completely as you can.
+
+  - type: dropdown
+    id: package
+    attributes:
+      label: Affected package
+      description: Which part of the repo would this change touch?
+      options:
+        - Backend (repo root)
+        - Frontend (web/)
+        - Both / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Is your feature request related to a problem? Describe what's missing or frustrating.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the solution you'd like.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any alternative solutions or features you've considered.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else relevant (mockups, links, related issues).
+    validations:
+      required: false
