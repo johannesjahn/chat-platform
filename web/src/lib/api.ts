@@ -132,6 +132,11 @@ export const usersQueryKey = ["get", "/users/search"] as const;
 // bounded independent of the user base's size (see issue #48).
 export const MIN_USER_SEARCH_QUERY_LENGTH = 3;
 
+// Floor for newly chosen passwords (mirrors `MIN_PASSWORD_LENGTH` in
+// src/Api.ts) — lets the form reject a too-short password before a round
+// trip, matching the server's own validation (issue #45).
+export const MIN_PASSWORD_LENGTH = 8;
+
 export type PublicUser = components["schemas"]["User"];
 export type Session = components["schemas"]["LoginResponse"];
 export type Credentials = components["schemas"]["LoginBody"];

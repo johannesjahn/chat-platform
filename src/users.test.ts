@@ -13,6 +13,7 @@ import {
   MAX_PASSWORD_LENGTH,
   MAX_USER_SEARCH_QUERY_LENGTH,
   MAX_USERNAME_LENGTH,
+  MIN_PASSWORD_LENGTH,
 } from "./Api.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
@@ -184,6 +185,59 @@ test("register rejects a password over the maximum length", () =>
     }),
   ));
 
+test("register rejects a password under the minimum length", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const result = yield* c.users
+        .register({
+          payload: {
+            username: "alice3",
+            password: "a".repeat(MIN_PASSWORD_LENGTH - 1),
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("register accepts a password at exactly the minimum length", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const user = yield* c.users.register({
+        payload: {
+          username: "alice4",
+          password: "a".repeat(MIN_PASSWORD_LENGTH),
+        },
+      });
+      expect(user.username).toBe("alice4");
+    }),
+  ));
+
+test("changePassword rejects a new password under the minimum length", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "xena", password: "pw-xena12" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "xena", password: "pw-xena12" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.users
+        .changePassword({
+          payload: {
+            currentPassword: "pw-xena12",
+            newPassword: "a".repeat(MIN_PASSWORD_LENGTH - 1),
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
 test("searchUsers returns matching users, case-insensitively, without password data", () =>
   run(
     Effect.gen(function* () {
@@ -195,10 +249,10 @@ test("searchUsers returns matching users, case-insensitively, without password d
         payload: { username: "alexina", password: "pw-alexina" },
       });
       yield* c.users.register({
-        payload: { username: "bob", password: "pw-bob" },
+        payload: { username: "bob", password: "pw-bob123" },
       });
       const { accessToken } = yield* c.users.login({
-        payload: { username: "bob", password: "pw-bob" },
+        payload: { username: "bob", password: "pw-bob123" },
       });
 
       const authed = yield* makeAuthedClient(accessToken);
@@ -308,10 +362,10 @@ test("getUser returns 404 for a missing id", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "dave", password: "pw-dave" },
+        payload: { username: "dave", password: "pw-dave1" },
       });
       const { accessToken } = yield* c.users.login({
-        payload: { username: "dave", password: "pw-dave" },
+        payload: { username: "dave", password: "pw-dave1" },
       });
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
@@ -329,10 +383,10 @@ test("register with a duplicate username returns a 409 conflict", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "dave", password: "pw1" },
+        payload: { username: "dave", password: "password-1" },
       });
       const result = yield* c.users
-        .register({ payload: { username: "dave", password: "pw2" } })
+        .register({ payload: { username: "dave", password: "password-2" } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left") {
@@ -346,10 +400,10 @@ test("register with a username differing only by case from an existing one retur
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "Bob", password: "pw1" },
+        payload: { username: "Bob", password: "password-1" },
       });
       const result = yield* c.users
-        .register({ payload: { username: "bob", password: "pw2" } })
+        .register({ payload: { username: "bob", password: "password-2" } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left") {
@@ -406,6 +460,33 @@ test("login succeeds and returns the user plus signed access and refresh JWTs", 
     }),
   ));
 
+test("login accepts a pre-existing account whose password predates the minimum length", () =>
+  run(
+    Effect.gen(function* () {
+      // Simulates an account created before MIN_PASSWORD_LENGTH existed —
+      // bypasses the register endpoint (and its now-enforced minimum) by
+      // inserting the row directly, with a short password hashed the same
+      // way the handler would.
+      const db = yield* Effect.promise(getTestDb);
+      const shortPassword = "short1";
+      const passwordHash = yield* Effect.tryPromise(() =>
+        Bun.password.hash(shortPassword, { algorithm: "argon2id" }),
+      );
+      yield* Effect.tryPromise(() =>
+        db
+          .insert(users)
+          .values({ username: "legacyuser", passwordHash })
+          .returning(),
+      );
+
+      const c = yield* makeClient;
+      const { user } = yield* c.users.login({
+        payload: { username: "legacyuser", password: shortPassword },
+      });
+      expect(user.username).toBe("legacyuser");
+    }),
+  ));
+
 test("login fails with a wrong password", () =>
   run(
     Effect.gen(function* () {
@@ -450,10 +531,10 @@ test("refresh exchanges a valid refresh token for a new, working access token", 
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "hana", password: "pw-hana" },
+        payload: { username: "hana", password: "pw-hana1" },
       });
       const { refreshToken } = yield* c.users.login({
-        payload: { username: "hana", password: "pw-hana" },
+        payload: { username: "hana", password: "pw-hana1" },
       });
 
       const refreshed = yield* c.users.refresh({
@@ -476,10 +557,10 @@ test("refresh rotates the refresh token", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "ivan", password: "pw-ivan" },
+        payload: { username: "ivan", password: "pw-ivan1" },
       });
       const { refreshToken } = yield* c.users.login({
-        payload: { username: "ivan", password: "pw-ivan" },
+        payload: { username: "ivan", password: "pw-ivan1" },
       });
 
       const first = yield* c.users.refresh({ payload: { refreshToken } });
@@ -498,10 +579,10 @@ test("refresh rejects the previous refresh token once it's been rotated away", (
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "kate", password: "pw-kate" },
+        payload: { username: "kate", password: "pw-kate1" },
       });
       const { refreshToken } = yield* c.users.login({
-        payload: { username: "kate", password: "pw-kate" },
+        payload: { username: "kate", password: "pw-kate1" },
       });
 
       yield* c.users.refresh({ payload: { refreshToken } });
@@ -525,10 +606,10 @@ test("replaying a rotated-away refresh token revokes the whole family, including
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "nora", password: "pw-nora" },
+        payload: { username: "nora", password: "pw-nora1" },
       });
       const { refreshToken } = yield* c.users.login({
-        payload: { username: "nora", password: "pw-nora" },
+        payload: { username: "nora", password: "pw-nora1" },
       });
 
       // Simulates theft: someone rotates the token first (the legitimate
@@ -566,13 +647,13 @@ test("two concurrent login sessions each rotate independently", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "liam", password: "pw-liam" },
+        payload: { username: "liam", password: "pw-liam1" },
       });
       const sessionA = yield* c.users.login({
-        payload: { username: "liam", password: "pw-liam" },
+        payload: { username: "liam", password: "pw-liam1" },
       });
       const sessionB = yield* c.users.login({
-        payload: { username: "liam", password: "pw-liam" },
+        payload: { username: "liam", password: "pw-liam1" },
       });
 
       // Rotating session A must not invalidate session B's still-unused
@@ -593,10 +674,10 @@ test("refresh rejects an access token used in place of a refresh token", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "jack", password: "pw-jack" },
+        payload: { username: "jack", password: "pw-jack1" },
       });
       const { accessToken } = yield* c.users.login({
-        payload: { username: "jack", password: "pw-jack" },
+        payload: { username: "jack", password: "pw-jack1" },
       });
 
       const result = yield* c.users
@@ -632,10 +713,10 @@ test("logout revokes the presented refresh token", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "maya", password: "pw-maya" },
+        payload: { username: "maya", password: "pw-maya1" },
       });
       const { refreshToken } = yield* c.users.login({
-        payload: { username: "maya", password: "pw-maya" },
+        payload: { username: "maya", password: "pw-maya1" },
       });
 
       yield* c.users.logout({ payload: { refreshToken } });
@@ -657,13 +738,13 @@ test("logout only revokes the presented session, leaving others intact", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "noah", password: "pw-noah" },
+        payload: { username: "noah", password: "pw-noah1" },
       });
       const sessionA = yield* c.users.login({
-        payload: { username: "noah", password: "pw-noah" },
+        payload: { username: "noah", password: "pw-noah1" },
       });
       const sessionB = yield* c.users.login({
-        payload: { username: "noah", password: "pw-noah" },
+        payload: { username: "noah", password: "pw-noah1" },
       });
 
       yield* c.users.logout({
@@ -682,13 +763,13 @@ test("logout with allSessions revokes every session for the user", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "olga", password: "pw-olga" },
+        payload: { username: "olga", password: "pw-olga1" },
       });
       const sessionA = yield* c.users.login({
-        payload: { username: "olga", password: "pw-olga" },
+        payload: { username: "olga", password: "pw-olga1" },
       });
       const sessionB = yield* c.users.login({
-        payload: { username: "olga", password: "pw-olga" },
+        payload: { username: "olga", password: "pw-olga1" },
       });
 
       yield* c.users.logout({
@@ -770,13 +851,13 @@ test("refresh rejects a token signed under a token_version invalidated by a forc
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "ravi", password: "pw-ravi" },
+        payload: { username: "ravi", password: "pw-ravi1" },
       });
       const sessionA = yield* c.users.login({
-        payload: { username: "ravi", password: "pw-ravi" },
+        payload: { username: "ravi", password: "pw-ravi1" },
       });
       const sessionB = yield* c.users.login({
-        payload: { username: "ravi", password: "pw-ravi" },
+        payload: { username: "ravi", password: "pw-ravi1" },
       });
 
       yield* c.users.logout({
@@ -814,7 +895,7 @@ test("changePassword rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.users
         .changePassword({
-          payload: { currentPassword: "pw-sam", newPassword: "new-pw-sam" },
+          payload: { currentPassword: "pw-sam12", newPassword: "new-pw-sam" },
         })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
@@ -829,10 +910,10 @@ test("changePassword rejects a wrong current password", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
-        payload: { username: "sam", password: "pw-sam" },
+        payload: { username: "sam", password: "pw-sam12" },
       });
       const { accessToken } = yield* c.users.login({
-        payload: { username: "sam", password: "pw-sam" },
+        payload: { username: "sam", password: "pw-sam12" },
       });
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
@@ -952,14 +1033,14 @@ test("changePassword is rate-limited per account after repeated wrong attempts",
       for (let i = 0; i < 5; i++) {
         const attempt = yield* authed.users
           .changePassword({
-            payload: { currentPassword: "wrong-pw", newPassword: "new-pw" },
+            payload: { currentPassword: "wrong-pw", newPassword: "new-pw12" },
           })
           .pipe(Effect.either);
         expect(attempt._tag).toBe("Left");
       }
       const result = yield* authed.users
         .changePassword({
-          payload: { currentPassword: "wrong-pw", newPassword: "new-pw" },
+          payload: { currentPassword: "wrong-pw", newPassword: "new-pw12" },
         })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");

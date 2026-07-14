@@ -426,8 +426,8 @@ export interface components {
              */
             username: components["schemas"]["NonEmptyTrimmedString"];
             /**
-             * maxLength(128)
-             * @description a string at most 128 character(s) long
+             * minLength(8)
+             * @description a string at least 8 character(s) long
              */
             password: components["schemas"]["NonEmptyString"];
         };
@@ -500,8 +500,8 @@ export interface components {
              */
             currentPassword: components["schemas"]["NonEmptyString"];
             /**
-             * maxLength(128)
-             * @description a string at most 128 character(s) long
+             * minLength(8)
+             * @description a string at least 8 character(s) long
              */
             newPassword: components["schemas"]["NonEmptyString"];
         };
