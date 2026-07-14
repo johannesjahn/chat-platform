@@ -23,6 +23,11 @@ type AuthFormProps = {
     password: string;
   }) => Promise<void>;
   footer: ReactNode;
+  // Set on the register form to enforce and hint at the server's minimum
+  // password length (issue #45); omitted on login, where an existing
+  // account's password — possibly shorter, from before this floor existed —
+  // must still be accepted.
+  minPasswordLength?: number;
 };
 
 export function AuthForm({
@@ -31,11 +36,17 @@ export function AuthForm({
   submitLabel,
   onSubmit,
   footer,
+  minPasswordLength,
 }: AuthFormProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  const tooShort =
+    minPasswordLength !== undefined &&
+    password.length > 0 &&
+    password.length < minPasswordLength;
 
   return (
     <main className="relative flex min-h-[calc(100vh-57px)] items-center justify-center overflow-hidden px-4 py-16">
@@ -95,13 +106,27 @@ export function AuthForm({
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                minLength={minPasswordLength}
                 required
               />
+              {minPasswordLength !== undefined && (
+                <p
+                  className={
+                    tooShort
+                      ? "text-sm text-destructive"
+                      : "text-sm text-muted-foreground"
+                  }
+                >
+                  {tooShort
+                    ? `Password must be at least ${minPasswordLength} characters.`
+                    : `At least ${minPasswordLength} characters.`}
+                </p>
+              )}
             </div>
             <Button
               type="submit"
               className="mt-1 w-full"
-              disabled={pending || !username || !password}
+              disabled={pending || !username || !password || tooShort}
             >
               {pending && <Loader2 className="size-4 animate-spin" />}
               {pending ? "Please wait…" : submitLabel}

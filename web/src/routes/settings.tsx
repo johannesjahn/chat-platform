@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { $api } from "@/lib/api";
+import { $api, MIN_PASSWORD_LENGTH } from "@/lib/api";
 import { setSession, useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 
@@ -57,6 +57,8 @@ function ChangePasswordCard() {
 
   const mismatch =
     confirmPassword.length > 0 && newPassword !== confirmPassword;
+  const tooShort =
+    newPassword.length > 0 && newPassword.length < MIN_PASSWORD_LENGTH;
 
   return (
     <Card className="w-full motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
@@ -83,6 +85,12 @@ function ChangePasswordCard() {
             event.preventDefault();
             setError(null);
             setSuccess(false);
+            if (newPassword.length < MIN_PASSWORD_LENGTH) {
+              setError(
+                `New password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+              );
+              return;
+            }
             if (newPassword !== confirmPassword) {
               setError("New passwords don't match.");
               return;
@@ -122,8 +130,14 @@ function ChangePasswordCard() {
               autoComplete="new-password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
+              minLength={MIN_PASSWORD_LENGTH}
               required
             />
+            {tooShort && (
+              <p className="text-sm text-destructive">
+                New password must be at least {MIN_PASSWORD_LENGTH} characters.
+              </p>
+            )}
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="confirm-password">Confirm new password</Label>
@@ -149,7 +163,8 @@ function ChangePasswordCard() {
               !currentPassword ||
               !newPassword ||
               !confirmPassword ||
-              mismatch
+              mismatch ||
+              tooShort
             }
           >
             {changePassword.isPending && (

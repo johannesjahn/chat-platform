@@ -2503,9 +2503,10 @@
           },
           "password": {
             "$ref": "#/components/schemas/NonEmptyString",
-            "description": "a string at most 128 character(s) long",
-            "title": "maxLength(128)",
-            "maxLength": 128
+            "description": "a string at least 8 character(s) long",
+            "title": "minLength(8)",
+            "maxLength": 128,
+            "minLength": 8
           }
         },
         "additionalProperties": false
@@ -2690,9 +2691,10 @@
           },
           "newPassword": {
             "$ref": "#/components/schemas/NonEmptyString",
-            "description": "a string at most 128 character(s) long",
-            "title": "maxLength(128)",
-            "maxLength": 128
+            "description": "a string at least 8 character(s) long",
+            "title": "minLength(8)",
+            "maxLength": 128,
+            "minLength": 8
           }
         },
         "additionalProperties": false

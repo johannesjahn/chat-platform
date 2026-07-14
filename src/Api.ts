@@ -29,17 +29,27 @@ const Username = Schema.NonEmptyTrimmedString.pipe(
 
 // A generous ceiling — long enough for any real passphrase, but bounded so a
 // multi-megabyte payload can't be pushed through the (deliberately
-// expensive) Argon2id hash/verify path. Minimum length/complexity is a
-// separate concern (issue #45).
+// expensive) Argon2id hash/verify path.
 export const MAX_PASSWORD_LENGTH = 128;
+
+// Floor for newly chosen passwords (issue #45) — rules out trivial
+// one-character passwords without imposing composition rules (NIST no
+// longer recommends those; length is the stronger lever).
+export const MIN_PASSWORD_LENGTH = 8;
 
 const Password = Schema.NonEmptyString.pipe(
   Schema.maxLength(MAX_PASSWORD_LENGTH),
 );
 
+// Only applied where a password is being newly *set* (registration, password
+// change) — `Password` alone remains the decode schema for login and
+// `currentPassword`, so accounts created before this floor existed can still
+// authenticate with their existing (possibly shorter) password.
+const NewPassword = Password.pipe(Schema.minLength(MIN_PASSWORD_LENGTH));
+
 export const RegisterBody = Schema.Struct({
   username: Username,
-  password: Password,
+  password: NewPassword,
 }).annotations({ identifier: "RegisterBody" });
 
 export const LoginBody = Schema.Struct({
@@ -84,7 +94,7 @@ export const LogoutBody = Schema.Struct({
 
 export const ChangePasswordBody = Schema.Struct({
   currentPassword: Password,
-  newPassword: Password,
+  newPassword: NewPassword,
 }).annotations({ identifier: "ChangePasswordBody" });
 
 export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
