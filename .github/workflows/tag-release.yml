@@ -27,10 +27,12 @@ name: Tag Release
 # deploy-frontend builds web/ and pushes it to Cloudflare Workers (static
 # assets) via Wrangler — see k8s/README.md's "Frontend: Cloudflare Workers"
 # section. It lives here (rather than its own push-triggered workflow) so it
-# always runs after argocd-sync, never concurrently with or ahead of a
-# backend release. It only runs when `tag` actually cut a new release, so
-# frontend deploys stay tied to a backend version bump instead of running on
-# every pipeline invocation.
+# stays tied to the same release as the backend image build. It runs in
+# parallel with argocd-sync (both only need `docker`, not each other) since
+# the two deploys are independent — the frontend doesn't need the backend's
+# ArgoCD sync to have happened first. It only runs when `tag` actually cut a
+# new release, so frontend deploys stay tied to a backend version bump
+# instead of running on every pipeline invocation.
 #
 # workflow_dispatch runs the same pipeline manually (e.g. to retry a release
 # that didn't fire automatically) rather than being a frontend-only shortcut.
@@ -139,7 +141,7 @@ jobs:
 
   deploy-frontend:
     name: Build & deploy frontend to Cloudflare Workers
-    needs: [tag, docker, argocd-sync]
+    needs: [tag, docker]
     if: |
       always() &&
       needs.tag.outputs.created == 'true' &&
