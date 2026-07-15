@@ -139,7 +139,7 @@ export function PostCard({
           <div className="px-6 py-6">
             <p
               className={
-                "whitespace-pre-wrap text-base leading-relaxed" +
+                "whitespace-pre-wrap break-words text-base leading-relaxed" +
                 (!expanded ? " line-clamp-6" : "")
               }
             >
