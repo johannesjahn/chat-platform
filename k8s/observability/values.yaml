@@ -11,9 +11,9 @@
 # (picked up via grafana.sidecar.dashboards below, since that one — unlike
 # vmagent's own discovery — defaults to this chart's own namespace only).
 #
-# Out of scope here: Loki/log-derived dashboards and alerts — the log stack
-# (#123) isn't deployed yet, so there's nothing to build them on. Revisit
-# once #123 lands.
+# The log stack (#123) is deployed too (loki-values.yaml/alloy-values.yaml)
+# — its Loki-backed "Cluster - Logs" dashboard lives in this file's
+# `extraObjects` below, alongside the #125 starter alert rules.
 
 vmsingle:
   spec:
