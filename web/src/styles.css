@@ -81,7 +81,9 @@
       "Segoe UI",
       Roboto,
       sans-serif;
-    /* Ambient, fixed-position gradients for depth — never affects layout. */
+    /* Ambient, fixed-position gradients for depth — never affects layout.
+       A third, slowly-drifting blob (see `aurora-drift`) adds a living sheen
+       behind the app without ever touching the flow. */
     background-image:
       radial-gradient(
         60rem 30rem at 10% -10%,
@@ -95,6 +97,64 @@
       );
     background-repeat: no-repeat;
     background-attachment: fixed;
+  }
+
+  /* A single fixed, blurred aurora blob that slowly wanders behind everything.
+     `position: fixed` + `-z-10` keeps it purely decorative — it never
+     participates in layout or intercepts pointer events. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -20vmax;
+    z-index: -10;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        30rem 30rem at 30% 40%,
+        oklch(0.62 0.19 277 / 0.12),
+        transparent 60%
+      ),
+      radial-gradient(
+        26rem 26rem at 70% 60%,
+        oklch(0.72 0.14 210 / 0.1),
+        transparent 60%
+      );
+    filter: blur(40px);
+    animation: aurora-drift 24s ease-in-out infinite alternate;
+  }
+
+  /* Sleek, unobtrusive scrollbars that match the surface tokens. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--border), transparent 20%);
+    border: 3px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--primary), transparent 40%);
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@keyframes aurora-drift {
+  0% {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3%, 4%, 0) scale(1.08);
+  }
+  100% {
+    transform: translate3d(5%, -3%, 0) scale(1.04);
   }
 }
 
@@ -169,11 +229,86 @@
   animation: presence-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
+/* Diagonal sheen that sweeps across an element once on hover. Drop `btn-shine`
+   on a solid-fill control (see the primary Button variant) — it clips itself
+   and rides above the label without intercepting clicks. */
+@utility btn-shine {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: linear-gradient(
+      110deg,
+      transparent 35%,
+      color-mix(in oklch, white 22%, transparent) 50%,
+      transparent 65%
+    );
+    transform: translateX(-160%);
+    transition: transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+    pointer-events: none;
+  }
+
+  &:hover::after {
+    transform: translateX(160%);
+  }
+}
+
+@keyframes like-pop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.35);
+  }
+  70% {
+    transform: scale(0.92);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* One-shot springy bounce for a toggled control (e.g. a like button the moment
+   it becomes active). Re-trigger by toggling the class off/on. */
+@utility animate-like-pop {
+  animation: like-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* Gentle idle hover for hero/empty-state glyphs. */
+@utility animate-float {
+  animation: float 5s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skeleton-shimmer,
   .animate-gradient-shift,
   .animate-typing-bounce,
-  .animate-presence-ping {
+  .animate-presence-ping,
+  .animate-like-pop,
+  .animate-float {
     animation: none;
+  }
+
+  body::before {
+    animation: none;
+  }
+
+  .btn-shine::after {
+    display: none;
   }
 }
