@@ -52,7 +52,7 @@ export function Avatar({
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-full bg-primary/15 font-semibold text-primary",
+        "flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 to-primary/10 font-semibold text-primary ring-1 ring-inset ring-primary/20",
         AVATAR_SIZES[size],
         className,
       )}

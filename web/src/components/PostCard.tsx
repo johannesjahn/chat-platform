@@ -10,6 +10,7 @@ import {
   Type,
 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { Spotlight } from "@/components/reactbits/Spotlight";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -82,18 +83,33 @@ export function PostCard({
       aria-label={`Post by @${authorUsername}`}
       data-post-id={post.id}
       style={style}
+      onMouseMove={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        e.currentTarget.style.setProperty(
+          "--spot-x",
+          `${e.clientX - rect.left}px`,
+        );
+        e.currentTarget.style.setProperty(
+          "--spot-y",
+          `${e.clientY - rect.top}px`,
+        );
+      }}
       className={cn(
-        "w-full max-w-xl overflow-hidden py-0 transition-[transform,box-shadow] duration-400 ease-out hover:-translate-y-px hover:shadow-lg",
+        "group w-full max-w-xl overflow-hidden py-0 transition-[transform,box-shadow,border-color] duration-400 ease-out hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5",
         "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-500",
       )}
     >
+      <Spotlight color="oklch(0.62 0.19 277 / 0.16)" size={360} />
       <CardHeader className="flex flex-row items-center gap-3 border-b border-border py-4">
         <Link
           to="/users/$id"
           params={{ id: String(authorId) }}
           className="flex flex-1 items-center gap-3 leading-tight"
         >
-          <Avatar name={authorUsername} />
+          <Avatar
+            name={authorUsername}
+            className="transition-transform duration-300 ease-out group-hover:scale-105"
+          />
           <div className="flex flex-1 flex-col leading-tight">
             <span className="font-medium">@{authorUsername}</span>
             <span className="text-xs text-muted-foreground">
