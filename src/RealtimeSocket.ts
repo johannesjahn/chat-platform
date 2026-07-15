@@ -94,11 +94,42 @@ const wsHandler = Effect.gen(function* () {
     ).pipe(Effect.ignore);
   }
 
-  // Blocks for the lifetime of the connection — the frontend never sends
-  // anything meaningful (a periodic ping to defeat idle timeouts, at most),
-  // so incoming messages are ignored.
+  // Blocks for the lifetime of the connection. Most incoming frames are
+  // ignored (a periodic ping to defeat idle timeouts), but a client viewing a
+  // post's comment section sends `subscribe_post_comments`/
+  // `unsubscribe_post_comments` to join/leave that post's realtime room (see
+  // Realtime.ts), so comment/reply and per-comment-like events reach it
+  // without flooding every connected client. `runRaw` (rather than `run`)
+  // preserves text frames as strings; anything that isn't one of these two
+  // JSON control messages is dropped. No per-post authorization: the feed is
+  // public to any signed-in user, so any of them may watch any post's room.
+  const handleIncoming = (data: string | Uint8Array) =>
+    Effect.gen(function* () {
+      const text =
+        typeof data === "string" ? data : new TextDecoder().decode(data);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        return;
+      }
+      if (typeof parsed !== "object" || parsed === null) return;
+      const message = parsed as { type?: unknown; postId?: unknown };
+      if (
+        typeof message.postId !== "number" ||
+        !Number.isInteger(message.postId)
+      ) {
+        return;
+      }
+      if (message.type === "subscribe_post_comments") {
+        yield* connections.subscribePost(message.postId, write);
+      } else if (message.type === "unsubscribe_post_comments") {
+        yield* connections.unsubscribePost(message.postId, write);
+      }
+    });
+
   yield* socket
-    .run(() => Effect.void)
+    .runRaw((data) => handleIncoming(data))
     .pipe(Effect.ensuring(Effect.sync(unregister)));
 
   return HttpServerResponse.empty();

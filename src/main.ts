@@ -10,6 +10,7 @@ import { globalRateLimit } from "./GlobalRateLimit.ts";
 import { HealthRouteLive, ReadyRouteLive } from "./Health.ts";
 import { JwtLive } from "./Jwt.ts";
 import { MetricsRouteLive, recordHttpMetrics } from "./Metrics.ts";
+import { EngagementHandlerLive } from "./EngagementHandler.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { PresenceStoreLive } from "./Presence.ts";
 import { PubSubLive } from "./PubSub.ts";
@@ -33,6 +34,7 @@ const CorsLive = HttpApiBuilder.middlewareCors({
 const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(UsersHandlerLive),
   Layer.provide(PostsHandlerLive),
+  Layer.provide(EngagementHandlerLive),
   Layer.provide(ChatsHandlerLive),
   Layer.provide(VersionHandlerLive),
   Layer.provide(RealtimeHandlerLive),

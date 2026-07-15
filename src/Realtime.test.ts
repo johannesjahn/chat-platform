@@ -308,6 +308,111 @@ test("onlineUserIds reflects users with at least one live connection", async () 
   );
 });
 
+test("notifyPostRoom reaches only sockets subscribed to that post", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const viewer = recordingWriter();
+      const other = recordingWriter();
+      yield* connections.register(1, viewer.write);
+      yield* connections.register(2, other.write);
+      // Only the viewer opens post 42's comment section.
+      yield* connections.subscribePost(42, viewer.write);
+      viewer.received.length = 0;
+      other.received.length = 0;
+
+      yield* connections.notifyPostRoom(42, {
+        type: "comment_changed",
+        postId: 42,
+        commentId: 7,
+      });
+
+      expect(viewer.received).toEqual([
+        JSON.stringify({
+          type: "comment_changed",
+          postId: 42,
+          commentId: 7,
+        }),
+      ]);
+      expect(other.received).toEqual([]);
+    }),
+  );
+});
+
+test("unsubscribePost stops further room delivery to that socket", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const viewer = recordingWriter();
+      yield* connections.register(1, viewer.write);
+      yield* connections.subscribePost(42, viewer.write);
+      yield* connections.unsubscribePost(42, viewer.write);
+      viewer.received.length = 0;
+
+      yield* connections.notifyPostRoom(42, {
+        type: "comment_changed",
+        postId: 42,
+        commentId: 1,
+      });
+
+      expect(viewer.received).toEqual([]);
+    }),
+  );
+});
+
+test("unregister removes a socket from every post room it had joined", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const viewer = recordingWriter();
+      const unregister = yield* connections.register(1, viewer.write);
+      yield* connections.subscribePost(42, viewer.write);
+      viewer.received.length = 0;
+
+      // A dropped connection never sends `unsubscribe_post_comments`, so the
+      // registry must sweep it out of rooms on unregister.
+      unregister();
+      yield* connections.notifyPostRoom(42, {
+        type: "comment_changed",
+        postId: 42,
+        commentId: 1,
+      });
+
+      expect(viewer.received).toEqual([]);
+    }),
+  );
+});
+
+test("a like on a post still broadcasts feed-wide, not just to the room", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const alice = recordingWriter();
+      const bob = recordingWriter();
+      yield* connections.register(1, alice.write);
+      yield* connections.register(2, bob.write);
+      alice.received.length = 0;
+      bob.received.length = 0;
+
+      yield* connections.broadcastAll({
+        type: "like_changed",
+        targetType: "post",
+        targetId: 5,
+        likeCount: 3,
+      });
+
+      const expected = JSON.stringify({
+        type: "like_changed",
+        targetType: "post",
+        targetId: 5,
+        likeCount: 3,
+      });
+      expect(alice.received).toEqual([expected]);
+      expect(bob.received).toEqual([expected]);
+    }),
+  );
+});
+
 test("different RealtimeConnectionsLive instances don't share state", async () => {
   // Regression guard for the sharing this feature depends on: main.ts
   // provides one RealtimeConnectionsLive instance to both the chat/post

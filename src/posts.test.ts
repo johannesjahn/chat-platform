@@ -15,6 +15,7 @@ import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { JwtLive } from "./Jwt.ts";
+import { EngagementHandlerLive } from "./EngagementHandler.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
@@ -33,6 +34,7 @@ process.env.JWT_SECRET ??= "test-secret";
 const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(UsersHandlerLive),
   Layer.provide(PostsHandlerLive),
+  Layer.provide(EngagementHandlerLive),
   Layer.provide(ChatsHandlerLive),
   Layer.provide(VersionHandlerLive),
   Layer.provide(RealtimeHandlerLive),
