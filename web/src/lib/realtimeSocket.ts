@@ -12,7 +12,13 @@ import {
   chatMessagesQueryKey,
   chatsListQueryKey,
 } from "./chats";
-import { postDetailQueryKeyPrefix, postsFeedQueryKey } from "./posts";
+import { commentsQueryKeyRoot } from "./comments";
+import {
+  patchCachedPost,
+  postDetailQueryKeyPrefix,
+  postsFeedQueryKey,
+} from "./posts";
+import { setRealtimeSocket } from "./postRooms";
 import { resetPresence, setUserOnline } from "./presence";
 import { noteTyping } from "./typing";
 
@@ -20,6 +26,13 @@ type RealtimeSocketEvent =
   | { type: "chat_updated"; chatId: number; version: number }
   | { type: "chat_deleted"; chatId: number }
   | { type: "post_changed"; postId: number }
+  | { type: "comment_changed"; postId: number; commentId: number }
+  | {
+      type: "like_changed";
+      targetType: "post" | "comment";
+      targetId: number;
+      likeCount: number;
+    }
   | { type: "presence"; userId: number; online: boolean }
   | { type: "typing"; chatId: number; userId: number; username: string };
 
@@ -87,6 +100,10 @@ export function useRealtimeSocket(enabled: boolean): void {
       socket.onopen = () => {
         reconnectDelay = RECONNECT_BASE_MS;
         pingTimer = setInterval(() => socket?.send("ping"), PING_INTERVAL_MS);
+        // Hand the live socket to the post-room manager so any comment
+        // sections currently open re-join their post rooms — the previous
+        // socket's server-side subscriptions died with it (see postRooms.ts).
+        if (socket) setRealtimeSocket(socket);
         // A dropped connection can mean any number of users went
         // offline/online without this client hearing about it — start
         // presence clean and let the fresh connection's initial snapshot
@@ -107,6 +124,7 @@ export function useRealtimeSocket(enabled: boolean): void {
         void queryClient.invalidateQueries({
           queryKey: postDetailQueryKeyPrefix,
         });
+        void queryClient.invalidateQueries({ queryKey: commentsQueryKeyRoot });
       };
 
       socket.onmessage = (event) => {
@@ -177,6 +195,36 @@ export function useRealtimeSocket(enabled: boolean): void {
               queryKey: postDetailQueryKeyPrefix,
             });
             break;
+          case "comment_changed":
+            // Scoped to this post's room (only arrives while its comment
+            // section is open — see postRooms.ts). Refetch the comment/reply
+            // queries; the event is id-only, so a refetch is how the new
+            // content/counts land, same convention as `post_changed`.
+            void queryClient.invalidateQueries({
+              queryKey: commentsQueryKeyRoot,
+            });
+            break;
+          case "like_changed":
+            // A post like goes out feed-wide, so this lands on *every*
+            // connected client. Patch the affected post's count in place from
+            // the event's `likeCount` (that's exactly why it's on the wire —
+            // see LikeEvent in src/Realtime.ts) instead of invalidating the
+            // whole feed, which would be an O(users × likes) refetch storm.
+            // `likedByMe` is left untouched: it doesn't change for a non-actor,
+            // and the actor already reconciled it from its own mutation
+            // response. A comment like arrives scoped to the post room (far
+            // lower volume), so it just refetches the comment queries.
+            if (parsed.targetType === "post") {
+              patchCachedPost(queryClient, parsed.targetId, (post) => ({
+                ...post,
+                likeCount: parsed.likeCount,
+              }));
+            } else {
+              void queryClient.invalidateQueries({
+                queryKey: commentsQueryKeyRoot,
+              });
+            }
+            break;
           case "presence":
             setUserOnline(parsed.userId, parsed.online);
             break;
@@ -200,6 +248,7 @@ export function useRealtimeSocket(enabled: boolean): void {
 
     return () => {
       stopped = true;
+      setRealtimeSocket(null);
       if (pingTimer) clearInterval(pingTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       socket?.close();

@@ -1,15 +1,18 @@
 import { type CSSProperties, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
   ChevronDown,
   ChevronUp,
   ImageIcon,
   Loader2,
+  MessageSquare,
   Pencil,
   Trash2,
   Type,
 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { CommentsSection, LikeToggle } from "@/components/CommentsSection";
 import { Spotlight } from "@/components/reactbits/Spotlight";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +22,8 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { $api } from "@/lib/api";
+import { patchCachedPost } from "@/lib/posts";
 import { cn } from "@/lib/utils";
 import type { Post } from "@/lib/posts";
 
@@ -76,6 +81,29 @@ export function PostCard({
   const isLongText =
     post.contentType === "text" && post.content.length > COLLAPSE_THRESHOLD;
   const [expanded, setExpanded] = useState(!isLongText);
+  const [showComments, setShowComments] = useState(false);
+
+  const queryClient = useQueryClient();
+  const likePost = $api.useMutation("post", "/posts/{id}/likes");
+  const unlikePost = $api.useMutation("delete", "/posts/{id}/likes");
+  const likePending = likePost.isPending || unlikePost.isPending;
+
+  const toggleLike = async () => {
+    const mutation = post.likedByMe ? unlikePost : likePost;
+    // The endpoint returns the authoritative { likeCount, liked } — patch it
+    // straight into the cache rather than refetching. `likedByMe` only ever
+    // changes for the acting client, so it's reconciled here from the
+    // response; the feed-wide `like_changed` broadcast updates every other
+    // client's count in place (see useRealtimeSocket).
+    const result = await mutation.mutateAsync({
+      params: { path: { id: String(post.id) } },
+    });
+    patchCachedPost(queryClient, post.id, (p) => ({
+      ...p,
+      likeCount: result.likeCount,
+      likedByMe: result.liked,
+    }));
+  };
 
   return (
     <Card
@@ -185,19 +213,41 @@ export function PostCard({
         )}
       </CardContent>
 
-      <CardFooter className="border-t border-border py-3 text-xs text-muted-foreground">
-        {post.contentType === "image_url" ? (
-          <span className="flex items-center gap-1.5">
-            <ImageIcon className="size-3.5" />
-            Image post
+      <CardFooter className="flex-col items-stretch gap-0 border-t border-border p-0">
+        <div className="flex items-center gap-1 px-3 py-2">
+          <LikeToggle
+            liked={post.likedByMe}
+            likeCount={post.likeCount}
+            pending={likePending}
+            onToggle={toggleLike}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-expanded={showComments}
+            onClick={() => setShowComments((prev) => !prev)}
+            className="h-8 gap-1.5 px-2 text-muted-foreground"
+          >
+            <MessageSquare className="size-4" />
+            {showComments ? "Hide comments" : "Comments"}
+          </Button>
+          <span className="ml-auto flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
+            {post.contentType === "image_url" ? (
+              <>
+                <ImageIcon className="size-3.5" />
+                Image
+              </>
+            ) : (
+              <>
+                <Type className="size-3.5" />
+                Text
+              </>
+            )}
           </span>
-        ) : (
-          <span className="flex items-center gap-1.5">
-            <Type className="size-3.5" />
-            Text post
-          </span>
-        )}
+        </div>
       </CardFooter>
+      {showComments && <CommentsSection postId={post.id} />}
     </Card>
   );
 }

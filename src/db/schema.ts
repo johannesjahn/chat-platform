@@ -1,4 +1,6 @@
 import {
+  type AnyPgColumn,
+  check,
   index,
   integer,
   pgTable,
@@ -93,6 +95,101 @@ export const posts = pgTable(
 
 export type DbPost = typeof posts.$inferSelect;
 export type NewDbPost = typeof posts.$inferInsert;
+
+// Comments on posts, plus one level of replies (a reply is just a comment
+// whose `parentCommentId` points at another comment). Nesting is capped at
+// depth 2 — post → comment → reply — enforced in the application layer at
+// create time (see EngagementHandler.ts), not by the schema: a reply's
+// parent must itself be a top-level comment (`parentCommentId` null), so a
+// reply can never be replied to. Both the post FK and the self FK cascade,
+// so deleting a post removes its whole thread and deleting a top-level
+// comment removes its replies.
+export const comments = pgTable(
+  "comments",
+  {
+    id: serial("id").primaryKey(),
+    postId: integer("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    // Null for a top-level comment, set to the parent comment's id for a
+    // reply. The `AnyPgColumn` return annotation is required for a
+    // self-referencing FK — without it the column type would be inferred
+    // circularly.
+    parentCommentId: integer("parent_comment_id").references(
+      (): AnyPgColumn => comments.id,
+      { onDelete: "cascade" },
+    ),
+    authorId: integer("author_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    // `listComments` filters + orders by (postId, id) for top-level comments;
+    // Postgres doesn't auto-index FK columns, so without this every page
+    // (and every cascade delete from `posts`) scans the whole table.
+    index("comments_post_id_idx").on(table.postId, table.id),
+    // `listReplies` filters + orders by (parentCommentId, id); also serves
+    // the self-referential cascade delete when a top-level comment is
+    // removed.
+    index("comments_parent_comment_id_idx").on(table.parentCommentId, table.id),
+    index("comments_author_id_idx").on(table.authorId),
+  ],
+);
+
+export type DbComment = typeof comments.$inferSelect;
+export type NewDbComment = typeof comments.$inferInsert;
+
+// One row per (user, liked target). The target is polymorphic: exactly one
+// of `postId`/`commentId` is set (enforced by the check constraint), so a
+// single table covers likes on posts, comments, and replies alike (replies
+// live in `comments`). The partial unique constraints keep a user from
+// liking the same target twice. Like counts are computed on read (a grouped
+// COUNT over this table — see EngagementHandler.ts) rather than denormalized,
+// so there's no counter column to drift out of sync.
+export const likes = pgTable(
+  "likes",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    postId: integer("post_id").references(() => posts.id, {
+      onDelete: "cascade",
+    }),
+    commentId: integer("comment_id").references(() => comments.id, {
+      onDelete: "cascade",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    // A user can like a given post / comment at most once. These are backed
+    // by partial-ish composite btrees whose leading `userId` also serves the
+    // "which of these did I like?" lookups when rendering a page.
+    unique("likes_user_post_unique").on(table.userId, table.postId),
+    unique("likes_user_comment_unique").on(table.userId, table.commentId),
+    // Grouped COUNT(*) for a target's like total filters by postId/commentId;
+    // index them so that stays cheap and the cascade deletes don't scan.
+    index("likes_post_id_idx").on(table.postId),
+    index("likes_comment_id_idx").on(table.commentId),
+    // Exactly one target column is set — never both, never neither.
+    check(
+      "likes_exactly_one_target",
+      sql`(${table.postId} IS NOT NULL AND ${table.commentId} IS NULL) OR (${table.postId} IS NULL AND ${table.commentId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type DbLike = typeof likes.$inferSelect;
+export type NewDbLike = typeof likes.$inferInsert;
 
 export const chats = pgTable("chats", {
   id: serial("id").primaryKey(),

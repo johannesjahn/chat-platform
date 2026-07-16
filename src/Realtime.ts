@@ -36,6 +36,34 @@ export type PostEvent = {
   readonly postId: number;
 };
 
+// Pushed when a comment or reply on a post is created, edited, or deleted.
+// Unlike `post_changed` this is *not* broadcast to everyone — a busy post's
+// comment traffic would flood every connected client. It's scoped to the
+// "post room": the sockets that have explicitly subscribed to this post's
+// comment section (via a `subscribe_post_comments` message — see
+// RealtimeSocket.ts and `notifyPostRoom` below), i.e. whoever currently has
+// it open. Carries only ids; the client refetches the affected comment
+// queries over REST, same convention as the other id-only events.
+export type CommentEvent = {
+  readonly type: "comment_changed";
+  readonly postId: number;
+  readonly commentId: number;
+};
+
+// Pushed when a like on a post or a comment/reply is added or removed. A like
+// on a *post* goes out feed-wide (via `broadcastAll`, like `post_changed`) —
+// like counts are low-volume and relevant to anyone viewing the feed. A like
+// on a *comment* is scoped to that post's room (`notifyPostRoom`) instead, to
+// avoid flooding the whole feed with per-comment activity. Unlike the id-only
+// events, this carries the fresh `likeCount` so a viewer's count updates
+// without every client having to refetch on every toggle.
+export type LikeEvent = {
+  readonly type: "like_changed";
+  readonly targetType: "post" | "comment";
+  readonly targetId: number;
+  readonly likeCount: number;
+};
+
 // Pushed whenever a user's live-connection count transitions between zero and
 // non-zero (see `register` below) — i.e. on their *first* connection (a tab
 // opened, a page refreshed) or their *last* disconnection (every tab closed),
@@ -67,7 +95,13 @@ export type TypingEvent = {
 // the exception: there's no REST resource to refetch for "is this user
 // currently online/typing", so those carry the full, self-contained state.
 export type RealtimeEvent =
-  ChatEvent | ChatDeletedEvent | PostEvent | PresenceEvent | TypingEvent;
+  | ChatEvent
+  | ChatDeletedEvent
+  | PostEvent
+  | CommentEvent
+  | LikeEvent
+  | PresenceEvent
+  | TypingEvent;
 
 // A connected client's outbound channel — bound to one open `/ws` socket.
 type Writer = (chunk: string) => Effect.Effect<void, unknown>;
@@ -89,6 +123,30 @@ export class RealtimeConnections extends Context.Tag("RealtimeConnections")<
       event: RealtimeEvent,
     ) => Effect.Effect<void>;
     readonly broadcastAll: (event: RealtimeEvent) => Effect.Effect<void>;
+    // Post-room subscription: a single `/ws` connection (identified by its
+    // `write` channel) joining/leaving the set of sockets currently viewing
+    // `postId`'s comment section. Membership is local to this instance — a
+    // connection only lives on the instance that accepted it — so these just
+    // mutate a local map; the *events* still travel over PubSub so a mutation
+    // on any instance reaches that post's viewers on every instance (see
+    // `notifyPostRoom`). A connection's `unregister` (from `register`) also
+    // sweeps it out of every room, so a dropped socket needs no explicit
+    // unsubscribe.
+    readonly subscribePost: (
+      postId: number,
+      write: Writer,
+    ) => Effect.Effect<void>;
+    readonly unsubscribePost: (
+      postId: number,
+      write: Writer,
+    ) => Effect.Effect<void>;
+    // Publishes `event` to every socket subscribed to `postId`'s room, on any
+    // instance — the scoped counterpart to `broadcastAll`, for comment/reply
+    // and per-comment-like activity that shouldn't flood the whole feed.
+    readonly notifyPostRoom: (
+      postId: number,
+      event: RealtimeEvent,
+    ) => Effect.Effect<void>;
     // Ids of every user with a live `/ws` connection *anywhere* right now
     // (see PresenceStore, which is what actually answers this — correctly
     // cross-instance when Redis-backed). Used to hand a freshly-connecting
@@ -110,7 +168,12 @@ type Envelope =
       readonly userIds: ReadonlyArray<number>;
       readonly event: RealtimeEvent;
     }
-  | { readonly scope: "all"; readonly event: RealtimeEvent };
+  | { readonly scope: "all"; readonly event: RealtimeEvent }
+  | {
+      readonly scope: "post";
+      readonly postId: number;
+      readonly event: RealtimeEvent;
+    };
 
 // Registration (`byUser`) stays local to this process — a `/ws` connection
 // only ever lives on the instance that accepted it, and `byUser` exists only
@@ -127,25 +190,35 @@ export const RealtimeConnectionsLive = Layer.effect(
     const pubsub = yield* PubSub;
     const presenceStore = yield* PresenceStore;
     const byUser = new Map<number, Set<Writer>>();
+    // postId -> the local connection writers currently subscribed to that
+    // post's comment room (see `subscribePost`). Parallel to `byUser`, and
+    // like it stays local per-instance — cross-instance fan-out is PubSub's
+    // job (see `notifyPostRoom`).
+    const byPost = new Map<number, Set<Writer>>();
 
     // A dead/broken socket write must never fail the mutation that triggered
     // it (same reasoning as notifyUsers/broadcastAll's Effect.ignore below),
     // but silently dropping it left no trace a connection had gone bad.
-    // Logging here at least leaves a trail.
-    const logDroppedWrite = (userId: number, error: unknown) =>
+    // Logging here at least leaves a trail. `context` identifies the intended
+    // recipient (a `userId` for user/broadcast scopes, a `postId` for a post
+    // room) for the log line.
+    const logDroppedWrite = (
+      context: Record<string, unknown>,
+      error: unknown,
+    ) =>
       Effect.logWarning(
         "RealtimeConnections: dropped delivery, connection write failed",
-      ).pipe(Effect.annotateLogs({ userId, error: String(error) }));
+      ).pipe(Effect.annotateLogs({ ...context, error: String(error) }));
 
     const writeAll = (
       writers: Iterable<Writer>,
       payload: string,
-      userId: number,
+      context: Record<string, unknown>,
     ) =>
       Effect.gen(function* () {
         for (const write of writers) {
           yield* write(payload).pipe(
-            Effect.catchAll((error) => logDroppedWrite(userId, error)),
+            Effect.catchAll((error) => logDroppedWrite(context, error)),
           );
         }
       });
@@ -157,8 +230,15 @@ export const RealtimeConnectionsLive = Layer.effect(
 
         if (envelope.scope === "all") {
           for (const [userId, writers] of byUser) {
-            yield* writeAll(writers, payload, userId);
+            yield* writeAll(writers, payload, { userId });
           }
+          return;
+        }
+
+        if (envelope.scope === "post") {
+          const writers = byPost.get(envelope.postId);
+          if (!writers) return;
+          yield* writeAll(writers, payload, { postId: envelope.postId });
           return;
         }
 
@@ -168,7 +248,7 @@ export const RealtimeConnectionsLive = Layer.effect(
           seen.add(userId);
           const writers = byUser.get(userId);
           if (!writers) continue;
-          yield* writeAll(writers, payload, userId);
+          yield* writeAll(writers, payload, { userId });
         }
       });
 
@@ -206,6 +286,34 @@ export const RealtimeConnectionsLive = Layer.effect(
         .pipe(Effect.catchAll((error) => logPublishFailure(envelope, error)));
     };
 
+    const notifyPostRoom: Context.Tag.Service<
+      typeof RealtimeConnections
+    >["notifyPostRoom"] = (postId, event) => {
+      const envelope = { scope: "post", postId, event } satisfies Envelope;
+      return pubsub
+        .publish(CHANNEL, JSON.stringify(envelope))
+        .pipe(Effect.catchAll((error) => logPublishFailure(envelope, error)));
+    };
+
+    const subscribePost: Context.Tag.Service<
+      typeof RealtimeConnections
+    >["subscribePost"] = (postId, write) =>
+      Effect.sync(() => {
+        const set = byPost.get(postId) ?? new Set();
+        set.add(write);
+        byPost.set(postId, set);
+      });
+
+    const unsubscribePost: Context.Tag.Service<
+      typeof RealtimeConnections
+    >["unsubscribePost"] = (postId, write) =>
+      Effect.sync(() => {
+        const set = byPost.get(postId);
+        if (!set) return;
+        set.delete(write);
+        if (set.size === 0) byPost.delete(postId);
+      });
+
     const register: Context.Tag.Service<
       typeof RealtimeConnections
     >["register"] = (userId, write) =>
@@ -232,6 +340,16 @@ export const RealtimeConnectionsLive = Layer.effect(
           if (current) {
             current.delete(write);
             if (current.size === 0) byUser.delete(userId);
+          }
+          // Sweep this connection out of every post room it had joined, so a
+          // dropped socket leaves no dangling room membership (the client has
+          // no chance to send `unsubscribe_post_comments` on an abrupt
+          // close). Iterating every room is fine — a process holds at most a
+          // handful of open comment sections' worth.
+          for (const [postId, writers] of byPost) {
+            if (writers.delete(write) && writers.size === 0) {
+              byPost.delete(postId);
+            }
           }
           Effect.runFork(Metric.incrementBy(websocketConnectionsActive, -1));
           // Called from a plain sync cleanup callback
@@ -260,6 +378,14 @@ export const RealtimeConnectionsLive = Layer.effect(
       typeof RealtimeConnections
     >["onlineUserIds"] = presenceStore.onlineUserIds;
 
-    return { register, notifyUsers, broadcastAll, onlineUserIds };
+    return {
+      register,
+      notifyUsers,
+      broadcastAll,
+      subscribePost,
+      unsubscribePost,
+      notifyPostRoom,
+      onlineUserIds,
+    };
   }),
 );

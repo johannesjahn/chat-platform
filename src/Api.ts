@@ -139,6 +139,14 @@ export class InvalidPostsRequest extends Schema.TaggedError<InvalidPostsRequest>
   { message: Schema.String },
 ) {}
 
+// Raised for comment/reply domain-rule violations that aren't a 404/403 — a
+// malformed pagination cursor, or an attempt to reply to a reply (the depth-2
+// nesting cap, enforced at create time — see EngagementHandler.ts).
+export class InvalidCommentRequest extends Schema.TaggedError<InvalidCommentRequest>()(
+  "InvalidCommentRequest",
+  { message: Schema.String },
+) {}
+
 // Content types a post's body can hold. Extend this union (and the handler's
 // per-type validation, if any is ever needed) to support new post kinds.
 export const PostContentType = Schema.Literal("text", "image_url").annotations({
@@ -217,6 +225,13 @@ export const Post = Schema.Struct({
   content: Schema.String,
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
+  // Engagement counters computed on read (see EngagementHandler.ts /
+  // PostsHandler.ts) rather than stored — `likeCount` is the total number of
+  // likes on this post, and `likedByMe` whether the requesting user is one of
+  // them, so the feed can render a filled/unfilled like button without a
+  // second request per post.
+  likeCount: Schema.Number,
+  likedByMe: Schema.Boolean,
 }).annotations({ identifier: "Post" });
 export type Post = typeof Post.Type;
 
@@ -281,6 +296,73 @@ export const PostsPage = Schema.Struct({
   // needs to know whether another page exists (issue #51).
   nextCursor: Schema.NullOr(Schema.String),
 }).annotations({ identifier: "PostsPage" });
+
+// Shorter than a post's cap — comments are conversational, not long-form.
+export const MAX_COMMENT_CONTENT_LENGTH = 2_000;
+
+const CommentContent = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_COMMENT_CONTENT_LENGTH),
+);
+
+// A comment on a post, or a reply to a comment (a reply is just a comment
+// with `parentCommentId` set — null for a top-level comment). Nesting is
+// capped at depth 2, so a reply's parent is always a top-level comment.
+// `likeCount`/`likedByMe` mirror `Post`'s — computed on read, not stored.
+export const Comment = Schema.Struct({
+  id: Schema.Number,
+  postId: Schema.Number,
+  parentCommentId: Schema.NullOr(Schema.Number),
+  authorId: Schema.Number,
+  content: Schema.String,
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+  likeCount: Schema.Number,
+  likedByMe: Schema.Boolean,
+}).annotations({ identifier: "Comment" });
+export type Comment = typeof Comment.Type;
+
+export const CreateCommentBody = Schema.Struct({
+  content: CommentContent,
+}).annotations({ identifier: "CreateCommentBody" });
+
+export const UpdateCommentBody = Schema.Struct({
+  content: CommentContent,
+}).annotations({ identifier: "UpdateCommentBody" });
+
+// Returned by the like/unlike endpoints (on posts and comments alike): the
+// target's new total plus whether the requesting user now likes it, so the
+// client can reconcile an optimistic toggle without a follow-up read.
+export const LikeState = Schema.Struct({
+  likeCount: Schema.Number,
+  liked: Schema.Boolean,
+}).annotations({ identifier: "LikeState" });
+export type LikeState = typeof LikeState.Type;
+
+export const DEFAULT_COMMENTS_LIMIT = 20;
+export const MAX_COMMENTS_LIMIT = 100;
+
+// Comments (and replies) are ordered oldest-first (`id asc`) within their
+// thread and never reorder, so — like `PostsPageQuery` — a single forward
+// keyset cursor ("give me the next `limit` with `id > cursor`") is enough.
+// Left un-`identifier`-annotated for the same reason as `PostsPageQuery`
+// above (see CLAUDE.md) — it's inlined into query parameters.
+export const CommentsPageQuery = Schema.Struct({
+  cursor: Schema.optional(Schema.String),
+  limit: Schema.optional(
+    Schema.NumberFromString.pipe(
+      Schema.int(),
+      Schema.between(1, MAX_COMMENTS_LIMIT),
+    ),
+  ),
+});
+
+export const CommentsPage = Schema.Struct({
+  comments: Schema.Array(Comment),
+  limit: Schema.Number,
+  // Opaque cursor for the next page, or null once the thread is exhausted —
+  // same fetch-one-past-`limit` trick as `PostsPage.nextCursor`.
+  nextCursor: Schema.NullOr(Schema.String),
+}).annotations({ identifier: "CommentsPage" });
 
 // A chat is either a "direct" (exactly two participants, no title — the UI
 // derives a name from the other participant) or a "group" chat (2-20
@@ -568,6 +650,118 @@ const PostsGroup = HttpApiGroup.make("posts")
       .middleware(Authentication),
   );
 
+// Comments, replies, and likes on posts/comments. Kept in its own group
+// (rather than folded into `posts`) since it spans two path roots
+// (`/posts/:id/...` and `/comments/:id/...`) and its own handler — the group
+// name is just an organizational label, it doesn't have to match the path.
+const IdParam = Schema.Struct({ id: Schema.NumberFromString });
+
+const CommentsGroup = HttpApiGroup.make("comments")
+  .add(
+    // Idempotent like/unlike toggle on a post — liking an already-liked post
+    // (or unliking one that isn't) still succeeds, returning the current
+    // state. Emits a feed-wide `like_changed` realtime event.
+    HttpApiEndpoint.post("likePost", "/posts/:id/likes")
+      .setPath(IdParam)
+      .addSuccess(LikeState)
+      .addError(NotFound, { status: 404 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    HttpApiEndpoint.del("unlikePost", "/posts/:id/likes")
+      .setPath(IdParam)
+      .addSuccess(LikeState)
+      .addError(NotFound, { status: 404 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Oldest-first page of a post's top-level comments (replies excluded —
+    // fetch those per-comment via `listReplies`). Keyset-paginated like
+    // `listPosts`.
+    HttpApiEndpoint.get("listComments", "/posts/:id/comments")
+      .setPath(IdParam)
+      .setUrlParams(CommentsPageQuery)
+      .addSuccess(CommentsPage)
+      .addError(NotFound, { status: 404 })
+      .addError(InvalidCommentRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    HttpApiEndpoint.post("createComment", "/posts/:id/comments")
+      .setPath(IdParam)
+      .setPayload(CreateCommentBody)
+      .addSuccess(Comment, { status: 201 })
+      .addError(NotFound, { status: 404 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Oldest-first page of a comment's replies.
+    HttpApiEndpoint.get("listReplies", "/comments/:id/replies")
+      .setPath(IdParam)
+      .setUrlParams(CommentsPageQuery)
+      .addSuccess(CommentsPage)
+      .addError(NotFound, { status: 404 })
+      .addError(InvalidCommentRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Creates a reply to a top-level comment. Rejects (400) if the target is
+    // itself a reply — the depth-2 nesting cap (see EngagementHandler.ts).
+    HttpApiEndpoint.post("createReply", "/comments/:id/replies")
+      .setPath(IdParam)
+      .setPayload(CreateCommentBody)
+      .addSuccess(Comment, { status: 201 })
+      .addError(NotFound, { status: 404 })
+      .addError(InvalidCommentRequest, { status: 400 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Like/unlike toggle on a comment or reply (both live in `comments`, so
+    // one endpoint covers both). Emits a `like_changed` event scoped to the
+    // post's comment-room subscribers rather than broadcast feed-wide.
+    HttpApiEndpoint.post("likeComment", "/comments/:id/likes")
+      .setPath(IdParam)
+      .addSuccess(LikeState)
+      .addError(NotFound, { status: 404 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    HttpApiEndpoint.del("unlikeComment", "/comments/:id/likes")
+      .setPath(IdParam)
+      .addSuccess(LikeState)
+      .addError(NotFound, { status: 404 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Edits a comment/reply's content — the author only (or an admin), same
+    // `canModify` rule as posts.
+    HttpApiEndpoint.patch("updateComment", "/comments/:id")
+      .setPath(IdParam)
+      .setPayload(UpdateCommentBody)
+      .addSuccess(Comment)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Deletes a comment/reply — the author only (or an admin). A top-level
+    // comment's replies and every like on it cascade via the FKs.
+    HttpApiEndpoint.del("deleteComment", "/comments/:id")
+      .setPath(IdParam)
+      .addSuccess(Schema.Void)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  );
+
 const ChatIdPath = Schema.Struct({ id: Schema.NumberFromString });
 
 const MessageIdPath = Schema.Struct({
@@ -826,6 +1020,7 @@ const RealtimeGroup = HttpApiGroup.make("realtime").add(
 export class ChatApi extends HttpApi.make("chat-platform")
   .add(UsersGroup)
   .add(PostsGroup)
+  .add(CommentsGroup)
   .add(ChatsGroup)
   .add(MetaGroup)
   .add(RealtimeGroup) {}

@@ -229,3 +229,91 @@ test("a chat event reaches only the chat's participants, and a post event reache
   aliceSocket.socket.close();
   carolSocket.socket.close();
 }, 15_000);
+
+test("a comment event reaches only sockets subscribed to that post's room", async () => {
+  // Only two fresh registrations here on purpose: registration is rate-limited
+  // per IP (REGISTER_MAX_ATTEMPTS_PER_IP in UsersHandler.ts) and the first
+  // test in this file already spent several against this shared server's one
+  // client IP. The post's author doubles as the "bystander": their own socket
+  // never subscribes to the room, so it stands in for any connected user who
+  // doesn't have the comment section open.
+  const author = await registerAndLogin(`cauthor_${Date.now()}`);
+  const viewer = await registerAndLogin(`cviewer_${Date.now()}`);
+
+  const [authorSocket, viewerSocket] = await Promise.all([
+    connect(author.accessToken),
+    connect(viewer.accessToken),
+  ]);
+  await Promise.all([authorSocket.ready, viewerSocket.ready]);
+
+  const postResponse = await fetch(`${apiUrl}/posts`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${author.accessToken}`,
+    },
+    body: JSON.stringify({ contentType: "text", content: "come discuss" }),
+  });
+  const post = (await postResponse.json()) as { id: number };
+
+  // Only the viewer opens the comment section — joining the post's realtime
+  // room over the existing socket (what the frontend does on mount, see
+  // web/src/lib/postRooms.ts). The author's socket deliberately does not.
+  viewerSocket.socket.send(
+    JSON.stringify({ type: "subscribe_post_comments", postId: post.id }),
+  );
+  // Give the subscribe control message a moment to be processed before the
+  // comment is created, so the room membership is in place first.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  await fetch(`${apiUrl}/posts/${post.id}/comments`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${author.accessToken}`,
+    },
+    body: JSON.stringify({ content: "first!" }),
+  });
+
+  // The subscribed viewer sees the scoped comment event.
+  await waitFor(() =>
+    viewerSocket.messages.some(
+      (m) => m.type === "comment_changed" && m.postId === post.id,
+    ),
+  );
+  expect(
+    viewerSocket.messages.some(
+      (m) => m.type === "comment_changed" && m.postId === post.id,
+    ),
+  ).toBe(true);
+
+  // The author's socket, which never subscribed to this post's room, must
+  // not — the whole point of room scoping (vs. the feed-wide `post_changed`
+  // broadcast).
+  expect(authorSocket.messages.some((m) => m.type === "comment_changed")).toBe(
+    false,
+  );
+
+  // A like on the post itself, by contrast, still broadcasts feed-wide, so
+  // even the non-subscribed author socket sees it.
+  await fetch(`${apiUrl}/posts/${post.id}/likes`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${viewer.accessToken}` },
+  });
+  await waitFor(() =>
+    authorSocket.messages.some(
+      (m) =>
+        m.type === "like_changed" &&
+        m.targetType === "post" &&
+        m.targetId === post.id,
+    ),
+  );
+  expect(
+    authorSocket.messages.some(
+      (m) => m.type === "like_changed" && m.targetId === post.id,
+    ),
+  ).toBe(true);
+
+  authorSocket.socket.close();
+  viewerSocket.socket.close();
+}, 15_000);
