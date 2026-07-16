@@ -7,7 +7,7 @@ import {
   HttpClientRequest,
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
-import { Duration, Effect, Layer } from "effect";
+import { Duration, Effect, Layer, Metric, MetricLabel } from "effect";
 import {
   ChatApi,
   MAX_PASSWORD_LENGTH,
@@ -21,6 +21,7 @@ import { Db } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { JwtLive } from "./Jwt.ts";
 import { EngagementHandlerLive } from "./EngagementHandler.ts";
+import { authEventsTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive, PubSub } from "./PubSub.ts";
@@ -100,6 +101,29 @@ const run = async <A, E>(
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
+// authEventsTotal/rateLimitRejectionsTotal are module-level metrics shared
+// with whichever other test files land in the same `bun test --parallel`
+// worker process, so tests below assert deltas rather than absolute values
+// (see Metrics.test.ts's websocketConnectionsActive test for the same
+// reasoning).
+const authEventCount = (
+  event: "signup" | "login" | "refresh",
+  outcome: "success" | "failure",
+) =>
+  Metric.value(
+    Metric.taggedWithLabels(authEventsTotal, [
+      MetricLabel.make("event", event),
+      MetricLabel.make("outcome", outcome),
+    ]),
+  ).pipe(Effect.map((state) => state.count));
+
+const rateLimitRejectionCount = (limiter: string) =>
+  Metric.value(
+    Metric.taggedWithLabels(rateLimitRejectionsTotal, [
+      MetricLabel.make("limiter", limiter),
+    ]),
+  ).pipe(Effect.map((state) => state.count));
+
 // A client that sends `Authorization: Bearer <token>` on every request, for
 // exercising endpoints behind the Authentication middleware.
 const makeAuthedClient = (token: string) =>
@@ -140,10 +164,11 @@ test("searchUsers rejects a bogus bearer token", () =>
     }),
   ));
 
-test("register returns the created user with an id and no password", () =>
+test('register returns the created user with an id and no password, incrementing auth_events_total{event="signup",outcome="success"}', () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
+      const before = yield* authEventCount("signup", "success");
       const user = yield* c.users.register({
         payload: { username: "alice", password: "s3cret-pw" },
       });
@@ -152,6 +177,7 @@ test("register returns the created user with an id and no password", () =>
       expect(user.role).toBe("user");
       expect(user).not.toHaveProperty("password");
       expect(user).not.toHaveProperty("passwordHash");
+      expect(yield* authEventCount("signup", "success")).toBe(before + 1);
     }),
   ));
 
@@ -380,13 +406,40 @@ test("getUser returns 404 for a missing id", () =>
     }),
   ));
 
-test("register with a duplicate username returns a 409 conflict", () =>
+test('register is rate-limited per IP, incrementing rate_limit_rejections_total{limiter="register"}', () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const before = yield* rateLimitRejectionCount("register");
+      // REGISTER_MAX_ATTEMPTS_PER_IP = 5 (UsersHandler.ts). Every call in
+      // this in-process test harness resolves to the same "unknown" IP (no
+      // real socket/remoteAddress), so they all land in one bucket.
+      for (let i = 0; i < 5; i++) {
+        yield* c.users.register({
+          payload: { username: `ratelimited-${i}`, password: "pw-testpass" },
+        });
+      }
+      const result = yield* c.users
+        .register({
+          payload: { username: "ratelimited-tripped", password: "pw-testpass" },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("TooManyRequests");
+      }
+      expect(yield* rateLimitRejectionCount("register")).toBe(before + 1);
+    }),
+  ));
+
+test('register with a duplicate username returns a 409 conflict, incrementing auth_events_total{event="signup",outcome="failure"}', () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
         payload: { username: "dave", password: "password-1" },
       });
+      const before = yield* authEventCount("signup", "failure");
       const result = yield* c.users
         .register({ payload: { username: "dave", password: "password-2" } })
         .pipe(Effect.either);
@@ -394,6 +447,7 @@ test("register with a duplicate username returns a 409 conflict", () =>
       if (result._tag === "Left") {
         expect((result.left as { message: string }).message).toContain("dave");
       }
+      expect(yield* authEventCount("signup", "failure")).toBe(before + 1);
     }),
   ));
 
@@ -431,16 +485,18 @@ const decodeClaims = (token: string) => {
   };
 };
 
-test("login succeeds and returns the user plus signed access and refresh JWTs", () =>
+test('login succeeds and returns the user plus signed access and refresh JWTs, incrementing auth_events_total{event="login",outcome="success"}', () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
       const created = yield* c.users.register({
         payload: { username: "erin", password: "correct-horse" },
       });
+      const before = yield* authEventCount("login", "success");
       const { user, accessToken, refreshToken } = yield* c.users.login({
         payload: { username: "erin", password: "correct-horse" },
       });
+      expect(yield* authEventCount("login", "success")).toBe(before + 1);
       expect(user).toEqual(created);
 
       const access = decodeClaims(accessToken);
@@ -489,17 +545,19 @@ test("login accepts a pre-existing account whose password predates the minimum l
     }),
   ));
 
-test("login fails with a wrong password", () =>
+test('login fails with a wrong password, incrementing auth_events_total{event="login",outcome="failure"}', () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
         payload: { username: "frank", password: "right-pw" },
       });
+      const before = yield* authEventCount("login", "failure");
       const result = yield* c.users
         .login({ payload: { username: "frank", password: "wrong-pw" } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
+      expect(yield* authEventCount("login", "failure")).toBe(before + 1);
     }),
   ));
 
@@ -528,7 +586,7 @@ test("login succeeds regardless of the casing used, matching the registered acco
     }),
   ));
 
-test("refresh exchanges a valid refresh token for a new, working access token", () =>
+test('refresh exchanges a valid refresh token for a new, working access token, incrementing auth_events_total{event="refresh",outcome="success"}', () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
@@ -539,9 +597,11 @@ test("refresh exchanges a valid refresh token for a new, working access token", 
         payload: { username: "hana", password: "pw-hana1" },
       });
 
+      const before = yield* authEventCount("refresh", "success");
       const refreshed = yield* c.users.refresh({
         payload: { refreshToken },
       });
+      expect(yield* authEventCount("refresh", "success")).toBe(before + 1);
       const claims = decodeClaims(refreshed.accessToken);
       expect(claims.username).toBe("hana");
       expect(claims.type).toBe("access");
@@ -694,10 +754,11 @@ test("refresh rejects an access token used in place of a refresh token", () =>
     }),
   ));
 
-test("refresh rejects a bogus refresh token", () =>
+test('refresh rejects a bogus refresh token, incrementing auth_events_total{event="refresh",outcome="failure"}', () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
+      const before = yield* authEventCount("refresh", "failure");
       const result = yield* c.users
         .refresh({ payload: { refreshToken: "not-a-real-token" } })
         .pipe(Effect.either);
@@ -707,6 +768,7 @@ test("refresh rejects a bogus refresh token", () =>
           "InvalidCredentials",
         );
       }
+      expect(yield* authEventCount("refresh", "failure")).toBe(before + 1);
     }),
   ));
 

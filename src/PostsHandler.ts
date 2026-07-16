@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { desc, eq, lt } from "drizzle-orm";
-import { Effect } from "effect";
+import { Effect, Metric, MetricLabel } from "effect";
 import {
   ChatApi,
   DEFAULT_POSTS_LIMIT,
@@ -11,6 +11,7 @@ import {
 import { CurrentUser } from "./Auth.ts";
 import { Db } from "./Db.ts";
 import { type LikeInfo, postLikeInfo } from "./likes.ts";
+import { contentCreatedTotal } from "./Metrics.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { posts } from "./db/schema.ts";
 
@@ -149,6 +150,12 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
+          yield* Metric.update(
+            Metric.taggedWithLabels(contentCreatedTotal, [
+              MetricLabel.make("type", "post"),
+            ]),
+            1,
+          );
           yield* connections.broadcastAll({
             type: "post_changed",
             postId: row.id,

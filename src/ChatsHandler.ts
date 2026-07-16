@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context, Effect, Metric, MetricLabel } from "effect";
 import {
   ChatApi,
   DEFAULT_CHATS_LIMIT,
@@ -29,6 +29,7 @@ import {
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
+import { contentCreatedTotal } from "./Metrics.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import {
   chatParticipants,
@@ -1294,6 +1295,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const row = created[0];
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
+          yield* Metric.update(
+            Metric.taggedWithLabels(contentCreatedTotal, [
+              MetricLabel.make("type", "message"),
+            ]),
+            1,
+          );
 
           const version = yield* getChatVersion(db, id);
           const participants = yield* getParticipants(db, id);

@@ -8,7 +8,7 @@ import {
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
 import { eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Metric, MetricLabel } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
@@ -16,6 +16,7 @@ import { Db } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { JwtLive } from "./Jwt.ts";
 import { EngagementHandlerLive } from "./EngagementHandler.ts";
+import { contentCreatedTotal } from "./Metrics.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
@@ -162,6 +163,27 @@ test("createPost creates a text post owned by the current user", () =>
       expect(post.content).toBe("hello world");
       expect(typeof post.id).toBe("number");
       expect(post.createdAt).toBe(post.updatedAt);
+    }),
+  ));
+
+// content_created_total is a module-level metric shared with whichever other
+// test files land in the same `bun test --parallel` worker process (same
+// reasoning as Metrics.test.ts's websocketConnectionsActive test), so this
+// asserts the delta createPost produces rather than an absolute value.
+test('createPost increments content_created_total{type="post"}', () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin("dana", "pw-testpass");
+      const authed = yield* makeAuthedClient(accessToken);
+      const postsCreated = Metric.taggedWithLabels(contentCreatedTotal, [
+        MetricLabel.make("type", "post"),
+      ]);
+      const before = yield* Metric.value(postsCreated);
+      yield* authed.posts.createPost({
+        payload: { contentType: "text", content: "counted" },
+      });
+      const after = yield* Metric.value(postsCreated);
+      expect(after.count).toBe(before.count + 1);
     }),
   ));
 

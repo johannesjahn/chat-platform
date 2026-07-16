@@ -1,5 +1,8 @@
-import { Context, Effect, Layer, Metric } from "effect";
-import { websocketConnectionsActive } from "./Metrics.ts";
+import { Context, Effect, Layer, Metric, MetricLabel } from "effect";
+import {
+  websocketConnectionsActive,
+  websocketConnectionsTotal,
+} from "./Metrics.ts";
 import { PresenceStore } from "./Presence.ts";
 import { PubSub } from "./PubSub.ts";
 
@@ -326,6 +329,15 @@ export const RealtimeConnectionsLive = Layer.effect(
         // *connections*, not of online *users* (PresenceStore, below, is the
         // latter): a user with two tabs open holds two of these.
         yield* Metric.increment(websocketConnectionsActive);
+        // Churn counterpart to the gauge above — websocketConnectionsActive
+        // only shows the current count, not how often connections open and
+        // close.
+        yield* Metric.update(
+          Metric.taggedWithLabels(websocketConnectionsTotal, [
+            MetricLabel.make("event", "connect"),
+          ]),
+          1,
+        );
         // PresenceStore.connect reports whether this was the *global*
         // transition to online (across every instance), not just whether
         // this instance's own local set was empty a moment ago — a second
@@ -352,6 +364,14 @@ export const RealtimeConnectionsLive = Layer.effect(
             }
           }
           Effect.runFork(Metric.incrementBy(websocketConnectionsActive, -1));
+          Effect.runFork(
+            Metric.update(
+              Metric.taggedWithLabels(websocketConnectionsTotal, [
+                MetricLabel.make("event", "disconnect"),
+              ]),
+              1,
+            ),
+          );
           // Called from a plain sync cleanup callback
           // (`Effect.ensuring(Effect.sync(unregister))` in
           // RealtimeSocket.ts), which can't itself `yield*` — same

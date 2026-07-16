@@ -1,7 +1,16 @@
 import { afterAll, expect, test } from "bun:test";
 import { HttpServerRequest, HttpServerResponse } from "@effect/platform";
-import { ConfigProvider, Effect, Layer, ManagedRuntime, Option } from "effect";
+import {
+  ConfigProvider,
+  Effect,
+  Layer,
+  ManagedRuntime,
+  Metric,
+  MetricLabel,
+  Option,
+} from "effect";
 import { globalRateLimit } from "./GlobalRateLimit.ts";
+import { rateLimitRejectionsTotal } from "./Metrics.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 
 // A trivial inner app: globalRateLimit only ever reads `.url`/`.remoteAddress`
@@ -45,7 +54,17 @@ test("a request under the ceiling passes through untouched", async () => {
   expect(response.status).toBe(200);
 });
 
-test("the ceiling trips after GLOBAL_MAX_REQUESTS_PER_IP requests from the same IP, returning 429 with a Retry-After hint", async () => {
+test('the ceiling trips after GLOBAL_MAX_REQUESTS_PER_IP requests from the same IP, returning 429 with a Retry-After hint and incrementing rate_limit_rejections_total{limiter="global"}', async () => {
+  // rate_limit_rejections_total is a module-level metric shared with
+  // whichever other test files land in the same `bun test --parallel`
+  // worker process, so this asserts the delta produced rather than an
+  // absolute value (see Metrics.test.ts's websocketConnectionsActive test
+  // for the same reasoning).
+  const rejections = Metric.taggedWithLabels(rateLimitRejectionsTotal, [
+    MetricLabel.make("limiter", "global"),
+  ]);
+  const before = await runtime.runPromise(Metric.value(rejections));
+
   // GLOBAL_MAX_REQUESTS_PER_IP is 1000 (GlobalRateLimit.ts).
   for (let i = 0; i < 1000; i++) {
     const response = await request("/version", "2.2.2.2");
@@ -56,6 +75,9 @@ test("the ceiling trips after GLOBAL_MAX_REQUESTS_PER_IP requests from the same 
   expect(tripped.status).toBe(429);
   const retryAfter = tripped.headers["retry-after"];
   expect(Number(retryAfter)).toBeGreaterThan(0);
+
+  const after = await runtime.runPromise(Metric.value(rejections));
+  expect(after.count).toBe(before.count + 1);
 });
 
 test("a different source IP gets its own, independent bucket", async () => {

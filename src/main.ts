@@ -2,6 +2,7 @@ import { HttpApiBuilder, HttpApiSwagger } from "@effect/platform";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Config, Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
+import { ActiveUsersMetricsLive } from "./ActiveUsersMetrics.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
@@ -65,6 +66,7 @@ const ServerLive = Layer.mergeAll(
   ReadyRouteLive,
   MetricsRouteLive,
   RefreshTokenCleanupLive,
+  ActiveUsersMetricsLive,
 ).pipe(
   Layer.provide(ApiLive),
   Layer.provide(RealtimeConnectionsLive),

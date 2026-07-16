@@ -8,7 +8,7 @@ import {
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
 import { eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Metric, MetricLabel } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
@@ -16,6 +16,7 @@ import { Db } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { EngagementHandlerLive } from "./EngagementHandler.ts";
 import { JwtLive } from "./Jwt.ts";
+import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
@@ -165,6 +166,31 @@ test("likePost increments the count and marks likedByMe", () =>
     }),
   ));
 
+// content_created_total is a module-level metric shared with whichever other
+// test files land in the same `bun test --parallel` worker process, so this
+// asserts the delta produced rather than an absolute value (see
+// Metrics.test.ts's websocketConnectionsActive test for the same reasoning).
+test('likePost increments content_created_total{type="like"} only on an actual new like', () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("faye");
+      const likesCreated = Metric.taggedWithLabels(contentCreatedTotal, [
+        MetricLabel.make("type", "like"),
+      ]);
+      const before = yield* Metric.value(likesCreated);
+
+      yield* authed.comments.likePost({ path: { id: post.id } });
+      const afterFirst = yield* Metric.value(likesCreated);
+      expect(afterFirst.count).toBe(before.count + 1);
+
+      // A repeat like is a no-op (see likePost's onConflictDoNothing) and
+      // must not double-count.
+      yield* authed.comments.likePost({ path: { id: post.id } });
+      const afterSecond = yield* Metric.value(likesCreated);
+      expect(afterSecond.count).toBe(before.count + 1);
+    }),
+  ));
+
 test("likePost is idempotent — liking twice still counts once", () =>
   run(
     Effect.gen(function* () {
@@ -255,10 +281,14 @@ test("likePost rejects an unauthenticated request", () =>
     }),
   ));
 
-test("engagement mutations are rate-limited per user", () =>
+test('engagement mutations are rate-limited per user, incrementing rate_limit_rejections_total{limiter="engagement"}', () =>
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("limiter");
+      const rejections = Metric.taggedWithLabels(rateLimitRejectionsTotal, [
+        MetricLabel.make("limiter", "engagement"),
+      ]);
+      const before = yield* Metric.value(rejections);
       // ENGAGEMENT_WRITE_MAX_PER_USER = 120 (EngagementHandler.ts). Creating
       // the post above isn't an engagement write (it's the posts group, no
       // limiter), so this user's engagement bucket starts empty. likePost is
@@ -279,6 +309,8 @@ test("engagement mutations are rate-limited per user", () =>
       }
       expect(allowed).toBe(120);
       expect(lastTag).toBe("TooManyRequests");
+      const after = yield* Metric.value(rejections);
+      expect(after.count).toBe(before.count + 1);
     }),
   ));
 
@@ -298,6 +330,23 @@ test("createComment creates a top-level comment owned by the author", () =>
       expect(comment.content).toBe("nice post");
       expect(comment.likeCount).toBe(0);
       expect(comment.likedByMe).toBe(false);
+    }),
+  ));
+
+test('createComment increments content_created_total{type="comment"}', () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("nadia");
+      const commentsCreated = Metric.taggedWithLabels(contentCreatedTotal, [
+        MetricLabel.make("type", "comment"),
+      ]);
+      const before = yield* Metric.value(commentsCreated);
+      yield* authed.comments.createComment({
+        path: { id: post.id },
+        payload: { content: "nice post" },
+      });
+      const after = yield* Metric.value(commentsCreated);
+      expect(after.count).toBe(before.count + 1);
     }),
   ));
 

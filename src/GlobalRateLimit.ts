@@ -4,8 +4,9 @@ import {
   HttpServerResponse,
   type HttpApp,
 } from "@effect/platform";
-import { Effect } from "effect";
+import { Effect, Metric, MetricLabel } from "effect";
 import { clientIp } from "./ClientIp.ts";
+import { rateLimitRejectionsTotal } from "./Metrics.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 
 // Global per-IP request-rate ceiling (issue #40, sub-task of #25) — a single
@@ -50,6 +51,12 @@ export const globalRateLimit = HttpMiddleware.make(
         GLOBAL_WINDOW_SECONDS,
       );
       if (!result.allowed) {
+        yield* Metric.update(
+          Metric.taggedWithLabels(rateLimitRejectionsTotal, [
+            MetricLabel.make("limiter", "global"),
+          ]),
+          1,
+        );
         return yield* HttpServerResponse.text("Too Many Requests", {
           status: 429,
           headers: { "retry-after": String(result.retryAfterSeconds) },

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { FetchHttpClient, HttpApiBuilder, HttpClient } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
-import { Effect, Layer, Metric } from "effect";
+import { Effect, Layer, Metric, MetricLabel } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
@@ -11,6 +11,7 @@ import {
   MetricsRouteLive,
   recordHttpMetrics,
   websocketConnectionsActive,
+  websocketConnectionsTotal,
 } from "./Metrics.ts";
 import { EngagementHandlerLive } from "./EngagementHandler.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
@@ -149,6 +150,40 @@ test("RealtimeConnections.register/unregister track the websocketConnectionsActi
       yield* Effect.sleep("10 millis");
       const after = yield* Metric.value(websocketConnectionsActive);
       expect(after.value).toBe(before.value);
+    }).pipe(Effect.provide(TestRealtimeLive)),
+  );
+});
+
+test("RealtimeConnections.register/unregister increment websocket_connections_total, labeled by event", async () => {
+  const TestRealtimeLive = RealtimeConnectionsLive.pipe(
+    Layer.provide(InMemoryPubSubLive),
+    Layer.provide(InMemoryPresenceStoreLive),
+  );
+  const connects = Metric.taggedWithLabels(websocketConnectionsTotal, [
+    MetricLabel.make("event", "connect"),
+  ]);
+  const disconnects = Metric.taggedWithLabels(websocketConnectionsTotal, [
+    MetricLabel.make("event", "disconnect"),
+  ]);
+
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const beforeConnect = yield* Metric.value(connects);
+      const beforeDisconnect = yield* Metric.value(disconnects);
+
+      const unregister = yield* connections.register(1, () => Effect.void);
+      expect((yield* Metric.value(connects)).count).toBe(
+        beforeConnect.count + 1,
+      );
+
+      unregister();
+      // The disconnect counter update is forked rather than awaited (same
+      // reasoning as the gauge decrement above), so give it a tick to land.
+      yield* Effect.sleep("10 millis");
+      expect((yield* Metric.value(disconnects)).count).toBe(
+        beforeDisconnect.count + 1,
+      );
     }).pipe(Effect.provide(TestRealtimeLive)),
   );
 });
