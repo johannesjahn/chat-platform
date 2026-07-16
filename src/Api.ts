@@ -665,6 +665,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       .setPath(IdParam)
       .addSuccess(LikeState)
       .addError(NotFound, { status: 404 })
+      .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
   )
   .add(
@@ -672,6 +673,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       .setPath(IdParam)
       .addSuccess(LikeState)
       .addError(NotFound, { status: 404 })
+      .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
   )
   .add(
@@ -692,6 +694,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       .setPayload(CreateCommentBody)
       .addSuccess(Comment, { status: 201 })
       .addError(NotFound, { status: 404 })
+      .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
   )
   .add(
@@ -713,6 +716,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       .addSuccess(Comment, { status: 201 })
       .addError(NotFound, { status: 404 })
       .addError(InvalidCommentRequest, { status: 400 })
+      .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
   )
   .add(
@@ -723,6 +727,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       .setPath(IdParam)
       .addSuccess(LikeState)
       .addError(NotFound, { status: 404 })
+      .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
   )
   .add(
@@ -730,6 +735,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       .setPath(IdParam)
       .addSuccess(LikeState)
       .addError(NotFound, { status: 404 })
+      .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
   )
   .add(
@@ -741,6 +747,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       .addSuccess(Comment)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })
+      .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
   )
   .add(
@@ -751,6 +758,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       .addSuccess(Schema.Void)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })
+      .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
   );
 

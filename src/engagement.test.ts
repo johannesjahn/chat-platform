@@ -255,6 +255,33 @@ test("likePost rejects an unauthenticated request", () =>
     }),
   ));
 
+test("engagement mutations are rate-limited per user", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("limiter");
+      // ENGAGEMENT_WRITE_MAX_PER_USER = 120 (EngagementHandler.ts). Creating
+      // the post above isn't an engagement write (it's the posts group, no
+      // limiter), so this user's engagement bucket starts empty. likePost is
+      // idempotent, so repeats are harmless no-ops that each still consume one
+      // unit — fire past the limit and the bucket should reject.
+      let allowed = 0;
+      let lastTag = "";
+      for (let i = 0; i < 130; i++) {
+        const result = yield* authed.comments
+          .likePost({ path: { id: post.id } })
+          .pipe(Effect.either);
+        if (result._tag === "Right") {
+          allowed++;
+        } else {
+          lastTag = (result.left as { _tag: string })._tag;
+          break;
+        }
+      }
+      expect(allowed).toBe(120);
+      expect(lastTag).toBe("TooManyRequests");
+    }),
+  ));
+
 // --- Comments -------------------------------------------------------------
 
 test("createComment creates a top-level comment owned by the author", () =>

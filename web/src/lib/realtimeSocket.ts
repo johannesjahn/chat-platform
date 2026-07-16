@@ -13,7 +13,11 @@ import {
   chatsListQueryKey,
 } from "./chats";
 import { commentsQueryKeyRoot } from "./comments";
-import { postDetailQueryKeyPrefix, postsFeedQueryKey } from "./posts";
+import {
+  patchCachedPost,
+  postDetailQueryKeyPrefix,
+  postsFeedQueryKey,
+} from "./posts";
 import { setRealtimeSocket } from "./postRooms";
 import { resetPresence, setUserOnline } from "./presence";
 import { noteTyping } from "./typing";
@@ -201,16 +205,20 @@ export function useRealtimeSocket(enabled: boolean): void {
             });
             break;
           case "like_changed":
-            // A post like is feed-wide (refresh feed + any open detail); a
-            // comment like arrives scoped to the post room, so refresh the
-            // comment queries to pick up the new count.
+            // A post like goes out feed-wide, so this lands on *every*
+            // connected client. Patch the affected post's count in place from
+            // the event's `likeCount` (that's exactly why it's on the wire —
+            // see LikeEvent in src/Realtime.ts) instead of invalidating the
+            // whole feed, which would be an O(users × likes) refetch storm.
+            // `likedByMe` is left untouched: it doesn't change for a non-actor,
+            // and the actor already reconciled it from its own mutation
+            // response. A comment like arrives scoped to the post room (far
+            // lower volume), so it just refetches the comment queries.
             if (parsed.targetType === "post") {
-              void queryClient.invalidateQueries({
-                queryKey: postsFeedQueryKey,
-              });
-              void queryClient.invalidateQueries({
-                queryKey: postDetailQueryKeyPrefix,
-              });
+              patchCachedPost(queryClient, parsed.targetId, (post) => ({
+                ...post,
+                likeCount: parsed.likeCount,
+              }));
             } else {
               void queryClient.invalidateQueries({
                 queryKey: commentsQueryKeyRoot,

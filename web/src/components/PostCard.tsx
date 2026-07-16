@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { $api } from "@/lib/api";
-import { postDetailQueryKeyPrefix, postsFeedQueryKey } from "@/lib/posts";
+import { patchCachedPost } from "@/lib/posts";
 import { cn } from "@/lib/utils";
 import type { Post } from "@/lib/posts";
 
@@ -90,14 +90,19 @@ export function PostCard({
 
   const toggleLike = async () => {
     const mutation = post.likedByMe ? unlikePost : likePost;
-    await mutation.mutateAsync({ params: { path: { id: String(post.id) } } });
-    // The server also broadcasts a `like_changed` event, but invalidate here
-    // too so the acting user's own count updates immediately rather than
-    // waiting on the socket round-trip.
-    await queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
-    await queryClient.invalidateQueries({
-      queryKey: postDetailQueryKeyPrefix,
+    // The endpoint returns the authoritative { likeCount, liked } — patch it
+    // straight into the cache rather than refetching. `likedByMe` only ever
+    // changes for the acting client, so it's reconciled here from the
+    // response; the feed-wide `like_changed` broadcast updates every other
+    // client's count in place (see useRealtimeSocket).
+    const result = await mutation.mutateAsync({
+      params: { path: { id: String(post.id) } },
     });
+    patchCachedPost(queryClient, post.id, (p) => ({
+      ...p,
+      likeCount: result.likeCount,
+      likedByMe: result.liked,
+    }));
   };
 
   return (
