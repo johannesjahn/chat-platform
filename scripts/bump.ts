@@ -36,7 +36,9 @@ const packageJsonUpdated = packageJsonOriginal.replace(
   `$1${nextVersion}$2`,
 );
 await Bun.write(packageJsonPath, packageJsonUpdated);
-console.log(`Bumped ${packageJsonPath} from ${packageJson.version} to ${nextVersion}`);
+console.log(
+  `Bumped ${packageJsonPath} from ${packageJson.version} to ${nextVersion}`,
+);
 
 await Bun.$`bun run sync:chart-version`;
 
