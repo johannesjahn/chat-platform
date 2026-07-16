@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { and, asc, eq, gt, isNull } from "drizzle-orm";
-import { Effect } from "effect";
+import { Effect, Metric, MetricLabel } from "effect";
 import {
   ChatApi,
   DEFAULT_COMMENTS_LIMIT,
@@ -17,6 +17,7 @@ import {
   type LikeInfo,
   postLikeInfoOne,
 } from "./likes.ts";
+import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { comments, likes, posts } from "./db/schema.ts";
@@ -42,14 +43,29 @@ const enforceEngagementLimit = (userId: number) =>
       ENGAGEMENT_WRITE_MAX_PER_USER,
       ENGAGEMENT_WRITE_WINDOW_SECONDS,
     );
-    if (!result.allowed)
+    if (!result.allowed) {
+      yield* Metric.update(
+        Metric.taggedWithLabels(rateLimitRejectionsTotal, [
+          MetricLabel.make("limiter", "engagement"),
+        ]),
+        1,
+      );
       return yield* Effect.fail(
         new TooManyRequests({
           message: "Too many requests. Please try again later.",
           retryAfterSeconds: result.retryAfterSeconds,
         }),
       );
+    }
   });
+
+const recordContentCreated = (type: "comment" | "like") =>
+  Metric.update(
+    Metric.taggedWithLabels(contentCreatedTotal, [
+      MetricLabel.make("type", type),
+    ]),
+    1,
+  );
 
 const toApiComment = (
   row: typeof comments.$inferSelect,
@@ -191,6 +207,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             postLikeInfoOne(db, id, currentUser.id),
           ).pipe(Effect.orDie);
           if (inserted.length > 0) {
+            yield* recordContentCreated("like");
             yield* connections.broadcastAll({
               type: "like_changed",
               targetType: "post",
@@ -266,6 +283,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
+          yield* recordContentCreated("comment");
           yield* connections.notifyPostRoom(id, {
             type: "comment_changed",
             postId: id,
@@ -317,6 +335,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
+          yield* recordContentCreated("comment");
           yield* connections.notifyPostRoom(parent.postId, {
             type: "comment_changed",
             postId: parent.postId,
@@ -346,6 +365,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           // feed-wide (see LikeEvent in Realtime.ts). Only emit on an actual
           // new like, not a redundant re-like.
           if (inserted.length > 0) {
+            yield* recordContentCreated("like");
             yield* connections.notifyPostRoom(comment.postId, {
               type: "like_changed",
               targetType: "comment",

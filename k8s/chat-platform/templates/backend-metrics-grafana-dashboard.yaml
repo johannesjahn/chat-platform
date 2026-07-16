@@ -175,6 +175,89 @@ data:
               "legendFormat": "subscribe {{ "{{" }}outcome{{ "}}" }}"
             }
           ]
+        },
+        {
+          "id": 10,
+          "type": "row",
+          "title": "Activity",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 26, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "Content created rate by type",
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 0, "y": 27, "w": 12, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+              "expr": "sum(rate(content_created_total[5m])) by (type)",
+              "legendFormat": "{{ "{{" }}type{{ "}}" }}"
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Active users (DAU/WAU/MAU)",
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 12, "y": 27, "w": 12, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+              "expr": "active_users",
+              "legendFormat": "{{ "{{" }}window{{ "}}" }}"
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "WebSocket connection churn",
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 0, "y": 35, "w": 8, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+              "expr": "sum(rate(websocket_connections_total[5m])) by (event)",
+              "legendFormat": "{{ "{{" }}event{{ "}}" }}"
+            }
+          ]
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "Rate limit rejections by limiter",
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 8, "y": 35, "w": 8, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+              "expr": "sum(rate(rate_limit_rejections_total[5m])) by (limiter)",
+              "legendFormat": "{{ "{{" }}limiter{{ "}}" }}"
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "Auth funnel rate by event/outcome",
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 16, "y": 35, "w": 8, "h": 8 },
+          "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+              "expr": "sum(rate(auth_events_total[5m])) by (event, outcome)",
+              "legendFormat": "{{ "{{" }}event{{ "}}" }} {{ "{{" }}outcome{{ "}}" }}"
+            }
+          ]
         }
       ]
     }

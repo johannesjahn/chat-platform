@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "@effect/platform";
 import { and, eq, ilike, isNull, sql } from "drizzle-orm";
-import { Context, Effect, FiberRef } from "effect";
+import { Context, Effect, FiberRef, Metric, MetricLabel } from "effect";
 import { currentLogUser } from "./RedactedLogger.ts";
 import {
   ChatApi,
@@ -12,6 +12,7 @@ import {
 import { CurrentUser, TokenVersionCache } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
+import { authEventsTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { PubSub } from "./PubSub.ts";
 import { clientIp } from "./ClientIp.ts";
 import { RateLimiter } from "./RateLimiter.ts";
@@ -54,7 +55,10 @@ const escapeLikePattern = (value: string): string =>
 // Consumes `key` from the rate limiter and fails with TooManyRequests if the
 // caller has exceeded `limit` calls within `windowSeconds`. The failure
 // message is deliberately generic — it must never reveal which bucket (IP
-// vs. account) tripped, so it can't be used to enumerate accounts.
+// vs. account) tripped, so it can't be used to enumerate accounts. On a
+// rejection, `rate_limit_rejections_total` is labeled only by the bucket
+// *kind* (the part of `key` before its first ":", e.g. "login"/"register") —
+// never by the IP/account/user id the rest of `key` encodes.
 const enforceRateLimit = (
   limiter: Context.Tag.Service<typeof RateLimiter>,
   key: string,
@@ -63,14 +67,39 @@ const enforceRateLimit = (
 ): Effect.Effect<void, TooManyRequests> =>
   Effect.gen(function* () {
     const result = yield* limiter.consume(key, limit, windowSeconds);
-    if (!result.allowed)
+    if (!result.allowed) {
+      yield* Metric.update(
+        Metric.taggedWithLabels(rateLimitRejectionsTotal, [
+          MetricLabel.make("limiter", key.split(":")[0] ?? key),
+        ]),
+        1,
+      );
       return yield* Effect.fail(
         new TooManyRequests({
           message: "Too many requests. Please try again later.",
           retryAfterSeconds: result.retryAfterSeconds,
         }),
       );
+    }
   });
+
+// Auth funnel counter (issue #196) — labeled only by `event`
+// ("signup"/"login"/"refresh") and `outcome` ("success"/"failure"), never by
+// username/user id. A request rejected by enforceRateLimit above is counted
+// there instead (as a rate_limit_rejections_total, not an auth_events_total
+// failure), so a single rejected request isn't double-counted across both
+// metrics.
+const recordAuthEvent = (
+  event: "signup" | "login" | "refresh",
+  outcome: "success" | "failure",
+) =>
+  Metric.update(
+    Metric.taggedWithLabels(authEventsTotal, [
+      MetricLabel.make("event", event),
+      MetricLabel.make("outcome", outcome),
+    ]),
+    1,
+  );
 
 // Rotation info for a refresh: the row being replaced, identified by its own
 // jti plus the familyId it belongs to (every token descended from the same
@@ -222,12 +251,14 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               )
               .limit(1),
           ).pipe(Effect.orDie);
-          if (existing[0])
+          if (existing[0]) {
+            yield* recordAuthEvent("signup", "failure");
             return yield* Effect.fail(
               new UsernameTaken({
                 message: `Username "${payload.username}" is already taken`,
               }),
             );
+          }
 
           const passwordHash = yield* hashPassword(payload.password);
 
@@ -249,6 +280,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
           if (!rows[0])
             return yield* Effect.die(new Error("INSERT returned no rows"));
+          yield* recordAuthEvent("signup", "success");
           yield* FiberRef.set(currentLogUser, rows[0].username);
           return rows[0];
         }),
@@ -289,12 +321,14 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const user = rows[0];
           const hash = user ? user.passwordHash : yield* dummyHash();
           const valid = yield* verifyPassword(payload.password, hash);
-          if (!user || !valid)
+          if (!user || !valid) {
+            yield* recordAuthEvent("login", "failure");
             return yield* Effect.fail(
               new InvalidCredentials({
                 message: "Invalid username or password",
               }),
             );
+          }
 
           const publicUser = {
             id: user.id,
@@ -304,6 +338,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const tokenUser = { ...publicUser, tokenVersion: user.tokenVersion };
           const accessToken = yield* jwt.signAccessToken(tokenUser);
           const refreshToken = yield* issueRefreshToken(db, jwt, tokenUser);
+          yield* recordAuthEvent("login", "success");
           yield* FiberRef.set(currentLogUser, user.username);
           return { user: publicUser, accessToken, refreshToken };
         }),
@@ -330,6 +365,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                     message: "Invalid or expired refresh token",
                   }),
               ),
+              Effect.tapError(() => recordAuthEvent("refresh", "failure")),
             );
 
           // Reject anything not present in the server-side store — a
@@ -347,12 +383,14 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               .limit(1),
           ).pipe(Effect.orDie);
           const storedToken = stored[0];
-          if (!storedToken)
+          if (!storedToken) {
+            yield* recordAuthEvent("refresh", "failure");
             return yield* Effect.fail(
               new InvalidCredentials({
                 message: "Invalid or expired refresh token",
               }),
             );
+          }
 
           // The row is still there but already revoked — either explicitly
           // (logout) or, most notably, by rotation: this exact token was
@@ -363,6 +401,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           // legitimate holder both get logged out and have to re-authenticate.
           if (storedToken.revokedAt) {
             yield* revokeFamily(db, storedToken.familyId);
+            yield* recordAuthEvent("refresh", "failure");
             return yield* Effect.fail(
               new InvalidCredentials({
                 message: "Invalid or expired refresh token",
@@ -390,12 +429,14 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           // token_version — it survived the store lookup above (rotation
           // doesn't touch other users' rows), but a version bump since
           // issuance means it must not be trusted regardless.
-          if (!dbUser || dbUser.tokenVersion !== tokenUser.tokenVersion)
+          if (!dbUser || dbUser.tokenVersion !== tokenUser.tokenVersion) {
+            yield* recordAuthEvent("refresh", "failure");
             return yield* Effect.fail(
               new InvalidCredentials({
                 message: "Invalid or expired refresh token",
               }),
             );
+          }
 
           const publicUser = {
             id: dbUser.id,
@@ -411,6 +452,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             oldJti: tokenUser.jti,
             familyId: storedToken.familyId,
           });
+          yield* recordAuthEvent("refresh", "success");
           return { accessToken, refreshToken };
         }),
       )

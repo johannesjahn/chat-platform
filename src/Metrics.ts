@@ -66,6 +66,58 @@ export const pubsubSubscribeTotal = Metric.counter("pubsub_subscribe_total", {
   description: "PubSub subscribe attempts, labeled by outcome.",
 });
 
+// Application-domain activity metrics (issue #196, follow-up to #124's
+// transport-level ones) — every metric below is a count or a distribution
+// with no user id, username, IP, or IP hash ever used as a label or
+// persisted value (see the issue's GDPR-driven scoping discussion for why
+// that constraint exists and what it rules out, e.g. a "most active users"
+// panel).
+
+// Labeled only by content `type` ("post"/"comment"/"like"/"message") — same
+// cardinality profile as pubsubPublishTotal above, never by author/post/chat
+// id.
+export const contentCreatedTotal = Metric.counter("content_created_total", {
+  description: "Content items created, labeled by type.",
+});
+
+// Set (not incremented) by ActiveUsersMetrics.ts's periodic
+// `COUNT(DISTINCT user_id)` job, one gauge per `window` label
+// ("1d"/"7d"/"30d") — DAU/WAU/MAU. The distinct-user computation happens
+// inside that job's SQL query; only the resulting count ever reaches this
+// gauge.
+export const activeUsers = Metric.gauge("active_users", {
+  description:
+    "Distinct users who created content in the trailing window (DAU/WAU/MAU).",
+});
+
+// Labeled by `event` ("connect"/"disconnect") — the churn counterpart to
+// websocketConnectionsActive's point-in-time gauge above, which only shows
+// the current count, not the rate connections come and go.
+export const websocketConnectionsTotal = Metric.counter(
+  "websocket_connections_total",
+  { description: "WebSocket connection lifecycle events, labeled by event." },
+);
+
+// Labeled by `limiter` (e.g. "global"/"register"/"login"/"refresh"/
+// "change-password"/"engagement" — the bucket *kind*, not which specific IP
+// or account tripped it: see enforceRateLimit in UsersHandler.ts, which
+// derives this from the part of its rate-limit key before the first ":").
+// A 429 would otherwise be invisible in httpRequestsTotal, indistinguishable
+// from any other status.
+export const rateLimitRejectionsTotal = Metric.counter(
+  "rate_limit_rejections_total",
+  { description: "Requests rejected by a rate limiter, labeled by limiter." },
+);
+
+// Labeled by `event` ("signup"/"login"/"refresh") and `outcome`
+// ("success"/"failure") — an auth funnel, never by username/user id.
+// Rate-limit rejections on these same endpoints are counted separately via
+// rateLimitRejectionsTotal rather than as a "failure" here, so the two don't
+// double-count the same rejected request.
+export const authEventsTotal = Metric.counter("auth_events_total", {
+  description: "Authentication funnel events, labeled by event and outcome.",
+});
+
 const pathnameOf = (url: string): string => {
   const queryIndex = url.indexOf("?");
   return queryIndex === -1 ? url : url.slice(0, queryIndex);

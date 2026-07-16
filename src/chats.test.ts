@@ -8,7 +8,7 @@ import {
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
 import { eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Metric, MetricLabel } from "effect";
 import { ChatApi, MAX_GROUP_PARTICIPANTS } from "./Api.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
@@ -16,6 +16,7 @@ import { Db } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { JwtLive } from "./Jwt.ts";
 import { EngagementHandlerLive } from "./EngagementHandler.ts";
+import { contentCreatedTotal } from "./Metrics.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
@@ -548,6 +549,16 @@ test("createMessage sends a message, bumps chat activity, and is forbidden for n
         payload: { userId: bob.user.id },
       });
 
+      // content_created_total is a module-level metric shared with whichever
+      // other test files land in the same `bun test --parallel` worker
+      // process, so this asserts the delta createMessage produces rather
+      // than an absolute value (see Metrics.test.ts's
+      // websocketConnectionsActive test for the same reasoning).
+      const messagesCreated = Metric.taggedWithLabels(contentCreatedTotal, [
+        MetricLabel.make("type", "message"),
+      ]);
+      const beforeMessagesCreated = yield* Metric.value(messagesCreated);
+
       const message = yield* alice.client.chats.createMessage({
         path: { id: chat.id },
         payload: { contentType: "text", content: "hello bob" },
@@ -555,6 +566,9 @@ test("createMessage sends a message, bumps chat activity, and is forbidden for n
       expect(message.senderId).toBe(alice.user.id);
       expect(message.content).toBe("hello bob");
       expect(message.readByUserIds).toEqual([]);
+      expect((yield* Metric.value(messagesCreated)).count).toBe(
+        beforeMessagesCreated.count + 1,
+      );
 
       const {
         chats: [aliceChat],
