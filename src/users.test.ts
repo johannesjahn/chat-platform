@@ -10,6 +10,7 @@ import { BunHttpServer } from "@effect/platform-bun";
 import { Duration, Effect, Layer, Metric, MetricLabel } from "effect";
 import {
   ChatApi,
+  MAX_DISPLAY_NAME_LENGTH,
   MAX_PASSWORD_LENGTH,
   MAX_USER_SEARCH_QUERY_LENGTH,
   MAX_USERNAME_LENGTH,
@@ -1283,5 +1284,460 @@ test("authentication token version cache is immediately evicted via PubSub inval
           "Unauthorized",
         );
       }
+    }),
+  ));
+
+test("updateProfile rejects an unauthenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const result = yield* c.users
+        .updateProfile({
+          payload: { username: "nobody", displayName: null, avatarUrl: null },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
+    }),
+  ));
+
+test("updateProfile updates username, displayName, and avatarUrl, reflected by getUser", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const created = yield* c.users.register({
+        payload: { username: "xander", password: "pw-xander" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "xander", password: "pw-xander" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const updated = yield* authed.users.updateProfile({
+        payload: {
+          username: "xander2",
+          displayName: "Xander Prime",
+          avatarUrl: "https://i.imgur.com/avatar.png",
+        },
+      });
+      expect(updated).toEqual({
+        id: created.id,
+        username: "xander2",
+        displayName: "Xander Prime",
+        avatarUrl: "https://i.imgur.com/avatar.png",
+        role: "user",
+      });
+
+      const fetched = yield* authed.users.getUser({ path: { id: created.id } });
+      expect(fetched).toEqual(updated);
+    }),
+  ));
+
+test("updateProfile allows keeping the caller's own current username unchanged", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "yara", password: "pw-yara12" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "yara", password: "pw-yara12" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const updated = yield* authed.users.updateProfile({
+        payload: { username: "yara", displayName: "Yara", avatarUrl: null },
+      });
+      expect(updated.username).toBe("yara");
+      expect(updated.displayName).toBe("Yara");
+    }),
+  ));
+
+test("updateProfile rejects a username already taken by another account, case-insensitively", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "Zack", password: "pw-zack123" },
+      });
+      yield* c.users.register({
+        payload: { username: "wendell", password: "pw-wendell" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "wendell", password: "pw-wendell" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const result = yield* authed.users
+        .updateProfile({
+          payload: { username: "zack", displayName: null, avatarUrl: null },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("UsernameTaken");
+      }
+    }),
+  ));
+
+test("updateProfile rejects a displayName over the maximum length", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "victor", password: "pw-victor" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "victor", password: "pw-victor" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const result = yield* authed.users
+        .updateProfile({
+          payload: {
+            username: "victor",
+            displayName: "a".repeat(MAX_DISPLAY_NAME_LENGTH + 1),
+            avatarUrl: null,
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("updateProfile rejects an avatarUrl on a disallowed host", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "ulysses", password: "pw-ulysses" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "ulysses", password: "pw-ulysses" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const result = yield* authed.users
+        .updateProfile({
+          payload: {
+            username: "ulysses",
+            displayName: null,
+            avatarUrl: "https://evil.example.com/avatar.png",
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("updateProfile clears displayName and avatarUrl when set to null after being set", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "tobias", password: "pw-tobias" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "tobias", password: "pw-tobias" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      yield* authed.users.updateProfile({
+        payload: {
+          username: "tobias",
+          displayName: "Tobias",
+          avatarUrl: "https://i.imgur.com/avatar.png",
+        },
+      });
+      const cleared = yield* authed.users.updateProfile({
+        payload: { username: "tobias", displayName: null, avatarUrl: null },
+      });
+      expect(cleared.displayName).toBeNull();
+      expect(cleared.avatarUrl).toBeNull();
+    }),
+  ));
+
+test("deleteAccount rejects an unauthenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const result = yield* c.users
+        .deleteAccount({ payload: { password: "whatever" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
+    }),
+  ));
+
+test("deleteAccount rejects a wrong password", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "susan", password: "pw-susan12" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "susan", password: "pw-susan12" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.users
+        .deleteAccount({ payload: { password: "wrong-pw" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidCredentials",
+        );
+      }
+    }),
+  ));
+
+test("deleteAccount removes the account, cascading to its posts, and prevents future login", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const created = yield* c.users.register({
+        payload: { username: "ronny", password: "pw-ronny12" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "ronny", password: "pw-ronny12" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      const post = yield* authed.posts.createPost({
+        payload: { contentType: "text", content: "hello world" },
+      });
+
+      yield* authed.users.deleteAccount({
+        payload: { password: "pw-ronny12" },
+      });
+
+      const loginResult = yield* c.users
+        .login({ payload: { username: "ronny", password: "pw-ronny12" } })
+        .pipe(Effect.either);
+      expect(loginResult._tag).toBe("Left");
+
+      // Register a fresh user just to get an authenticated client to look up
+      // the now-deleted account/post through.
+      yield* c.users.register({
+        payload: { username: "sabrina", password: "pw-sabrina" },
+      });
+      const { accessToken: otherToken } = yield* c.users.login({
+        payload: { username: "sabrina", password: "pw-sabrina" },
+      });
+      const otherAuthed = yield* makeAuthedClient(otherToken);
+
+      const getUserResult = yield* otherAuthed.users
+        .getUser({ path: { id: created.id } })
+        .pipe(Effect.either);
+      expect(getUserResult._tag).toBe("Left");
+      if (getUserResult._tag === "Left") {
+        expect((getUserResult.left as { _tag: string })._tag).toBe("NotFound");
+      }
+
+      const getPostResult = yield* otherAuthed.posts
+        .getPost({ path: { id: post.id } })
+        .pipe(Effect.either);
+      expect(getPostResult._tag).toBe("Left");
+      if (getPostResult._tag === "Left") {
+        expect((getPostResult.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("deleteAccount immediately invalidates the caller's own outstanding tokens elsewhere", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "quincy", password: "pw-quincy1" },
+      });
+      const sessionA = yield* c.users.login({
+        payload: { username: "quincy", password: "pw-quincy1" },
+      });
+      const sessionB = yield* c.users.login({
+        payload: { username: "quincy", password: "pw-quincy1" },
+      });
+
+      const authedA = yield* makeAuthedClient(sessionA.accessToken);
+      yield* authedA.users.deleteAccount({
+        payload: { password: "pw-quincy1" },
+      });
+
+      const refreshB = yield* c.users
+        .refresh({ payload: { refreshToken: sessionB.refreshToken } })
+        .pipe(Effect.either);
+      expect(refreshB._tag).toBe("Left");
+    }),
+  ));
+
+test("deleteAccount is rate-limited per account after repeated wrong attempts", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "percy", password: "pw-percy12" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "percy", password: "pw-percy12" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      // DELETE_ACCOUNT_MAX_ATTEMPTS_PER_ACCOUNT is 5 (UsersHandler.ts).
+      for (let i = 0; i < 5; i++) {
+        const attempt = yield* authed.users
+          .deleteAccount({ payload: { password: "wrong-pw" } })
+          .pipe(Effect.either);
+        expect(attempt._tag).toBe("Left");
+      }
+      const result = yield* authed.users
+        .deleteAccount({ payload: { password: "wrong-pw" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        const left = result.left as { _tag: string; retryAfterSeconds: number };
+        expect(left._tag).toBe("TooManyRequests");
+        expect(left.retryAfterSeconds).toBeGreaterThan(0);
+      }
+    }),
+  ));
+
+test("updateUserRole rejects an unauthenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const created = yield* c.users.register({
+        payload: { username: "opal", password: "pw-opal123" },
+      });
+      const result = yield* c.users
+        .updateUserRole({
+          path: { id: created.id },
+          payload: { role: "admin" },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
+    }),
+  ));
+
+test("updateUserRole rejects a non-admin caller with Forbidden", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const target = yield* c.users.register({
+        payload: { username: "nadia", password: "pw-nadia12" },
+      });
+      yield* c.users.register({
+        payload: { username: "myron", password: "pw-myron12" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "myron", password: "pw-myron12" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const result = yield* authed.users
+        .updateUserRole({
+          path: { id: target.id },
+          payload: { role: "admin" },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+    }),
+  ));
+
+test("updateUserRole returns 404 for a missing target user", () =>
+  run(
+    Effect.gen(function* () {
+      const db = yield* Effect.promise(getTestDb);
+      const passwordHash = yield* Effect.tryPromise(() =>
+        Bun.password.hash("pw-admin123", { algorithm: "argon2id" }),
+      );
+      yield* Effect.tryPromise(() =>
+        db
+          .insert(users)
+          .values({ username: "adminlisa", passwordHash, role: "admin" })
+          .returning(),
+      );
+      const c = yield* makeClient;
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "adminlisa", password: "pw-admin123" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const result = yield* authed.users
+        .updateUserRole({ path: { id: 999999 }, payload: { role: "admin" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("updateUserRole promotes a user to admin, immediately invalidating their outstanding token and taking effect on their next login", () =>
+  run(
+    Effect.gen(function* () {
+      const db = yield* Effect.promise(getTestDb);
+      const adminPasswordHash = yield* Effect.tryPromise(() =>
+        Bun.password.hash("pw-admin456", { algorithm: "argon2id" }),
+      );
+      yield* Effect.tryPromise(() =>
+        db
+          .insert(users)
+          .values({
+            username: "adminkarl",
+            passwordHash: adminPasswordHash,
+            role: "admin",
+          })
+          .returning(),
+      );
+
+      const c = yield* makeClient;
+      const target = yield* c.users.register({
+        payload: { username: "louise", password: "pw-louise1" },
+      });
+      const targetSession = yield* c.users.login({
+        payload: { username: "louise", password: "pw-louise1" },
+      });
+
+      const { accessToken: adminToken } = yield* c.users.login({
+        payload: { username: "adminkarl", password: "pw-admin456" },
+      });
+      const adminAuthed = yield* makeAuthedClient(adminToken);
+
+      const updated = yield* adminAuthed.users.updateUserRole({
+        path: { id: target.id },
+        payload: { role: "admin" },
+      });
+      expect(updated.role).toBe("admin");
+
+      // The target's already-issued access token was signed under the old
+      // role/token_version — must be rejected immediately, not just on its
+      // own TTL.
+      const targetAuthedBefore = yield* makeAuthedClient(
+        targetSession.accessToken,
+      );
+      const staleResult = yield* targetAuthedBefore.users
+        .getUser({ path: { id: target.id } })
+        .pipe(Effect.either);
+      expect(staleResult._tag).toBe("Left");
+      if (staleResult._tag === "Left") {
+        expect((staleResult.left as { _tag: string })._tag).toBe(
+          "Unauthorized",
+        );
+      }
+
+      // A fresh login reflects the new role.
+      const { user: reloggedUser } = yield* c.users.login({
+        payload: { username: "louise", password: "pw-louise1" },
+      });
+      expect(reloggedUser.role).toBe("admin");
     }),
   ));

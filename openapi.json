@@ -148,6 +148,8 @@
                   "required": [
                     "id",
                     "username",
+                    "displayName",
+                    "avatarUrl",
                     "role"
                   ],
                   "properties": {
@@ -156,6 +158,26 @@
                     },
                     "username": {
                       "type": "string"
+                    },
+                    "displayName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "avatarUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "role": {
                       "$ref": "#/components/schemas/UserRole"
@@ -434,6 +456,221 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ChangePasswordBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/users/me": {
+      "put": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users.updateProfile",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "UsernameTaken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsernameTaken"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileBody"
+              }
+            }
+          },
+          "required": true
+        }
+      },
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users.deleteAccount",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "InvalidCredentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidCredentials"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Unauthorized"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "TooManyRequests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyRequests"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/users/{id}/role": {
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users.updateUserRole",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRoleBody"
               }
             }
           },
@@ -3254,6 +3491,8 @@
         "required": [
           "id",
           "username",
+          "displayName",
+          "avatarUrl",
           "role"
         ],
         "properties": {
@@ -3262,6 +3501,26 @@
           },
           "username": {
             "type": "string"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "role": {
             "$ref": "#/components/schemas/UserRole"
@@ -3623,6 +3882,95 @@
         },
         "additionalProperties": false
       },
+      "UpdateProfileBody": {
+        "type": "object",
+        "required": [
+          "username",
+          "displayName",
+          "avatarUrl"
+        ],
+        "properties": {
+          "username": {
+            "$ref": "#/components/schemas/NonEmptyTrimmedString",
+            "description": "a string at most 32 character(s) long",
+            "title": "maxLength(32)",
+            "maxLength": 32
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NonEmptyTrimmedString",
+                "description": "a string at most 64 character(s) long",
+                "title": "maxLength(64)",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarUrl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "a string at most 2048 character(s) long",
+                "title": "maxLength(2048)",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "DeleteAccountBody": {
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "$ref": "#/components/schemas/NonEmptyString",
+            "description": "a string at most 128 character(s) long",
+            "title": "maxLength(128)",
+            "maxLength": 128
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateUserRoleBody": {
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Forbidden": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "Forbidden"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "Post": {
         "type": "object",
         "required": [
@@ -3753,25 +4101,6 @@
             "description": "a string at most 10000 character(s) long",
             "title": "maxLength(10000)",
             "maxLength": 10000
-          }
-        },
-        "additionalProperties": false
-      },
-      "Forbidden": {
-        "type": "object",
-        "required": [
-          "message",
-          "_tag"
-        ],
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "_tag": {
-            "type": "string",
-            "enum": [
-              "Forbidden"
-            ]
           }
         },
         "additionalProperties": false

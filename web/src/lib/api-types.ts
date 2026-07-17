@@ -116,6 +116,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["users.updateProfile"];
+        post?: never;
+        delete: operations["users.deleteAccount"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/{id}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["users.updateUserRole"];
+        trace?: never;
+    };
     "/posts/{id}": {
         parameters: {
             query?: never;
@@ -459,6 +491,8 @@ export interface components {
         User: {
             id: number;
             username: string;
+            displayName: string | null;
+            avatarUrl: string | null;
             role: components["schemas"]["UserRole"];
         };
         /** @enum {string} */
@@ -585,6 +619,30 @@ export interface components {
              */
             newPassword: components["schemas"]["NonEmptyString"];
         };
+        UpdateProfileBody: {
+            /**
+             * maxLength(32)
+             * @description a string at most 32 character(s) long
+             */
+            username: components["schemas"]["NonEmptyTrimmedString"];
+            displayName: components["schemas"]["NonEmptyTrimmedString"] | null;
+            avatarUrl: string | null;
+        };
+        DeleteAccountBody: {
+            /**
+             * maxLength(128)
+             * @description a string at most 128 character(s) long
+             */
+            password: components["schemas"]["NonEmptyString"];
+        };
+        UpdateUserRoleBody: {
+            role: components["schemas"]["UserRole"];
+        };
+        Forbidden: {
+            message: string;
+            /** @enum {string} */
+            _tag: "Forbidden";
+        };
         Post: {
             id: number;
             authorId: number;
@@ -622,11 +680,6 @@ export interface components {
              * @description a string at most 10000 character(s) long
              */
             content: components["schemas"]["NonEmptyTrimmedString"];
-        };
-        Forbidden: {
-            message: string;
-            /** @enum {string} */
-            _tag: "Forbidden";
         };
         LikeState: {
             likeCount: number;
@@ -890,6 +943,8 @@ export interface operations {
                     "application/json": {
                         id: number;
                         username: string;
+                        displayName: string | null;
+                        avatarUrl: string | null;
                         role: components["schemas"]["UserRole"];
                     };
                 };
@@ -1103,6 +1158,168 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TooManyRequests"];
+                };
+            };
+        };
+    };
+    "users.updateProfile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProfileBody"];
+            };
+        };
+        responses: {
+            /** @description User */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description UsernameTaken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsernameTaken"];
+                };
+            };
+        };
+    };
+    "users.deleteAccount": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteAccountBody"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description InvalidCredentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvalidCredentials"] | components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequests"];
+                };
+            };
+        };
+    };
+    "users.updateUserRole": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUserRoleBody"];
+            };
+        };
+        responses: {
+            /** @description User */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Forbidden"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
                 };
             };
         };
