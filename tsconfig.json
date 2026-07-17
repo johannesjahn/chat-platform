@@ -29,6 +29,9 @@
   },
 
   // The `web/` frontend is a separate project with its own tsconfig.
+  // scripts/loadtest is excluded: those are k6 scripts, not Bun/Node code —
+  // they import module specifiers like "k6/http" that only resolve inside
+  // k6's own runtime, so tsc has nothing to check them against.
   "include": ["src", "scripts"],
-  "exclude": ["node_modules", "web"]
+  "exclude": ["node_modules", "web", "scripts/loadtest"]
 }

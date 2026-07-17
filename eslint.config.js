@@ -33,6 +33,22 @@ export default tseslint.config(
     },
   },
 
+  // k6 load-test scripts (scripts/loadtest/) run under the k6 JS runtime,
+  // not Bun/Node — they use its injected globals and import module
+  // specifiers like "k6/http" that don't resolve to real npm packages
+  // (excluded from typecheck in tsconfig.json for the same reason).
+  {
+    files: ["scripts/loadtest/**/*.js"],
+    languageOptions: {
+      globals: {
+        __ENV: "readonly",
+        __VU: "readonly",
+        __ITER: "readonly",
+        console: "readonly",
+      },
+    },
+  },
+
   // Frontend: React in the browser.
   {
     files: ["web/**/*.{ts,tsx}"],
