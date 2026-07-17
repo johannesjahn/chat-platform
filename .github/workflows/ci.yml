@@ -242,7 +242,7 @@ jobs:
       # binary tarball, same artifact the README's ArgoCD sidecar image wraps.
       - name: Install helmfile
         run: |
-          curl -sSL https://github.com/helmfile/helmfile/releases/download/v1.7.0/helmfile_1.7.0_linux_amd64.tar.gz \
+          curl -sSL https://github.com/helmfile/helmfile/releases/download/v1.7.1/helmfile_1.7.0_linux_amd64.tar.gz \
             | tar -xz helmfile
           sudo install helmfile /usr/local/bin/helmfile
           helmfile version

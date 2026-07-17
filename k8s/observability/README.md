@@ -146,7 +146,7 @@ about), so it lives wherever you already manage ArgoCD itself (e.g. the
    repoServer:
      extraContainers:
        - name: helmfile
-         image: ghcr.io/helmfile/helmfile:v1.7.0
+         image: ghcr.io/helmfile/helmfile:v1.7.1
          command: ["/var/run/argocd/argocd-cmp-server"]
          env:
            - name: HELM_CACHE_HOME
