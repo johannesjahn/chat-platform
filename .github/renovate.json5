@@ -159,13 +159,17 @@
     },
 
     // Tracks the helmfile CLI version pinned in ci.yml's install step
-    // (grouped with the README copy below).
+    // (grouped with the README copy below). Matches the single
+    // HELMFILE_VERSION env var the step derives both the release tag and
+    // the tarball filename from — see the comment on that step. Previously
+    // this matched the tag and filename as two separate literals on one
+    // line, and since the regex manager only rewrites the captured
+    // `currentValue` text, it only ever bumped the tag half, leaving the
+    // filename's version to silently drift and 404 (see PR #201).
     {
       customType: "regex",
       managerFilePatterns: ["/^\\.github/workflows/ci\\.yml$/"],
-      matchStrings: [
-        "helmfile/helmfile/releases/download/(?<currentValue>v[0-9.]+)/helmfile_[0-9.]+_linux_amd64\\.tar\\.gz",
-      ],
+      matchStrings: ["HELMFILE_VERSION:\\s*(?<currentValue>v[0-9.]+)"],
       depNameTemplate: "helmfile/helmfile",
       datasourceTemplate: "github-releases",
     },
