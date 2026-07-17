@@ -240,9 +240,20 @@ jobs:
       # CMP sidecar example — keep the two in sync. No official setup-helmfile
       # GitHub Action exists, so install straight from the goreleaser-published
       # binary tarball, same artifact the README's ArgoCD sidecar image wraps.
+      #
+      # HELMFILE_VERSION is the single source of truth here: the release
+      # tag (v-prefixed) and the tarball filename (un-prefixed) are both
+      # derived from it via shell substitution instead of being spelled out
+      # as two separate literals. PR #201 broke this the old way — Renovate's
+      # regex manager only updates a captured `currentValue`, and it only
+      # captured the tag half of the URL, so it bumped the tag to v1.7.1
+      # while leaving the filename at 1.7.0, which 404s (no such asset on
+      # the v1.7.1 release) and makes `tar -xz` fail on the HTML error page.
       - name: Install helmfile
+        env:
+          HELMFILE_VERSION: v1.7.0
         run: |
-          curl -sSL https://github.com/helmfile/helmfile/releases/download/v1.7.0/helmfile_1.7.0_linux_amd64.tar.gz \
+          curl -sSL "https://github.com/helmfile/helmfile/releases/download/${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION#v}_linux_amd64.tar.gz" \
             | tar -xz helmfile
           sudo install helmfile /usr/local/bin/helmfile
           helmfile version
