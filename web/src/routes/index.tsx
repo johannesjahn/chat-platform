@@ -3,12 +3,19 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Loader2, PlusCircle } from "lucide-react";
 import { LoginPrompt } from "@/components/LoginPrompt";
+import { PendingPostCard } from "@/components/PendingPostCard";
 import { PostCard, PostCardSkeleton } from "@/components/PostCard";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
+import {
+  dismissQueuedItem,
+  replayQueue,
+  retryQueuedItem,
+  usePendingPosts,
+} from "@/lib/offlineQueue";
 import { useOnlineStatus } from "@/lib/online";
 import { postsFeedQueryKey, usePostsFeed } from "@/lib/posts";
 import { useUsernamesById } from "@/lib/users";
@@ -32,6 +39,7 @@ function PostsFeedPage() {
   } = usePostsFeed(!!session);
 
   const posts = data?.pages.flatMap((page) => page.posts) ?? [];
+  const pendingPosts = usePendingPosts();
 
   // Resolves `authorId` -> `@username` on each card, one request per
   // distinct author currently loaded (see `useUsernamesById`).
@@ -85,6 +93,23 @@ function PostsFeedPage() {
           </Button>
         )}
       </div>
+
+      {session && pendingPosts.length > 0 && (
+        <ul role="list" className="flex w-full flex-col items-center gap-6">
+          {pendingPosts.map((item) => (
+            <li key={item.clientId} className="flex w-full justify-center">
+              <PendingPostCard
+                item={item}
+                onRetry={() => {
+                  retryQueuedItem(item.clientId);
+                  void replayQueue(queryClient);
+                }}
+                onDismiss={() => dismissQueuedItem(item.clientId)}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
 
       {!session ? (
         <LoginPrompt

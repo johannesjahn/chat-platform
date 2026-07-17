@@ -61,6 +61,13 @@ type PostFormProps = {
     content: string;
   }) => Promise<void>;
   footer?: ReactNode;
+  // Lets `onSubmit` be attempted while offline instead of being blocked —
+  // set by callers that queue the mutation locally when offline (see
+  // lib/offlineQueue.ts) rather than requiring a live connection. Off by
+  // default: editing an existing post has no offline-queueing support (only
+  // creation does, see routes/posts/new.tsx), so it keeps the original
+  // "blocked while offline" behavior.
+  allowOfflineQueue?: boolean;
 };
 
 export function PostForm({
@@ -71,6 +78,7 @@ export function PostForm({
   initialContent = "",
   onSubmit,
   footer,
+  allowOfflineQueue = false,
 }: PostFormProps) {
   const [contentType, setContentType] =
     useState<PostContentType>(initialContentType);
@@ -90,7 +98,7 @@ export function PostForm({
     !overLimit &&
     !invalidImageUrl &&
     !pending &&
-    isOnline;
+    (isOnline || allowOfflineQueue);
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 py-10">
@@ -205,11 +213,19 @@ export function PostForm({
             <Button type="submit" className="mt-1 w-full" disabled={!canSubmit}>
               {pending && <Loader2 className="size-4 animate-spin" />}
               {!isOnline
-                ? "You're offline"
+                ? allowOfflineQueue
+                  ? "Queue for sending"
+                  : "You're offline"
                 : pending
                   ? "Please wait…"
                   : submitLabel}
             </Button>
+            {!isOnline && allowOfflineQueue && (
+              <p className="-mt-2 self-end text-xs text-muted-foreground">
+                You&apos;re offline — this will be queued and posted once
+                you&apos;re back online.
+              </p>
+            )}
           </form>
         </CardContent>
         {footer && (

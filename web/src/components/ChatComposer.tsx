@@ -42,12 +42,11 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
     contentType === "image_url" &&
     trimmed.length > 0 &&
     !isAllowedImageUrl(trimmed);
+  // Sending while offline is allowed — `onSend` queues the message locally
+  // instead of failing (see lib/offlineQueue.ts) — so `isOnline` no longer
+  // gates this the way it gates a plain query.
   const canSend =
-    trimmed.length > 0 &&
-    !overLimit &&
-    !invalidImageUrl &&
-    !pending &&
-    isOnline;
+    trimmed.length > 0 && !overLimit && !invalidImageUrl && !pending;
 
   function notifyTyping() {
     const now = Date.now();
@@ -138,8 +137,14 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
           size="icon"
           disabled={!canSend}
           onClick={() => void submit()}
-          aria-label={isOnline ? "Send message" : "Send message (offline)"}
-          title={isOnline ? undefined : "You're offline"}
+          aria-label={
+            isOnline ? "Send message" : "Send message (will be queued)"
+          }
+          title={
+            isOnline
+              ? undefined
+              : "You're offline — this will be queued and sent once you reconnect"
+          }
           className="shrink-0"
         >
           {pending ? (
@@ -157,7 +162,8 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
       )}
       {!isOnline ? (
         <span className="self-end text-xs text-muted-foreground">
-          You&apos;re offline — sending is disabled until you reconnect.
+          You&apos;re offline — messages you send will be queued and delivered
+          once you&apos;re back online.
         </span>
       ) : (
         (nearLimit || overLimit) && (
