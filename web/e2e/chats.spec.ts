@@ -249,6 +249,78 @@ test("a message sent by one user appears on the other's already-open chat via th
   await contextB.close();
 });
 
+test("sending a message doesn't leave a duplicate copy in the sender's own view (issue #203)", async ({
+  browser,
+  injectApiUrl,
+}) => {
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+
+  // The server publishes the `chat_updated` push for a sent message *before*
+  // it returns the send's own HTTP response (see `notifyChatUpdated` in
+  // ChatsHandler.ts), so on an unthrottled localhost connection the WS event
+  // reliably reaches the client before (or interleaved with) the mutation's
+  // own response — too fast for the client-side race in `useChatMessages`
+  // (chats.ts) to reproduce. Delaying every `chat_updated` push forces the
+  // opposite, real-world-representative ordering: the mutation's
+  // `appendSentMessage` optimistic write lands first, then the WS-triggered
+  // catch-up refetch runs against a cache that already has the message.
+  await pageA.routeWebSocket(
+    (url) => url.pathname === "/ws",
+    (ws) => {
+      const server = ws.connectToServer();
+      server.onMessage((message) => {
+        if (typeof message === "string" && message.includes("chat_updated")) {
+          setTimeout(() => ws.send(message), 500);
+          return;
+        }
+        ws.send(message);
+      });
+    },
+  );
+  await registerViaUi(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const { username: usernameB } = await registerViaUi(pageB);
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Direct message" }).click();
+  await pageA.fill("#user-search", usernameB);
+  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+
+  // The bug only reproduces once `useChatMessages` has already anchored a
+  // real (non-null) cursor from a prior load — a brand-new empty chat's very
+  // first fetch has no cursor yet, so its first sent message always takes
+  // the "true first load" branch, which replaces the array wholesale and
+  // can't duplicate. Send a first message to establish that cursor before
+  // sending the one we actually check for duplication.
+  await pageA.fill("textarea", "First message, just to anchor the cursor");
+  await pageA.keyboard.press("Enter");
+  await expect(
+    pageA.getByText("First message, just to anchor the cursor"),
+  ).toBeVisible();
+  await pageA.waitForTimeout(1_000);
+
+  const messageText = "This message must not appear twice";
+  await pageA.fill("textarea", messageText);
+  await pageA.keyboard.press("Enter");
+
+  const messageLocator = pageA.getByText(messageText);
+  await expect(messageLocator).toBeVisible();
+  // Give the deliberately-delayed `chat_updated` push time to arrive and
+  // trigger `useChatMessages`'s catch-up refetch before asserting there's
+  // still only one copy of the message.
+  await pageA.waitForTimeout(1_500);
+  await expect(messageLocator).toHaveCount(1);
+
+  await contextA.close();
+  await contextB.close();
+});
+
 test("infinite scroll stops requesting more messages once the oldest one is loaded", async ({
   browser,
   injectApiUrl,

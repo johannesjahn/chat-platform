@@ -249,10 +249,18 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
           limit: MESSAGES_MAX_LIMIT,
         });
         if (page.messages.length === 0) return prev;
-        if (prev.messages.length + page.messages.length <= MESSAGES_MAX_LIMIT) {
+        // `newestCursorRef` isn't advanced by `appendSentMessage` (it has no
+        // access to this hook's refs), so a `chat_updated`-triggered refetch
+        // right after sending a message re-fetches "everything after the
+        // stale cursor" — which includes the message already appended
+        // optimistically. Drop anything already present by id so it isn't
+        // duplicated in the merged list.
+        const existingIds = new Set(prev.messages.map((m) => m.id));
+        const newMessages = page.messages.filter((m) => !existingIds.has(m.id));
+        if (prev.messages.length + newMessages.length <= MESSAGES_MAX_LIMIT) {
           newestCursorRef.current = page.latestCursor;
           return {
-            messages: [...prev.messages, ...page.messages],
+            messages: [...prev.messages, ...newMessages],
             hasEarlier: prev.hasEarlier,
           };
         }
