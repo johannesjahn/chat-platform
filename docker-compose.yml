@@ -112,7 +112,7 @@ services:
   # buckets on its own, unlike a managed cloud bucket you'd provision
   # out-of-band before pointing S3_ENDPOINT at it.
   minio-init:
-    image: minio/mc:RELEASE.2024-11-05T11-17-56Z
+    image: minio/mc:RELEASE.2024-11-05T11-29-45Z
     depends_on:
       minio:
         condition: service_healthy
