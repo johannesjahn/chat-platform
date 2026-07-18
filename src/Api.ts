@@ -168,9 +168,9 @@ export const ChangePasswordBody = Schema.Struct({
 
 // Full-replace body (mirrors `UpdatePostBody`/`UpdateChatBody`'s convention)
 // rather than a partial patch — `displayName`/`avatarUrl` are nullable so a
-// caller can explicitly clear either back to "unset".
+// caller can explicitly clear either back to "unset". Username is not
+// editable here — it's assigned at registration and immutable thereafter.
 export const UpdateProfileBody = Schema.Struct({
-  username: Username,
   displayName: Schema.NullOr(DisplayName),
   avatarUrl: Schema.NullOr(AvatarUrl),
 }).annotations({ identifier: "UpdateProfileBody" });
@@ -433,6 +433,7 @@ const GroupTitle = Schema.NonEmptyTrimmedString.pipe(
 export const ChatParticipant = Schema.Struct({
   userId: Schema.Number,
   username: Schema.String,
+  displayName: Schema.NullOr(Schema.String),
 }).annotations({ identifier: "ChatParticipant" });
 export type ChatParticipant = typeof ChatParticipant.Type;
 
@@ -660,12 +661,12 @@ const UsersGroup = HttpApiGroup.make("users")
       .middleware(Authentication),
   )
   .add(
-    // Updates the current user's own profile — username, display name, and
-    // avatar URL (issue #67). Full-replace like `updatePost`/`updateChat`.
+    // Updates the current user's own profile — display name and avatar URL
+    // (issue #67). Full-replace like `updatePost`/`updateChat`. Username is
+    // not editable through this endpoint.
     HttpApiEndpoint.put("updateProfile", "/users/me")
       .setPayload(UpdateProfileBody)
       .addSuccess(User)
-      .addError(UsernameTaken, { status: 409 })
       .middleware(Authentication),
   )
   .add(

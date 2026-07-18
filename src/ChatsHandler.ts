@@ -61,7 +61,11 @@ const getParticipants = (
 ): Effect.Effect<ReadonlyArray<ChatParticipant>> =>
   Effect.tryPromise(() =>
     db
-      .select({ userId: chatParticipants.userId, username: users.username })
+      .select({
+        userId: chatParticipants.userId,
+        username: users.username,
+        displayName: users.displayName,
+      })
       .from(chatParticipants)
       .innerJoin(users, eq(users.id, chatParticipants.userId))
       .where(eq(chatParticipants.chatId, chatId)),
@@ -194,6 +198,7 @@ const getParticipantsForChats = (
             chatId: chatParticipants.chatId,
             userId: chatParticipants.userId,
             username: users.username,
+            displayName: users.displayName,
           })
           .from(chatParticipants)
           .innerJoin(users, eq(users.id, chatParticipants.userId))
@@ -1325,11 +1330,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const others = participants
             .map((p) => p.userId)
             .filter((userId) => userId !== currentUser.id);
+          const self = participants.find((p) => p.userId === currentUser.id);
           yield* connections.notifyUsers(others, {
             type: "typing",
             chatId: id,
             userId: currentUser.id,
             username: currentUser.username,
+            displayName: self?.displayName ?? null,
           });
         }),
       )

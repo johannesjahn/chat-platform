@@ -49,6 +49,7 @@ import { useOnlineStatus } from "@/lib/online";
 import { useIsOnline } from "@/lib/presence";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
+import { userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/chats/$id")({
@@ -412,8 +413,8 @@ function ChatView({ id }: { id: string }) {
     }
   }
 
-  async function handleRemoveParticipant(userId: number, username: string) {
-    if (!window.confirm(`Remove @${username} from this chat?`)) return;
+  async function handleRemoveParticipant(userId: number, label: string) {
+    if (!window.confirm(`Remove ${label} from this chat?`)) return;
     setActionError(null);
     try {
       await removeParticipant.mutateAsync({
@@ -427,8 +428,8 @@ function ChatView({ id }: { id: string }) {
     }
   }
 
-  async function handleTransferOwnership(userId: number, username: string) {
-    if (!window.confirm(`Make @${username} the owner of this chat?`)) return;
+  async function handleTransferOwnership(userId: number, label: string) {
+    if (!window.confirm(`Make ${label} the owner of this chat?`)) return;
     setActionError(null);
     try {
       await transferOwnership.mutateAsync({
@@ -618,6 +619,7 @@ function ChatView({ id }: { id: string }) {
               {chat.participants.map((p) => {
                 const isOwner = chat.createdBy === p.userId;
                 const isSelf = p.userId === session.user.id;
+                const label = userLabel(p);
                 return (
                   <li
                     key={p.userId}
@@ -628,7 +630,7 @@ function ChatView({ id }: { id: string }) {
                         <Crown className="size-3.5 shrink-0 text-amber-500" />
                       )}
                       <span className="truncate">
-                        @{p.username}
+                        {label}
                         {isSelf ? " (you)" : ""}
                       </span>
                     </span>
@@ -640,7 +642,7 @@ function ChatView({ id }: { id: string }) {
                           className="h-6 px-2 text-xs"
                           disabled={transferOwnership.isPending}
                           onClick={() =>
-                            void handleTransferOwnership(p.userId, p.username)
+                            void handleTransferOwnership(p.userId, label)
                           }
                         >
                           Make owner
@@ -651,10 +653,10 @@ function ChatView({ id }: { id: string }) {
                           size="icon"
                           variant="ghost"
                           className="size-6"
-                          aria-label={`Remove @${p.username}`}
+                          aria-label={`Remove ${label}`}
                           disabled={removeParticipant.isPending}
                           onClick={() =>
-                            void handleRemoveParticipant(p.userId, p.username)
+                            void handleRemoveParticipant(p.userId, label)
                           }
                         >
                           <UserMinus className="size-3.5" />
@@ -728,7 +730,7 @@ function ChatView({ id }: { id: string }) {
                             : "border-border bg-background/60 hover:border-primary/40",
                         )}
                       >
-                        @{u.username}
+                        {userLabel(u)}
                       </button>
                     );
                   })}
@@ -788,8 +790,10 @@ function ChatView({ id }: { id: string }) {
                     canModify={isOwn || session.user.role === "admin"}
                     onEdit={(content) => handleEditMessage(message.id, content)}
                     onDelete={() => handleDeleteMessage(message.id)}
-                    senderUsername={
-                      chat.type === "group" ? sender?.username : undefined
+                    senderLabel={
+                      chat.type === "group" && sender
+                        ? userLabel(sender)
+                        : undefined
                     }
                     style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}
                   />
@@ -816,7 +820,7 @@ function ChatView({ id }: { id: string }) {
                   <TypingDots />
                   {chat.type === "group" && (
                     <span className="text-xs">
-                      {typingUsers.map((t) => `@${t.username}`).join(", ")}{" "}
+                      {typingUsers.map((t) => userLabel(t)).join(", ")}{" "}
                       {typingUsers.length === 1 ? "is" : "are"} typing…
                     </span>
                   )}

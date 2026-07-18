@@ -18,7 +18,6 @@ import { Label } from "@/components/ui/label";
 import {
   $api,
   MAX_DISPLAY_NAME_LENGTH,
-  MAX_USERNAME_LENGTH,
   MIN_PASSWORD_LENGTH,
   usersQueryKey,
 } from "@/lib/api";
@@ -62,7 +61,6 @@ function EditProfileCard() {
   const queryClient = useQueryClient();
   const updateProfile = $api.useMutation("put", "/users/me");
 
-  const [username, setUsername] = useState(session?.user.username ?? "");
   const [displayName, setDisplayName] = useState(
     session?.user.displayName ?? "",
   );
@@ -74,9 +72,7 @@ function EditProfileCard() {
     <Card className="w-full motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
       <CardHeader>
         <CardTitle>Edit profile</CardTitle>
-        <CardDescription>
-          Update your username, display name, and avatar.
-        </CardDescription>
+        <CardDescription>Update your display name and avatar.</CardDescription>
       </CardHeader>
       <CardContent>
         {error && (
@@ -99,7 +95,6 @@ function EditProfileCard() {
             try {
               const updated = await updateProfile.mutateAsync({
                 body: {
-                  username,
                   displayName: displayName.trim() || null,
                   avatarUrl: avatarUrl.trim() || null,
                 },
@@ -114,7 +109,7 @@ function EditProfileCard() {
         >
           <div className="flex items-center gap-4">
             <Avatar
-              name={displayName.trim() || username}
+              name={displayName.trim() || session?.user.username || ""}
               avatarUrl={avatarUrl.trim() || null}
               size="lg"
             />
@@ -130,14 +125,10 @@ function EditProfileCard() {
             </div>
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="username">Username</Label>
-            <Input
-              id="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              maxLength={MAX_USERNAME_LENGTH}
-              required
-            />
+            <Label>Username</Label>
+            <p className="text-sm text-muted-foreground">
+              @{session?.user.username}
+            </p>
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="display-name">Display name</Label>
@@ -152,7 +143,7 @@ function EditProfileCard() {
           <Button
             type="submit"
             className="mt-1 w-full"
-            disabled={updateProfile.isPending || !username.trim()}
+            disabled={updateProfile.isPending}
           >
             {updateProfile.isPending && (
               <Loader2 className="size-4 animate-spin" />

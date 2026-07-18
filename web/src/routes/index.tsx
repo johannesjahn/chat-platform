@@ -18,7 +18,7 @@ import {
 } from "@/lib/offlineQueue";
 import { useOnlineStatus } from "@/lib/online";
 import { postsFeedQueryKey, usePostsFeed } from "@/lib/posts";
-import { useUsernamesById } from "@/lib/users";
+import { useUserSummariesById, userLabel } from "@/lib/users";
 
 export const Route = createFileRoute("/")({
   component: PostsFeedPage,
@@ -41,12 +41,16 @@ function PostsFeedPage() {
   const posts = data?.pages.flatMap((page) => page.posts) ?? [];
   const pendingPosts = usePendingPosts();
 
-  // Resolves `authorId` -> `@username` on each card, one request per
-  // distinct author currently loaded (see `useUsernamesById`).
-  const usernameById = useUsernamesById(
+  // Resolves `authorId` -> a display label on each card, one request per
+  // distinct author currently loaded (see `useUserSummariesById`).
+  const authorById = useUserSummariesById(
     posts.map((post) => post.authorId),
     !!session,
   );
+  const authorLabelFor = (authorId: number) => {
+    const author = authorById.get(authorId);
+    return author ? userLabel(author) : `user #${authorId}`;
+  };
 
   const deletePost = $api.useMutation("delete", "/posts/{id}");
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -150,9 +154,7 @@ function PostsFeedPage() {
               <PostCard
                 post={post}
                 authorId={post.authorId}
-                authorUsername={
-                  usernameById.get(post.authorId) ?? `user #${post.authorId}`
-                }
+                authorLabel={authorLabelFor(post.authorId)}
                 canModify={
                   session.user.id === post.authorId ||
                   session.user.role === "admin"

@@ -22,7 +22,7 @@ import {
 type MessageBubbleProps = {
   message: ChatMessage;
   isOwn: boolean;
-  senderUsername?: string;
+  senderLabel?: string;
   isRead: boolean;
   canModify: boolean;
   onEdit: (content: string) => Promise<void>;
@@ -33,7 +33,7 @@ type MessageBubbleProps = {
 export function MessageBubble({
   message,
   isOwn,
-  senderUsername,
+  senderLabel,
   isRead,
   canModify,
   onEdit,
@@ -131,13 +131,13 @@ export function MessageBubble({
             : "rounded-bl-sm border border-border bg-card text-card-foreground",
         )}
       >
-        {senderUsername && !isOwn && (
+        {senderLabel && !isOwn && (
           <Link
             to="/users/$id"
             params={{ id: String(message.senderId) }}
             className="w-fit text-xs font-semibold text-primary hover:underline"
           >
-            @{senderUsername}
+            {senderLabel}
           </Link>
         )}
 

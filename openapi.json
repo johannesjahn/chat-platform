@@ -505,16 +505,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "UsernameTaken",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsernameTaken"
-                }
-              }
-            }
           }
         },
         "requestBody": {
@@ -3885,17 +3875,10 @@
       "UpdateProfileBody": {
         "type": "object",
         "required": [
-          "username",
           "displayName",
           "avatarUrl"
         ],
         "properties": {
-          "username": {
-            "$ref": "#/components/schemas/NonEmptyTrimmedString",
-            "description": "a string at most 32 character(s) long",
-            "title": "maxLength(32)",
-            "maxLength": 32
-          },
           "displayName": {
             "anyOf": [
               {
@@ -4364,7 +4347,8 @@
         "type": "object",
         "required": [
           "userId",
-          "username"
+          "username",
+          "displayName"
         ],
         "properties": {
           "userId": {
@@ -4372,6 +4356,16 @@
           },
           "username": {
             "type": "string"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false

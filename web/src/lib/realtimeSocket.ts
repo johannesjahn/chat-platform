@@ -34,7 +34,13 @@ type RealtimeSocketEvent =
       likeCount: number;
     }
   | { type: "presence"; userId: number; online: boolean }
-  | { type: "typing"; chatId: number; userId: number; username: string };
+  | {
+      type: "typing";
+      chatId: number;
+      userId: number;
+      username: string;
+      displayName: string | null;
+    };
 
 // A little more than the default Bun WebSocket idle timeout — sending
 // anything at all (the content is irrelevant, the server ignores incoming
@@ -229,7 +235,12 @@ export function useRealtimeSocket(enabled: boolean): void {
             setUserOnline(parsed.userId, parsed.online);
             break;
           case "typing":
-            noteTyping(parsed.chatId, parsed.userId, parsed.username);
+            noteTyping(
+              parsed.chatId,
+              parsed.userId,
+              parsed.username,
+              parsed.displayName,
+            );
             break;
         }
       };

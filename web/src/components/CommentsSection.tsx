@@ -18,7 +18,7 @@ import {
 } from "@/lib/comments";
 import { errorMessage } from "@/lib/errors";
 import { usePostCommentsSubscription } from "@/lib/postRooms";
-import { useUsernamesById } from "@/lib/users";
+import { useUserSummariesById, userAvatarName, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 // A small controlled composer used both for new comments/replies and for
@@ -132,9 +132,12 @@ function CommentItem({
 }) {
   const session = useSession();
   const queryClient = useQueryClient();
-  const usernameById = useUsernamesById([comment.authorId], true);
-  const authorName =
-    usernameById.get(comment.authorId) ?? `user #${comment.authorId}`;
+  const authorById = useUserSummariesById([comment.authorId], true);
+  const author = authorById.get(comment.authorId);
+  const authorName = author
+    ? userAvatarName(author)
+    : `user #${comment.authorId}`;
+  const authorLabel = author ? userLabel(author) : `user #${comment.authorId}`;
   const canModify =
     !!session &&
     (session.user.id === comment.authorId || session.user.role === "admin");
@@ -181,7 +184,7 @@ function CommentItem({
               params={{ id: String(comment.authorId) }}
               className="text-sm font-medium hover:underline"
             >
-              @{authorName}
+              {authorLabel}
             </Link>
             <span className="text-xs text-muted-foreground">
               {new Date(comment.createdAt).toLocaleString()}
@@ -270,7 +273,7 @@ function CommentItem({
         {replying && !isReply && (
           <div className="mt-1">
             <CommentComposer
-              placeholder={`Reply to @${authorName}…`}
+              placeholder={`Reply to ${authorLabel}…`}
               submitLabel="Reply"
               autoFocus
               onSubmit={async (content) => {

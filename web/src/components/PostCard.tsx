@@ -30,7 +30,7 @@ import type { Post } from "@/lib/posts";
 type PostCardProps = {
   post: Post;
   authorId: number;
-  authorUsername: string;
+  authorLabel: string;
   canModify: boolean;
   onDelete: () => void;
   isDeleting: boolean;
@@ -71,7 +71,7 @@ const COLLAPSE_THRESHOLD = 500;
 export function PostCard({
   post,
   authorId,
-  authorUsername,
+  authorLabel,
   canModify,
   onDelete,
   isDeleting,
@@ -108,7 +108,7 @@ export function PostCard({
   return (
     <Card
       role="article"
-      aria-label={`Post by @${authorUsername}`}
+      aria-label={`Post by ${authorLabel}`}
       data-post-id={post.id}
       style={style}
       onMouseMove={(e) => {
@@ -135,11 +135,11 @@ export function PostCard({
           className="flex flex-1 items-center gap-3 leading-tight"
         >
           <Avatar
-            name={authorUsername}
+            name={authorLabel}
             className="transition-transform duration-300 ease-out group-hover:scale-105"
           />
           <div className="flex flex-1 flex-col leading-tight">
-            <span className="font-medium">@{authorUsername}</span>
+            <span className="font-medium">{authorLabel}</span>
             <span className="text-xs text-muted-foreground">
               {new Date(post.createdAt).toLocaleString()}
               {wasEdited && " · edited"}

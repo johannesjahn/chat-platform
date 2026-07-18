@@ -1293,7 +1293,7 @@ test("updateProfile rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.users
         .updateProfile({
-          payload: { username: "nobody", displayName: null, avatarUrl: null },
+          payload: { displayName: null, avatarUrl: null },
         })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
@@ -1303,7 +1303,7 @@ test("updateProfile rejects an unauthenticated request", () =>
     }),
   ));
 
-test("updateProfile updates username, displayName, and avatarUrl, reflected by getUser", () =>
+test("updateProfile updates displayName and avatarUrl, reflected by getUser, without changing username", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
@@ -1317,14 +1317,13 @@ test("updateProfile updates username, displayName, and avatarUrl, reflected by g
 
       const updated = yield* authed.users.updateProfile({
         payload: {
-          username: "xander2",
           displayName: "Xander Prime",
           avatarUrl: "https://i.imgur.com/avatar.png",
         },
       });
       expect(updated).toEqual({
         id: created.id,
-        username: "xander2",
+        username: "xander",
         displayName: "Xander Prime",
         avatarUrl: "https://i.imgur.com/avatar.png",
         role: "user",
@@ -1332,53 +1331,6 @@ test("updateProfile updates username, displayName, and avatarUrl, reflected by g
 
       const fetched = yield* authed.users.getUser({ path: { id: created.id } });
       expect(fetched).toEqual(updated);
-    }),
-  ));
-
-test("updateProfile allows keeping the caller's own current username unchanged", () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "yara", password: "pw-yara12" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "yara", password: "pw-yara12" },
-      });
-      const authed = yield* makeAuthedClient(accessToken);
-
-      const updated = yield* authed.users.updateProfile({
-        payload: { username: "yara", displayName: "Yara", avatarUrl: null },
-      });
-      expect(updated.username).toBe("yara");
-      expect(updated.displayName).toBe("Yara");
-    }),
-  ));
-
-test("updateProfile rejects a username already taken by another account, case-insensitively", () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "Zack", password: "pw-zack123" },
-      });
-      yield* c.users.register({
-        payload: { username: "wendell", password: "pw-wendell" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "wendell", password: "pw-wendell" },
-      });
-      const authed = yield* makeAuthedClient(accessToken);
-
-      const result = yield* authed.users
-        .updateProfile({
-          payload: { username: "zack", displayName: null, avatarUrl: null },
-        })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("UsernameTaken");
-      }
     }),
   ));
 
@@ -1397,7 +1349,6 @@ test("updateProfile rejects a displayName over the maximum length", () =>
       const result = yield* authed.users
         .updateProfile({
           payload: {
-            username: "victor",
             displayName: "a".repeat(MAX_DISPLAY_NAME_LENGTH + 1),
             avatarUrl: null,
           },
@@ -1422,7 +1373,6 @@ test("updateProfile rejects an avatarUrl on a disallowed host", () =>
       const result = yield* authed.users
         .updateProfile({
           payload: {
-            username: "ulysses",
             displayName: null,
             avatarUrl: "https://evil.example.com/avatar.png",
           },
@@ -1446,13 +1396,12 @@ test("updateProfile clears displayName and avatarUrl when set to null after bein
 
       yield* authed.users.updateProfile({
         payload: {
-          username: "tobias",
           displayName: "Tobias",
           avatarUrl: "https://i.imgur.com/avatar.png",
         },
       });
       const cleared = yield* authed.users.updateProfile({
-        payload: { username: "tobias", displayName: null, avatarUrl: null },
+        payload: { displayName: null, avatarUrl: null },
       });
       expect(cleared.displayName).toBeNull();
       expect(cleared.avatarUrl).toBeNull();

@@ -137,8 +137,7 @@ export const MIN_USER_SEARCH_QUERY_LENGTH = 3;
 // trip, matching the server's own validation (issue #45).
 export const MIN_PASSWORD_LENGTH = 8;
 
-// Mirrors `MAX_USERNAME_LENGTH`/`MAX_DISPLAY_NAME_LENGTH` in src/Api.ts.
-export const MAX_USERNAME_LENGTH = 32;
+// Mirrors `MAX_DISPLAY_NAME_LENGTH` in src/Api.ts.
 export const MAX_DISPLAY_NAME_LENGTH = 64;
 
 export type PublicUser = components["schemas"]["User"];

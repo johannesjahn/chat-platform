@@ -18,6 +18,7 @@ import { useSession } from "@/lib/auth";
 import { MAX_GROUP_PARTICIPANTS, chatsListQueryKey } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
+import { userAvatarName, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/chats/new")({
@@ -218,10 +219,10 @@ function NewChatPage() {
                         )}
                       >
                         <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-                          {user.username.slice(0, 1).toUpperCase()}
+                          {userAvatarName(user).slice(0, 1).toUpperCase()}
                         </span>
                         <span className="flex-1 font-medium">
-                          @{user.username}
+                          {userLabel(user)}
                         </span>
                         {mode === "direct" && pendingUserId === user.id && (
                           <Loader2 className="size-4 animate-spin text-muted-foreground" />

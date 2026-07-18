@@ -8,6 +8,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
 import { recordChatVersion } from "./chatVersions";
+import { userLabel } from "./users";
 
 export type Chat = components["schemas"]["Chat"];
 export type ChatType = components["schemas"]["ChatType"];
@@ -68,7 +69,7 @@ export function useChatsList(enabled: boolean) {
 export function chatDisplayName(chat: Chat, currentUserId: number): string {
   if (chat.type === "group") return chat.title ?? "Group chat";
   const other = chat.participants.find((p) => p.userId !== currentUserId);
-  return other ? `@${other.username}` : "Direct chat";
+  return other ? userLabel(other) : "Direct chat";
 }
 
 // Today shows a time, anything older shows a short date — the usual chat-app
