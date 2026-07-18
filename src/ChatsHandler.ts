@@ -505,7 +505,12 @@ const requireChatOwner = (
     if (role !== "owner")
       return yield* Effect.fail(
         new Forbidden({
-          message: "Only the chat owner or an admin can perform this action",
+          // "admin" here means a *site-wide* admin, not this chat's
+          // "admin" role (that's exactly who this check excludes) — spelled
+          // out so the message doesn't read as self-contradictory to
+          // whoever it just rejected.
+          message:
+            "Only the chat owner (or a site admin) can perform this action",
         }),
       );
   });
@@ -1757,11 +1762,26 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             );
           yield* requireChatManager(db, currentUser, chatRow);
 
+          const now = new Date();
+          // Only still-active invites (not revoked, not expired) count
+          // toward the cap — a revoked or expired one no longer occupies a
+          // "slot" a caller could ever redeem, so it shouldn't keep this
+          // chat permanently stuck at the limit (matches the "revoke an old
+          // one first" wording below: revoking must actually free a slot).
           const existingCount = yield* Effect.tryPromise(() =>
             db
               .select({ total: count() })
               .from(chatInvites)
-              .where(eq(chatInvites.chatId, id)),
+              .where(
+                and(
+                  eq(chatInvites.chatId, id),
+                  isNull(chatInvites.revokedAt),
+                  or(
+                    isNull(chatInvites.expiresAt),
+                    gt(chatInvites.expiresAt, now),
+                  ),
+                ),
+              ),
           ).pipe(
             Effect.orDie,
             Effect.map((rows) => rows[0]?.total ?? 0),
@@ -1769,11 +1789,9 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           if (existingCount >= MAX_INVITES_PER_CHAT)
             return yield* Effect.fail(
               new InvalidChatRequest({
-                message: `This chat has reached its limit of ${MAX_INVITES_PER_CHAT} invites — revoke an old one first`,
+                message: `This chat has reached its limit of ${MAX_INVITES_PER_CHAT} active invites — revoke an old one first`,
               }),
             );
-
-          const now = new Date();
           const created = yield* Effect.tryPromise(() =>
             db
               .insert(chatInvites)
@@ -1878,6 +1896,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             return yield* Effect.fail(
               new InvalidChatRequest({ message: "This invite has expired" }),
             );
+          // The plain read above is just a fast-path rejection for an
+          // already-obviously-exhausted invite — the authoritative check is
+          // the guarded UPDATE inside the transaction below, which is immune
+          // to the TOCTOU race two concurrent redemptions of a
+          // `maxUses`-limited invite would otherwise hit if this were the
+          // only check.
           if (invite.maxUses !== null && invite.useCount >= invite.maxUses)
             return yield* Effect.fail(
               new InvalidChatRequest({
@@ -1893,11 +1917,16 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           );
           if (alreadyIn) return yield* buildChat(db, chatRow, currentUser.id);
 
-          // The "is the chat still under the participant cap" check and the
-          // join itself run inside one `serializable` transaction, same
-          // reasoning as `addParticipants` — otherwise two concurrent
-          // redemptions of invites to a chat sitting one seat under the cap
-          // could both read "room for one more" and both insert.
+          // Participant cap, `useCount` bump, and the join itself all run
+          // inside one `serializable` transaction, same reasoning as
+          // `addParticipants` for the cap. The `useCount` bump is additionally
+          // guarded by a conditional `WHERE useCount < maxUses` (skipped
+          // entirely when unlimited) rather than just re-reading `useCount` —
+          // two concurrent redemptions of a `maxUses: 1` invite could
+          // otherwise both read "0 < 1" and both proceed. Ordered cap-check
+          // first, then the guarded bump, then the insert, so a request that
+          // fails either check never mutates `chatInvites` or
+          // `chatParticipants`.
           const result = yield* Effect.tryPromise(() =>
             db.transaction(
               async (tx) => {
@@ -1906,7 +1935,22 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                   .from(chatParticipants)
                   .where(eq(chatParticipants.chatId, chatRow.id));
                 if (currentParticipants.length >= MAX_GROUP_PARTICIPANTS)
-                  return { ok: false as const };
+                  return { ok: false as const, reason: "cap" as const };
+
+                const useCountGuard =
+                  invite.maxUses !== null
+                    ? and(
+                        eq(chatInvites.id, invite.id),
+                        lt(chatInvites.useCount, invite.maxUses),
+                      )
+                    : eq(chatInvites.id, invite.id);
+                const bumped = await tx
+                  .update(chatInvites)
+                  .set({ useCount: sql`${chatInvites.useCount} + 1` })
+                  .where(useCountGuard)
+                  .returning({ id: chatInvites.id });
+                if (bumped.length === 0)
+                  return { ok: false as const, reason: "maxUses" as const };
 
                 await tx.insert(chatParticipants).values({
                   chatId: chatRow.id,
@@ -1914,10 +1958,6 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                   joinedAt: new Date(),
                   role: "member",
                 });
-                await tx
-                  .update(chatInvites)
-                  .set({ useCount: sql`${chatInvites.useCount} + 1` })
-                  .where(eq(chatInvites.id, invite.id));
                 return { ok: true as const };
               },
               { isolationLevel: "serializable" },
@@ -1926,7 +1966,10 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           if (!result.ok)
             return yield* Effect.fail(
               new InvalidChatRequest({
-                message: `Group chats can have at most ${MAX_GROUP_PARTICIPANTS} participants`,
+                message:
+                  result.reason === "maxUses"
+                    ? "This invite has reached its use limit"
+                    : `Group chats can have at most ${MAX_GROUP_PARTICIPANTS} participants`,
               }),
             );
 

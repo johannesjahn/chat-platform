@@ -9,7 +9,11 @@ import {
 import { BunHttpServer } from "@effect/platform-bun";
 import { eq } from "drizzle-orm";
 import { Effect, Layer, Metric, MetricLabel } from "effect";
-import { ChatApi, MAX_GROUP_PARTICIPANTS } from "./Api.ts";
+import {
+  ChatApi,
+  MAX_GROUP_PARTICIPANTS,
+  MAX_INVITES_PER_CHAT,
+} from "./Api.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
 import { AttachmentStorageLive } from "./AttachmentStorage.ts";
@@ -2110,5 +2114,94 @@ test("joinChatViaInvite rejects joining once the group is at its participant cap
           "InvalidChatRequest",
         );
       }
+    }),
+  ));
+
+// Regression test for a TOCTOU race between the pre-transaction `useCount`
+// read and the increment: two concurrent redemptions of a `maxUses: 1`
+// invite must not both succeed (see the guarded `WHERE useCount < maxUses`
+// update in `joinChatViaInvite`, ChatsHandler.ts).
+test("joinChatViaInvite serializes concurrent redemptions against maxUses", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const dave = yield* registerAndLogin("dave", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+      const invite = yield* alice.client.chats.createChatInvite({
+        path: { id: chat.id },
+        payload: { maxUses: 1 },
+      });
+
+      const [carolResult, daveResult] = yield* Effect.all(
+        [
+          carol.client.chats
+            .joinChatViaInvite({ path: { code: invite.code } })
+            .pipe(Effect.either),
+          dave.client.chats
+            .joinChatViaInvite({ path: { code: invite.code } })
+            .pipe(Effect.either),
+        ],
+        { concurrency: "unbounded" },
+      );
+      const results = [carolResult, daveResult];
+      const succeeded = results.filter((r) => r._tag === "Right");
+      const failed = results.filter((r) => r._tag === "Left");
+      expect(succeeded).toHaveLength(1);
+      expect(failed).toHaveLength(1);
+      if (failed[0]?._tag === "Left") {
+        expect((failed[0].left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+
+      const invites = yield* alice.client.chats.listChatInvites({
+        path: { id: chat.id },
+      });
+      expect(invites.find((i) => i.id === invite.id)?.useCount).toBe(1);
+    }),
+  ));
+
+test("createChatInvite doesn't count revoked/expired invites toward the per-chat cap", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+
+      const invites = [];
+      for (let i = 0; i < MAX_INVITES_PER_CHAT; i++) {
+        invites.push(
+          yield* alice.client.chats.createChatInvite({
+            path: { id: chat.id },
+            payload: {},
+          }),
+        );
+      }
+
+      const atCap = yield* alice.client.chats
+        .createChatInvite({ path: { id: chat.id }, payload: {} })
+        .pipe(Effect.either);
+      expect(atCap._tag).toBe("Left");
+      if (atCap._tag === "Left") {
+        expect((atCap.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+
+      // Revoking one frees a slot even though the row itself still exists.
+      yield* alice.client.chats.revokeChatInvite({
+        path: { id: chat.id, inviteId: invites[0]!.id },
+      });
+      const afterRevoke = yield* alice.client.chats.createChatInvite({
+        path: { id: chat.id },
+        payload: {},
+      });
+      expect(afterRevoke.chatId).toBe(chat.id);
     }),
   ));
