@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { ImageIcon, Loader2, SendHorizontal, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,17 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
   const lastTypingSentAtRef = useRef(0);
   const sendTyping = $api.useMutation("post", "/chats/{id}/typing");
   const isOnline = useOnlineStatus();
+
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (contentType !== "text") return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    const newHeight = Math.min(textarea.scrollHeight, 160);
+    textarea.style.height = `${newHeight}px`;
+  }, [content, contentType]);
 
   const trimmed = content.trim();
   const overLimit = trimmed.length > MAX_MESSAGE_CONTENT_LENGTH;
@@ -108,13 +119,14 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
 
         {contentType === "text" ? (
           <Textarea
+            ref={textareaRef}
             value={content}
             onChange={(e) => handleContentChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Write a message… (Enter to send, Shift+Enter for a new line)"
             rows={1}
             aria-invalid={overLimit}
-            className="min-h-9 flex-1 resize-none py-2"
+            className="min-h-9 max-h-40 flex-1 resize-none py-2 transition-[height] duration-150 ease-smooth overflow-y-auto"
           />
         ) : (
           <Input
@@ -145,12 +157,12 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
               ? undefined
               : "You're offline — this will be queued and sent once you reconnect"
           }
-          className="shrink-0"
+          className="group/send shrink-0 transition-all duration-300 ease-spring active:scale-95"
         >
           {pending ? (
             <Loader2 className="size-4 animate-spin" />
           ) : (
-            <SendHorizontal className="size-4" />
+            <SendHorizontal className="size-4 transition-transform duration-300 ease-spring group-hover/send:translate-x-0.5 group-hover/send:-translate-y-0.25 group-hover/send:scale-105" />
           )}
         </Button>
       </div>

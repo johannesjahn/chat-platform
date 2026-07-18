@@ -123,7 +123,7 @@ export function PostCard({
         );
       }}
       className={cn(
-        "group w-full max-w-xl overflow-hidden py-0 transition-[transform,box-shadow,border-color] duration-400 ease-out hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5",
+        "group w-full max-w-xl overflow-hidden py-0 transition-all duration-400 ease-smooth hover:-translate-y-1 hover:border-primary/35 hover:shadow-xl hover:shadow-primary/8",
         "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-500",
       )}
     >
@@ -136,7 +136,7 @@ export function PostCard({
         >
           <Avatar
             name={authorLabel}
-            className="transition-transform duration-300 ease-out group-hover:scale-105"
+            className="transition-transform duration-300 ease-smooth group-hover:scale-105"
           />
           <div className="flex flex-1 flex-col leading-tight">
             <span className="font-medium">{authorLabel}</span>
@@ -191,19 +191,19 @@ export function PostCard({
             </p>
             {isLongText && (
               <Button
-                variant="link"
+                variant="ghost"
                 size="sm"
-                className="mt-2 h-auto p-0"
+                className="mt-2 h-8 gap-1.5 px-3 text-xs text-primary hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-smooth"
                 onClick={() => setExpanded((prev) => !prev)}
               >
                 {expanded ? (
                   <>
-                    <ChevronUp className="size-4" />
+                    <ChevronUp className="size-4 transition-transform duration-300 group-hover:-translate-y-0.5" />
                     Show less
                   </>
                 ) : (
                   <>
-                    <ChevronDown className="size-4" />
+                    <ChevronDown className="size-4 transition-transform duration-300 group-hover:translate-y-0.5" />
                     Show more
                   </>
                 )}
