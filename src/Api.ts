@@ -2,9 +2,11 @@ import {
   HttpApi,
   HttpApiEndpoint,
   HttpApiGroup,
+  HttpApiSchema,
+  Multipart,
   OpenApi,
 } from "@effect/platform";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import packageJson from "../package.json" with { type: "json" };
 import { Authentication } from "./Auth.ts";
 
@@ -242,9 +244,60 @@ export class InvalidCommentRequest extends Schema.TaggedError<InvalidCommentRequ
   { message: Schema.String },
 ) {}
 
+// Uploaded file metadata (issue #221) — attached to a post/message via
+// `attachmentId` in Create/UpdatePostBody/CreateMessageBody/UpdateMessageBody
+// below. `url` is a fresh, short-lived presigned (or `data:`, in the
+// no-S3-configured dev fallback — see AttachmentStorage.ts) link resolved on
+// every read, never stored, so it can't go stale or outlive its own access
+// check.
+export const Attachment = Schema.Struct({
+  id: Schema.Number,
+  filename: Schema.String,
+  mimeType: Schema.String,
+  size: Schema.Number,
+  url: Schema.String,
+}).annotations({ identifier: "Attachment" });
+export type Attachment = typeof Attachment.Type;
+
+// Mime types `POST /attachments` accepts — deliberately curated rather than
+// "anything" (issue #221 only asks for previews of these four families), and
+// mainly to avoid ever storing/serving something like `text/html` or
+// `image/svg+xml` from the bucket's origin, which could be used for stored
+// XSS against whoever opens the presigned/data URL.
+export const ALLOWED_ATTACHMENT_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "video/mp4",
+  "video/webm",
+  "audio/mpeg",
+  "audio/ogg",
+  "audio/wav",
+  "application/pdf",
+] as const;
+
+// A generous ceiling for chat/post media while still bounding worst-case
+// storage and upload time per request.
+export const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024;
+
+export class UnsupportedAttachmentType extends Schema.TaggedError<UnsupportedAttachmentType>()(
+  "UnsupportedAttachmentType",
+  { message: Schema.String },
+) {}
+
+export class AttachmentTooLarge extends Schema.TaggedError<AttachmentTooLarge>()(
+  "AttachmentTooLarge",
+  { message: Schema.String },
+) {}
+
 // Content types a post's body can hold. Extend this union (and the handler's
 // per-type validation, if any is ever needed) to support new post kinds.
-export const PostContentType = Schema.Literal("text", "image_url").annotations({
+export const PostContentType = Schema.Literal(
+  "text",
+  "image_url",
+  "attachment",
+).annotations({
   identifier: "PostContentType",
 });
 export type PostContentType = typeof PostContentType.Type;
@@ -298,11 +351,27 @@ export const ReactionSummary = Schema.Struct({
 }).annotations({ identifier: "ReactionSummary" });
 export type ReactionSummary = typeof ReactionSummary.Type;
 
+// Cross-field check shared by post/message create+update bodies:
+// `attachmentId` must be set exactly when `contentType` is "attachment" —
+// never alongside "text"/"image_url", and never missing for "attachment".
+const requireAttachmentId = (body: {
+  readonly contentType: string;
+  readonly attachmentId?: number | undefined;
+}): string | undefined => {
+  if (body.contentType === "attachment" && body.attachmentId === undefined)
+    return `attachmentId is required when contentType is "attachment"`;
+  if (body.contentType !== "attachment" && body.attachmentId !== undefined)
+    return `attachmentId may only be set when contentType is "attachment"`;
+  return undefined;
+};
+
 export const Post = Schema.Struct({
   id: Schema.Number,
   authorId: Schema.Number,
   contentType: PostContentType,
   content: Schema.String,
+  // Set only when contentType is "attachment" — see `Attachment` above.
+  attachment: Schema.NullOr(Attachment),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
   // Engagement computed on read (see EngagementHandler.ts / PostsHandler.ts)
@@ -316,15 +385,25 @@ export type Post = typeof Post.Type;
 export const CreatePostBody = Schema.Struct({
   contentType: PostContentType,
   content: PostContent,
+  // Id of a previously-uploaded attachment (`POST /attachments`) owned by
+  // the caller — required exactly when contentType is "attachment".
+  attachmentId: Schema.optional(Schema.Number),
 })
-  .pipe(Schema.filter(requireAllowedImageUrl))
+  .pipe(
+    Schema.filter(requireAllowedImageUrl),
+    Schema.filter(requireAttachmentId),
+  )
   .annotations({ identifier: "CreatePostBody" });
 
 export const UpdatePostBody = Schema.Struct({
   contentType: PostContentType,
   content: PostContent,
+  attachmentId: Schema.optional(Schema.Number),
 })
-  .pipe(Schema.filter(requireAllowedImageUrl))
+  .pipe(
+    Schema.filter(requireAllowedImageUrl),
+    Schema.filter(requireAttachmentId),
+  )
   .annotations({ identifier: "UpdatePostBody" });
 
 export const DEFAULT_POSTS_LIMIT = 20;
@@ -474,6 +553,7 @@ export type ChatParticipant = typeof ChatParticipant.Type;
 export const MessageContentType = Schema.Literal(
   "text",
   "image_url",
+  "attachment",
 ).annotations({ identifier: "MessageContentType" });
 export type MessageContentType = typeof MessageContentType.Type;
 
@@ -491,6 +571,8 @@ export const Message = Schema.Struct({
   senderId: Schema.Number,
   contentType: MessageContentType,
   content: Schema.String,
+  // Set only when contentType is "attachment" — see `Attachment` above.
+  attachment: Schema.NullOr(Attachment),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
   // Ids of participants (other than the sender) who have read this message —
@@ -559,15 +641,25 @@ export const TransferOwnershipBody = Schema.Struct({
 export const CreateMessageBody = Schema.Struct({
   contentType: MessageContentType,
   content: MessageContent,
+  // Id of a previously-uploaded attachment (`POST /attachments`) owned by
+  // the caller — required exactly when contentType is "attachment".
+  attachmentId: Schema.optional(Schema.Number),
 })
-  .pipe(Schema.filter(requireAllowedImageUrl))
+  .pipe(
+    Schema.filter(requireAllowedImageUrl),
+    Schema.filter(requireAttachmentId),
+  )
   .annotations({ identifier: "CreateMessageBody" });
 
 export const UpdateMessageBody = Schema.Struct({
   contentType: MessageContentType,
   content: MessageContent,
+  attachmentId: Schema.optional(Schema.Number),
 })
-  .pipe(Schema.filter(requireAllowedImageUrl))
+  .pipe(
+    Schema.filter(requireAllowedImageUrl),
+    Schema.filter(requireAttachmentId),
+  )
   .annotations({ identifier: "UpdateMessageBody" });
 
 export const MarkReadBody = Schema.Struct({
@@ -747,6 +839,9 @@ const PostsGroup = HttpApiGroup.make("posts")
     HttpApiEndpoint.post("createPost", "/posts")
       .setPayload(CreatePostBody)
       .addSuccess(Post, { status: 201 })
+      // Raised when `attachmentId` doesn't reference an attachment owned by
+      // the caller (see getOwnedAttachmentOr404 in attachments.ts).
+      .addError(NotFound, { status: 404 })
       .middleware(Authentication),
   )
   .add(
@@ -1114,6 +1209,32 @@ const ChatsGroup = HttpApiGroup.make("chats")
       .middleware(Authentication),
   );
 
+// Multipart upload payload (issue #221) — a single "file" field, persisted
+// to a temp path by the framework (see Multipart.PersistedFile) before the
+// handler reads it. `maxFileSize` here is a coarse, in-stream backstop
+// against an attacker just sending gigabytes of data — enforced while the
+// body is still streaming in, before it ever hits disk. It's deliberately
+// looser than `MAX_ATTACHMENT_SIZE_BYTES`'s precise, typed
+// `AttachmentTooLarge` check the handler runs afterward on the persisted
+// file — set equal to it, an ordinary too-large upload would trip this
+// coarse limit first and surface as a generic 400 (rejected by the
+// multipart parser itself, before the handler's payload schema even exists
+// to attach a typed error to) instead of the typed 413.
+const UploadAttachmentBody = HttpApiSchema.Multipart(
+  Schema.Struct({ file: Multipart.SingleFileSchema }),
+  { maxFileSize: Option.some(MAX_ATTACHMENT_SIZE_BYTES * 2) },
+);
+
+const AttachmentsGroup = HttpApiGroup.make("attachments").add(
+  HttpApiEndpoint.post("uploadAttachment", "/attachments")
+    .setPayload(UploadAttachmentBody)
+    .addSuccess(Attachment, { status: 201 })
+    .addError(UnsupportedAttachmentType, { status: 415 })
+    .addError(AttachmentTooLarge, { status: 413 })
+    .addError(TooManyRequests, { status: 429 })
+    .middleware(Authentication),
+);
+
 export const VersionResponse = Schema.Struct({
   version: Schema.String,
 }).annotations({ identifier: "VersionResponse" });
@@ -1146,6 +1267,7 @@ export class ChatApi extends HttpApi.make("chat-platform")
   .add(PostsGroup)
   .add(CommentsGroup)
   .add(ChatsGroup)
+  .add(AttachmentsGroup)
   .add(MetaGroup)
   .add(RealtimeGroup)
   .annotate(OpenApi.Version, packageJson.version) {}

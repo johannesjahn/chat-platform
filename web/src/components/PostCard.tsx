@@ -7,10 +7,12 @@ import {
   ImageIcon,
   Loader2,
   MessageSquare,
+  Paperclip,
   Pencil,
   Trash2,
   Type,
 } from "lucide-react";
+import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar } from "@/components/Avatar";
 import { CommentsSection, ReactionPicker } from "@/components/CommentsSection";
 import { Spotlight } from "@/components/reactbits/Spotlight";
@@ -181,6 +183,10 @@ export function PostCard({
             loading="lazy"
             className="aspect-4/5 w-full bg-muted object-cover"
           />
+        ) : post.contentType === "attachment" && post.attachment ? (
+          <div className="px-6 py-6">
+            <AttachmentPreview attachment={post.attachment} />
+          </div>
         ) : (
           <div className="px-6 py-6">
             <p
@@ -238,6 +244,11 @@ export function PostCard({
               <>
                 <ImageIcon className="size-3.5" />
                 Image
+              </>
+            ) : post.contentType === "attachment" ? (
+              <>
+                <Paperclip className="size-3.5" />
+                Attachment
               </>
             ) : (
               <>

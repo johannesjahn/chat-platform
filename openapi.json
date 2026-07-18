@@ -976,6 +976,7 @@
                     "authorId",
                     "contentType",
                     "content",
+                    "attachment",
                     "createdAt",
                     "updatedAt",
                     "reactions"
@@ -992,6 +993,16 @@
                     },
                     "content": {
                       "type": "string"
+                    },
+                    "attachment": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Attachment"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "createdAt": {
                       "type": "number"
@@ -1027,6 +1038,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
                 }
               }
             }
@@ -3012,6 +3033,7 @@
                     "senderId",
                     "contentType",
                     "content",
+                    "attachment",
                     "createdAt",
                     "updatedAt",
                     "readByUserIds"
@@ -3031,6 +3053,16 @@
                     },
                     "content": {
                       "type": "string"
+                    },
+                    "attachment": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/Attachment"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "createdAt": {
                       "type": "number"
@@ -3420,6 +3452,133 @@
               }
             }
           }
+        }
+      }
+    },
+    "/attachments": {
+      "post": {
+        "tags": [
+          "attachments"
+        ],
+        "operationId": "attachments.uploadAttachment",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "filename",
+                    "mimeType",
+                    "size",
+                    "url"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    },
+                    "filename": {
+                      "type": "string"
+                    },
+                    "mimeType": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "number"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "AttachmentTooLarge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentTooLarge"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "UnsupportedAttachmentType",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnsupportedAttachmentType"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "TooManyRequests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyRequests"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/PersistedFile"
+                    },
+                    "description": "an array of exactly 1 item(s)",
+                    "title": "itemsCount(1)",
+                    "minItems": 1,
+                    "maxItems": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
         }
       }
     },
@@ -3998,6 +4157,7 @@
           "authorId",
           "contentType",
           "content",
+          "attachment",
           "createdAt",
           "updatedAt",
           "reactions"
@@ -4014,6 +4174,16 @@
           },
           "content": {
             "type": "string"
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Attachment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "createdAt": {
             "type": "number"
@@ -4034,8 +4204,37 @@
         "type": "string",
         "enum": [
           "text",
-          "image_url"
+          "image_url",
+          "attachment"
         ]
+      },
+      "Attachment": {
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "mimeType",
+          "size",
+          "url"
+        ],
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "ReactionSummary": {
         "type": "object",
@@ -4121,6 +4320,9 @@
             "description": "a string at most 10000 character(s) long",
             "title": "maxLength(10000)",
             "maxLength": 10000
+          },
+          "attachmentId": {
+            "type": "number"
           }
         },
         "additionalProperties": false
@@ -4140,6 +4342,9 @@
             "description": "a string at most 10000 character(s) long",
             "title": "maxLength(10000)",
             "maxLength": 10000
+          },
+          "attachmentId": {
+            "type": "number"
           }
         },
         "additionalProperties": false
@@ -4455,6 +4660,7 @@
           "senderId",
           "contentType",
           "content",
+          "attachment",
           "createdAt",
           "updatedAt",
           "readByUserIds"
@@ -4475,6 +4681,16 @@
           "content": {
             "type": "string"
           },
+          "attachment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Attachment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "createdAt": {
             "type": "number"
           },
@@ -4494,7 +4710,8 @@
         "type": "string",
         "enum": [
           "text",
-          "image_url"
+          "image_url",
+          "attachment"
         ]
       },
       "InvalidChatRequest": {
@@ -4664,6 +4881,9 @@
             "description": "a string at most 4000 character(s) long",
             "title": "maxLength(4000)",
             "maxLength": 4000
+          },
+          "attachmentId": {
+            "type": "number"
           }
         },
         "additionalProperties": false
@@ -4695,6 +4915,51 @@
             "description": "a string at most 4000 character(s) long",
             "title": "maxLength(4000)",
             "maxLength": 4000
+          },
+          "attachmentId": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PersistedFile": {
+        "type": "string",
+        "format": "binary"
+      },
+      "UnsupportedAttachmentType": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "UnsupportedAttachmentType"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "AttachmentTooLarge": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "AttachmentTooLarge"
+            ]
           }
         },
         "additionalProperties": false
@@ -4732,6 +4997,9 @@
     },
     {
       "name": "chats"
+    },
+    {
+      "name": "attachments"
     },
     {
       "name": "meta"

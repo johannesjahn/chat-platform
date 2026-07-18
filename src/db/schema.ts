@@ -74,6 +74,35 @@ export const refreshTokens = pgTable(
 export type DbRefreshToken = typeof refreshTokens.$inferSelect;
 export type NewDbRefreshToken = typeof refreshTokens.$inferInsert;
 
+// Uploaded files (issue #221) — one row per successful `POST /attachments`
+// upload. `storageKey` is the object's key in the S3-compatible bucket (see
+// src/AttachmentStorage.ts), not a public URL: a fresh presigned/served URL
+// is generated on every read instead of being stored, so it can't go stale
+// or leak past its TTL. An attachment is only ever referenced by exactly one
+// message/post (via their nullable `attachmentId` FK below) — it isn't a
+// shared media library — so there's no back-reference here to what it's
+// attached to.
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: serial("id").primaryKey(),
+    uploaderId: integer("uploader_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    size: integer("size").notNull(),
+    storageKey: text("storage_key").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [index("attachments_uploader_id_idx").on(table.uploaderId)],
+);
+
+export type DbAttachment = typeof attachments.$inferSelect;
+export type NewDbAttachment = typeof attachments.$inferInsert;
+
 export const posts = pgTable(
   "posts",
   {
@@ -82,9 +111,15 @@ export const posts = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     contentType: text("content_type", {
-      enum: ["text", "image_url"],
+      enum: ["text", "image_url", "attachment"],
     }).notNull(),
     content: text("content").notNull(),
+    // Set only when contentType is "attachment" — null'd out (rather than
+    // cascading the post's own deletion) if the attachment row it points at
+    // is ever removed independently, since a post should outlive that.
+    attachmentId: integer("attachment_id").references(() => attachments.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -94,7 +129,12 @@ export const posts = pgTable(
   },
   // Postgres doesn't auto-index foreign key columns — without this, cascade
   // deletes from `users` and any author-filtered listing scan every post.
-  (table) => [index("posts_author_id_idx").on(table.authorId)],
+  // `attachmentId` is indexed for the same reason: `attachments`' `set null`
+  // FK above needs to find referencing posts when an attachment is deleted.
+  (table) => [
+    index("posts_author_id_idx").on(table.authorId),
+    index("posts_attachment_id_idx").on(table.attachmentId),
+  ],
 );
 
 export type DbPost = typeof posts.$inferSelect;
@@ -288,9 +328,14 @@ export const messages = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     contentType: text("content_type", {
-      enum: ["text", "image_url"],
+      enum: ["text", "image_url", "attachment"],
     }).notNull(),
     content: text("content").notNull(),
+    // Mirrors `posts.attachmentId` — set only when contentType is
+    // "attachment".
+    attachmentId: integer("attachment_id").references(() => attachments.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -309,6 +354,8 @@ export const messages = pgTable(
     // dedicated index lets Postgres use a bitmap AND of both instead of
     // falling back to a filter scan over every chatId match.
     index("messages_sender_id_idx").on(table.senderId),
+    // Same rationale as `posts_attachment_id_idx` above.
+    index("messages_attachment_id_idx").on(table.attachmentId),
   ],
 );
 

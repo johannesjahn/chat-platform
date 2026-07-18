@@ -1,9 +1,17 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { ImageIcon, Loader2, SendHorizontal, Type } from "lucide-react";
+import {
+  ImageIcon,
+  Loader2,
+  Paperclip,
+  SendHorizontal,
+  Type,
+} from "lucide-react";
+import { AttachmentUploadField } from "@/components/AttachmentUploadField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { $api } from "@/lib/api";
+import type { Attachment } from "@/lib/attachments";
 import { isAllowedImageUrl } from "@/lib/imageHosts";
 import { useOnlineStatus } from "@/lib/online";
 import { cn } from "@/lib/utils";
@@ -24,12 +32,14 @@ type ChatComposerProps = {
   onSend: (values: {
     contentType: MessageContentType;
     content: string;
+    attachmentId?: number;
   }) => Promise<void>;
 };
 
 export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
   const [contentType, setContentType] = useState<MessageContentType>("text");
   const [content, setContent] = useState("");
+  const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [pending, setPending] = useState(false);
   const lastTypingSentAtRef = useRef(0);
   const sendTyping = $api.useMutation("post", "/chats/{id}/typing");
@@ -53,11 +63,14 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
     contentType === "image_url" &&
     trimmed.length > 0 &&
     !isAllowedImageUrl(trimmed);
-  // Sending while offline is allowed — `onSend` queues the message locally
-  // instead of failing (see lib/offlineQueue.ts) — so `isOnline` no longer
-  // gates this the way it gates a plain query.
+  // Sending while offline is allowed for text/image_url — `onSend` queues the
+  // message locally instead of failing (see lib/offlineQueue.ts). An
+  // attachment message can't be queued the same way (it needs a completed
+  // upload, which needs a live connection), so it requires being online.
   const canSend =
-    trimmed.length > 0 && !overLimit && !invalidImageUrl && !pending;
+    contentType === "attachment"
+      ? attachment !== null && !pending && isOnline
+      : trimmed.length > 0 && !overLimit && !invalidImageUrl && !pending;
 
   function notifyTyping() {
     const now = Date.now();
@@ -75,8 +88,17 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
     if (!canSend) return;
     setPending(true);
     try {
-      await onSend({ contentType, content: trimmed });
+      await onSend(
+        contentType === "attachment"
+          ? {
+              contentType,
+              content: attachment!.filename,
+              attachmentId: attachment!.id,
+            }
+          : { contentType, content: trimmed },
+      );
       setContent("");
+      setAttachment(null);
       setContentType("text");
       lastTypingSentAtRef.current = 0;
     } finally {
@@ -115,6 +137,16 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
           >
             <ImageIcon className="size-4" />
           </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant={contentType === "attachment" ? "secondary" : "ghost"}
+            aria-label="Attach a file"
+            aria-pressed={contentType === "attachment"}
+            onClick={() => setContentType("attachment")}
+          >
+            <Paperclip className="size-4" />
+          </Button>
         </div>
 
         {contentType === "text" ? (
@@ -128,7 +160,7 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
             aria-invalid={overLimit}
             className="min-h-9 max-h-40 flex-1 resize-none py-2 transition-[height] duration-150 ease-smooth overflow-y-auto"
           />
-        ) : (
+        ) : contentType === "image_url" ? (
           <Input
             type="url"
             value={content}
@@ -141,6 +173,14 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
             }}
             placeholder="https://picsum.photos/id/1/600/800"
             aria-invalid={invalidImageUrl}
+          />
+        ) : (
+          <AttachmentUploadField
+            attachment={attachment}
+            onUploaded={setAttachment}
+            onClear={() => setAttachment(null)}
+            disabled={pending}
+            className="flex-1"
           />
         )}
 
@@ -172,7 +212,12 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
           picsum.photos, imgur.com, unsplash.com).
         </span>
       )}
-      {!isOnline ? (
+      {!isOnline && contentType === "attachment" ? (
+        <span className="self-end text-xs text-muted-foreground">
+          You&apos;re offline — file attachments can&apos;t be queued and need a
+          live connection to send.
+        </span>
+      ) : !isOnline ? (
         <span className="self-end text-xs text-muted-foreground">
           You&apos;re offline — messages you send will be queued and delivered
           once you&apos;re back online.

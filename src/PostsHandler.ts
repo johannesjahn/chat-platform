@@ -2,12 +2,19 @@ import { HttpApiBuilder } from "@effect/platform";
 import { desc, eq, lt } from "drizzle-orm";
 import { Effect, Metric, MetricLabel } from "effect";
 import {
+  type Attachment,
   ChatApi,
   DEFAULT_POSTS_LIMIT,
   Forbidden,
   InvalidPostsRequest,
   NotFound,
 } from "./Api.ts";
+import {
+  getOwnedAttachmentOr404,
+  resolveAttachments,
+  toApiAttachment,
+} from "./attachments.ts";
+import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
@@ -20,11 +27,13 @@ const NO_REACTIONS: ReactionSummary[] = [];
 const toApiPost = (
   row: typeof posts.$inferSelect,
   reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
+  attachment: Attachment | null = null,
 ) => ({
   id: row.id,
   authorId: row.authorId,
   contentType: row.contentType,
   content: row.content,
+  attachment,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
   reactions: [...reactions],
@@ -75,7 +84,14 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const reactions = yield* Effect.tryPromise(() =>
             postReactionInfo(db, [row.id], currentUser.id),
           ).pipe(Effect.orDie);
-          return toApiPost(row, reactions.get(row.id));
+          const attachments = yield* resolveAttachments(db, [row.attachmentId]);
+          return toApiPost(
+            row,
+            reactions.get(row.id),
+            row.attachmentId !== null
+              ? (attachments.get(row.attachmentId) ?? null)
+              : null,
+          );
         }),
       )
       .handle("listPosts", ({ urlParams }) =>
@@ -117,8 +133,20 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               currentUser.id,
             ),
           ).pipe(Effect.orDie);
+          const attachments = yield* resolveAttachments(
+            db,
+            rows.map((r) => r.attachmentId),
+          );
           return {
-            posts: rows.map((r) => toApiPost(r, reactionInfo.get(r.id))),
+            posts: rows.map((r) =>
+              toApiPost(
+                r,
+                reactionInfo.get(r.id),
+                r.attachmentId !== null
+                  ? (attachments.get(r.attachmentId) ?? null)
+                  : null,
+              ),
+            ),
             limit,
             nextCursor,
           };
@@ -129,6 +157,21 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const connections = yield* RealtimeConnections;
+          const storage = yield* AttachmentStorage;
+
+          let attachment: Attachment | null = null;
+          if (payload.attachmentId !== undefined) {
+            const attachmentRow = yield* getOwnedAttachmentOr404(
+              db,
+              payload.attachmentId,
+              currentUser.id,
+            );
+            attachment = toApiAttachment(
+              attachmentRow,
+              storage.presignGetUrl(attachmentRow.storageKey),
+            );
+          }
+
           // Set both from a single Date rather than relying on the schema's
           // independent per-column $defaultFn — two separate `new Date()`
           // calls can land a millisecond apart, and a freshly created post's
@@ -141,6 +184,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 authorId: currentUser.id,
                 contentType: payload.contentType,
                 content: payload.content,
+                attachmentId: payload.attachmentId ?? null,
                 createdAt: now,
                 updatedAt: now,
               })
@@ -159,7 +203,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             type: "post_changed",
             postId: row.id,
           });
-          return toApiPost(row);
+          return toApiPost(row, NO_REACTIONS, attachment);
         }),
       )
       .handle("updatePost", ({ path: { id }, payload }) =>
@@ -167,11 +211,25 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const connections = yield* RealtimeConnections;
+          const storage = yield* AttachmentStorage;
           const existing = yield* getPostOr404(id);
           if (!canModify(currentUser, existing))
             return yield* Effect.fail(
               new Forbidden({ message: "You can only edit your own posts" }),
             );
+
+          let attachment: Attachment | null = null;
+          if (payload.attachmentId !== undefined) {
+            const attachmentRow = yield* getOwnedAttachmentOr404(
+              db,
+              payload.attachmentId,
+              currentUser.id,
+            );
+            attachment = toApiAttachment(
+              attachmentRow,
+              storage.presignGetUrl(attachmentRow.storageKey),
+            );
+          }
 
           const rows = yield* Effect.tryPromise(() =>
             db
@@ -179,6 +237,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               .set({
                 contentType: payload.contentType,
                 content: payload.content,
+                attachmentId: payload.attachmentId ?? null,
                 updatedAt: new Date(),
               })
               .where(eq(posts.id, id))
@@ -196,7 +255,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             type: "post_changed",
             postId: row.id,
           });
-          return toApiPost(row, reactions.get(row.id));
+          return toApiPost(row, reactions.get(row.id), attachment);
         }),
       )
       .handle("deletePost", ({ path: { id } }) =>

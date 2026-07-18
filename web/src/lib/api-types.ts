@@ -452,6 +452,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["attachments.uploadAttachment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/version": {
         parameters: {
             query?: never;
@@ -643,12 +659,20 @@ export interface components {
             authorId: number;
             contentType: components["schemas"]["PostContentType"];
             content: string;
+            attachment: components["schemas"]["Attachment"] | null;
             createdAt: number;
             updatedAt: number;
             reactions: components["schemas"]["ReactionSummary"][];
         };
         /** @enum {string} */
-        PostContentType: "text" | "image_url";
+        PostContentType: "text" | "image_url" | "attachment";
+        Attachment: {
+            id: number;
+            filename: string;
+            mimeType: string;
+            size: number;
+            url: string;
+        };
         ReactionSummary: {
             emoji: string;
             count: number;
@@ -671,6 +695,7 @@ export interface components {
              * @description a string at most 10000 character(s) long
              */
             content: components["schemas"]["NonEmptyTrimmedString"];
+            attachmentId?: number;
         };
         UpdatePostBody: {
             contentType: components["schemas"]["PostContentType"];
@@ -679,6 +704,7 @@ export interface components {
              * @description a string at most 10000 character(s) long
              */
             content: components["schemas"]["NonEmptyTrimmedString"];
+            attachmentId?: number;
         };
         ReactionBody: {
             emoji: components["schemas"]["ReactionEmoji"];
@@ -752,12 +778,13 @@ export interface components {
             senderId: number;
             contentType: components["schemas"]["MessageContentType"];
             content: string;
+            attachment: components["schemas"]["Attachment"] | null;
             createdAt: number;
             updatedAt: number;
             readByUserIds: number[];
         };
         /** @enum {string} */
-        MessageContentType: "text" | "image_url";
+        MessageContentType: "text" | "image_url" | "attachment";
         InvalidChatRequest: {
             message: string;
             /** @enum {string} */
@@ -810,6 +837,7 @@ export interface components {
              * @description a string at most 4000 character(s) long
              */
             content: components["schemas"]["NonEmptyTrimmedString"];
+            attachmentId?: number;
         };
         MarkReadBody: {
             messageId: number;
@@ -821,6 +849,19 @@ export interface components {
              * @description a string at most 4000 character(s) long
              */
             content: components["schemas"]["NonEmptyTrimmedString"];
+            attachmentId?: number;
+        };
+        /** Format: binary */
+        PersistedFile: string;
+        UnsupportedAttachmentType: {
+            message: string;
+            /** @enum {string} */
+            _tag: "UnsupportedAttachmentType";
+        };
+        AttachmentTooLarge: {
+            message: string;
+            /** @enum {string} */
+            _tag: "AttachmentTooLarge";
         };
         VersionResponse: {
             version: string;
@@ -1551,6 +1592,7 @@ export interface operations {
                         authorId: number;
                         contentType: components["schemas"]["PostContentType"];
                         content: string;
+                        attachment: components["schemas"]["Attachment"] | null;
                         createdAt: number;
                         updatedAt: number;
                         reactions: components["schemas"]["ReactionSummary"][];
@@ -1573,6 +1615,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
                 };
             };
         };
@@ -2869,6 +2920,7 @@ export interface operations {
                         senderId: number;
                         contentType: components["schemas"]["MessageContentType"];
                         content: string;
+                        attachment: components["schemas"]["Attachment"] | null;
                         createdAt: number;
                         updatedAt: number;
                         readByUserIds: number[];
@@ -3147,6 +3199,87 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotFound"];
+                };
+            };
+        };
+    };
+    "attachments.uploadAttachment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * itemsCount(1)
+                     * @description an array of exactly 1 item(s)
+                     */
+                    file: components["schemas"]["PersistedFile"][];
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: number;
+                        filename: string;
+                        mimeType: string;
+                        size: number;
+                        url: string;
+                    };
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description AttachmentTooLarge */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentTooLarge"];
+                };
+            };
+            /** @description UnsupportedAttachmentType */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnsupportedAttachmentType"];
+                };
+            };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequests"];
                 };
             };
         };

@@ -10,6 +10,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -203,6 +204,8 @@ export function MessageBubble({
             loading="lazy"
             className="max-h-72 w-full rounded-lg bg-muted object-cover"
           />
+        ) : message.contentType === "attachment" && message.attachment ? (
+          <AttachmentPreview attachment={message.attachment} />
         ) : (
           <>
             <p
