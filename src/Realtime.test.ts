@@ -383,7 +383,7 @@ test("unregister removes a socket from every post room it had joined", async () 
   );
 });
 
-test("a like on a post still broadcasts feed-wide, not just to the room", async () => {
+test("a reaction on a post still broadcasts feed-wide, not just to the room", async () => {
   await run(
     Effect.gen(function* () {
       const connections = yield* RealtimeConnections;
@@ -395,17 +395,17 @@ test("a like on a post still broadcasts feed-wide, not just to the room", async 
       bob.received.length = 0;
 
       yield* connections.broadcastAll({
-        type: "like_changed",
+        type: "reaction_changed",
         targetType: "post",
         targetId: 5,
-        likeCount: 3,
+        reactions: [{ emoji: "👍", count: 3 }],
       });
 
       const expected = JSON.stringify({
-        type: "like_changed",
+        type: "reaction_changed",
         targetType: "post",
         targetId: 5,
-        likeCount: 3,
+        reactions: [{ emoji: "👍", count: 3 }],
       });
       expect(alice.received).toEqual([expected]);
       expect(bob.received).toEqual([expected]);

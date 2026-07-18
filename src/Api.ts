@@ -274,6 +274,30 @@ const requireAllowedImageUrl = (body: {
     ? IMAGE_URL_FILTER_MESSAGE
     : undefined;
 
+// The standard emoji reaction set (issue #215, widening the original binary
+// "like" from issue #67). A `Schema.Literal` rather than a plain string so
+// the OpenAPI spec documents the exact allowed values and invalid input is
+// rejected at decode time rather than reaching the DB — see the `emoji`
+// column comment in db/schema.ts for why the DB itself stays unconstrained
+// (so a future custom-emoji set doesn't need a migration to loosen it).
+export const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"] as const;
+export const ReactionEmoji = Schema.Literal(...REACTION_EMOJIS).annotations({
+  identifier: "ReactionEmoji",
+});
+export type ReactionEmoji = typeof ReactionEmoji.Type;
+
+// One emoji's aggregate state on a target: how many reactions it has, and
+// whether the requesting user is one of them. `Post`/`Comment` each carry an
+// array of these — one entry per emoji that has at least one reaction, never
+// a zero-filled entry for the rest of the standard set (the frontend's
+// "add a reaction" picker already knows the full set independently).
+export const ReactionSummary = Schema.Struct({
+  emoji: Schema.String,
+  count: Schema.Number,
+  reactedByMe: Schema.Boolean,
+}).annotations({ identifier: "ReactionSummary" });
+export type ReactionSummary = typeof ReactionSummary.Type;
+
 export const Post = Schema.Struct({
   id: Schema.Number,
   authorId: Schema.Number,
@@ -281,13 +305,11 @@ export const Post = Schema.Struct({
   content: Schema.String,
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
-  // Engagement counters computed on read (see EngagementHandler.ts /
-  // PostsHandler.ts) rather than stored — `likeCount` is the total number of
-  // likes on this post, and `likedByMe` whether the requesting user is one of
-  // them, so the feed can render a filled/unfilled like button without a
-  // second request per post.
-  likeCount: Schema.Number,
-  likedByMe: Schema.Boolean,
+  // Engagement computed on read (see EngagementHandler.ts / PostsHandler.ts)
+  // rather than stored — one entry per emoji this post has at least one
+  // reaction from, so the feed can render reaction pills (with the current
+  // user's own reactions highlighted) without a second request per post.
+  reactions: Schema.Array(ReactionSummary),
 }).annotations({ identifier: "Post" });
 export type Post = typeof Post.Type;
 
@@ -363,7 +385,7 @@ const CommentContent = Schema.NonEmptyTrimmedString.pipe(
 // A comment on a post, or a reply to a comment (a reply is just a comment
 // with `parentCommentId` set — null for a top-level comment). Nesting is
 // capped at depth 2, so a reply's parent is always a top-level comment.
-// `likeCount`/`likedByMe` mirror `Post`'s — computed on read, not stored.
+// `reactions` mirrors `Post`'s — computed on read, not stored.
 export const Comment = Schema.Struct({
   id: Schema.Number,
   postId: Schema.Number,
@@ -372,8 +394,7 @@ export const Comment = Schema.Struct({
   content: Schema.String,
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
-  likeCount: Schema.Number,
-  likedByMe: Schema.Boolean,
+  reactions: Schema.Array(ReactionSummary),
 }).annotations({ identifier: "Comment" });
 export type Comment = typeof Comment.Type;
 
@@ -385,14 +406,19 @@ export const UpdateCommentBody = Schema.Struct({
   content: CommentContent,
 }).annotations({ identifier: "UpdateCommentBody" });
 
-// Returned by the like/unlike endpoints (on posts and comments alike): the
-// target's new total plus whether the requesting user now likes it, so the
-// client can reconcile an optimistic toggle without a follow-up read.
-export const LikeState = Schema.Struct({
-  likeCount: Schema.Number,
-  liked: Schema.Boolean,
-}).annotations({ identifier: "LikeState" });
-export type LikeState = typeof LikeState.Type;
+// Payload for the add/remove-reaction endpoints (on posts and comments
+// alike): which of the standard emojis this reaction is/was.
+export const ReactionBody = Schema.Struct({
+  emoji: ReactionEmoji,
+}).annotations({ identifier: "ReactionBody" });
+
+// Returned by the add/remove-reaction endpoints: the target's full new set of
+// per-emoji reaction summaries, so the client can reconcile an optimistic
+// toggle without a follow-up read.
+export const ReactionState = Schema.Struct({
+  reactions: Schema.Array(ReactionSummary),
+}).annotations({ identifier: "ReactionState" });
+export type ReactionState = typeof ReactionState.Type;
 
 export const DEFAULT_COMMENTS_LIMIT = 20;
 export const MAX_COMMENTS_LIMIT = 100;
@@ -741,7 +767,7 @@ const PostsGroup = HttpApiGroup.make("posts")
       .middleware(Authentication),
   );
 
-// Comments, replies, and likes on posts/comments. Kept in its own group
+// Comments, replies, and reactions on posts/comments. Kept in its own group
 // (rather than folded into `posts`) since it spans two path roots
 // (`/posts/:id/...` and `/comments/:id/...`) and its own handler — the group
 // name is just an organizational label, it doesn't have to match the path.
@@ -749,20 +775,25 @@ const IdParam = Schema.Struct({ id: Schema.NumberFromString });
 
 const CommentsGroup = HttpApiGroup.make("comments")
   .add(
-    // Idempotent like/unlike toggle on a post — liking an already-liked post
-    // (or unliking one that isn't) still succeeds, returning the current
-    // state. Emits a feed-wide `like_changed` realtime event.
-    HttpApiEndpoint.post("likePost", "/posts/:id/likes")
+    // Idempotent add-reaction on a post — reacting with an emoji already
+    // reacted with is a no-op, returning the current state. Emits a
+    // feed-wide `reaction_changed` realtime event.
+    HttpApiEndpoint.post("addPostReaction", "/posts/:id/reactions")
       .setPath(IdParam)
-      .addSuccess(LikeState)
+      .setPayload(ReactionBody)
+      .addSuccess(ReactionState)
       .addError(NotFound, { status: 404 })
       .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.del("unlikePost", "/posts/:id/likes")
+    // Removes one specific emoji reaction — a user may have reacted with more
+    // than one emoji on the same target, so this only clears the one named in
+    // the payload, not every reaction of theirs on it.
+    HttpApiEndpoint.del("removePostReaction", "/posts/:id/reactions")
       .setPath(IdParam)
-      .addSuccess(LikeState)
+      .setPayload(ReactionBody)
+      .addSuccess(ReactionState)
       .addError(NotFound, { status: 404 })
       .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
@@ -811,20 +842,22 @@ const CommentsGroup = HttpApiGroup.make("comments")
       .middleware(Authentication),
   )
   .add(
-    // Like/unlike toggle on a comment or reply (both live in `comments`, so
-    // one endpoint covers both). Emits a `like_changed` event scoped to the
+    // Add-reaction on a comment or reply (both live in `comments`, so one
+    // endpoint covers both). Emits a `reaction_changed` event scoped to the
     // post's comment-room subscribers rather than broadcast feed-wide.
-    HttpApiEndpoint.post("likeComment", "/comments/:id/likes")
+    HttpApiEndpoint.post("addCommentReaction", "/comments/:id/reactions")
       .setPath(IdParam)
-      .addSuccess(LikeState)
+      .setPayload(ReactionBody)
+      .addSuccess(ReactionState)
       .addError(NotFound, { status: 404 })
       .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.del("unlikeComment", "/comments/:id/likes")
+    HttpApiEndpoint.del("removeCommentReaction", "/comments/:id/reactions")
       .setPath(IdParam)
-      .addSuccess(LikeState)
+      .setPayload(ReactionBody)
+      .addSuccess(ReactionState)
       .addError(NotFound, { status: 404 })
       .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),

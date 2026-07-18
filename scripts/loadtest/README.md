@@ -6,7 +6,7 @@ surfaces, for manual/on-demand capacity checks — not a CI gate (see issue
 
 | Script         | Exercises                                                                                                                                                     |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `http-crud.js` | Posts/comments/likes and chats/messages REST endpoints under sustained concurrent load.                                                                       |
+| `http-crud.js` | Posts/comments/reactions and chats/messages REST endpoints under sustained concurrent load.                                                                   |
 | `ws-fanout.js` | `chat_updated` realtime delivery latency to N concurrent `/ws` connections sharing one chat — the scenario that actually exercises `PubSub.ts`/Redis fan-out. |
 
 Both are out-of-process k6 scripts (not `bun test` files) — they generate
@@ -67,7 +67,7 @@ directly constrain how these scripts are written:
 - **`/users/login` allows 20 attempts per IP / 5 per account per 15
   minutes.** Only hit once per user in `setup()`, so this isn't a practical
   constraint at the default participant counts.
-- **Engagement writes (likes/comments/replies) are capped at 120 per user
+- **Engagement writes (reactions/comments/replies) are capped at 120 per user
   per minute** (`src/EngagementHandler.ts`), and the global per-IP limiter
   caps all requests at 1000/minute (`src/GlobalRateLimit.ts`).
   `http-crud.js` paces each VU with `sleep(SLEEP_SECONDS)` (default 3s)
@@ -89,7 +89,7 @@ k6 run -e BASE_URL=http://localhost:3000 -e USERS=5 -e VUS=20 -e DURATION=2m -e 
 ```
 
 `setup()` logs in `USERS` accounts (default 5) and creates one shared group
-chat. Each VU repeatedly: creates a post, lists posts, likes its post,
+chat. Each VU repeatedly: creates a post, lists posts, reacts to its post,
 comments on it, sends a chat message, and lists the chat's messages, then
 sleeps `SLEEP_SECONDS` — picking one of the seeded accounts round-robin by VU
 number. `VUS` (default = `USERS`) and `DURATION` (default `1m`) control the

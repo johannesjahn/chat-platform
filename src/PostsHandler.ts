@@ -10,16 +10,16 @@ import {
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db } from "./Db.ts";
-import { type LikeInfo, postLikeInfo } from "./likes.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
+import { postReactionInfo, type ReactionSummary } from "./reactions.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { posts } from "./db/schema.ts";
 
-const NO_LIKES: LikeInfo = { likeCount: 0, likedByMe: false };
+const NO_REACTIONS: ReactionSummary[] = [];
 
 const toApiPost = (
   row: typeof posts.$inferSelect,
-  like: LikeInfo = NO_LIKES,
+  reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
 ) => ({
   id: row.id,
   authorId: row.authorId,
@@ -27,8 +27,7 @@ const toApiPost = (
   content: row.content,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
-  likeCount: like.likeCount,
-  likedByMe: like.likedByMe,
+  reactions: [...reactions],
 });
 
 // Admins can edit/delete any post; everyone else only their own.
@@ -73,10 +72,10 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const row = yield* getPostOr404(id);
-          const like = yield* Effect.tryPromise(() =>
-            postLikeInfo(db, [row.id], currentUser.id),
+          const reactions = yield* Effect.tryPromise(() =>
+            postReactionInfo(db, [row.id], currentUser.id),
           ).pipe(Effect.orDie);
-          return toApiPost(row, like.get(row.id));
+          return toApiPost(row, reactions.get(row.id));
         }),
       )
       .handle("listPosts", ({ urlParams }) =>
@@ -111,15 +110,15 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const lastRow = rows[rows.length - 1];
           const nextCursor =
             hasMore && lastRow ? encodePostsCursor(lastRow.id) : null;
-          const likeInfo = yield* Effect.tryPromise(() =>
-            postLikeInfo(
+          const reactionInfo = yield* Effect.tryPromise(() =>
+            postReactionInfo(
               db,
               rows.map((r) => r.id),
               currentUser.id,
             ),
           ).pipe(Effect.orDie);
           return {
-            posts: rows.map((r) => toApiPost(r, likeInfo.get(r.id))),
+            posts: rows.map((r) => toApiPost(r, reactionInfo.get(r.id))),
             limit,
             nextCursor,
           };
@@ -188,16 +187,16 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
-          // Editing a post's content leaves its likes untouched — reflect the
-          // existing count/likedByMe in the response rather than resetting it.
-          const like = yield* Effect.tryPromise(() =>
-            postLikeInfo(db, [row.id], currentUser.id),
+          // Editing a post's content leaves its reactions untouched — reflect
+          // the existing state in the response rather than resetting it.
+          const reactions = yield* Effect.tryPromise(() =>
+            postReactionInfo(db, [row.id], currentUser.id),
           ).pipe(Effect.orDie);
           yield* connections.broadcastAll({
             type: "post_changed",
             postId: row.id,
           });
-          return toApiPost(row, like.get(row.id));
+          return toApiPost(row, reactions.get(row.id));
         }),
       )
       .handle("deletePost", ({ path: { id } }) =>

@@ -53,18 +53,26 @@ export type CommentEvent = {
   readonly commentId: number;
 };
 
-// Pushed when a like on a post or a comment/reply is added or removed. A like
-// on a *post* goes out feed-wide (via `broadcastAll`, like `post_changed`) —
-// like counts are low-volume and relevant to anyone viewing the feed. A like
-// on a *comment* is scoped to that post's room (`notifyPostRoom`) instead, to
-// avoid flooding the whole feed with per-comment activity. Unlike the id-only
-// events, this carries the fresh `likeCount` so a viewer's count updates
-// without every client having to refetch on every toggle.
-export type LikeEvent = {
-  readonly type: "like_changed";
+// Pushed when a reaction on a post or a comment/reply is added or removed
+// (issue #215 — widened from the original binary "like", issue #67). A
+// reaction on a *post* goes out feed-wide (via `broadcastAll`, like
+// `post_changed`) — reaction counts are low-volume and relevant to anyone
+// viewing the feed. A reaction on a *comment* is scoped to that post's room
+// (`notifyPostRoom`) instead, to avoid flooding the whole feed with
+// per-comment activity. Unlike the id-only events, this carries the fresh
+// per-emoji counts so a viewer's counts update without every client having to
+// refetch on every toggle — but never `reactedByMe`, which is inherently
+// per-viewer and can't be baked into one broadcast payload shared by every
+// recipient (each client's own reaction state is reconciled from its own
+// mutation response instead — see EngagementHandler.ts).
+export type ReactionEvent = {
+  readonly type: "reaction_changed";
   readonly targetType: "post" | "comment";
   readonly targetId: number;
-  readonly likeCount: number;
+  readonly reactions: ReadonlyArray<{
+    readonly emoji: string;
+    readonly count: number;
+  }>;
 };
 
 // Pushed whenever a user's live-connection count transitions between zero and
@@ -103,7 +111,7 @@ export type RealtimeEvent =
   | ChatDeletedEvent
   | PostEvent
   | CommentEvent
-  | LikeEvent
+  | ReactionEvent
   | PresenceEvent
   | TypingEvent;
 

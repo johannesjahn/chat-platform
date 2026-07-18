@@ -294,23 +294,27 @@ test("a comment event reaches only sockets subscribed to that post's room", asyn
     false,
   );
 
-  // A like on the post itself, by contrast, still broadcasts feed-wide, so
-  // even the non-subscribed author socket sees it.
-  await fetch(`${apiUrl}/posts/${post.id}/likes`, {
+  // A reaction on the post itself, by contrast, still broadcasts feed-wide,
+  // so even the non-subscribed author socket sees it.
+  await fetch(`${apiUrl}/posts/${post.id}/reactions`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${viewer.accessToken}` },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${viewer.accessToken}`,
+    },
+    body: JSON.stringify({ emoji: "👍" }),
   });
   await waitFor(() =>
     authorSocket.messages.some(
       (m) =>
-        m.type === "like_changed" &&
+        m.type === "reaction_changed" &&
         m.targetType === "post" &&
         m.targetId === post.id,
     ),
   );
   expect(
     authorSocket.messages.some(
-      (m) => m.type === "like_changed" && m.targetId === post.id,
+      (m) => m.type === "reaction_changed" && m.targetId === post.id,
     ),
   ).toBe(true);
 
