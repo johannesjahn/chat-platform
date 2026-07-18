@@ -20,6 +20,7 @@ import {
 } from "./posts";
 import { setRealtimeSocket } from "./postRooms";
 import { resetPresence, setUserOnline } from "./presence";
+import { mergeReactionCounts } from "./reactions";
 import { noteTyping } from "./typing";
 
 type RealtimeSocketEvent =
@@ -28,10 +29,10 @@ type RealtimeSocketEvent =
   | { type: "post_changed"; postId: number }
   | { type: "comment_changed"; postId: number; commentId: number }
   | {
-      type: "like_changed";
+      type: "reaction_changed";
       targetType: "post" | "comment";
       targetId: number;
-      likeCount: number;
+      reactions: ReadonlyArray<{ emoji: string; count: number }>;
     }
   | { type: "presence"; userId: number; online: boolean }
   | {
@@ -210,20 +211,25 @@ export function useRealtimeSocket(enabled: boolean): void {
               queryKey: commentsQueryKeyRoot,
             });
             break;
-          case "like_changed":
-            // A post like goes out feed-wide, so this lands on *every*
-            // connected client. Patch the affected post's count in place from
-            // the event's `likeCount` (that's exactly why it's on the wire —
-            // see LikeEvent in src/Realtime.ts) instead of invalidating the
-            // whole feed, which would be an O(users × likes) refetch storm.
-            // `likedByMe` is left untouched: it doesn't change for a non-actor,
-            // and the actor already reconciled it from its own mutation
-            // response. A comment like arrives scoped to the post room (far
-            // lower volume), so it just refetches the comment queries.
+          case "reaction_changed":
+            // A post reaction goes out feed-wide, so this lands on *every*
+            // connected client. Patch the affected post's counts in place
+            // from the event's `reactions` (that's exactly why it's on the
+            // wire — see ReactionEvent in src/Realtime.ts) instead of
+            // invalidating the whole feed, which would be an O(users ×
+            // reactions) refetch storm. `reactedByMe` is preserved rather
+            // than trusted from the event: it doesn't change for a
+            // non-actor, and the actor already reconciled it from its own
+            // mutation response (see mergeReactionCounts). A comment
+            // reaction arrives scoped to the post room (far lower volume),
+            // so it just refetches the comment queries.
             if (parsed.targetType === "post") {
               patchCachedPost(queryClient, parsed.targetId, (post) => ({
                 ...post,
-                likeCount: parsed.likeCount,
+                reactions: mergeReactionCounts(
+                  post.reactions,
+                  parsed.reactions,
+                ),
               }));
             } else {
               void queryClient.invalidateQueries({

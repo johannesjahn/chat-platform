@@ -1,7 +1,14 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Heart, Loader2, MessageSquare, Pencil, Trash2 } from "lucide-react";
+import {
+  Loader2,
+  MessageSquare,
+  Pencil,
+  SmilePlus,
+  Trash2,
+} from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,6 +25,12 @@ import {
 } from "@/lib/comments";
 import { errorMessage } from "@/lib/errors";
 import { usePostCommentsSubscription } from "@/lib/postRooms";
+import {
+  REACTION_EMOJIS,
+  reactionOf,
+  type ReactionEmoji,
+  type ReactionSummary,
+} from "@/lib/reactions";
 import { useUserSummariesById, userAvatarName, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
@@ -87,37 +100,135 @@ function CommentComposer({
   );
 }
 
-// The like/unlike toggle shared by posts and comments — a heart plus count.
-// Kept generic over the two `$api` mutation calls (post vs comment) so both
-// look and behave identically.
-export function LikeToggle({
-  liked,
-  likeCount,
+// The emoji reaction picker shared by posts and comments (issue #215,
+// widened from the original binary "like" of issue #67). Renders one pill per
+// emoji that has at least one reaction (highlighted if the current user is
+// one of them), plus a trigger that opens a small popover of the standard
+// emoji set for adding a new reaction. Kept generic over the caller's
+// `onToggle` (post vs comment mutations) so both look and behave identically.
+//
+// The popover is rendered through a portal into `document.body`, positioned
+// from the trigger button's own `getBoundingClientRect()`, rather than as a
+// normal absolutely-positioned child — both call sites (PostCard, and
+// CommentsSection itself) live inside a `Card` with `overflow-hidden` (for
+// its image/decorative clipping), which would otherwise clip the popover
+// invisible whenever the trigger sits near the bottom of the card.
+export function ReactionPicker({
+  reactions,
   pending,
   onToggle,
 }: {
-  liked: boolean;
-  likeCount: number;
+  reactions: ReadonlyArray<ReactionSummary>;
   pending: boolean;
-  onToggle: () => void;
+  onToggle: (emoji: string) => void;
 }) {
+  const [pickerPos, setPickerPos] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  // A wrapping span rather than a ref on `Button` itself — `Button` (see
+  // components/ui/button.tsx) is a plain function component that doesn't
+  // declare/forward a `ref` parameter, so it wouldn't receive one.
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pickerPos) return;
+    const close = (event: Event) => {
+      const target = event.target as Node;
+      if (
+        !triggerRef.current?.contains(target) &&
+        !popoverRef.current?.contains(target)
+      ) {
+        setPickerPos(null);
+      }
+    };
+    // Closed on any scroll (capture phase catches scrolling within a nested
+    // container, not just the window) rather than tracked/repositioned —
+    // this popover is short-lived and simple, so it's not worth wiring up
+    // continuous position updates.
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("scroll", close, true);
+    };
+  }, [pickerPos]);
+
+  const active = reactions.filter((r) => r.count > 0);
+
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      onClick={onToggle}
-      disabled={pending}
-      aria-pressed={liked}
-      aria-label={liked ? "Unlike" : "Like"}
-      className={cn(
-        "h-8 gap-1.5 px-2 text-muted-foreground hover:text-rose-500",
-        liked && "text-rose-500",
-      )}
-    >
-      <Heart className={cn("size-4", liked && "fill-current")} />
-      <span className="tabular-nums">{likeCount}</span>
-    </Button>
+    <div className="flex flex-wrap items-center gap-1">
+      {active.map((reaction) => (
+        <Button
+          key={reaction.emoji}
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => onToggle(reaction.emoji)}
+          disabled={pending}
+          aria-pressed={reaction.reactedByMe}
+          aria-label={`${reaction.reactedByMe ? "Remove" : "Add"} ${reaction.emoji} reaction`}
+          className={cn(
+            "h-8 gap-1 rounded-full px-2 text-muted-foreground",
+            reaction.reactedByMe &&
+              "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
+          )}
+        >
+          <span>{reaction.emoji}</span>
+          <span className="tabular-nums">{reaction.count}</span>
+        </Button>
+      ))}
+      <span ref={triggerRef} className="inline-flex">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            if (pickerPos) {
+              setPickerPos(null);
+              return;
+            }
+            const rect = triggerRef.current?.getBoundingClientRect();
+            if (rect) setPickerPos({ top: rect.bottom + 4, left: rect.left });
+          }}
+          disabled={pending}
+          aria-expanded={pickerPos !== null}
+          aria-label="Add a reaction"
+          className="h-8 gap-1.5 px-2 text-muted-foreground"
+        >
+          <SmilePlus className="size-4" />
+        </Button>
+      </span>
+      {pickerPos &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            style={{ top: pickerPos.top, left: pickerPos.left }}
+            className="fixed z-50 flex gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-md"
+          >
+            {REACTION_EMOJIS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                disabled={pending}
+                aria-label={`React with ${emoji}`}
+                className={cn(
+                  "flex size-8 items-center justify-center rounded-md text-lg transition-colors hover:bg-muted",
+                  reactionOf(reactions, emoji).reactedByMe && "bg-primary/10",
+                )}
+                onClick={() => {
+                  onToggle(emoji);
+                  setPickerPos(null);
+                }}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </div>
   );
 }
 
@@ -146,8 +257,8 @@ function CommentItem({
   const [replying, setReplying] = useState(false);
   const [editing, setEditing] = useState(false);
 
-  const likeComment = $api.useMutation("post", "/comments/{id}/likes");
-  const unlikeComment = $api.useMutation("delete", "/comments/{id}/likes");
+  const addReaction = $api.useMutation("post", "/comments/{id}/reactions");
+  const removeReaction = $api.useMutation("delete", "/comments/{id}/reactions");
   const createReply = $api.useMutation("post", "/comments/{id}/replies");
   const updateComment = $api.useMutation("patch", "/comments/{id}");
   const deleteComment = $api.useMutation("delete", "/comments/{id}");
@@ -158,11 +269,13 @@ function CommentItem({
   const replies = useReplies(comment.id, showReplies && !isReply);
   const replyRows = replies.data?.pages.flatMap((p) => p.comments) ?? [];
 
-  const likePending = likeComment.isPending || unlikeComment.isPending;
-  const toggleLike = async () => {
-    const mutation = comment.likedByMe ? unlikeComment : likeComment;
+  const reactionPending = addReaction.isPending || removeReaction.isPending;
+  const toggleReaction = async (emoji: string) => {
+    const mine = comment.reactions.find((r) => r.emoji === emoji)?.reactedByMe;
+    const mutation = mine ? removeReaction : addReaction;
     await mutation.mutateAsync({
       params: { path: { id: String(comment.id) } },
+      body: { emoji: emoji as ReactionEmoji },
     });
     await invalidateComments();
   };
@@ -216,11 +329,10 @@ function CommentItem({
         </div>
 
         <div className="flex flex-wrap items-center gap-1 pl-1">
-          <LikeToggle
-            liked={comment.likedByMe}
-            likeCount={comment.likeCount}
-            pending={likePending}
-            onToggle={toggleLike}
+          <ReactionPicker
+            reactions={comment.reactions}
+            pending={reactionPending}
+            onToggle={toggleReaction}
           />
           {!isReply && (
             <Button

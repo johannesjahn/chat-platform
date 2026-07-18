@@ -3,7 +3,6 @@ import { fetchClient } from "./api";
 import type { components } from "./api-types";
 
 export type Comment = components["schemas"]["Comment"];
-export type LikeState = components["schemas"]["LikeState"];
 
 // Content is capped server-side (`MAX_COMMENT_CONTENT_LENGTH` in src/Api.ts) —
 // mirrored here so the composer can show a live counter without a round-trip.

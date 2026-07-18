@@ -28,10 +28,11 @@ export const postDetailQueryKeyPrefix = ["get", "/posts/{id}"] as const;
 
 // Applies `update` to a single post wherever it's cached — across the feed's
 // infinite-query pages and any mounted post-detail query — without a refetch.
-// Used to reflect a like toggle from the `like_changed` realtime event's
-// `likeCount` payload (and the acting client's own mutation response) in
-// place, rather than invalidating the whole feed on every like for every
-// connected client (which would be O(users × likes) full-feed refetches).
+// Used to reflect a reaction toggle from the `reaction_changed` realtime
+// event's `reactions` payload (and the acting client's own mutation response)
+// in place, rather than invalidating the whole feed on every reaction for
+// every connected client (which would be O(users × reactions) full-feed
+// refetches).
 export function patchCachedPost(
   queryClient: QueryClient,
   postId: number,

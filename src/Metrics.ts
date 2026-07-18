@@ -73,9 +73,9 @@ export const pubsubSubscribeTotal = Metric.counter("pubsub_subscribe_total", {
 // that constraint exists and what it rules out, e.g. a "most active users"
 // panel).
 
-// Labeled only by content `type` ("post"/"comment"/"like"/"message") — same
-// cardinality profile as pubsubPublishTotal above, never by author/post/chat
-// id.
+// Labeled only by content `type` ("post"/"comment"/"reaction"/"message") —
+// same cardinality profile as pubsubPublishTotal above, never by
+// author/post/chat id.
 export const contentCreatedTotal = Metric.counter("content_created_total", {
   description: "Content items created, labeled by type.",
 });

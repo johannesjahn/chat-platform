@@ -139,30 +139,53 @@ const setupPostBy = (username: string) =>
     return { user, accessToken, authed, post };
   });
 
-// --- Post likes -----------------------------------------------------------
+// --- Post reactions --------------------------------------------------------
 
-test("a new post starts with zero likes and likedByMe false", () =>
+// Finds one emoji's summary in a `reactions` array, or a zero/false default
+// if that emoji has no reactions at all (mirroring what the API itself
+// omits — see ReactionSummary in reactions.ts).
+const reactionOf = (
+  reactions: ReadonlyArray<{
+    emoji: string;
+    count: number;
+    reactedByMe: boolean;
+  }>,
+  emoji: string,
+) =>
+  reactions.find((r) => r.emoji === emoji) ?? {
+    emoji,
+    count: 0,
+    reactedByMe: false,
+  };
+
+test("a new post starts with no reactions", () =>
   run(
     Effect.gen(function* () {
       const { post } = yield* setupPostBy("alice");
-      expect(post.likeCount).toBe(0);
-      expect(post.likedByMe).toBe(false);
+      expect(post.reactions).toEqual([]);
     }),
   ));
 
-test("likePost increments the count and marks likedByMe", () =>
+test("addPostReaction increments the count and marks reactedByMe", () =>
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("bob");
-      const state = yield* authed.comments.likePost({
+      const state = yield* authed.comments.addPostReaction({
         path: { id: post.id },
+        payload: { emoji: "👍" },
       });
-      expect(state.likeCount).toBe(1);
-      expect(state.liked).toBe(true);
+      expect(reactionOf(state.reactions, "👍")).toEqual({
+        emoji: "👍",
+        count: 1,
+        reactedByMe: true,
+      });
 
       const fetched = yield* authed.posts.getPost({ path: { id: post.id } });
-      expect(fetched.likeCount).toBe(1);
-      expect(fetched.likedByMe).toBe(true);
+      expect(reactionOf(fetched.reactions, "👍")).toEqual({
+        emoji: "👍",
+        count: 1,
+        reactedByMe: true,
+      });
     }),
   ));
 
@@ -170,96 +193,176 @@ test("likePost increments the count and marks likedByMe", () =>
 // test files land in the same `bun test --parallel` worker process, so this
 // asserts the delta produced rather than an absolute value (see
 // Metrics.test.ts's websocketConnectionsActive test for the same reasoning).
-test('likePost increments content_created_total{type="like"} only on an actual new like', () =>
+test('addPostReaction increments content_created_total{type="reaction"} only on an actual new reaction', () =>
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("faye");
-      const likesCreated = Metric.taggedWithLabels(contentCreatedTotal, [
-        MetricLabel.make("type", "like"),
+      const reactionsCreated = Metric.taggedWithLabels(contentCreatedTotal, [
+        MetricLabel.make("type", "reaction"),
       ]);
-      const before = yield* Metric.value(likesCreated);
+      const before = yield* Metric.value(reactionsCreated);
 
-      yield* authed.comments.likePost({ path: { id: post.id } });
-      const afterFirst = yield* Metric.value(likesCreated);
+      yield* authed.comments.addPostReaction({
+        path: { id: post.id },
+        payload: { emoji: "👍" },
+      });
+      const afterFirst = yield* Metric.value(reactionsCreated);
       expect(afterFirst.count).toBe(before.count + 1);
 
-      // A repeat like is a no-op (see likePost's onConflictDoNothing) and
-      // must not double-count.
-      yield* authed.comments.likePost({ path: { id: post.id } });
-      const afterSecond = yield* Metric.value(likesCreated);
+      // A repeat reaction with the same emoji is a no-op (see
+      // addPostReaction's onConflictDoNothing) and must not double-count.
+      yield* authed.comments.addPostReaction({
+        path: { id: post.id },
+        payload: { emoji: "👍" },
+      });
+      const afterSecond = yield* Metric.value(reactionsCreated);
       expect(afterSecond.count).toBe(before.count + 1);
     }),
   ));
 
-test("likePost is idempotent — liking twice still counts once", () =>
+test("addPostReaction is idempotent — reacting twice with the same emoji still counts once", () =>
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("carol");
-      yield* authed.comments.likePost({ path: { id: post.id } });
-      const state = yield* authed.comments.likePost({
+      yield* authed.comments.addPostReaction({
         path: { id: post.id },
+        payload: { emoji: "❤️" },
       });
-      expect(state.likeCount).toBe(1);
-      expect(state.liked).toBe(true);
+      const state = yield* authed.comments.addPostReaction({
+        path: { id: post.id },
+        payload: { emoji: "❤️" },
+      });
+      expect(reactionOf(state.reactions, "❤️")).toEqual({
+        emoji: "❤️",
+        count: 1,
+        reactedByMe: true,
+      });
     }),
   ));
 
-test("likes from different users accumulate; likedByMe is per-user", () =>
+test("a user can react to the same post with more than one distinct emoji", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("iris");
+      yield* authed.comments.addPostReaction({
+        path: { id: post.id },
+        payload: { emoji: "👍" },
+      });
+      const state = yield* authed.comments.addPostReaction({
+        path: { id: post.id },
+        payload: { emoji: "😂" },
+      });
+      expect(reactionOf(state.reactions, "👍")).toEqual({
+        emoji: "👍",
+        count: 1,
+        reactedByMe: true,
+      });
+      expect(reactionOf(state.reactions, "😂")).toEqual({
+        emoji: "😂",
+        count: 1,
+        reactedByMe: true,
+      });
+    }),
+  ));
+
+test("reactions from different users accumulate; reactedByMe is per-user", () =>
   run(
     Effect.gen(function* () {
       const { authed: aliceClient, post } = yield* setupPostBy("dave");
-      yield* aliceClient.comments.likePost({ path: { id: post.id } });
+      yield* aliceClient.comments.addPostReaction({
+        path: { id: post.id },
+        payload: { emoji: "👍" },
+      });
 
       const bob = yield* registerAndLogin("erin", "pw-testpass");
       const bobClient = yield* makeAuthedClient(bob.accessToken);
-      const state = yield* bobClient.comments.likePost({
+      const state = yield* bobClient.comments.addPostReaction({
         path: { id: post.id },
+        payload: { emoji: "👍" },
       });
-      expect(state.likeCount).toBe(2);
-      expect(state.liked).toBe(true);
+      expect(reactionOf(state.reactions, "👍").count).toBe(2);
+      expect(reactionOf(state.reactions, "👍").reactedByMe).toBe(true);
 
-      // From the author's perspective, the count is 2 but they only like it
+      // From the author's perspective, the count is 2 but they only reacted
       // themselves.
       const fromAuthor = yield* aliceClient.posts.getPost({
         path: { id: post.id },
       });
-      expect(fromAuthor.likeCount).toBe(2);
-      expect(fromAuthor.likedByMe).toBe(true);
+      expect(reactionOf(fromAuthor.reactions, "👍")).toEqual({
+        emoji: "👍",
+        count: 2,
+        reactedByMe: true,
+      });
 
-      // A third user who hasn't liked sees the count but likedByMe false.
+      // A third user who hasn't reacted sees the count but reactedByMe false.
       const carol = yield* registerAndLogin("frank", "pw-testpass");
       const carolClient = yield* makeAuthedClient(carol.accessToken);
       const seen = yield* carolClient.posts.getPost({ path: { id: post.id } });
-      expect(seen.likeCount).toBe(2);
-      expect(seen.likedByMe).toBe(false);
+      expect(reactionOf(seen.reactions, "👍")).toEqual({
+        emoji: "👍",
+        count: 2,
+        reactedByMe: false,
+      });
     }),
   ));
 
-test("unlikePost removes the like; unliking again is a no-op", () =>
+test("removePostReaction removes only that emoji; removing again is a no-op", () =>
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("grace");
-      yield* authed.comments.likePost({ path: { id: post.id } });
-      const afterUnlike = yield* authed.comments.unlikePost({
+      yield* authed.comments.addPostReaction({
         path: { id: post.id },
+        payload: { emoji: "👍" },
       });
-      expect(afterUnlike.likeCount).toBe(0);
-      expect(afterUnlike.liked).toBe(false);
+      yield* authed.comments.addPostReaction({
+        path: { id: post.id },
+        payload: { emoji: "😢" },
+      });
+      const afterRemove = yield* authed.comments.removePostReaction({
+        path: { id: post.id },
+        payload: { emoji: "👍" },
+      });
+      expect(reactionOf(afterRemove.reactions, "👍")).toEqual({
+        emoji: "👍",
+        count: 0,
+        reactedByMe: false,
+      });
+      // The other emoji is untouched.
+      expect(reactionOf(afterRemove.reactions, "😢")).toEqual({
+        emoji: "😢",
+        count: 1,
+        reactedByMe: true,
+      });
 
-      const again = yield* authed.comments.unlikePost({
+      const again = yield* authed.comments.removePostReaction({
         path: { id: post.id },
+        payload: { emoji: "👍" },
       });
-      expect(again.likeCount).toBe(0);
+      expect(reactionOf(again.reactions, "👍").count).toBe(0);
     }),
   ));
 
-test("likePost returns 404 for a missing post", () =>
+test("addPostReaction rejects an emoji outside the standard set", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("kelly");
+      const result = yield* authed.comments
+        .addPostReaction({
+          path: { id: post.id },
+          payload: { emoji: "🚀" as never },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("addPostReaction returns 404 for a missing post", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("heidi", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
-        .likePost({ path: { id: 9999 } })
+        .addPostReaction({ path: { id: 9999 }, payload: { emoji: "👍" } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left")
@@ -267,13 +370,13 @@ test("likePost returns 404 for a missing post", () =>
     }),
   ));
 
-test("likePost rejects an unauthenticated request", () =>
+test("addPostReaction rejects an unauthenticated request", () =>
   run(
     Effect.gen(function* () {
       const { post } = yield* setupPostBy("ivan");
       const c = yield* makeClient;
       const result = yield* c.comments
-        .likePost({ path: { id: post.id } })
+        .addPostReaction({ path: { id: post.id }, payload: { emoji: "👍" } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left")
@@ -291,14 +394,15 @@ test('engagement mutations are rate-limited per user, incrementing rate_limit_re
       const before = yield* Metric.value(rejections);
       // ENGAGEMENT_WRITE_MAX_PER_USER = 120 (EngagementHandler.ts). Creating
       // the post above isn't an engagement write (it's the posts group, no
-      // limiter), so this user's engagement bucket starts empty. likePost is
-      // idempotent, so repeats are harmless no-ops that each still consume one
-      // unit — fire past the limit and the bucket should reject.
+      // limiter), so this user's engagement bucket starts empty.
+      // addPostReaction is idempotent per emoji, so repeats are harmless
+      // no-ops that each still consume one unit — fire past the limit and the
+      // bucket should reject.
       let allowed = 0;
       let lastTag = "";
       for (let i = 0; i < 130; i++) {
         const result = yield* authed.comments
-          .likePost({ path: { id: post.id } })
+          .addPostReaction({ path: { id: post.id }, payload: { emoji: "👍" } })
           .pipe(Effect.either);
         if (result._tag === "Right") {
           allowed++;
@@ -328,8 +432,7 @@ test("createComment creates a top-level comment owned by the author", () =>
       expect(comment.parentCommentId).toBeNull();
       expect(comment.authorId).toBe(user.id);
       expect(comment.content).toBe("nice post");
-      expect(comment.likeCount).toBe(0);
-      expect(comment.likedByMe).toBe(false);
+      expect(comment.reactions).toEqual([]);
     }),
   ));
 
@@ -525,44 +628,51 @@ test("createReply returns 404 for a missing parent comment", () =>
     }),
   ));
 
-// --- Comment likes --------------------------------------------------------
+// --- Comment reactions ------------------------------------------------------
 
-test("likeComment toggles like state on a comment", () =>
+test("addCommentReaction/removeCommentReaction toggle reaction state on a comment", () =>
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("wendy");
       const comment = yield* authed.comments.createComment({
         path: { id: post.id },
-        payload: { content: "like me" },
+        payload: { content: "react to me" },
       });
-      const liked = yield* authed.comments.likeComment({
+      const reacted = yield* authed.comments.addCommentReaction({
         path: { id: comment.id },
+        payload: { emoji: "👍" },
       });
-      expect(liked.likeCount).toBe(1);
-      expect(liked.liked).toBe(true);
+      expect(reactionOf(reacted.reactions, "👍")).toEqual({
+        emoji: "👍",
+        count: 1,
+        reactedByMe: true,
+      });
 
       const listed = yield* authed.comments.listComments({
         path: { id: post.id },
         urlParams: {},
       });
-      expect(listed.comments[0]!.likeCount).toBe(1);
-      expect(listed.comments[0]!.likedByMe).toBe(true);
-
-      const unliked = yield* authed.comments.unlikeComment({
-        path: { id: comment.id },
+      expect(reactionOf(listed.comments[0]!.reactions, "👍")).toEqual({
+        emoji: "👍",
+        count: 1,
+        reactedByMe: true,
       });
-      expect(unliked.likeCount).toBe(0);
-      expect(unliked.liked).toBe(false);
+
+      const removed = yield* authed.comments.removeCommentReaction({
+        path: { id: comment.id },
+        payload: { emoji: "👍" },
+      });
+      expect(reactionOf(removed.reactions, "👍").count).toBe(0);
     }),
   ));
 
-test("likeComment returns 404 for a missing comment", () =>
+test("addCommentReaction returns 404 for a missing comment", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("yvonne", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
-        .likeComment({ path: { id: 9999 } })
+        .addCommentReaction({ path: { id: 9999 }, payload: { emoji: "👍" } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left")
@@ -652,9 +762,12 @@ test("deleteComment cascades to its replies", () =>
 
       yield* authed.comments.deleteComment({ path: { id: comment.id } });
 
-      // The reply is gone with its parent — liking it now 404s.
+      // The reply is gone with its parent — reacting to it now 404s.
       const result = yield* authed.comments
-        .likeComment({ path: { id: reply.id } })
+        .addCommentReaction({
+          path: { id: reply.id },
+          payload: { emoji: "👍" },
+        })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
       if (result._tag === "Left")

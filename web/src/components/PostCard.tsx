@@ -12,7 +12,7 @@ import {
   Type,
 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
-import { CommentsSection, LikeToggle } from "@/components/CommentsSection";
+import { CommentsSection, ReactionPicker } from "@/components/CommentsSection";
 import { Spotlight } from "@/components/reactbits/Spotlight";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +24,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { $api } from "@/lib/api";
 import { patchCachedPost } from "@/lib/posts";
+import type { ReactionEmoji } from "@/lib/reactions";
 import { cn } from "@/lib/utils";
 import type { Post } from "@/lib/posts";
 
@@ -84,24 +85,25 @@ export function PostCard({
   const [showComments, setShowComments] = useState(false);
 
   const queryClient = useQueryClient();
-  const likePost = $api.useMutation("post", "/posts/{id}/likes");
-  const unlikePost = $api.useMutation("delete", "/posts/{id}/likes");
-  const likePending = likePost.isPending || unlikePost.isPending;
+  const addReaction = $api.useMutation("post", "/posts/{id}/reactions");
+  const removeReaction = $api.useMutation("delete", "/posts/{id}/reactions");
+  const reactionPending = addReaction.isPending || removeReaction.isPending;
 
-  const toggleLike = async () => {
-    const mutation = post.likedByMe ? unlikePost : likePost;
-    // The endpoint returns the authoritative { likeCount, liked } — patch it
-    // straight into the cache rather than refetching. `likedByMe` only ever
+  const toggleReaction = async (emoji: string) => {
+    const mine = post.reactions.find((r) => r.emoji === emoji)?.reactedByMe;
+    const mutation = mine ? removeReaction : addReaction;
+    // The endpoint returns the authoritative `reactions` array — patch it
+    // straight into the cache rather than refetching. `reactedByMe` only ever
     // changes for the acting client, so it's reconciled here from the
-    // response; the feed-wide `like_changed` broadcast updates every other
-    // client's count in place (see useRealtimeSocket).
+    // response; the feed-wide `reaction_changed` broadcast updates every
+    // other client's counts in place (see useRealtimeSocket).
     const result = await mutation.mutateAsync({
       params: { path: { id: String(post.id) } },
+      body: { emoji: emoji as ReactionEmoji },
     });
     patchCachedPost(queryClient, post.id, (p) => ({
       ...p,
-      likeCount: result.likeCount,
-      likedByMe: result.liked,
+      reactions: result.reactions,
     }));
   };
 
@@ -215,11 +217,10 @@ export function PostCard({
 
       <CardFooter className="flex-col items-stretch gap-0 border-t border-border p-0">
         <div className="flex items-center gap-1 px-3 py-2">
-          <LikeToggle
-            liked={post.likedByMe}
-            likeCount={post.likeCount}
-            pending={likePending}
-            onToggle={toggleLike}
+          <ReactionPicker
+            reactions={post.reactions}
+            pending={reactionPending}
+            onToggle={toggleReaction}
           />
           <Button
             type="button"

@@ -11,18 +11,24 @@ import {
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db } from "./Db.ts";
-import {
-  commentLikeInfo,
-  commentLikeInfoOne,
-  type LikeInfo,
-  postLikeInfoOne,
-} from "./likes.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
+import {
+  commentReactionInfo,
+  commentReactionInfoOne,
+  postReactionInfoOne,
+  type ReactionSummary,
+} from "./reactions.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { comments, likes, posts } from "./db/schema.ts";
 
-const NO_LIKES: LikeInfo = { likeCount: 0, likedByMe: false };
+const NO_REACTIONS: ReactionSummary[] = [];
+
+// The realtime broadcast only ever needs the aggregate counts, never
+// `reactedByMe` — that field is inherently per-viewer, and a broadcast fans
+// out to every connected client at once (see ReactionEvent in Realtime.ts).
+const toReactionCounts = (reactions: ReadonlyArray<ReactionSummary>) =>
+  reactions.map(({ emoji, count }) => ({ emoji, count }));
 
 // Defense-in-depth cap on engagement writes (likes, comments, replies) per
 // user, mirroring the auth-endpoint limiters (see UsersHandler.ts). A single
@@ -59,7 +65,7 @@ const enforceEngagementLimit = (userId: number) =>
     }
   });
 
-const recordContentCreated = (type: "comment" | "like") =>
+const recordContentCreated = (type: "comment" | "reaction") =>
   Metric.update(
     Metric.taggedWithLabels(contentCreatedTotal, [
       MetricLabel.make("type", type),
@@ -69,7 +75,7 @@ const recordContentCreated = (type: "comment" | "like") =>
 
 const toApiComment = (
   row: typeof comments.$inferSelect,
-  like: LikeInfo = NO_LIKES,
+  reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
 ) => ({
   id: row.id,
   postId: row.postId,
@@ -78,8 +84,7 @@ const toApiComment = (
   content: row.content,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
-  likeCount: like.likeCount,
-  likedByMe: like.likedByMe,
+  reactions: [...reactions],
 });
 
 // Author or admin — the same ownership rule posts use (see PostsHandler.ts).
@@ -165,8 +170,8 @@ const listThread = (
     const nextCursor =
       hasMore && lastRow ? encodeCommentsCursor(lastRow.id) : null;
 
-    const likeInfo = yield* Effect.tryPromise(() =>
-      commentLikeInfo(
+    const reactionInfo = yield* Effect.tryPromise(() =>
+      commentReactionInfo(
         db,
         rows.map((r) => r.id),
         currentUser.id,
@@ -174,7 +179,7 @@ const listThread = (
     ).pipe(Effect.orDie);
 
     return {
-      comments: rows.map((r) => toApiComment(r, likeInfo.get(r.id))),
+      comments: rows.map((r) => toApiComment(r, reactionInfo.get(r.id))),
       limit,
       nextCursor,
     };
@@ -185,40 +190,45 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
   "comments",
   (handlers) =>
     handlers
-      .handle("likePost", ({ path: { id } }) =>
+      .handle("addPostReaction", ({ path: { id }, payload }) =>
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const connections = yield* RealtimeConnections;
           yield* enforceEngagementLimit(currentUser.id);
           yield* getPostOr404(id);
-          // Idempotent: the (userId, postId) unique constraint turns a repeat
-          // like into a no-op rather than a duplicate row or an error.
-          // `.returning()` lets us tell an actual new like from a no-op so we
-          // only fan out a realtime event when the count really changed.
+          // Idempotent: the (userId, postId, emoji) unique constraint turns a
+          // repeat reaction with the same emoji into a no-op rather than a
+          // duplicate row or an error. `.returning()` lets us tell an actual
+          // new reaction from a no-op so we only fan out a realtime event
+          // when the counts really changed.
           const inserted = yield* Effect.tryPromise(() =>
             db
               .insert(likes)
-              .values({ userId: currentUser.id, postId: id })
+              .values({
+                userId: currentUser.id,
+                postId: id,
+                emoji: payload.emoji,
+              })
               .onConflictDoNothing()
               .returning(),
           ).pipe(Effect.orDie);
-          const info = yield* Effect.tryPromise(() =>
-            postLikeInfoOne(db, id, currentUser.id),
+          const reactions = yield* Effect.tryPromise(() =>
+            postReactionInfoOne(db, id, currentUser.id),
           ).pipe(Effect.orDie);
           if (inserted.length > 0) {
-            yield* recordContentCreated("like");
+            yield* recordContentCreated("reaction");
             yield* connections.broadcastAll({
-              type: "like_changed",
+              type: "reaction_changed",
               targetType: "post",
               targetId: id,
-              likeCount: info.likeCount,
+              reactions: toReactionCounts(reactions),
             });
           }
-          return { likeCount: info.likeCount, liked: info.likedByMe };
+          return { reactions };
         }),
       )
-      .handle("unlikePost", ({ path: { id } }) =>
+      .handle("removePostReaction", ({ path: { id }, payload }) =>
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
@@ -229,24 +239,29 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             db
               .delete(likes)
               .where(
-                and(eq(likes.userId, currentUser.id), eq(likes.postId, id)),
+                and(
+                  eq(likes.userId, currentUser.id),
+                  eq(likes.postId, id),
+                  eq(likes.emoji, payload.emoji),
+                ),
               )
               .returning(),
           ).pipe(Effect.orDie);
-          const info = yield* Effect.tryPromise(() =>
-            postLikeInfoOne(db, id, currentUser.id),
+          const reactions = yield* Effect.tryPromise(() =>
+            postReactionInfoOne(db, id, currentUser.id),
           ).pipe(Effect.orDie);
-          // Only broadcast if a like was actually removed — unliking something
-          // not liked is a no-op and shouldn't fan out a redundant event.
+          // Only broadcast if a reaction was actually removed — removing one
+          // that isn't there is a no-op and shouldn't fan out a redundant
+          // event.
           if (deleted.length > 0) {
             yield* connections.broadcastAll({
-              type: "like_changed",
+              type: "reaction_changed",
               targetType: "post",
               targetId: id,
-              likeCount: info.likeCount,
+              reactions: toReactionCounts(reactions),
             });
           }
-          return { likeCount: info.likeCount, liked: info.likedByMe };
+          return { reactions };
         }),
       )
       .handle("listComments", ({ path: { id }, urlParams }) =>
@@ -344,7 +359,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           return toApiComment(row);
         }),
       )
-      .handle("likeComment", ({ path: { id } }) =>
+      .handle("addCommentReaction", ({ path: { id }, payload }) =>
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
@@ -354,29 +369,33 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const inserted = yield* Effect.tryPromise(() =>
             db
               .insert(likes)
-              .values({ userId: currentUser.id, commentId: id })
+              .values({
+                userId: currentUser.id,
+                commentId: id,
+                emoji: payload.emoji,
+              })
               .onConflictDoNothing()
               .returning(),
           ).pipe(Effect.orDie);
-          const info = yield* Effect.tryPromise(() =>
-            commentLikeInfoOne(db, id, currentUser.id),
+          const reactions = yield* Effect.tryPromise(() =>
+            commentReactionInfoOne(db, id, currentUser.id),
           ).pipe(Effect.orDie);
-          // Per-comment likes stay scoped to the post's room, not broadcast
-          // feed-wide (see LikeEvent in Realtime.ts). Only emit on an actual
-          // new like, not a redundant re-like.
+          // Per-comment reactions stay scoped to the post's room, not
+          // broadcast feed-wide (see ReactionEvent in Realtime.ts). Only emit
+          // on an actual new reaction, not a redundant repeat.
           if (inserted.length > 0) {
-            yield* recordContentCreated("like");
+            yield* recordContentCreated("reaction");
             yield* connections.notifyPostRoom(comment.postId, {
-              type: "like_changed",
+              type: "reaction_changed",
               targetType: "comment",
               targetId: id,
-              likeCount: info.likeCount,
+              reactions: toReactionCounts(reactions),
             });
           }
-          return { likeCount: info.likeCount, liked: info.likedByMe };
+          return { reactions };
         }),
       )
-      .handle("unlikeComment", ({ path: { id } }) =>
+      .handle("removeCommentReaction", ({ path: { id }, payload }) =>
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
@@ -387,22 +406,26 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             db
               .delete(likes)
               .where(
-                and(eq(likes.userId, currentUser.id), eq(likes.commentId, id)),
+                and(
+                  eq(likes.userId, currentUser.id),
+                  eq(likes.commentId, id),
+                  eq(likes.emoji, payload.emoji),
+                ),
               )
               .returning(),
           ).pipe(Effect.orDie);
-          const info = yield* Effect.tryPromise(() =>
-            commentLikeInfoOne(db, id, currentUser.id),
+          const reactions = yield* Effect.tryPromise(() =>
+            commentReactionInfoOne(db, id, currentUser.id),
           ).pipe(Effect.orDie);
           if (deleted.length > 0) {
             yield* connections.notifyPostRoom(comment.postId, {
-              type: "like_changed",
+              type: "reaction_changed",
               targetType: "comment",
               targetId: id,
-              likeCount: info.likeCount,
+              reactions: toReactionCounts(reactions),
             });
           }
-          return { likeCount: info.likeCount, liked: info.likedByMe };
+          return { reactions };
         }),
       )
       .handle("updateComment", ({ path: { id }, payload }) =>
@@ -428,15 +451,15 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
-          const like = yield* Effect.tryPromise(() =>
-            commentLikeInfoOne(db, id, currentUser.id),
+          const reactions = yield* Effect.tryPromise(() =>
+            commentReactionInfoOne(db, id, currentUser.id),
           ).pipe(Effect.orDie);
           yield* connections.notifyPostRoom(row.postId, {
             type: "comment_changed",
             postId: row.postId,
             commentId: row.id,
           });
-          return toApiComment(row, like);
+          return toApiComment(row, reactions);
         }),
       )
       .handle("deleteComment", ({ path: { id } }) =>

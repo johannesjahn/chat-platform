@@ -180,7 +180,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/posts/{id}/likes": {
+    "/posts/{id}/reactions": {
         parameters: {
             query?: never;
             header?: never;
@@ -189,8 +189,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["comments.likePost"];
-        delete: operations["comments.unlikePost"];
+        post: operations["comments.addPostReaction"];
+        delete: operations["comments.removePostReaction"];
         options?: never;
         head?: never;
         patch?: never;
@@ -228,7 +228,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/comments/{id}/likes": {
+    "/comments/{id}/reactions": {
         parameters: {
             query?: never;
             header?: never;
@@ -237,8 +237,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["comments.likeComment"];
-        delete: operations["comments.unlikeComment"];
+        post: operations["comments.addCommentReaction"];
+        delete: operations["comments.removeCommentReaction"];
         options?: never;
         head?: never;
         patch?: never;
@@ -645,11 +645,15 @@ export interface components {
             content: string;
             createdAt: number;
             updatedAt: number;
-            likeCount: number;
-            likedByMe: boolean;
+            reactions: components["schemas"]["ReactionSummary"][];
         };
         /** @enum {string} */
         PostContentType: "text" | "image_url";
+        ReactionSummary: {
+            emoji: string;
+            count: number;
+            reactedByMe: boolean;
+        };
         PostsPage: {
             posts: components["schemas"]["Post"][];
             limit: number;
@@ -676,9 +680,13 @@ export interface components {
              */
             content: components["schemas"]["NonEmptyTrimmedString"];
         };
-        LikeState: {
-            likeCount: number;
-            liked: boolean;
+        ReactionBody: {
+            emoji: components["schemas"]["ReactionEmoji"];
+        };
+        /** @enum {string} */
+        ReactionEmoji: "👍" | "❤️" | "😂" | "😮" | "😢" | "😡";
+        ReactionState: {
+            reactions: components["schemas"]["ReactionSummary"][];
         };
         CommentsPage: {
             comments: components["schemas"]["Comment"][];
@@ -693,8 +701,7 @@ export interface components {
             content: string;
             createdAt: number;
             updatedAt: number;
-            likeCount: number;
-            likedByMe: boolean;
+            reactions: components["schemas"]["ReactionSummary"][];
         };
         InvalidCommentRequest: {
             message: string;
@@ -1546,8 +1553,7 @@ export interface operations {
                         content: string;
                         createdAt: number;
                         updatedAt: number;
-                        likeCount: number;
-                        likedByMe: boolean;
+                        reactions: components["schemas"]["ReactionSummary"][];
                     };
                 };
             };
@@ -1571,7 +1577,7 @@ export interface operations {
             };
         };
     };
-    "comments.likePost": {
+    "comments.addPostReaction": {
         parameters: {
             query?: never;
             header?: never;
@@ -1580,15 +1586,19 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReactionBody"];
+            };
+        };
         responses: {
-            /** @description LikeState */
+            /** @description ReactionState */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LikeState"];
+                    "application/json": components["schemas"]["ReactionState"];
                 };
             };
             /** @description The request did not match the expected schema */
@@ -1629,7 +1639,7 @@ export interface operations {
             };
         };
     };
-    "comments.unlikePost": {
+    "comments.removePostReaction": {
         parameters: {
             query?: never;
             header?: never;
@@ -1638,15 +1648,19 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReactionBody"];
+            };
+        };
         responses: {
-            /** @description LikeState */
+            /** @description ReactionState */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LikeState"];
+                    "application/json": components["schemas"]["ReactionState"];
                 };
             };
             /** @description The request did not match the expected schema */
@@ -1769,8 +1783,7 @@ export interface operations {
                         content: string;
                         createdAt: number;
                         updatedAt: number;
-                        likeCount: number;
-                        likedByMe: boolean;
+                        reactions: components["schemas"]["ReactionSummary"][];
                     };
                 };
             };
@@ -1894,8 +1907,7 @@ export interface operations {
                         content: string;
                         createdAt: number;
                         updatedAt: number;
-                        likeCount: number;
-                        likedByMe: boolean;
+                        reactions: components["schemas"]["ReactionSummary"][];
                     };
                 };
             };
@@ -1937,7 +1949,7 @@ export interface operations {
             };
         };
     };
-    "comments.likeComment": {
+    "comments.addCommentReaction": {
         parameters: {
             query?: never;
             header?: never;
@@ -1946,15 +1958,19 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReactionBody"];
+            };
+        };
         responses: {
-            /** @description LikeState */
+            /** @description ReactionState */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LikeState"];
+                    "application/json": components["schemas"]["ReactionState"];
                 };
             };
             /** @description The request did not match the expected schema */
@@ -1995,7 +2011,7 @@ export interface operations {
             };
         };
     };
-    "comments.unlikeComment": {
+    "comments.removeCommentReaction": {
         parameters: {
             query?: never;
             header?: never;
@@ -2004,15 +2020,19 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReactionBody"];
+            };
+        };
         responses: {
-            /** @description LikeState */
+            /** @description ReactionState */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LikeState"];
+                    "application/json": components["schemas"]["ReactionState"];
                 };
             };
             /** @description The request did not match the expected schema */

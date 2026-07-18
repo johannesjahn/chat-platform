@@ -1,5 +1,6 @@
-// HTTP CRUD churn scenario (issue #195) — exercises the posts/comments/likes
-// and chats/messages REST endpoints under sustained concurrent load. See
+// HTTP CRUD churn scenario (issue #195) — exercises the posts/comments/
+// reactions and chats/messages REST endpoints under sustained concurrent
+// load. See
 // scripts/loadtest/README.md for setup and how to run this.
 //
 //   k6 run scripts/loadtest/http-crud.js
@@ -22,7 +23,7 @@ const USER_COUNT = Number(__ENV.USERS || 5);
 const VUS = Number(__ENV.VUS || USER_COUNT);
 const DURATION = __ENV.DURATION || "1m";
 // Each iteration issues 6 requests (4 in "posts", 2 in "chat"), 2 of them
-// engagement writes (like + comment). At the default VUS=USERS=5, every VU
+// engagement writes (reaction + comment). At the default VUS=USERS=5, every VU
 // maps to a distinct user 1:1, so a VU's iteration rate is also that user's
 // engagement-write rate. A 3s floor between iterations keeps that at
 // <=20/min/VU — <=40 engagement writes/min/user (33% of the 120/min/user
@@ -107,11 +108,12 @@ export default function (data) {
     });
     check(listRes, { "posts listed": (r) => r.status === 200 });
 
-    const likeRes = http.post(`${BASE_URL}/posts/${postId}/likes`, null, {
-      headers,
-      tags: { name: "likePost" },
-    });
-    check(likeRes, { "post liked": (r) => r.status === 200 });
+    const reactionRes = http.post(
+      `${BASE_URL}/posts/${postId}/reactions`,
+      JSON.stringify({ emoji: "👍" }),
+      { headers, tags: { name: "addPostReaction" } },
+    );
+    check(reactionRes, { "post reacted to": (r) => r.status === 200 });
 
     const commentRes = http.post(
       `${BASE_URL}/posts/${postId}/comments`,

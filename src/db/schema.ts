@@ -150,13 +150,20 @@ export const comments = pgTable(
 export type DbComment = typeof comments.$inferSelect;
 export type NewDbComment = typeof comments.$inferInsert;
 
-// One row per (user, liked target). The target is polymorphic: exactly one
-// of `postId`/`commentId` is set (enforced by the check constraint), so a
-// single table covers likes on posts, comments, and replies alike (replies
-// live in `comments`). The partial unique constraints keep a user from
-// liking the same target twice. Like counts are computed on read (a grouped
-// COUNT over this table — see EngagementHandler.ts) rather than denormalized,
-// so there's no counter column to drift out of sync.
+// One row per (user, target, emoji) reaction. The target is polymorphic:
+// exactly one of `postId`/`commentId` is set (enforced by the check
+// constraint), so a single table covers reactions on posts, comments, and
+// replies alike (replies live in `comments`). `emoji` started as a plain
+// binary "like" (issue #67) and was widened to a standard-emoji reaction set
+// (issue #215) by adding this column rather than a new table — a user may now
+// react to the same target with more than one distinct emoji (one row each),
+// but at most once per (target, emoji) pair, per the unique constraints
+// below. Deliberately left as free-form `text` rather than a DB-level enum/
+// check: the allowed set is enforced at the API layer (`ReactionEmoji` in
+// Api.ts) instead, so a future custom-emoji set doesn't need a migration to
+// loosen a DB constraint. Reaction counts are computed on read (a grouped
+// COUNT over this table, per emoji — see reactions.ts) rather than
+// denormalized, so there's no counter column to drift out of sync.
 export const likes = pgTable(
   "likes",
   {
@@ -170,18 +177,32 @@ export const likes = pgTable(
     commentId: integer("comment_id").references(() => comments.id, {
       onDelete: "cascade",
     }),
+    // Defaults to the original binary "like" emoji so a row inserted without
+    // specifying one (shouldn't happen post-migration, but keeps the column
+    // additive/backward-compatible per the expand-contract note in CLAUDE.md)
+    // still lands on a sensible value rather than NULL.
+    emoji: text("emoji").notNull().default("👍"),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
   (table) => [
-    // A user can like a given post / comment at most once. These are backed
-    // by partial-ish composite btrees whose leading `userId` also serves the
-    // "which of these did I like?" lookups when rendering a page.
-    unique("likes_user_post_unique").on(table.userId, table.postId),
-    unique("likes_user_comment_unique").on(table.userId, table.commentId),
-    // Grouped COUNT(*) for a target's like total filters by postId/commentId;
-    // index them so that stays cheap and the cascade deletes don't scan.
+    // A user can react to a given post / comment with a given emoji at most
+    // once. These are backed by composite btrees whose leading `userId` also
+    // serves the "which of these did I react to, and with what?" lookups
+    // when rendering a page.
+    unique("likes_user_post_emoji_unique").on(
+      table.userId,
+      table.postId,
+      table.emoji,
+    ),
+    unique("likes_user_comment_emoji_unique").on(
+      table.userId,
+      table.commentId,
+      table.emoji,
+    ),
+    // Grouped COUNT(*) per (target, emoji) filters by postId/commentId; index
+    // them so that stays cheap and the cascade deletes don't scan.
     index("likes_post_id_idx").on(table.postId),
     index("likes_comment_id_idx").on(table.commentId),
     // Exactly one target column is set — never both, never neither.
