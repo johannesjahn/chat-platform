@@ -107,6 +107,20 @@ bun run lint           # ESLint (bun run lint:fix to autofix)
 bun run typecheck      # backend types; run the same in web/ for the frontend
 ```
 
+## Load testing
+
+[`scripts/loadtest/`](scripts/loadtest/) has k6 scripts exercising the HTTP
+CRUD endpoints and the `/ws` realtime fan-out under concurrent load — a
+manual/on-demand tool for capacity checks, not a CI gate (issue #195). See
+[scripts/loadtest/README.md](scripts/loadtest/README.md) for setup
+(including `k6`'s separate install, since it isn't an npm/bun package) and
+scenario details.
+
+```bash
+bun run loadtest:http   # HTTP CRUD churn against posts/chats/messages
+bun run loadtest:ws     # /ws chat_updated fan-out latency
+```
+
 ## Deployment
 
 - **Docker Compose** — `docker compose up` (see above) for a local real

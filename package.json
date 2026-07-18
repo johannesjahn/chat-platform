@@ -18,7 +18,9 @@
     "sync:chart-version": "bun run scripts/sync-chart-version.ts",
     "bump": "bun run scripts/bump.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "bun run scripts/migrate.ts"
+    "db:migrate": "bun run scripts/migrate.ts",
+    "loadtest:http": "k6 run scripts/loadtest/http-crud.js",
+    "loadtest:ws": "k6 run scripts/loadtest/ws-fanout.js"
   },
   "dependencies": {
     "@effect/platform": "0.97.0",
