@@ -1,6 +1,8 @@
 // Bumps the root package.json's version (major, minor, or patch — patch by
 // default), runs sync:chart-version so the Helm chart, values.yaml, and
-// web/package.json stay in lockstep, then commits the result. Tagging is
+// web/package.json stay in lockstep, regenerates openapi.json so its
+// info.version (sourced from package.json — see OpenApi.Version in
+// src/Api.ts) doesn't go stale, then commits the result. Tagging is
 // handled separately by .github/workflows/tag-release.yml.
 const bumpType = process.argv[2] ?? "patch";
 if (bumpType !== "major" && bumpType !== "minor" && bumpType !== "patch") {
@@ -41,9 +43,10 @@ console.log(
 );
 
 await Bun.$`bun run sync:chart-version`;
+await Bun.$`bun run gen:openapi`;
 
 const repoRoot = new URL("..", import.meta.url).pathname;
-await Bun.$`git add package.json k8s/chat-platform/Chart.yaml k8s/chat-platform/values.yaml web/package.json`.cwd(
+await Bun.$`git add package.json k8s/chat-platform/Chart.yaml k8s/chat-platform/values.yaml web/package.json openapi.json`.cwd(
   repoRoot,
 );
 await Bun.$`git commit -m ${`[RELEASE] ${nextVersion}`}`.cwd(repoRoot);
