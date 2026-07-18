@@ -28,7 +28,11 @@ import { WsTicketLive } from "./WsTicket.ts";
 
 const CorsLive = HttpApiBuilder.middlewareCors({
   allowedOrigins,
-  allowedMethods: ["GET", "POST", "PUT", "DELETE"],
+  // PATCH is used by updateUserRole (/users/:id/role) and updateComment
+  // (/comments/:id) — omitting it here fails preflight for both, since
+  // Authorization (a non-safelisted header) forces every authenticated
+  // request through a preflight regardless of method.
+  allowedMethods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
 });
 
