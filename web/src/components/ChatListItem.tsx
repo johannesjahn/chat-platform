@@ -6,6 +6,7 @@ import { PresenceDot } from "@/components/PresenceDot";
 import { Skeleton } from "@/components/ui/skeleton";
 import { chatDisplayName, formatChatTimestamp, type Chat } from "@/lib/chats";
 import { useIsOnline } from "@/lib/presence";
+import { userAvatarName } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 function messagePreview(chat: Chat): string {
@@ -61,7 +62,7 @@ export function ChatListItem({
         <Link
           to="/users/$id"
           params={{ id: String(otherParticipant.userId) }}
-          aria-label={`View ${otherParticipant.username}'s profile`}
+          aria-label={`View ${userAvatarName(otherParticipant)}'s profile`}
           className="relative shrink-0"
         >
           <Avatar name={name} size="lg" />

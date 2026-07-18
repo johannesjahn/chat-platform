@@ -20,6 +20,7 @@ import { useTotalUnreadCount } from "../lib/chats";
 import { OfflineQueueSync } from "../lib/offlineQueue";
 import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
+import { userLabel } from "../lib/users";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -106,7 +107,7 @@ function Nav() {
             params={{ id: String(session.user.id) }}
             className="text-sm text-muted-foreground hover:text-foreground hover:underline"
           >
-            @{session.user.username}
+            {userLabel(session.user)}
           </Link>
           <Button asChild variant="ghost" size="icon" aria-label="Settings">
             <Link to="/settings">

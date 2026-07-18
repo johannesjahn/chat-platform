@@ -1,6 +1,10 @@
 import { useSyncExternalStore } from "react";
 
-export type TypingUser = { userId: number; username: string };
+export type TypingUser = {
+  userId: number;
+  username: string;
+  displayName: string | null;
+};
 
 // The server pushes a `typing` event per keystroke burst but never a
 // corresponding "stopped typing" event (see src/Api.ts's `sendTyping` — it's
@@ -48,9 +52,10 @@ export function noteTyping(
   chatId: number,
   userId: number,
   username: string,
+  displayName: string | null,
 ): void {
   const users = byChat.get(chatId) ?? new Map<number, TypingUser>();
-  users.set(userId, { userId, username });
+  users.set(userId, { userId, username, displayName });
   byChat.set(chatId, users);
   snapshots.delete(chatId);
 

@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { and, eq, ilike, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, ilike, isNull, sql } from "drizzle-orm";
 import { Context, Effect, FiberRef, Metric, MetricLabel } from "effect";
 import { currentLogUser } from "./RedactedLogger.ts";
 import {
@@ -607,34 +607,10 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
 
-          const existing = yield* Effect.tryPromise(() =>
-            db
-              .select({ id: users.id })
-              .from(users)
-              .where(
-                and(
-                  eq(
-                    sql`lower(${users.username})`,
-                    payload.username.toLowerCase(),
-                  ),
-                  ne(users.id, currentUser.id),
-                ),
-              )
-              .limit(1),
-          ).pipe(Effect.orDie);
-          if (existing[0]) {
-            return yield* Effect.fail(
-              new UsernameTaken({
-                message: `Username "${payload.username}" is already taken`,
-              }),
-            );
-          }
-
           const rows = yield* Effect.tryPromise(() =>
             db
               .update(users)
               .set({
-                username: payload.username,
                 displayName: payload.displayName,
                 avatarUrl: payload.avatarUrl,
               })

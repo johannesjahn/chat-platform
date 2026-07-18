@@ -52,3 +52,34 @@ test("changes password from settings and can log back in with the new one", asyn
   await expect(page).toHaveURL("/");
   await expect(page.getByText(`@${username}`)).toBeVisible();
 });
+
+test("setting a display name replaces the username in the nav, but the profile page still shows both", async ({
+  page,
+}) => {
+  const { username } = await registerViaUi(page);
+  const displayName = "Ada Lovelace";
+
+  // The settings page no longer offers a way to change the username itself —
+  // it's shown read-only.
+  await page.goto("/settings");
+  await expect(page.locator("#username")).toHaveCount(0);
+  await expect(page.getByText(`@${username}`)).toBeVisible();
+
+  await page.fill("#display-name", displayName);
+  await page.getByRole("button", { name: "Save profile" }).click();
+  await expect(page.getByText("Profile updated.")).toBeVisible();
+
+  // Everywhere but the profile page (and the settings page's own read-only
+  // username field, checked above), the display name now takes over from
+  // the raw username — starting with the feed, once navigated there.
+  await page.goto("/");
+  const navLink = page.locator("nav, header").getByText(displayName).first();
+  await expect(navLink).toBeVisible();
+  await expect(page.getByText(`@${username}`)).not.toBeVisible();
+
+  // The profile page is the one place that still surfaces the actual
+  // username, alongside the display name.
+  await navLink.click();
+  await expect(page).toHaveURL(/\/users\/\d+/);
+  await expect(page.getByText(`@${username}`)).toBeVisible();
+});

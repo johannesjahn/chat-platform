@@ -90,6 +90,7 @@ export type TypingEvent = {
   readonly chatId: number;
   readonly userId: number;
   readonly username: string;
+  readonly displayName: string | null;
 };
 
 // Event payloads mostly carry no data beyond an id — clients refetch the

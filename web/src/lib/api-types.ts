@@ -620,11 +620,6 @@ export interface components {
             newPassword: components["schemas"]["NonEmptyString"];
         };
         UpdateProfileBody: {
-            /**
-             * maxLength(32)
-             * @description a string at most 32 character(s) long
-             */
-            username: components["schemas"]["NonEmptyTrimmedString"];
             displayName: components["schemas"]["NonEmptyTrimmedString"] | null;
             avatarUrl: string | null;
         };
@@ -742,6 +737,7 @@ export interface components {
         ChatParticipant: {
             userId: number;
             username: string;
+            displayName: string | null;
         };
         Message: {
             id: number;
@@ -1200,15 +1196,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Unauthorized"];
-                };
-            };
-            /** @description UsernameTaken */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UsernameTaken"];
                 };
             };
         };
