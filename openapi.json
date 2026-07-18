@@ -979,8 +979,7 @@
                     "attachment",
                     "createdAt",
                     "updatedAt",
-                    "likeCount",
-                    "likedByMe"
+                    "reactions"
                   ],
                   "properties": {
                     "id": {
@@ -1011,11 +1010,11 @@
                     "updatedAt": {
                       "type": "number"
                     },
-                    "likeCount": {
-                      "type": "number"
-                    },
-                    "likedByMe": {
-                      "type": "boolean"
+                    "reactions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReactionSummary"
+                      }
                     }
                   },
                   "additionalProperties": false
@@ -1066,12 +1065,12 @@
         }
       }
     },
-    "/posts/{id}/likes": {
+    "/posts/{id}/reactions": {
       "post": {
         "tags": [
           "comments"
         ],
-        "operationId": "comments.likePost",
+        "operationId": "comments.addPostReaction",
         "parameters": [
           {
             "name": "id",
@@ -1089,11 +1088,11 @@
         ],
         "responses": {
           "200": {
-            "description": "LikeState",
+            "description": "ReactionState",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LikeState"
+                  "$ref": "#/components/schemas/ReactionState"
                 }
               }
             }
@@ -1138,13 +1137,23 @@
               }
             }
           }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReactionBody"
+              }
+            }
+          },
+          "required": true
         }
       },
       "delete": {
         "tags": [
           "comments"
         ],
-        "operationId": "comments.unlikePost",
+        "operationId": "comments.removePostReaction",
         "parameters": [
           {
             "name": "id",
@@ -1162,11 +1171,11 @@
         ],
         "responses": {
           "200": {
-            "description": "LikeState",
+            "description": "ReactionState",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LikeState"
+                  "$ref": "#/components/schemas/ReactionState"
                 }
               }
             }
@@ -1211,6 +1220,16 @@
               }
             }
           }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReactionBody"
+              }
+            }
+          },
+          "required": true
         }
       }
     },
@@ -1338,8 +1357,7 @@
                     "content",
                     "createdAt",
                     "updatedAt",
-                    "likeCount",
-                    "likedByMe"
+                    "reactions"
                   ],
                   "properties": {
                     "id": {
@@ -1370,11 +1388,11 @@
                     "updatedAt": {
                       "type": "number"
                     },
-                    "likeCount": {
-                      "type": "number"
-                    },
-                    "likedByMe": {
-                      "type": "boolean"
+                    "reactions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReactionSummary"
+                      }
                     }
                   },
                   "additionalProperties": false
@@ -1559,8 +1577,7 @@
                     "content",
                     "createdAt",
                     "updatedAt",
-                    "likeCount",
-                    "likedByMe"
+                    "reactions"
                   ],
                   "properties": {
                     "id": {
@@ -1591,11 +1608,11 @@
                     "updatedAt": {
                       "type": "number"
                     },
-                    "likeCount": {
-                      "type": "number"
-                    },
-                    "likedByMe": {
-                      "type": "boolean"
+                    "reactions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReactionSummary"
+                      }
                     }
                   },
                   "additionalProperties": false
@@ -1663,12 +1680,12 @@
         }
       }
     },
-    "/comments/{id}/likes": {
+    "/comments/{id}/reactions": {
       "post": {
         "tags": [
           "comments"
         ],
-        "operationId": "comments.likeComment",
+        "operationId": "comments.addCommentReaction",
         "parameters": [
           {
             "name": "id",
@@ -1686,11 +1703,11 @@
         ],
         "responses": {
           "200": {
-            "description": "LikeState",
+            "description": "ReactionState",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LikeState"
+                  "$ref": "#/components/schemas/ReactionState"
                 }
               }
             }
@@ -1735,13 +1752,23 @@
               }
             }
           }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReactionBody"
+              }
+            }
+          },
+          "required": true
         }
       },
       "delete": {
         "tags": [
           "comments"
         ],
-        "operationId": "comments.unlikeComment",
+        "operationId": "comments.removeCommentReaction",
         "parameters": [
           {
             "name": "id",
@@ -1759,11 +1786,11 @@
         ],
         "responses": {
           "200": {
-            "description": "LikeState",
+            "description": "ReactionState",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LikeState"
+                  "$ref": "#/components/schemas/ReactionState"
                 }
               }
             }
@@ -1808,6 +1835,16 @@
               }
             }
           }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReactionBody"
+              }
+            }
+          },
+          "required": true
         }
       }
     },
@@ -4123,8 +4160,7 @@
           "attachment",
           "createdAt",
           "updatedAt",
-          "likeCount",
-          "likedByMe"
+          "reactions"
         ],
         "properties": {
           "id": {
@@ -4155,11 +4191,11 @@
           "updatedAt": {
             "type": "number"
           },
-          "likeCount": {
-            "type": "number"
-          },
-          "likedByMe": {
-            "type": "boolean"
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReactionSummary"
+            }
           }
         },
         "additionalProperties": false
@@ -4196,6 +4232,26 @@
           },
           "url": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReactionSummary": {
+        "type": "object",
+        "required": [
+          "emoji",
+          "count",
+          "reactedByMe"
+        ],
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          },
+          "reactedByMe": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -4293,18 +4349,40 @@
         },
         "additionalProperties": false
       },
-      "LikeState": {
+      "ReactionBody": {
         "type": "object",
         "required": [
-          "likeCount",
-          "liked"
+          "emoji"
         ],
         "properties": {
-          "likeCount": {
-            "type": "number"
-          },
-          "liked": {
-            "type": "boolean"
+          "emoji": {
+            "$ref": "#/components/schemas/ReactionEmoji"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReactionEmoji": {
+        "type": "string",
+        "enum": [
+          "👍",
+          "❤️",
+          "😂",
+          "😮",
+          "😢",
+          "😡"
+        ]
+      },
+      "ReactionState": {
+        "type": "object",
+        "required": [
+          "reactions"
+        ],
+        "properties": {
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReactionSummary"
+            }
           }
         },
         "additionalProperties": false
@@ -4349,8 +4427,7 @@
           "content",
           "createdAt",
           "updatedAt",
-          "likeCount",
-          "likedByMe"
+          "reactions"
         ],
         "properties": {
           "id": {
@@ -4381,11 +4458,11 @@
           "updatedAt": {
             "type": "number"
           },
-          "likeCount": {
-            "type": "number"
-          },
-          "likedByMe": {
-            "type": "boolean"
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReactionSummary"
+            }
           }
         },
         "additionalProperties": false

@@ -47,8 +47,8 @@ export const resolveAttachment = (
 
 // Batched equivalent for building many messages/posts at once (listMessages,
 // listPosts, getLastMessagesForChats) — one query across every referenced
-// attachment id instead of one per row, mirroring likes.ts's
-// postLikeInfo/commentLikeInfo.
+// attachment id instead of one per row, mirroring reactions.ts's
+// postReactionInfo/commentReactionInfo.
 export const resolveAttachments = (
   db: DrizzleDb,
   attachmentIds: ReadonlyArray<number | null>,
