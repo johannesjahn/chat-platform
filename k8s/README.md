@@ -1,7 +1,8 @@
 # Kubernetes deployment
 
 This directory contains a Helm chart ([`chat-platform/`](chat-platform/)) that
-deploys the **backend**, **Postgres**, and **Redis** to a Kubernetes cluster.
+deploys the **backend**, **Postgres**, **Redis**, and **MinIO** to a
+Kubernetes cluster.
 It takes inspiration from
 [johannesjahn/chat-api-helm](https://github.com/johannesjahn/chat-api-helm),
 adapted for this repo's stack (Bun backend, `/health`/`/ready` probes, a
@@ -22,13 +23,14 @@ itself — see
 
 ## What's in the chart
 
-| Component  | Kind                               | Notes                                                                                                                                                                                                                                   |
-| ---------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `backend`  | `Deployment` + `Service`           | The Bun/Effect API. `Ingress` optional (on by default).                                                                                                                                                                                 |
-| `migrate`  | `Job`                              | Runs Drizzle database migrations standalone prior to Deployment rollouts (Helm `pre-install,pre-upgrade` hook).                                                                                                                         |
-| `postgres` | `StatefulSet` + headless `Service` | Persisted via a `volumeClaimTemplate` (disable with `postgres.persistence.enabled=false`).                                                                                                                                              |
-| `redis`    | `Deployment` + `Service`           | Backs realtime Pub/Sub fan-out and rate limiting; no persistence by default.                                                                                                                                                            |
-| secrets    | `Secret`                           | `JWT_SECRET`, the Postgres password, and the Redis password. `values.yaml` defaults all three to `existingSecret`, pointing at Secrets (`jwt`, `postgres-password`, `redis-password`) created once by hand in-cluster — see note below. |
+| Component  | Kind                               | Notes                                                                                                                                                                                                                                                                                                                  |
+| ---------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend`  | `Deployment` + `Service`           | The Bun/Effect API. `Ingress` optional (on by default).                                                                                                                                                                                                                                                                |
+| `migrate`  | `Job`                              | Runs Drizzle database migrations standalone prior to Deployment rollouts (Helm `pre-install,pre-upgrade` hook).                                                                                                                                                                                                        |
+| `postgres` | `StatefulSet` + headless `Service` | Persisted via a `volumeClaimTemplate` (disable with `postgres.persistence.enabled=false`).                                                                                                                                                                                                                             |
+| `redis`    | `Deployment` + `Service`           | Backs realtime Pub/Sub fan-out and rate limiting; no persistence by default.                                                                                                                                                                                                                                           |
+| `minio`    | `Deployment` + `Service` + `Job`   | S3-compatible object storage backing file/media uploads (issue #221). Persisted via a PVC. The `Job` (`minio-init`) creates the upload bucket, since MinIO doesn't do that on its own. Disable with `minio.enabled=false` and set `backend.s3.*` to use a real cloud bucket (AWS S3, Cloudflare R2, GCS) instead.      |
+| secrets    | `Secret`                           | `JWT_SECRET`, the Postgres password, the Redis password, and (when `minio.enabled`) MinIO's access/secret key pair. `values.yaml` defaults all of these to `existingSecret`, pointing at Secrets (`jwt`, `postgres-password`, `redis-password`, `minio-credentials`) created once by hand in-cluster — see note below. |
 
 Nothing here builds the backend's container image — the chart just deploys
 one. Build and push the repo-root [`Dockerfile`](../Dockerfile) to a
@@ -67,21 +69,35 @@ for the full set, with comments):
   Defaults assume an `nginx` `IngressClass` and cert-manager with a
   `letsencrypt-prod` `ClusterIssuer`; adjust or set `backend.ingress.enabled:
 false` if your cluster's setup differs.
-- `postgres.persistence.*` / `redis.persistence.*` — size and
-  `storageClassName` (empty uses the cluster default).
+- `postgres.persistence.*` / `redis.persistence.*` / `minio.persistence.*` —
+  size and `storageClassName` (empty uses the cluster default).
+- `minio.enabled` — set to `false` to skip deploying MinIO entirely and
+  point the backend at a real cloud bucket instead via `backend.s3.endpoint`
+  / `backend.s3.bucketName` / `backend.s3.region` /
+  `backend.s3.existingSecret` (see `src/AttachmentStorage.ts`).
+  `backend.s3.publicEndpoint` only matters if `backend.s3.endpoint` isn't
+  already reachable from the browser.
 - `jwt.existingSecret` / `postgres.auth.existingSecret` /
-  `redis.auth.existingSecret` — **required**, the name of a pre-existing
-  Secret holding each value (the chart no longer generates these itself —
-  see below for why). This repo's `values.yaml` defaults all three to
-  Secrets (`jwt`, `postgres-password`, `redis-password`) created once by
-  hand, e.g.:
+  `redis.auth.existingSecret` / `minio.auth.existingSecret` — **required**,
+  the name of a pre-existing Secret holding each value (the chart no longer
+  generates these itself — see below for why). This repo's `values.yaml`
+  defaults all four to Secrets (`jwt`, `postgres-password`,
+  `redis-password`, `minio-credentials`) created once by hand, e.g.:
   ```bash
   kubectl create secret generic postgres-password -n chat-platform \
     --from-literal=postgres-password="$(openssl rand -base64 24)"
   ```
   (same for `redis-password` / `jwt`, each with a data key matching its own
   Secret name — the chart reads the key by that same name, so there's no
-  separate key field to set). **Why not have the chart auto-generate these
+  separate key field to set). `minio-credentials` is the exception — it
+  holds a credential _pair_, so its data keys are fixed names instead
+  (`access-key`/`secret-key`) rather than matching the Secret's own name:
+  ```bash
+  kubectl create secret generic minio-credentials -n chat-platform \
+    --from-literal=access-key=chat-platform \
+    --from-literal=secret-key="$(openssl rand -base64 24)"
+  ```
+  **Why not have the chart auto-generate these
   password on first install?** An earlier version did exactly that (leave
   blank → generate a random value, reused across `helm upgrade` via a
   `lookup`-based helper that read back the existing Secret so it wouldn't

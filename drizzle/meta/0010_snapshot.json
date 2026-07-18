@@ -1,9 +1,94 @@
 {
-  "id": "665d8b3c-aacb-410e-9a43-6e4bba573c0d",
+  "id": "35a04eee-c823-463b-8500-909d6b3540e0",
   "prevId": "fa165220-0303-418f-b2fb-b662b8543437",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.attachments": {
+      "name": "attachments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "uploader_id": {
+          "name": "uploader_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "filename": {
+          "name": "filename",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "size": {
+          "name": "size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "attachments_uploader_id_idx": {
+          "name": "attachments_uploader_id_idx",
+          "columns": [
+            {
+              "expression": "uploader_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "attachments_uploader_id_users_id_fk": {
+          "name": "attachments_uploader_id_users_id_fk",
+          "tableFrom": "attachments",
+          "tableTo": "users",
+          "columnsFrom": [
+            "uploader_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.chat_participants": {
       "name": "chat_participants",
       "schema": "",
@@ -344,13 +429,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "emoji": {
-          "name": "emoji",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'👍'"
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -433,22 +511,20 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "likes_user_post_emoji_unique": {
-          "name": "likes_user_post_emoji_unique",
+        "likes_user_post_unique": {
+          "name": "likes_user_post_unique",
           "nullsNotDistinct": false,
           "columns": [
             "user_id",
-            "post_id",
-            "emoji"
+            "post_id"
           ]
         },
-        "likes_user_comment_emoji_unique": {
-          "name": "likes_user_comment_emoji_unique",
+        "likes_user_comment_unique": {
+          "name": "likes_user_comment_unique",
           "nullsNotDistinct": false,
           "columns": [
             "user_id",
-            "comment_id",
-            "emoji"
+            "comment_id"
           ]
         }
       },
@@ -568,6 +644,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "attachment_id": {
+          "name": "attachment_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -617,6 +699,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "messages_attachment_id_idx": {
+          "name": "messages_attachment_id_idx",
+          "columns": [
+            {
+              "expression": "attachment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -644,6 +741,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "messages_attachment_id_attachments_id_fk": {
+          "name": "messages_attachment_id_attachments_id_fk",
+          "tableFrom": "messages",
+          "tableTo": "attachments",
+          "columnsFrom": [
+            "attachment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -681,6 +791,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "attachment_id": {
+          "name": "attachment_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -709,6 +825,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "posts_attachment_id_idx": {
+          "name": "posts_attachment_id_idx",
+          "columns": [
+            {
+              "expression": "attachment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -723,6 +854,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "posts_attachment_id_attachments_id_fk": {
+          "name": "posts_attachment_id_attachments_id_fk",
+          "tableFrom": "posts",
+          "tableTo": "attachments",
+          "columnsFrom": [
+            "attachment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

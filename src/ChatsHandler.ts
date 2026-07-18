@@ -16,6 +16,7 @@ import {
 } from "drizzle-orm";
 import { Context, Effect, Metric, MetricLabel } from "effect";
 import {
+  type Attachment,
   ChatApi,
   DEFAULT_CHATS_LIMIT,
   DEFAULT_MESSAGES_LIMIT,
@@ -27,6 +28,13 @@ import {
   type ChatParticipant,
   type Message,
 } from "./Api.ts";
+import {
+  getOwnedAttachmentOr404,
+  resolveAttachment,
+  resolveAttachments,
+  toApiAttachment,
+} from "./attachments.ts";
+import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
@@ -44,12 +52,14 @@ import {
 const toApiMessage = (
   row: DbMessage,
   readByUserIds: ReadonlyArray<number>,
+  attachment: Attachment | null = null,
 ): Message => ({
   id: row.id,
   chatId: row.chatId,
   senderId: row.senderId,
   contentType: row.contentType,
   content: row.content,
+  attachment,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
   readByUserIds: [...readByUserIds],
@@ -129,7 +139,7 @@ const notifyChatUpdated = (
 const getLastMessage = (
   db: DrizzleDb,
   chatId: number,
-): Effect.Effect<Message | null> =>
+): Effect.Effect<Message | null, never, AttachmentStorage> =>
   Effect.gen(function* () {
     const rows = yield* Effect.tryPromise(() =>
       db
@@ -147,9 +157,11 @@ const getLastMessage = (
         .from(messageReads)
         .where(eq(messageReads.messageId, row.id)),
     ).pipe(Effect.orDie);
+    const attachment = yield* resolveAttachment(db, row.attachmentId);
     return toApiMessage(
       row,
       readers.map((r) => r.userId),
+      attachment,
     );
   });
 
@@ -219,7 +231,7 @@ const getParticipantsForChats = (
 const getLastMessagesForChats = (
   db: DrizzleDb,
   chatIds: ReadonlyArray<number>,
-): Effect.Effect<Map<number, Message>> =>
+): Effect.Effect<Map<number, Message>, never, AttachmentStorage> =>
   Effect.gen(function* () {
     const byChat = new Map<number, Message>();
     if (chatIds.length === 0) return byChat;
@@ -256,10 +268,20 @@ const getLastMessagesForChats = (
       list.push(r.userId);
       readersByMessage.set(r.messageId, list);
     }
+    const attachmentsByRow = yield* resolveAttachments(
+      db,
+      rows.map((r) => r.attachmentId),
+    );
     for (const row of rows) {
       byChat.set(
         row.chatId,
-        toApiMessage(row, readersByMessage.get(row.id) ?? []),
+        toApiMessage(
+          row,
+          readersByMessage.get(row.id) ?? [],
+          row.attachmentId !== null
+            ? (attachmentsByRow.get(row.attachmentId) ?? null)
+            : null,
+        ),
       );
     }
     return byChat;
@@ -479,7 +501,7 @@ const buildChat = (
   row: DbChat,
   currentUserId: number,
   participants?: ReadonlyArray<ChatParticipant>,
-): Effect.Effect<Chat> =>
+): Effect.Effect<Chat, never, AttachmentStorage> =>
   Effect.gen(function* () {
     const resolvedParticipants =
       participants ?? (yield* getParticipants(db, row.id));
@@ -1242,10 +1264,20 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             list.push(r.userId);
             readersByMessage.set(r.messageId, list);
           }
+          const attachmentsByRow = yield* resolveAttachments(
+            db,
+            rows.map((r) => r.attachmentId),
+          );
 
           return {
             messages: rows.map((row) =>
-              toApiMessage(row, readersByMessage.get(row.id) ?? []),
+              toApiMessage(
+                row,
+                readersByMessage.get(row.id) ?? [],
+                row.attachmentId !== null
+                  ? (attachmentsByRow.get(row.attachmentId) ?? null)
+                  : null,
+              ),
             ),
             limit,
             hasEarlier,
@@ -1260,8 +1292,22 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const connections = yield* RealtimeConnections;
+          const storage = yield* AttachmentStorage;
           yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
+
+          let attachment: Attachment | null = null;
+          if (payload.attachmentId !== undefined) {
+            const attachmentRow = yield* getOwnedAttachmentOr404(
+              db,
+              payload.attachmentId,
+              currentUser.id,
+            );
+            attachment = toApiAttachment(
+              attachmentRow,
+              storage.presignGetUrl(attachmentRow.storageKey),
+            );
+          }
 
           // Inserting the message and bumping the parent chat's `updatedAt`
           // (which `listChats` sorts by) are done as one atomic statement via
@@ -1279,6 +1325,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 senderId: currentUser.id,
                 contentType: payload.contentType,
                 content: payload.content,
+                attachmentId: payload.attachmentId ?? null,
                 createdAt: now,
                 updatedAt: now,
               })
@@ -1315,7 +1362,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             version,
             participants.map((p) => p.userId),
           );
-          return toApiMessage(row, []);
+          return toApiMessage(row, [], attachment);
         }),
       )
       .handle("sendTyping", ({ path: { id } }) =>
@@ -1420,6 +1467,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const connections = yield* RealtimeConnections;
+          const storage = yield* AttachmentStorage;
           yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
           const existing = yield* getMessageOr404(db, id, messageId);
@@ -1428,12 +1476,26 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               new Forbidden({ message: "You can only edit your own messages" }),
             );
 
+          let attachment: Attachment | null = null;
+          if (payload.attachmentId !== undefined) {
+            const attachmentRow = yield* getOwnedAttachmentOr404(
+              db,
+              payload.attachmentId,
+              currentUser.id,
+            );
+            attachment = toApiAttachment(
+              attachmentRow,
+              storage.presignGetUrl(attachmentRow.storageKey),
+            );
+          }
+
           const rows = yield* Effect.tryPromise(() =>
             db
               .update(messages)
               .set({
                 contentType: payload.contentType,
                 content: payload.content,
+                attachmentId: payload.attachmentId ?? null,
                 updatedAt: new Date(),
               })
               .where(eq(messages.id, messageId))
@@ -1452,7 +1514,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             version,
             participants.map((p) => p.userId),
           );
-          return toApiMessage(row, readers);
+          return toApiMessage(row, readers, attachment);
         }),
       )
       .handle("deleteMessage", ({ path: { id, messageId } }) =>

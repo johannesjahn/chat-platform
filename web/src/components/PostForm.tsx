@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from "react";
-import { ImageIcon, Loader2, Type } from "lucide-react";
+import { ImageIcon, Loader2, Paperclip, Type } from "lucide-react";
+import { AttachmentUploadField } from "@/components/AttachmentUploadField";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import type { Attachment } from "@/lib/attachments";
 import { errorMessage } from "@/lib/errors";
 import { isAllowedImageUrl } from "@/lib/imageHosts";
 import { useOnlineStatus } from "@/lib/online";
@@ -56,9 +58,11 @@ type PostFormProps = {
   submitLabel: string;
   initialContentType?: PostContentType;
   initialContent?: string;
+  initialAttachment?: Attachment | null;
   onSubmit: (values: {
     contentType: PostContentType;
     content: string;
+    attachmentId?: number;
   }) => Promise<void>;
   footer?: ReactNode;
   // Lets `onSubmit` be attempted while offline instead of being blocked —
@@ -76,6 +80,7 @@ export function PostForm({
   submitLabel,
   initialContentType = "text",
   initialContent = "",
+  initialAttachment = null,
   onSubmit,
   footer,
   allowOfflineQueue = false,
@@ -83,6 +88,9 @@ export function PostForm({
   const [contentType, setContentType] =
     useState<PostContentType>(initialContentType);
   const [content, setContent] = useState(initialContent);
+  const [attachment, setAttachment] = useState<Attachment | null>(
+    initialAttachment,
+  );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const isOnline = useOnlineStatus();
@@ -93,12 +101,17 @@ export function PostForm({
     contentType === "image_url" &&
     trimmed.length > 0 &&
     !isAllowedImageUrl(trimmed);
+  // An attachment post can't be offline-queued (see PostForm's caller,
+  // routes/posts/new.tsx) — it needs an already-completed upload, which
+  // needs a live connection — so it always requires being online.
   const canSubmit =
-    trimmed.length > 0 &&
-    !overLimit &&
-    !invalidImageUrl &&
-    !pending &&
-    (isOnline || allowOfflineQueue);
+    contentType === "attachment"
+      ? attachment !== null && !pending && isOnline
+      : trimmed.length > 0 &&
+        !overLimit &&
+        !invalidImageUrl &&
+        !pending &&
+        (isOnline || allowOfflineQueue);
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 py-10">
@@ -121,7 +134,15 @@ export function PostForm({
               setError(null);
               setPending(true);
               try {
-                await onSubmit({ contentType, content: trimmed });
+                await onSubmit(
+                  contentType === "attachment"
+                    ? {
+                        contentType,
+                        content: attachment!.filename,
+                        attachmentId: attachment!.id,
+                      }
+                    : { contentType, content: trimmed },
+                );
               } catch (err) {
                 setError(errorMessage(err));
               } finally {
@@ -150,77 +171,104 @@ export function PostForm({
                   <ImageIcon className="size-4" />
                   Image URL
                 </Button>
+                <Button
+                  type="button"
+                  variant={contentType === "attachment" ? "default" : "outline"}
+                  onClick={() => setContentType("attachment")}
+                  className="flex-1"
+                >
+                  <Paperclip className="size-4" />
+                  File
+                </Button>
               </div>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="content">
-                {contentType === "text" ? "Text" : "Image URL"}
-              </Label>
-              {contentType === "text" ? (
-                <Textarea
-                  id="content"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="What's on your mind?"
-                  rows={6}
-                  required
-                  aria-invalid={overLimit}
+            {contentType === "attachment" ? (
+              <div className="flex flex-col gap-2">
+                <Label>File</Label>
+                <AttachmentUploadField
+                  attachment={attachment}
+                  onUploaded={setAttachment}
+                  onClear={() => setAttachment(null)}
+                  disabled={pending}
                 />
-              ) : (
-                <Input
-                  id="content"
-                  type="url"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  placeholder="https://picsum.photos/id/1/600/800"
-                  required
-                  aria-invalid={invalidImageUrl}
-                />
-              )}
-              {invalidImageUrl && (
-                <p className="text-xs text-destructive">
-                  Image URLs must be https:// links from a supported image host
-                  (e.g. picsum.photos, imgur.com, unsplash.com).
-                </p>
-              )}
-              <span
-                className={
-                  overLimit
-                    ? "self-end text-xs text-destructive"
-                    : "self-end text-xs text-muted-foreground"
-                }
-              >
-                {trimmed.length}/{MAX_POST_CONTENT_LENGTH}
-              </span>
-              {contentType === "image_url" &&
-                trimmed &&
-                !overLimit &&
-                !invalidImageUrl && (
-                  <img
-                    // Re-parsed rather than passed through raw: `invalidImageUrl`
-                    // already proved `trimmed` is an https:// URL on the
-                    // allowlist (see isAllowedImageUrl), but `.href` also
-                    // canonicalizes/percent-encodes it so the DOM never sees
-                    // the user's original unescaped input verbatim.
-                    src={new URL(trimmed).href}
-                    alt="Preview"
-                    className="aspect-4/5 w-full rounded-md border border-border bg-muted object-cover"
+                {!isOnline && (
+                  <p className="text-xs text-muted-foreground">
+                    You&apos;re offline — file attachments need a live
+                    connection to upload and send.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="content">
+                  {contentType === "text" ? "Text" : "Image URL"}
+                </Label>
+                {contentType === "text" ? (
+                  <Textarea
+                    id="content"
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    placeholder="What's on your mind?"
+                    rows={6}
+                    required
+                    aria-invalid={overLimit}
+                  />
+                ) : (
+                  <Input
+                    id="content"
+                    type="url"
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    placeholder="https://picsum.photos/id/1/600/800"
+                    required
+                    aria-invalid={invalidImageUrl}
                   />
                 )}
-            </div>
+                {invalidImageUrl && (
+                  <p className="text-xs text-destructive">
+                    Image URLs must be https:// links from a supported image
+                    host (e.g. picsum.photos, imgur.com, unsplash.com).
+                  </p>
+                )}
+                <span
+                  className={
+                    overLimit
+                      ? "self-end text-xs text-destructive"
+                      : "self-end text-xs text-muted-foreground"
+                  }
+                >
+                  {trimmed.length}/{MAX_POST_CONTENT_LENGTH}
+                </span>
+                {contentType === "image_url" &&
+                  trimmed &&
+                  !overLimit &&
+                  !invalidImageUrl && (
+                    <img
+                      // Re-parsed rather than passed through raw: `invalidImageUrl`
+                      // already proved `trimmed` is an https:// URL on the
+                      // allowlist (see isAllowedImageUrl), but `.href` also
+                      // canonicalizes/percent-encodes it so the DOM never sees
+                      // the user's original unescaped input verbatim.
+                      src={new URL(trimmed).href}
+                      alt="Preview"
+                      className="aspect-4/5 w-full rounded-md border border-border bg-muted object-cover"
+                    />
+                  )}
+              </div>
+            )}
 
             <Button type="submit" className="mt-1 w-full" disabled={!canSubmit}>
               {pending && <Loader2 className="size-4 animate-spin" />}
               {!isOnline
-                ? allowOfflineQueue
+                ? allowOfflineQueue && contentType !== "attachment"
                   ? "Queue for sending"
                   : "You're offline"
                 : pending
                   ? "Please wait…"
                   : submitLabel}
             </Button>
-            {!isOnline && allowOfflineQueue && (
+            {!isOnline && allowOfflineQueue && contentType !== "attachment" && (
               <p className="-mt-2 self-end text-xs text-muted-foreground">
                 You&apos;re offline — this will be queued and posted once
                 you&apos;re back online.

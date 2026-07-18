@@ -1,0 +1,61 @@
+{{- if .Values.minio.enabled }}
+{{- $fullname := include "chat-platform.fullname" . -}}
+# Creates the bucket the backend uploads into — MinIO doesn't create buckets
+# on its own the way a managed cloud bucket is provisioned out-of-band before
+# pointing S3_ENDPOINT at it (see docker-compose.yml's `minio-init` service,
+# which does the same thing for local dev). Unlike
+# backend-migration-job.yaml, this isn't a Helm hook: it only needs to
+# eventually succeed once the minio Deployment above is up, not to run
+# strictly before the rest of the release, so a plain Job (retrying via
+# backoffLimit until minio's Service is reachable) is enough.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-minio-init-{{ .Release.Revision }}
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio-init
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        {{- include "chat-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: minio-init
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Never
+      containers:
+        - name: minio-init
+          image: "{{ .Values.minio.mcImage.repository }}:{{ .Values.minio.mcImage.tag }}"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              mc alias set local http://{{ $fullname }}-minio:9000 "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" &&
+              mc mb --ignore-existing local/"$S3_BUCKET_NAME"
+          env:
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "chat-platform.s3SecretName" . }}
+                  key: access-key
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "chat-platform.s3SecretName" . }}
+                  key: secret-key
+            - name: S3_BUCKET_NAME
+              value: {{ .Values.minio.bucketName | quote }}
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+{{- end }}

@@ -46,6 +46,25 @@ backend:
   # Service ClusterIP or subnet.
   trustProxy: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,loopback"
 
+  # S3-compatible object storage for file/media uploads (issue #221) — see
+  # src/AttachmentStorage.ts. Ignored when minio.enabled is true (the
+  # backend is wired to the in-cluster MinIO below automatically instead —
+  # see backend-deployment.yaml). Set these and disable minio.enabled to
+  # point at a real cloud bucket in production.
+  s3:
+    endpoint: ""
+    # Only needed when `endpoint` isn't already reachable from the browser
+    # (e.g. it's an internal hostname) — overrides just the host of
+    # presigned attachment URLs handed back to the browser. Leave unset for
+    # real cloud storage, where both are the same public endpoint.
+    publicEndpoint: ""
+    bucketName: ""
+    region: ""
+    # Secret with access-key/secret-key data keys holding your S3-compatible
+    # provider's credentials — required when minio.enabled is false (see
+    # postgres.auth.existingSecret above for the same convention).
+    existingSecret: ""
+
   ingress:
     enabled: true
     className: "traefik"
@@ -168,3 +187,47 @@ jwt:
   # Signs refresh JWTs (see src/Jwt.ts). Required — see
   # postgres.auth.existingSecret above for why.
   existingSecret: "jwt"
+
+minio:
+  # Local/in-cluster S3-compatible object storage for file/media uploads
+  # (issue #221) — see src/AttachmentStorage.ts and minio-deployment.yaml.
+  # Set to false and configure backend.s3.* above to use a real cloud bucket
+  # (AWS S3, Cloudflare R2, GCS) instead — this exists purely for dev-prod
+  # parity, mirroring docker-compose.yml's `minio` service.
+  enabled: true
+
+  image:
+    repository: minio/minio
+    tag: "RELEASE.2024-11-07T00-52-20Z"
+
+  # The `mc` CLI image, used only by the one-shot bucket-creation Job (see
+  # minio-init-job.yaml) — MinIO doesn't create buckets on its own.
+  mcImage:
+    repository: minio/mc
+    tag: "RELEASE.2024-11-05T11-17-56Z"
+
+  auth:
+    # Secret with access-key/secret-key data keys — doubles as MinIO's own
+    # root credentials (MINIO_ROOT_USER/MINIO_ROOT_PASSWORD) and as the
+    # backend's S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY. Required when
+    # minio.enabled is true — see postgres.auth.existingSecret above for the
+    # same convention. Create it once by hand, e.g.:
+    #   kubectl create secret generic minio-credentials \
+    #     --from-literal=access-key=chat-platform \
+    #     --from-literal=secret-key="$(openssl rand -base64 24)"
+    existingSecret: "minio-credentials"
+
+  bucketName: chat-platform-attachments
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: ""
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

@@ -34,23 +34,29 @@ function NewPostPage() {
       description="Share a text update or an image with everyone."
       submitLabel="Post"
       allowOfflineQueue
-      onSubmit={async ({ contentType, content }) => {
+      onSubmit={async ({ contentType, content, attachmentId }) => {
         // Offline: queue instead of attempting the request — it would just
-        // fail (see lib/offlineQueue.ts, replayed once back online).
-        if (!onlineManager.isOnline()) {
+        // fail (see lib/offlineQueue.ts, replayed once back online). An
+        // attachment post can't be queued this way (PostForm only lets one
+        // through while online, since it needs an already-completed
+        // upload), so it always falls through to the live request below.
+        if (contentType !== "attachment" && !onlineManager.isOnline()) {
           enqueuePost({ contentType, content });
           await router.navigate({ to: "/" });
           return;
         }
         try {
-          await createPost.mutateAsync({ body: { contentType, content } });
+          await createPost.mutateAsync({
+            body: { contentType, content, attachmentId },
+          });
           await queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
           await router.navigate({ to: "/" });
         } catch (err) {
           // A network-level failure discovered mid-request (as opposed to a
           // rejected request, which leaves connectivity untouched) — queue
-          // it rather than surfacing the failure, same as above.
-          if (!onlineManager.isOnline()) {
+          // it rather than surfacing the failure, same as above (again,
+          // not for an attachment post — see the comment above).
+          if (contentType !== "attachment" && !onlineManager.isOnline()) {
             enqueuePost({ contentType, content });
             await router.navigate({ to: "/" });
             return;

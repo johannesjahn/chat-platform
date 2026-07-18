@@ -88,10 +88,11 @@ function EditPostPage() {
       submitLabel="Save changes"
       initialContentType={post.contentType}
       initialContent={post.content}
-      onSubmit={async ({ contentType, content }) => {
+      initialAttachment={post.attachment}
+      onSubmit={async ({ contentType, content, attachmentId }) => {
         await updatePost.mutateAsync({
           params: { path: { id } },
-          body: { contentType, content },
+          body: { contentType, content, attachmentId },
         });
         await queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
         await router.navigate({ to: "/" });

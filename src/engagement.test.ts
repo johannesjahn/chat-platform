@@ -11,6 +11,8 @@ import { eq } from "drizzle-orm";
 import { Effect, Layer, Metric, MetricLabel } from "effect";
 import { ChatApi } from "./Api.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
+import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
+import { AttachmentStorageLive } from "./AttachmentStorage.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
@@ -37,6 +39,8 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(PostsHandlerLive),
   Layer.provide(EngagementHandlerLive),
   Layer.provide(ChatsHandlerLive),
+  Layer.provide(AttachmentsHandlerLive),
+  Layer.provide(AttachmentStorageLive),
   Layer.provide(VersionHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(RealtimeConnectionsLive),

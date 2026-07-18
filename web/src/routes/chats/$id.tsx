@@ -321,12 +321,16 @@ function ChatView({ id }: { id: string }) {
   );
 
   async function handleSend(values: {
-    contentType: "text" | "image_url";
+    contentType: "text" | "image_url" | "attachment";
     content: string;
+    attachmentId?: number;
   }) {
     // Offline: queue instead of attempting the request at all — it would
-    // just fail (see lib/offlineQueue.ts, replayed once back online).
-    if (!onlineManager.isOnline()) {
+    // just fail (see lib/offlineQueue.ts, replayed once back online). An
+    // attachment message can't be queued this way (ChatComposer only lets
+    // one through while online, since it needs an already-completed
+    // upload), so it always falls through to the live request below.
+    if (values.contentType !== "attachment" && !onlineManager.isOnline()) {
       enqueueMessage(chatId, values);
       return;
     }
@@ -346,8 +350,10 @@ function ChatView({ id }: { id: string }) {
       // A network-level failure (as opposed to a rejected request — a
       // validation error, a 403 — which leaves connectivity untouched) means
       // we just discovered we're offline mid-send. Queue it rather than
-      // surfacing the failure, same as the already-offline case above.
-      if (!onlineManager.isOnline()) {
+      // surfacing the failure, same as the already-offline case above — but
+      // not for an attachment message (see the comment above; the queue
+      // can't replay one without re-uploading the file).
+      if (values.contentType !== "attachment" && !onlineManager.isOnline()) {
         enqueueMessage(chatId, values);
         return;
       }
