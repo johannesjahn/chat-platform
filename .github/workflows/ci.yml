@@ -425,6 +425,13 @@ jobs:
           POSTGRES_PASSWORD: ci-docker-build-test-secret
           REDIS_PASSWORD: ci-docker-build-test-secret
           JWT_SECRET: ci-docker-build-test-secret
+          # Required (no insecure fallback default — see the `minio`/
+          # `minio-init`/`app` services in docker-compose.yml) even just to
+          # build the images: compose resolves every service's env
+          # interpolation while parsing the file, before any service
+          # actually builds.
+          S3_ACCESS_KEY_ID: ci-docker-build-test-secret
+          S3_SECRET_ACCESS_KEY: ci-docker-build-test-secret
 
       # Boots the full docker-compose.yml stack (Postgres + Redis + the image
       # built from the Dockerfile) and waits for the `app` service's own
@@ -456,6 +463,8 @@ jobs:
           POSTGRES_PASSWORD: ci-docker-build-test-secret
           REDIS_PASSWORD: ci-docker-build-test-secret
           JWT_SECRET: ci-docker-build-test-secret
+          S3_ACCESS_KEY_ID: ci-docker-build-test-secret
+          S3_SECRET_ACCESS_KEY: ci-docker-build-test-secret
 
   e2e:
     name: E2E tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
