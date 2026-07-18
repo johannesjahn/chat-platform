@@ -116,7 +116,7 @@ test("a failed request doesn't blank already-loaded posts behind an error messag
   await expect(page.getByText("Could not load posts:")).toHaveCount(0);
 });
 
-test("the composer disables sending while offline instead of failing the request", async ({
+test("queues a message sent while offline and delivers it automatically once back online (issue #177)", async ({
   browser,
   injectApiUrl,
 }) => {
@@ -141,14 +141,167 @@ test("the composer disables sending while offline instead of failing the request
   await expect(pageA.locator("textarea")).toBeVisible();
 
   await contextA.setOffline(true);
-  await pageA.fill("textarea", "Should not be sendable while offline");
-  await expect(
-    pageA.getByRole("button", { name: "Send message (offline)" }),
-  ).toBeDisabled();
-  await expect(
-    pageA.getByText("You're offline — sending is disabled"),
-  ).toBeVisible();
+  await pageA.fill("textarea", "Sent while offline");
+  await pageA.keyboard.press("Enter");
+
+  // Rather than failing, the message is queued locally (see
+  // lib/offlineQueue.ts) and shown right away as a "Pending" bubble.
+  await expect(pageA.getByTestId("pending-message")).toBeVisible();
+  await expect(pageA.getByText("Sent while offline")).toBeVisible();
+  await expect(pageA.getByText("Pending sync…")).toBeVisible();
+  // The composer itself is cleared immediately, same as an online send.
+  await expect(pageA.locator("textarea")).toHaveValue("");
+
+  await contextA.setOffline(false);
+
+  // Reconnecting replays the queue automatically: the pending bubble is
+  // replaced by the real, server-confirmed message.
+  await expect(pageA.getByTestId("pending-message")).toHaveCount(0);
+  await expect(pageA.getByText("Sent while offline")).toBeVisible();
+
+  // The other participant receives it too, proving it actually made it to
+  // the server rather than only rendering locally.
+  await pageB.goto("/chats");
+  await pageB.getByText("Sent while offline").click();
+  await expect(pageB.getByText("Sent while offline")).toBeVisible();
 
   await contextA.close();
   await contextB.close();
+});
+
+test("retries a queued message that failed to send, without losing its place", async ({
+  browser,
+  injectApiUrl,
+}) => {
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  await registerViaUi(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const { username: usernameB } = await registerViaUi(pageB);
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Direct message" }).click();
+  await pageA.fill("#user-search", usernameB);
+  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+  await expect(pageA.locator("textarea")).toBeVisible();
+
+  await contextA.setOffline(true);
+  await pageA.fill("textarea", "Queued then rejected");
+  await pageA.keyboard.press("Enter");
+  await expect(pageA.getByTestId("pending-message")).toBeVisible();
+
+  // Reconnecting normally would replay this straight through — force the
+  // replay's own request to fail with a real (non-network) rejection
+  // instead, so the item is marked "failed" rather than resent
+  // automatically.
+  await pageA.route("**/chats/*/messages", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({ message: "rejected for this test" }),
+    }),
+  );
+  await contextA.setOffline(false);
+
+  await expect(pageA.getByText("Failed to send")).toBeVisible();
+  await expect(
+    pageA.getByRole("button", { name: "Retry sending message" }),
+  ).toBeVisible();
+
+  // Let a real send through again, then retry.
+  await pageA.unroute("**/chats/*/messages");
+  await pageA.getByRole("button", { name: "Retry sending message" }).click();
+
+  await expect(pageA.getByTestId("pending-message")).toHaveCount(0);
+  await expect(pageA.getByText("Queued then rejected")).toBeVisible();
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test("queues a post created while offline and publishes it automatically once back online (issue #177)", async ({
+  page,
+  context,
+}) => {
+  await registerViaUi(page);
+  // Reach /posts/new via a client-side `Link` click, not `page.goto` — a
+  // `goto` is a real browser navigation that discards this page's JS module
+  // cache, so the "/" route's lazily-loaded chunk (needed below to navigate
+  // back to it) would have to be fetched fresh over the network. This e2e
+  // setup's dev server has no service worker to serve that while offline
+  // (see the other tests in this file), so the chunk must already be
+  // resident from this same page load instead.
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+  await page.getByRole("link", { name: "New post" }).click();
+  await expect(page).toHaveURL("/posts/new");
+  await expect(page.getByRole("button", { name: "Text" })).toBeVisible();
+
+  await context.setOffline(true);
+  await page.getByRole("button", { name: "Text" }).click();
+  await page.fill("#content", "Post created while offline");
+  await page.getByRole("button", { name: "Queue for sending" }).click();
+
+  await expect(page).toHaveURL("/");
+  await expect(page.getByTestId("pending-post")).toBeVisible();
+  await expect(page.getByText("Post created while offline")).toBeVisible();
+  await expect(
+    page.getByText("Pending sync — will send once you're back online"),
+  ).toBeVisible();
+
+  await context.setOffline(false);
+
+  await expect(page.getByTestId("pending-post")).toHaveCount(0);
+  await expect(page.getByText("Post created while offline")).toBeVisible();
+});
+
+test("a post queued offline by one user isn't sent under a different user who logs in on the same browser afterward", async ({
+  page,
+  context,
+}) => {
+  const { username: usernameA, password: passwordA } =
+    await registerViaUi(page);
+
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+  await page.getByRole("link", { name: "New post" }).click();
+  await expect(page).toHaveURL("/posts/new");
+  await expect(page.getByRole("button", { name: "Text" })).toBeVisible();
+
+  await context.setOffline(true);
+  await page.getByRole("button", { name: "Text" }).click();
+  await page.fill("#content", "A's offline post");
+  await page.getByRole("button", { name: "Queue for sending" }).click();
+  await expect(page).toHaveURL("/");
+  await expect(page.getByTestId("pending-post")).toBeVisible();
+
+  // Log out while still offline (works locally — see auth.ts's
+  // `clearSession`) with the item still queued and unsent.
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page.getByTestId("pending-post")).toHaveCount(0);
+
+  // Reconnect and register a second user on this same browser — the queued
+  // item belongs to A (see lib/offlineQueue.ts's per-item `ownerId`), so it
+  // must neither send nor even render for B, despite the connectivity
+  // restore that would otherwise trigger a replay.
+  await context.setOffline(false);
+  await registerViaUi(page);
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+  await expect(page.getByTestId("pending-post")).toHaveCount(0);
+  await expect(page.getByText("A's offline post")).toHaveCount(0);
+
+  // Logging back in as A picks the item back up and sends it for real —
+  // proving it wasn't silently dropped, just correctly held back from B.
+  await page.getByRole("button", { name: "Log out" }).click();
+  await page.goto("/login");
+  await page.fill("#username", usernameA);
+  await page.fill("#password", passwordA);
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page).toHaveURL("/");
+
+  await expect(page.getByTestId("pending-post")).toHaveCount(0);
+  await expect(page.getByText("A's offline post")).toBeVisible();
 });

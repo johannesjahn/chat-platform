@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { onlineManager, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import {
   ArrowLeft,
@@ -19,6 +19,7 @@ import { Avatar } from "@/components/Avatar";
 import { ChatComposer } from "@/components/ChatComposer";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { MessageBubble } from "@/components/MessageBubble";
+import { PendingMessageBubble } from "@/components/PendingMessageBubble";
 import { PresenceDot } from "@/components/PresenceDot";
 import { TypingDots } from "@/components/reactbits/TypingDots";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,13 @@ import {
   useChatMessages,
 } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
+import {
+  dismissQueuedItem,
+  enqueueMessage,
+  replayQueue,
+  retryQueuedItem,
+  useQueuedMessages,
+} from "@/lib/offlineQueue";
 import { useOnlineStatus } from "@/lib/online";
 import { useIsOnline } from "@/lib/presence";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
@@ -137,6 +145,7 @@ function ChatView({ id }: { id: string }) {
   const [loadingEarlier, setLoadingEarlier] = useState(false);
 
   const messages = messagesData?.messages ?? [];
+  const pendingMessages = useQueuedMessages(chatId);
 
   const newestMessage = messages[messages.length - 1];
   const newestMessageId = newestMessage?.id;
@@ -156,6 +165,16 @@ function ChatView({ id }: { id: string }) {
       initializedRef.current = true;
     }
   }, [newestMessageId]);
+
+  // A message just queued offline appends below the loaded history the same
+  // way a real new message would — scroll down to reveal it.
+  useEffect(() => {
+    if (pendingMessages.length === 0) return;
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [pendingMessages.length]);
 
   // A newly-arrived message means its sender is done typing — clear their
   // indicator immediately instead of leaving it up until the TTL in
@@ -304,17 +323,35 @@ function ChatView({ id }: { id: string }) {
     contentType: "text" | "image_url";
     content: string;
   }) {
-    const message = await sendMessage.mutateAsync({
-      params: { path: { id: String(chatId) } },
-      body: values,
-    });
-    // Show it immediately from the mutation's own response instead of
-    // waiting on a refetch. The server also pushes a `chat_updated` WS event
-    // to every participant (including the sender) for this same send, which
-    // invalidates the messages/detail/list queries and reconciles anything
-    // this optimistic write can't know locally (e.g. read receipts) — so no
-    // manual refetch/invalidate is needed here on top of that.
-    appendSentMessage(queryClient, chatId, message);
+    // Offline: queue instead of attempting the request at all — it would
+    // just fail (see lib/offlineQueue.ts, replayed once back online).
+    if (!onlineManager.isOnline()) {
+      enqueueMessage(chatId, values);
+      return;
+    }
+    try {
+      const message = await sendMessage.mutateAsync({
+        params: { path: { id: String(chatId) } },
+        body: values,
+      });
+      // Show it immediately from the mutation's own response instead of
+      // waiting on a refetch. The server also pushes a `chat_updated` WS event
+      // to every participant (including the sender) for this same send, which
+      // invalidates the messages/detail/list queries and reconciles anything
+      // this optimistic write can't know locally (e.g. read receipts) — so no
+      // manual refetch/invalidate is needed here on top of that.
+      appendSentMessage(queryClient, chatId, message);
+    } catch (err) {
+      // A network-level failure (as opposed to a rejected request — a
+      // validation error, a 403 — which leaves connectivity untouched) means
+      // we just discovered we're offline mid-send. Queue it rather than
+      // surfacing the failure, same as the already-offline case above.
+      if (!onlineManager.isOnline()) {
+        enqueueMessage(chatId, values);
+        return;
+      }
+      throw err;
+    }
   }
 
   async function handleEditMessage(messageId: number, content: string) {
@@ -732,7 +769,7 @@ function ChatView({ id }: { id: string }) {
                 <Skeleton className="h-10 w-2/3 self-start rounded-2xl" />
                 <Skeleton className="h-10 w-1/2 self-end rounded-2xl" />
               </div>
-            ) : messages.length === 0 ? (
+            ) : messages.length === 0 && pendingMessages.length === 0 ? (
               <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
                 No messages yet — say hi 👋
               </p>
@@ -759,6 +796,19 @@ function ChatView({ id }: { id: string }) {
                 );
               })
             )}
+
+            {!messagesLoading &&
+              pendingMessages.map((item) => (
+                <PendingMessageBubble
+                  key={item.clientId}
+                  item={item}
+                  onRetry={() => {
+                    retryQueuedItem(item.clientId);
+                    void replayQueue(queryClient);
+                  }}
+                  onDismiss={() => dismissQueuedItem(item.clientId)}
+                />
+              ))}
 
             {typingUsers.length > 0 && (
               <div className="flex w-full justify-start motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2 motion-safe:duration-300">

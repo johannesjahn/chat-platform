@@ -1,9 +1,10 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { onlineManager, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PostForm } from "@/components/PostForm";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
+import { enqueuePost } from "@/lib/offlineQueue";
 import { postsFeedQueryKey } from "@/lib/posts";
 
 export const Route = createFileRoute("/posts/new")({
@@ -32,10 +33,30 @@ function NewPostPage() {
       title="New post"
       description="Share a text update or an image with everyone."
       submitLabel="Post"
+      allowOfflineQueue
       onSubmit={async ({ contentType, content }) => {
-        await createPost.mutateAsync({ body: { contentType, content } });
-        await queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
-        await router.navigate({ to: "/" });
+        // Offline: queue instead of attempting the request — it would just
+        // fail (see lib/offlineQueue.ts, replayed once back online).
+        if (!onlineManager.isOnline()) {
+          enqueuePost({ contentType, content });
+          await router.navigate({ to: "/" });
+          return;
+        }
+        try {
+          await createPost.mutateAsync({ body: { contentType, content } });
+          await queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
+          await router.navigate({ to: "/" });
+        } catch (err) {
+          // A network-level failure discovered mid-request (as opposed to a
+          // rejected request, which leaves connectivity untouched) — queue
+          // it rather than surfacing the failure, same as above.
+          if (!onlineManager.isOnline()) {
+            enqueuePost({ contentType, content });
+            await router.navigate({ to: "/" });
+            return;
+          }
+          throw err;
+        }
       }}
     />
   );

@@ -17,6 +17,7 @@ import { VersionFooter } from "@/components/VersionFooter";
 import { logout } from "../lib/api";
 import { useSession } from "../lib/auth";
 import { useTotalUnreadCount } from "../lib/chats";
+import { OfflineQueueSync } from "../lib/offlineQueue";
 import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
 import appCss from "../styles.css?url";
@@ -52,6 +53,7 @@ function RootComponent() {
         client={queryClient}
         persistOptions={persistOptions}
       >
+        <OfflineQueueSync />
         <Nav />
         <OfflineBanner />
         <Outlet />
