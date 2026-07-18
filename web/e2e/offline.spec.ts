@@ -258,3 +258,50 @@ test("queues a post created while offline and publishes it automatically once ba
   await expect(page.getByTestId("pending-post")).toHaveCount(0);
   await expect(page.getByText("Post created while offline")).toBeVisible();
 });
+
+test("a post queued offline by one user isn't sent under a different user who logs in on the same browser afterward", async ({
+  page,
+  context,
+}) => {
+  const { username: usernameA, password: passwordA } =
+    await registerViaUi(page);
+
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+  await page.getByRole("link", { name: "New post" }).click();
+  await expect(page).toHaveURL("/posts/new");
+  await expect(page.getByRole("button", { name: "Text" })).toBeVisible();
+
+  await context.setOffline(true);
+  await page.getByRole("button", { name: "Text" }).click();
+  await page.fill("#content", "A's offline post");
+  await page.getByRole("button", { name: "Queue for sending" }).click();
+  await expect(page).toHaveURL("/");
+  await expect(page.getByTestId("pending-post")).toBeVisible();
+
+  // Log out while still offline (works locally — see auth.ts's
+  // `clearSession`) with the item still queued and unsent.
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page.getByTestId("pending-post")).toHaveCount(0);
+
+  // Reconnect and register a second user on this same browser — the queued
+  // item belongs to A (see lib/offlineQueue.ts's per-item `ownerId`), so it
+  // must neither send nor even render for B, despite the connectivity
+  // restore that would otherwise trigger a replay.
+  await context.setOffline(false);
+  await registerViaUi(page);
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+  await expect(page.getByTestId("pending-post")).toHaveCount(0);
+  await expect(page.getByText("A's offline post")).toHaveCount(0);
+
+  // Logging back in as A picks the item back up and sends it for real —
+  // proving it wasn't silently dropped, just correctly held back from B.
+  await page.getByRole("button", { name: "Log out" }).click();
+  await page.goto("/login");
+  await page.fill("#username", usernameA);
+  await page.fill("#password", passwordA);
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page).toHaveURL("/");
+
+  await expect(page.getByTestId("pending-post")).toHaveCount(0);
+  await expect(page.getByText("A's offline post")).toBeVisible();
+});
