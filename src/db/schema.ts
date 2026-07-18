@@ -18,6 +18,10 @@ export const users = pgTable(
     id: serial("id").primaryKey(),
     username: text("username").notNull(),
     passwordHash: text("password_hash").notNull(),
+    // Optional profile fields (issue #67) — null means "unset", falling back
+    // to `username` (display name) or initials (avatar) in the UI.
+    displayName: text("display_name"),
+    avatarUrl: text("avatar_url"),
     role: text("role", { enum: ["user", "admin"] })
       .notNull()
       .default("user"),

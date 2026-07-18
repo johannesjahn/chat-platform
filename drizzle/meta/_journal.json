@@ -64,6 +64,13 @@
       "when": 1784153548383,
       "tag": "0008_wide_sally_floyd",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784323322965,
+      "tag": "0009_yellow_miss_america",
+      "breakpoints": true
     }
   ]
 }

@@ -1,9 +1,10 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { and, eq, ilike, isNull, sql } from "drizzle-orm";
+import { and, eq, ilike, isNull, ne, sql } from "drizzle-orm";
 import { Context, Effect, FiberRef, Metric, MetricLabel } from "effect";
 import { currentLogUser } from "./RedactedLogger.ts";
 import {
   ChatApi,
+  Forbidden,
   InvalidCredentials,
   NotFound,
   TooManyRequests,
@@ -46,6 +47,11 @@ const USER_SEARCH_RESULTS_LIMIT = 20;
 // per-account bucket, keyed by user id rather than username.
 const CHANGE_PASSWORD_MAX_ATTEMPTS_PER_ACCOUNT = 5;
 const CHANGE_PASSWORD_WINDOW_SECONDS = 15 * 60;
+
+// Deleting an account re-verifies the password, same brute-force exposure as
+// changePassword — mirrors its limit/window.
+const DELETE_ACCOUNT_MAX_ATTEMPTS_PER_ACCOUNT = 5;
+const DELETE_ACCOUNT_WINDOW_SECONDS = 15 * 60;
 
 // Escapes LIKE/ILIKE wildcard characters in user-supplied search text so a
 // query containing "%" or "_" is matched literally instead of as a wildcard.
@@ -197,6 +203,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               .select({
                 id: users.id,
                 username: users.username,
+                displayName: users.displayName,
+                avatarUrl: users.avatarUrl,
                 role: users.role,
               })
               .from(users)
@@ -214,6 +222,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               .select({
                 id: users.id,
                 username: users.username,
+                displayName: users.displayName,
+                avatarUrl: users.avatarUrl,
                 role: users.role,
               })
               .from(users)
@@ -275,6 +285,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               .returning({
                 id: users.id,
                 username: users.username,
+                displayName: users.displayName,
+                avatarUrl: users.avatarUrl,
                 role: users.role,
               }),
           ).pipe(Effect.orDie);
@@ -333,9 +345,16 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const publicUser = {
             id: user.id,
             username: user.username,
+            displayName: user.displayName,
+            avatarUrl: user.avatarUrl,
             role: user.role,
           };
-          const tokenUser = { ...publicUser, tokenVersion: user.tokenVersion };
+          const tokenUser = {
+            id: user.id,
+            username: user.username,
+            role: user.role,
+            tokenVersion: user.tokenVersion,
+          };
           const accessToken = yield* jwt.signAccessToken(tokenUser);
           const refreshToken = yield* issueRefreshToken(db, jwt, tokenUser);
           yield* recordAuthEvent("login", "success");
@@ -581,6 +600,148 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const accessToken = yield* jwt.signAccessToken(tokenUser);
           const refreshToken = yield* issueRefreshToken(db, jwt, tokenUser);
           return { accessToken, refreshToken };
+        }),
+      )
+      .handle("updateProfile", ({ payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+
+          const existing = yield* Effect.tryPromise(() =>
+            db
+              .select({ id: users.id })
+              .from(users)
+              .where(
+                and(
+                  eq(
+                    sql`lower(${users.username})`,
+                    payload.username.toLowerCase(),
+                  ),
+                  ne(users.id, currentUser.id),
+                ),
+              )
+              .limit(1),
+          ).pipe(Effect.orDie);
+          if (existing[0]) {
+            return yield* Effect.fail(
+              new UsernameTaken({
+                message: `Username "${payload.username}" is already taken`,
+              }),
+            );
+          }
+
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .update(users)
+              .set({
+                username: payload.username,
+                displayName: payload.displayName,
+                avatarUrl: payload.avatarUrl,
+              })
+              .where(eq(users.id, currentUser.id))
+              .returning({
+                id: users.id,
+                username: users.username,
+                displayName: users.displayName,
+                avatarUrl: users.avatarUrl,
+                role: users.role,
+              }),
+          ).pipe(Effect.orDie);
+          const updated = rows[0];
+          if (!updated)
+            return yield* Effect.die(new Error("UPDATE returned no rows"));
+          return updated;
+        }),
+      )
+      .handle("deleteAccount", ({ payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const limiter = yield* RateLimiter;
+          const currentUser = yield* CurrentUser;
+          const tokenVersionCache = yield* TokenVersionCache;
+          const pubsub = yield* PubSub;
+
+          yield* enforceRateLimit(
+            limiter,
+            `delete-account:account:${currentUser.id}`,
+            DELETE_ACCOUNT_MAX_ATTEMPTS_PER_ACCOUNT,
+            DELETE_ACCOUNT_WINDOW_SECONDS,
+          );
+
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select({ passwordHash: users.passwordHash })
+              .from(users)
+              .where(eq(users.id, currentUser.id))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          const dbUser = rows[0];
+          const valid =
+            dbUser &&
+            (yield* verifyPassword(payload.password, dbUser.passwordHash));
+          if (!valid)
+            return yield* Effect.fail(
+              new InvalidCredentials({ message: "Incorrect password" }),
+            );
+
+          // The `users` row's cascading/`set null` FKs (db/schema.ts) take
+          // care of everything else this account owns — refresh tokens,
+          // posts, comments, likes, chat participation, sent messages, read
+          // receipts.
+          yield* Effect.tryPromise(() =>
+            db.delete(users).where(eq(users.id, currentUser.id)),
+          ).pipe(Effect.orDie);
+
+          yield* tokenVersionCache.invalidate(currentUser.id);
+          yield* pubsub
+            .publish("auth:invalidation", String(currentUser.id))
+            .pipe(Effect.ignore);
+        }),
+      )
+      .handle("updateUserRole", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const tokenVersionCache = yield* TokenVersionCache;
+          const pubsub = yield* PubSub;
+
+          if (currentUser.role !== "admin")
+            return yield* Effect.fail(
+              new Forbidden({ message: "Only admins can change user roles" }),
+            );
+
+          // Bumps token_version so an access token already issued to the
+          // target user can't keep acting under its old role for the rest of
+          // its TTL — mirrors `changePassword`'s reasoning, since `role` is
+          // embedded in the token's claims.
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .update(users)
+              .set({
+                role: payload.role,
+                tokenVersion: sql`${users.tokenVersion} + 1`,
+              })
+              .where(eq(users.id, id))
+              .returning({
+                id: users.id,
+                username: users.username,
+                displayName: users.displayName,
+                avatarUrl: users.avatarUrl,
+                role: users.role,
+              }),
+          ).pipe(Effect.orDie);
+          const updated = rows[0];
+          if (!updated)
+            return yield* Effect.fail(
+              new NotFound({ message: `User ${id} not found` }),
+            );
+
+          yield* tokenVersionCache.invalidate(id);
+          yield* pubsub
+            .publish("auth:invalidation", String(id))
+            .pipe(Effect.ignore);
+
+          return updated;
         }),
       ),
 );

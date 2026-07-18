@@ -9,11 +9,72 @@ export const UserRole = Schema.Literal("user", "admin").annotations({
 });
 export type UserRole = typeof UserRole.Type;
 
+// Hosting domains an image URL (avatar or post/message `image_url` content)
+// is allowed to point at (issue #47): rendered directly as an `<img src>`,
+// so without this an author could embed a `javascript:`/`data:` URL, track
+// viewers via an arbitrary third-party host, or serve mixed (non-https)
+// content. Matches the domain itself or any subdomain, e.g. "i.imgur.com"
+// matches "imgur.com".
+export const ALLOWED_IMAGE_HOST_DOMAINS = [
+  "picsum.photos",
+  "imgur.com",
+  "unsplash.com",
+  "gravatar.com",
+  "githubusercontent.com",
+  "imgbb.com",
+  "ibb.co",
+  "cloudinary.com",
+  "googleusercontent.com",
+  "discordapp.com",
+  "discordapp.net",
+  "staticflickr.com",
+  "wikimedia.org",
+  "pexels.com",
+  "pixabay.com",
+] as const;
+
+const isAllowedImageHost = (hostname: string): boolean => {
+  const lower = hostname.toLowerCase();
+  return ALLOWED_IMAGE_HOST_DOMAINS.some(
+    (domain) => lower === domain || lower.endsWith(`.${domain}`),
+  );
+};
+
+// A well-formed `https://` URL (rejects `data:`, `javascript:`, plain
+// `http:`, and unparseable strings) whose host is on the allowlist above.
+export const isAllowedImageUrl = (value: string): boolean => {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && isAllowedImageHost(url.hostname);
+};
+
+const AVATAR_URL_FILTER_MESSAGE =
+  "avatarUrl must be an https:// URL from an allowed image-hosting domain";
+
+// Bounded mainly to keep the request small — no real URL is anywhere close.
+const MAX_AVATAR_URL_LENGTH = 2048;
+
+const AvatarUrl = Schema.String.pipe(
+  Schema.maxLength(MAX_AVATAR_URL_LENGTH),
+  Schema.filter((value) =>
+    isAllowedImageUrl(value) ? undefined : AVATAR_URL_FILTER_MESSAGE,
+  ),
+);
+
 // Public representation of a user — never exposes the password hash.
 // `identifier` annotations surface these as named schemas in the OpenAPI spec.
 export const User = Schema.Struct({
   id: Schema.Number,
   username: Schema.String,
+  // Optional profile fields (issue #67) — null when unset. The UI falls back
+  // to `username` for display and initials-only for the avatar (see
+  // web/src/components/Avatar.tsx).
+  displayName: Schema.NullOr(Schema.String),
+  avatarUrl: Schema.NullOr(Schema.String),
   role: UserRole,
 }).annotations({ identifier: "User" });
 export type User = typeof User.Type;
@@ -25,6 +86,14 @@ export const MAX_USERNAME_LENGTH = 32;
 
 const Username = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_USERNAME_LENGTH),
+);
+
+// Mirrors MAX_USERNAME_LENGTH's rationale but roomier, since a display name
+// may hold a full "First Last" rather than a single token.
+export const MAX_DISPLAY_NAME_LENGTH = 64;
+
+const DisplayName = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_DISPLAY_NAME_LENGTH),
 );
 
 // A generous ceiling — long enough for any real passphrase, but bounded so a
@@ -97,6 +166,26 @@ export const ChangePasswordBody = Schema.Struct({
   newPassword: NewPassword,
 }).annotations({ identifier: "ChangePasswordBody" });
 
+// Full-replace body (mirrors `UpdatePostBody`/`UpdateChatBody`'s convention)
+// rather than a partial patch — `displayName`/`avatarUrl` are nullable so a
+// caller can explicitly clear either back to "unset".
+export const UpdateProfileBody = Schema.Struct({
+  username: Username,
+  displayName: Schema.NullOr(DisplayName),
+  avatarUrl: Schema.NullOr(AvatarUrl),
+}).annotations({ identifier: "UpdateProfileBody" });
+
+// Deleting an account is irreversible, so — like `changePassword` — it
+// requires re-proving the current password rather than trusting the bearer
+// token alone.
+export const DeleteAccountBody = Schema.Struct({
+  password: Password,
+}).annotations({ identifier: "DeleteAccountBody" });
+
+export const UpdateUserRoleBody = Schema.Struct({
+  role: UserRole,
+}).annotations({ identifier: "UpdateUserRoleBody" });
+
 export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
   message: Schema.String,
 }) {}
@@ -162,49 +251,10 @@ const PostContent = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_POST_CONTENT_LENGTH),
 );
 
-// Hosting domains a post/message's `image_url` content is allowed to point
-// at (issue #47): `content` is rendered directly as an `<img src>`
-// (MessageBubble.tsx, PostCard.tsx), so without this an author could embed a
-// `javascript:`/`data:` URL, silently track viewers via an arbitrary
-// third-party host, or serve mixed (non-https) content. Matches the domain
-// itself or any subdomain, e.g. "i.imgur.com" matches "imgur.com".
-export const ALLOWED_IMAGE_HOST_DOMAINS = [
-  "picsum.photos",
-  "imgur.com",
-  "unsplash.com",
-  "gravatar.com",
-  "githubusercontent.com",
-  "imgbb.com",
-  "ibb.co",
-  "cloudinary.com",
-  "googleusercontent.com",
-  "discordapp.com",
-  "discordapp.net",
-  "staticflickr.com",
-  "wikimedia.org",
-  "pexels.com",
-  "pixabay.com",
-] as const;
-
-const isAllowedImageHost = (hostname: string): boolean => {
-  const lower = hostname.toLowerCase();
-  return ALLOWED_IMAGE_HOST_DOMAINS.some(
-    (domain) => lower === domain || lower.endsWith(`.${domain}`),
-  );
-};
-
-// A well-formed `https://` URL (rejects `data:`, `javascript:`, plain
-// `http:`, and unparseable strings) whose host is on the allowlist above.
-export const isAllowedImageUrl = (value: string): boolean => {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  return url.protocol === "https:" && isAllowedImageHost(url.hostname);
-};
-
+// `content` is rendered directly as an `<img src>` (MessageBubble.tsx,
+// PostCard.tsx) when `contentType` is "image_url" — validated against the
+// same host allowlist as `avatarUrl` (see `ALLOWED_IMAGE_HOST_DOMAINS`
+// above), for the same reasons (issue #47).
 const IMAGE_URL_FILTER_MESSAGE =
   "content must be an https:// URL from an allowed image-hosting domain";
 
@@ -607,6 +657,40 @@ const UsersGroup = HttpApiGroup.make("users")
       .addSuccess(RefreshResponse)
       .addError(InvalidCredentials, { status: 401 })
       .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Updates the current user's own profile — username, display name, and
+    // avatar URL (issue #67). Full-replace like `updatePost`/`updateChat`.
+    HttpApiEndpoint.put("updateProfile", "/users/me")
+      .setPayload(UpdateProfileBody)
+      .addSuccess(User)
+      .addError(UsernameTaken, { status: 409 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Permanently deletes the current user's own account after re-verifying
+    // their password (irreversible, so — like `changePassword` — the bearer
+    // token alone isn't enough). The `users` row's cascading/`set null` FKs
+    // (see db/schema.ts) take care of everything the account owns.
+    HttpApiEndpoint.del("deleteAccount", "/users/me")
+      .setPayload(DeleteAccountBody)
+      .addSuccess(Schema.Void)
+      .addError(InvalidCredentials, { status: 401 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Promotes/demotes another user's role — admin only (issue #67: role
+    // changes previously required direct DB access). Bumps the target's
+    // token_version so an already-issued token can't keep acting under its
+    // old role past this call — mirrors `changePassword`'s reasoning.
+    HttpApiEndpoint.patch("updateUserRole", "/users/:id/role")
+      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
+      .setPayload(UpdateUserRoleBody)
+      .addSuccess(User)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
       .middleware(Authentication),
   );
 

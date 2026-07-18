@@ -11,13 +11,23 @@ type AvatarSize = keyof typeof AVATAR_SIZES;
 
 type AvatarProps = {
   name: string;
-  // Not sourced from anywhere yet — the `User` schema has no avatar field —
-  // but every call site already threads this through so a future image
-  // avatar only needs a backend field, not a UI rewrite.
   avatarUrl?: string | null;
   size?: AvatarSize;
   className?: string;
 };
+
+// The backend validates `avatarUrl` against an https:// + host allowlist at
+// write time (see `isAllowedImageUrl` in src/Api.ts), but this component
+// can't assume that held true for every value it's ever handed — re-checking
+// the scheme here keeps a non-`https:` URL (e.g. `javascript:`) from ever
+// reaching the `<img src>` sink, regardless of where the value came from.
+function isSafeAvatarUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 // Usernames are single tokens today (no separate display name), so the
 // "initials" are just its first letter for now; splitting on whitespace
@@ -35,7 +45,7 @@ export function Avatar({
   size = "md",
   className,
 }: AvatarProps) {
-  if (avatarUrl) {
+  if (avatarUrl && isSafeAvatarUrl(avatarUrl)) {
     return (
       <img
         src={avatarUrl}

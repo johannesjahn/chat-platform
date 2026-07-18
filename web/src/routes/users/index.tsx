@@ -137,9 +137,13 @@ function UsersPage() {
                   >
                     <Spotlight size={220} />
                     <span className="flex min-w-0 items-center gap-2.5">
-                      <Avatar name={user.username} size="sm" />
+                      <Avatar
+                        name={user.displayName || user.username}
+                        avatarUrl={user.avatarUrl}
+                        size="sm"
+                      />
                       <span className="truncate font-medium">
-                        @{user.username}
+                        {user.displayName || `@${user.username}`}
                       </span>
                     </span>
                     <span className="shrink-0 text-muted-foreground">
