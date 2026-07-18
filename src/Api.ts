@@ -1,5 +1,11 @@
-import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "@effect/platform";
+import {
+  HttpApi,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  OpenApi,
+} from "@effect/platform";
 import { Schema } from "effect";
+import packageJson from "../package.json" with { type: "json" };
 import { Authentication } from "./Auth.ts";
 
 // "admin" can edit/delete any post; "user" can only edit/delete their own.
@@ -1107,4 +1113,5 @@ export class ChatApi extends HttpApi.make("chat-platform")
   .add(CommentsGroup)
   .add(ChatsGroup)
   .add(MetaGroup)
-  .add(RealtimeGroup) {}
+  .add(RealtimeGroup)
+  .annotate(OpenApi.Version, packageJson.version) {}
