@@ -63,7 +63,7 @@ test("setting a display name replaces the username in the nav, but the profile p
   // it's shown read-only.
   await page.goto("/settings");
   await expect(page.locator("#username")).toHaveCount(0);
-  await expect(page.getByText(`@${username}`)).toBeVisible();
+  await expect(page.locator("form").getByText(`@${username}`)).toBeVisible();
 
   await page.fill("#display-name", displayName);
   await page.getByRole("button", { name: "Save profile" }).click();

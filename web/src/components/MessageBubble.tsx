@@ -82,14 +82,14 @@ export function MessageBubble({
       data-message-id={message.id}
       style={style}
       className={cn(
-        "group flex w-full items-center gap-1 motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300",
+        "group flex w-full items-center gap-1.5 motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-500 ease-spring",
         isOwn
-          ? "justify-end motion-safe:slide-in-from-right-2"
-          : "justify-start motion-safe:slide-in-from-left-2",
+          ? "justify-end motion-safe:slide-in-from-right-4"
+          : "justify-start motion-safe:slide-in-from-left-4",
       )}
     >
       {isOwn && canModify && !isEditing && (
-        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+        <div className="flex shrink-0 items-center gap-0.5 opacity-0 translate-x-2 scale-95 transition-all duration-300 ease-smooth group-hover:opacity-100 group-hover:translate-x-0 group-hover:scale-100">
           {message.contentType === "text" && (
             <Button
               type="button"
