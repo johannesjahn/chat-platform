@@ -28,7 +28,7 @@ import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
 import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
-import { users } from "./db/schema.ts";
+import { chatInvites, users } from "./db/schema.ts";
 import { InMemoryWsTicketLive } from "./WsTicket.ts";
 
 // JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
@@ -1737,5 +1737,378 @@ test("transferOwnership: once a chat is ownerless, any participant can claim it,
         payload: { userId: bob.user.id },
       });
       expect(claimed.createdBy).toBe(bob.user.id);
+    }),
+  ));
+
+// --- Per-chat roles (issue #220) ---
+
+test("group chat creation seeds the creator as owner and everyone else as member", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+
+      const byUserId = new Map(chat.participants.map((p) => [p.userId, p]));
+      expect(byUserId.get(alice.user.id)?.role).toBe("owner");
+      expect(byUserId.get(bob.user.id)?.role).toBe("member");
+    }),
+  ));
+
+test("direct chat participants are always plain members", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      for (const p of chat.participants) expect(p.role).toBe("member");
+    }),
+  ));
+
+test("updateParticipantRole: only the owner can promote/demote, and not the owner themselves", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: {
+          title: "Group",
+          participantIds: [bob.user.id, carol.user.id],
+        },
+      });
+
+      // A plain member can't promote anyone, including themselves.
+      const memberAttempt = yield* bob.client.chats
+        .updateParticipantRole({
+          path: { id: chat.id, userId: bob.user.id },
+          payload: { role: "admin" },
+        })
+        .pipe(Effect.either);
+      expect(memberAttempt._tag).toBe("Left");
+      if (memberAttempt._tag === "Left") {
+        expect((memberAttempt.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+
+      // The owner promotes bob to admin.
+      const promoted = yield* alice.client.chats.updateParticipantRole({
+        path: { id: chat.id, userId: bob.user.id },
+        payload: { role: "admin" },
+      });
+      expect(
+        promoted.participants.find((p) => p.userId === bob.user.id)?.role,
+      ).toBe("admin");
+
+      // An admin still can't promote/demote anyone else — only the owner can.
+      const adminAttempt = yield* bob.client.chats
+        .updateParticipantRole({
+          path: { id: chat.id, userId: carol.user.id },
+          payload: { role: "admin" },
+        })
+        .pipe(Effect.either);
+      expect(adminAttempt._tag).toBe("Left");
+      if (adminAttempt._tag === "Left") {
+        expect((adminAttempt.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+
+      // The owner's own role can't be changed through this endpoint.
+      const targetOwner = yield* alice.client.chats
+        .updateParticipantRole({
+          path: { id: chat.id, userId: alice.user.id },
+          payload: { role: "member" },
+        })
+        .pipe(Effect.either);
+      expect(targetOwner._tag).toBe("Left");
+      if (targetOwner._tag === "Left") {
+        expect((targetOwner.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+
+      // The owner demotes bob back to member.
+      const demoted = yield* alice.client.chats.updateParticipantRole({
+        path: { id: chat.id, userId: bob.user.id },
+        payload: { role: "member" },
+      });
+      expect(
+        demoted.participants.find((p) => p.userId === bob.user.id)?.role,
+      ).toBe("member");
+    }),
+  ));
+
+test("admins (not just the owner) can rename, add/remove participants, and delete any message", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const dave = yield* registerAndLogin("dave", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: {
+          title: "Group",
+          participantIds: [bob.user.id, carol.user.id],
+        },
+      });
+      yield* alice.client.chats.updateParticipantRole({
+        path: { id: chat.id, userId: bob.user.id },
+        payload: { role: "admin" },
+      });
+
+      const renamed = yield* bob.client.chats.updateChat({
+        path: { id: chat.id },
+        payload: { title: "Renamed by admin" },
+      });
+      expect(renamed.title).toBe("Renamed by admin");
+
+      const added = yield* bob.client.chats.addParticipants({
+        path: { id: chat.id },
+        payload: { participantIds: [dave.user.id] },
+      });
+      expect(added.participants.map((p) => p.userId)).toContain(dave.user.id);
+
+      const message = yield* carol.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "hi all" },
+      });
+      // A plain member can't delete someone else's message...
+      const memberDelete = yield* dave.client.chats
+        .deleteMessage({ path: { id: chat.id, messageId: message.id } })
+        .pipe(Effect.either);
+      expect(memberDelete._tag).toBe("Left");
+      if (memberDelete._tag === "Left") {
+        expect((memberDelete.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+      // ...but the chat's admin can.
+      yield* bob.client.chats.deleteMessage({
+        path: { id: chat.id, messageId: message.id },
+      });
+
+      const removed = yield* bob.client.chats.removeParticipant({
+        path: { id: chat.id, userId: dave.user.id },
+      });
+      expect(removed.participants.map((p) => p.userId)).not.toContain(
+        dave.user.id,
+      );
+    }),
+  ));
+
+test("removeParticipant refuses to let a chat-level admin remove the owner", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+      yield* alice.client.chats.updateParticipantRole({
+        path: { id: chat.id, userId: bob.user.id },
+        payload: { role: "admin" },
+      });
+
+      const result = yield* bob.client.chats
+        .removeParticipant({ path: { id: chat.id, userId: alice.user.id } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+    }),
+  ));
+
+// --- Invite links (issue #220) ---
+
+test("createChatInvite is owner/admin only, and joinChatViaInvite adds the redeemer as a member", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+
+      const forbidden = yield* bob.client.chats
+        .createChatInvite({ path: { id: chat.id }, payload: {} })
+        .pipe(Effect.either);
+      expect(forbidden._tag).toBe("Left");
+      if (forbidden._tag === "Left") {
+        expect((forbidden.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+
+      const invite = yield* alice.client.chats.createChatInvite({
+        path: { id: chat.id },
+        payload: {},
+      });
+      expect(invite.chatId).toBe(chat.id);
+      expect(invite.useCount).toBe(0);
+      expect(invite.revokedAt).toBeNull();
+
+      const joined = yield* carol.client.chats.joinChatViaInvite({
+        path: { code: invite.code },
+      });
+      expect(joined.id).toBe(chat.id);
+      const carolParticipant = joined.participants.find(
+        (p) => p.userId === carol.user.id,
+      );
+      expect(carolParticipant?.role).toBe("member");
+
+      const invites = yield* alice.client.chats.listChatInvites({
+        path: { id: chat.id },
+      });
+      expect(invites.find((i) => i.id === invite.id)?.useCount).toBe(1);
+
+      // Joining again with a code you're already in via is a no-op, not an
+      // error, and doesn't bump useCount further.
+      const rejoined = yield* carol.client.chats.joinChatViaInvite({
+        path: { code: invite.code },
+      });
+      expect(rejoined.id).toBe(chat.id);
+      const invitesAfterRejoin = yield* alice.client.chats.listChatInvites({
+        path: { id: chat.id },
+      });
+      expect(invitesAfterRejoin.find((i) => i.id === invite.id)?.useCount).toBe(
+        1,
+      );
+    }),
+  ));
+
+test("joinChatViaInvite 404s for an unknown code", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const result = yield* alice.client.chats
+        .joinChatViaInvite({ path: { code: "does-not-exist" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("revokeChatInvite invalidates the code for future joins", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+      const invite = yield* alice.client.chats.createChatInvite({
+        path: { id: chat.id },
+        payload: {},
+      });
+
+      yield* alice.client.chats.revokeChatInvite({
+        path: { id: chat.id, inviteId: invite.id },
+      });
+
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const result = yield* carol.client.chats
+        .joinChatViaInvite({ path: { code: invite.code } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+
+      const doubleRevoke = yield* alice.client.chats
+        .revokeChatInvite({ path: { id: chat.id, inviteId: invite.id } })
+        .pipe(Effect.either);
+      expect(doubleRevoke._tag).toBe("Left");
+      if (doubleRevoke._tag === "Left") {
+        expect((doubleRevoke.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("joinChatViaInvite enforces expiry and maxUses", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const dave = yield* registerAndLogin("dave", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+
+      // maxUses: 1 — the first join succeeds, the second is rejected.
+      const singleUse = yield* alice.client.chats.createChatInvite({
+        path: { id: chat.id },
+        payload: { maxUses: 1 },
+      });
+      yield* carol.client.chats.joinChatViaInvite({
+        path: { code: singleUse.code },
+      });
+      const overUse = yield* dave.client.chats
+        .joinChatViaInvite({ path: { code: singleUse.code } })
+        .pipe(Effect.either);
+      expect(overUse._tag).toBe("Left");
+      if (overUse._tag === "Left") {
+        expect((overUse.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+
+      // An already-expired invite (simulated by backdating it directly,
+      // since expiresInHours can't express "already in the past") is
+      // rejected too.
+      const expiring = yield* alice.client.chats.createChatInvite({
+        path: { id: chat.id },
+        payload: { expiresInHours: 1 },
+      });
+      const db = yield* Db;
+      yield* Effect.tryPromise(() =>
+        db
+          .update(chatInvites)
+          .set({ expiresAt: new Date(Date.now() - 1000) })
+          .where(eq(chatInvites.id, expiring.id)),
+      ).pipe(Effect.orDie);
+      const expired = yield* dave.client.chats
+        .joinChatViaInvite({ path: { code: expiring.code } })
+        .pipe(Effect.either);
+      expect(expired._tag).toBe("Left");
+      if (expired._tag === "Left") {
+        expect((expired.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
+    }),
+  ));
+
+test("joinChatViaInvite rejects joining once the group is at its participant cap", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const others = yield* insertDummyUsers(MAX_GROUP_PARTICIPANTS - 1);
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [others[0]!.id] },
+      });
+      yield* alice.client.chats.addParticipants({
+        path: { id: chat.id },
+        payload: { participantIds: others.slice(1).map((o) => o.id) },
+      });
+
+      const invite = yield* alice.client.chats.createChatInvite({
+        path: { id: chat.id },
+        payload: {},
+      });
+      const outsider = yield* registerAndLogin("outsider", "pw-testpass");
+      const result = yield* outsider.client.chats
+        .joinChatViaInvite({ path: { code: invite.code } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidChatRequest",
+        );
+      }
     }),
   ));

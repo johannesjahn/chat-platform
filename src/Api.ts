@@ -541,10 +541,22 @@ const GroupTitle = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_GROUP_TITLE_LENGTH),
 );
 
+// Per-chat role (issue #220) — distinct from `User.role` (site-wide admin).
+// Only meaningful for group chats: a direct chat's two participants are
+// both always "member". "owner" tracks `Chat.createdBy` 1:1 (see
+// db/schema.ts); "admin" is granted by the owner via `updateParticipantRole`
+// and, alongside "owner", can rename the group, add/remove participants, and
+// delete any message in it.
+export const ChatRole = Schema.Literal("owner", "admin", "member").annotations({
+  identifier: "ChatRole",
+});
+export type ChatRole = typeof ChatRole.Type;
+
 export const ChatParticipant = Schema.Struct({
   userId: Schema.Number,
   username: Schema.String,
   displayName: Schema.NullOr(Schema.String),
+  role: ChatRole,
 }).annotations({ identifier: "ChatParticipant" });
 export type ChatParticipant = typeof ChatParticipant.Type;
 
@@ -637,6 +649,43 @@ export const AddParticipantsBody = Schema.Struct({
 export const TransferOwnershipBody = Schema.Struct({
   userId: Schema.Number,
 }).annotations({ identifier: "TransferOwnershipBody" });
+
+// "owner" is deliberately excluded — appointing an owner goes through
+// `POST /chats/:id/owner` (`TransferOwnershipBody`) instead, since that also
+// has to move `Chat.createdBy` and demote the previous owner.
+export const UpdateParticipantRoleBody = Schema.Struct({
+  role: Schema.Literal("admin", "member"),
+}).annotations({ identifier: "UpdateParticipantRoleBody" });
+
+// Total invites that may exist (active + expired + revoked) for a single
+// chat — bounds the table's per-chat growth from repeated
+// create/revoke cycles.
+export const MAX_INVITES_PER_CHAT = 50;
+
+export const CreateChatInviteBody = Schema.Struct({
+  // Omitted means "never expires".
+  expiresInHours: Schema.optional(
+    Schema.Number.pipe(Schema.int(), Schema.between(1, 24 * 30)),
+  ),
+  // Omitted means "unlimited uses" (still bounded by the chat's own
+  // MAX_GROUP_PARTICIPANTS cap at redemption time).
+  maxUses: Schema.optional(
+    Schema.Number.pipe(Schema.int(), Schema.between(1, MAX_GROUP_PARTICIPANTS)),
+  ),
+}).annotations({ identifier: "CreateChatInviteBody" });
+
+export const ChatInvite = Schema.Struct({
+  id: Schema.Number,
+  chatId: Schema.Number,
+  code: Schema.String,
+  createdBy: Schema.Number,
+  createdAt: Schema.Number,
+  expiresAt: Schema.NullOr(Schema.Number),
+  maxUses: Schema.NullOr(Schema.Number),
+  useCount: Schema.Number,
+  revokedAt: Schema.NullOr(Schema.Number),
+}).annotations({ identifier: "ChatInvite" });
+export type ChatInvite = typeof ChatInvite.Type;
 
 export const CreateMessageBody = Schema.Struct({
   contentType: MessageContentType,
@@ -993,6 +1042,15 @@ const ChatParticipantPath = Schema.Struct({
   userId: Schema.NumberFromString,
 });
 
+const ChatInvitePath = Schema.Struct({
+  id: Schema.NumberFromString,
+  inviteId: Schema.NumberFromString,
+});
+
+const InviteCodePath = Schema.Struct({
+  code: Schema.String,
+});
+
 export const DEFAULT_CHATS_LIMIT = 30;
 export const MAX_CHATS_LIMIT = 100;
 
@@ -1067,7 +1125,8 @@ const ChatsGroup = HttpApiGroup.make("chats")
       .middleware(Authentication),
   )
   .add(
-    // Renames a group chat — the creator only.
+    // Renames a group chat — the owner or an admin (per-chat role, issue
+    // #220; formerly creator-only).
     HttpApiEndpoint.put("updateChat", "/chats/:id")
       .setPath(ChatIdPath)
       .setPayload(UpdateChatBody)
@@ -1078,7 +1137,7 @@ const ChatsGroup = HttpApiGroup.make("chats")
       .middleware(Authentication),
   )
   .add(
-    // Adds participants to a group chat — the creator only.
+    // Adds participants to a group chat — the owner or an admin.
     HttpApiEndpoint.post("addParticipants", "/chats/:id/participants")
       .setPath(ChatIdPath)
       .setPayload(AddParticipantsBody)
@@ -1089,10 +1148,10 @@ const ChatsGroup = HttpApiGroup.make("chats")
       .middleware(Authentication),
   )
   .add(
-    // Removes a participant from a group chat — the creator or an admin.
+    // Removes a participant from a group chat — the owner or an admin.
     // Counterpart to `addParticipants`. If this empties the chat, it's
     // deleted entirely (see `deleteChat`'s cascade). If the removed
-    // participant was the chat's creator, ownership is transferred
+    // participant was the chat's owner, ownership is transferred
     // automatically to the longest-standing remaining participant so the
     // group doesn't become unmanageable (mirrors `leaveChat`).
     HttpApiEndpoint.del("removeParticipant", "/chats/:id/participants/:userId")
@@ -1117,7 +1176,7 @@ const ChatsGroup = HttpApiGroup.make("chats")
       .middleware(Authentication),
   )
   .add(
-    // Deletes a group chat outright — the creator or an admin. The
+    // Deletes a group chat outright — the owner or an admin. The
     // `chats` row's cascading foreign keys (see db/schema.ts) take care of
     // its participants, messages, and read receipts.
     HttpApiEndpoint.del("deleteChat", "/chats/:id")
@@ -1137,6 +1196,23 @@ const ChatsGroup = HttpApiGroup.make("chats")
     HttpApiEndpoint.post("transferOwnership", "/chats/:id/owner")
       .setPath(ChatIdPath)
       .setPayload(TransferOwnershipBody)
+      .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Promotes/demotes a participant between "admin" and "member" — the
+    // owner only (an admin can't create or demote other admins). The owner's
+    // own role can't be changed here; use `transferOwnership` instead
+    // (issue #220).
+    HttpApiEndpoint.patch(
+      "updateParticipantRole",
+      "/chats/:id/participants/:userId/role",
+    )
+      .setPath(ChatParticipantPath)
+      .setPayload(UpdateParticipantRoleBody)
       .addSuccess(Chat)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })
@@ -1199,13 +1275,60 @@ const ChatsGroup = HttpApiGroup.make("chats")
       .middleware(Authentication),
   )
   .add(
-    // Deletes a message — the sender only (or an admin). The
+    // Deletes a message — the sender, the chat's owner/admin, or a
+    // site-wide admin (issue #220 extended this from sender-only). The
     // `message_reads` rows cascade via the FK, so nothing else to clean up.
     HttpApiEndpoint.del("deleteMessage", "/chats/:id/messages/:messageId")
       .setPath(MessageIdPath)
       .addSuccess(Schema.Void)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Mints an invite code for a group chat — the owner or an admin
+    // (issue #220). Joining via the code (`joinChatViaInvite`) is open to
+    // any authenticated user, so this is the access-control gate: only
+    // whoever holds a still-valid code (or link built from it) can join.
+    HttpApiEndpoint.post("createChatInvite", "/chats/:id/invites")
+      .setPath(ChatIdPath)
+      .setPayload(CreateChatInviteBody)
+      .addSuccess(ChatInvite, { status: 201 })
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Lists every invite (active, expired, and revoked) ever created for a
+    // group chat — the owner or an admin.
+    HttpApiEndpoint.get("listChatInvites", "/chats/:id/invites")
+      .setPath(ChatIdPath)
+      .addSuccess(Schema.Array(ChatInvite))
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Revokes an invite so its code can no longer be redeemed — the owner
+    // or an admin.
+    HttpApiEndpoint.del("revokeChatInvite", "/chats/:id/invites/:inviteId")
+      .setPath(ChatInvitePath)
+      .addSuccess(Schema.Void)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Redeems an invite code, adding the current user to its chat as a
+    // "member" — any authenticated user (not just existing participants).
+    // Idempotent for someone already in the chat: returns the chat as-is
+    // rather than erroring.
+    HttpApiEndpoint.post("joinChatViaInvite", "/chats/invites/:code/join")
+      .setPath(InviteCodePath)
+      .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(InvalidChatRequest, { status: 400 })
       .middleware(Authentication),
   );
 

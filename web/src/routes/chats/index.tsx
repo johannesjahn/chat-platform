@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Loader2, MessagesSquare, PlusCircle } from "lucide-react";
+import { Link2, Loader2, MessagesSquare, PlusCircle } from "lucide-react";
 import { ChatListItem, ChatListItemSkeleton } from "@/components/ChatListItem";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { GradientText } from "@/components/reactbits/GradientText";
@@ -51,12 +51,20 @@ function ChatsListPage() {
           <GradientText>Chats</GradientText>
         </h1>
         {session && (
-          <Button asChild size="sm">
-            <Link to="/chats/new">
-              <PlusCircle className="size-4" />
-              New chat
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link to="/chats/join">
+                <Link2 className="size-4" />
+                Join via invite
+              </Link>
+            </Button>
+            <Button asChild size="sm">
+              <Link to="/chats/new">
+                <PlusCircle className="size-4" />
+                New chat
+              </Link>
+            </Button>
+          </div>
         )}
       </div>
 
