@@ -22,9 +22,12 @@ export const authHeaders = (accessToken) => ({
   Authorization: `Bearer ${accessToken}`,
 });
 
-// Fixed and well over MIN_PASSWORD_LENGTH (see src/Api.ts) — every load-test
-// account shares this password since none of it is real user data.
-export const TEST_PASSWORD = "LoadTest-12345";
+// Fixed and well over MIN_PASSWORD_LENGTH (see src/Api.ts) by default — every
+// load-test account shares this password since none of it is real user data.
+// Overridable so it's not a hardcoded, publicly-known credential on any
+// target where that'd matter — see scripts/loadtest/README.md's warning
+// against pointing these at shared/production environments.
+export const TEST_PASSWORD = __ENV.TEST_PASSWORD || "LoadTest-12345";
 
 // Registers `username` if it doesn't already exist, otherwise logs it in —
 // either way returns {id, username, accessToken}. Idempotent across runs on
@@ -38,7 +41,15 @@ export function loginOrRegister(username) {
   const registerRes = http.post(
     `${BASE_URL}/users/register`,
     JSON.stringify({ username, password: TEST_PASSWORD }),
-    { headers: JSON_HEADERS, tags: { name: "register" } },
+    {
+      headers: JSON_HEADERS,
+      tags: { name: "register" },
+      // 409 (already registered, expected on every run but the first) isn't
+      // a failure — without this, k6's default "any 4xx/5xx counts against
+      // http_req_failed" marks it as one anyway, diluting that threshold
+      // with an outcome this function already treats as success below.
+      responseCallback: http.expectedStatuses(201, 409),
+    },
   );
   if (registerRes.status !== 201 && registerRes.status !== 409) {
     throw new Error(
@@ -77,7 +88,12 @@ export function mintWsTicket(accessToken) {
 }
 
 export function randomText(prefix, wordLength = 32) {
-  return `${prefix} ${Math.random()
-    .toString(36)
-    .slice(2, 2 + wordLength)}`;
+  // A single Math.random().toString(36) draw only ever yields ~11-13 base36
+  // chars, well short of any wordLength much past that — loop until there's
+  // enough, then trim to the exact requested length.
+  let word = "";
+  while (word.length < wordLength) {
+    word += Math.random().toString(36).slice(2);
+  }
+  return `${prefix} ${word.slice(0, wordLength)}`;
 }

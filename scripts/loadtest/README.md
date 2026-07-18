@@ -39,6 +39,14 @@ bun run loadtest:ws
 Both default to `BASE_URL=http://localhost:3000` (docker-compose's exposed
 port), overridable with `-e BASE_URL=...` / `-e WS_URL=...`.
 
+**Don't point `BASE_URL` at a shared or production deployment.** `setup()`
+seeds accounts with fixed, deterministic usernames (`loadtest-http-0`,
+`loadtest-ws-0`, …) and a hardcoded shared password (`TEST_PASSWORD` in
+`lib/api.js`) — fine against a disposable docker-compose/dev target, but
+anyone who's read this file could log into those same accounts on any real
+deployment they end up seeded on. Override `-e TEST_PASSWORD=...` if you
+ever do need to run against a non-disposable target.
+
 ## Rate limits shape the defaults
 
 The backend's auth rate limiters (`src/UsersHandler.ts`) are tuned for real
@@ -53,15 +61,22 @@ directly constrain how these scripts are written:
   `USERS`/`WS_PARTICIPANTS` (see below) raises how many accounts a first run
   needs to register; keep it at or under 5 unless you've already seeded more
   accounts in an earlier run, or are running against a target where you've
-  deliberately loosened this limit.
+  deliberately loosened this limit. Both also need at least 2 accounts —
+  `createGroupChat` requires at least one participant besides the creator —
+  and refuse to start below that.
 - **`/users/login` allows 20 attempts per IP / 5 per account per 15
   minutes.** Only hit once per user in `setup()`, so this isn't a practical
   constraint at the default participant counts.
 - **Engagement writes (likes/comments/replies) are capped at 120 per user
   per minute** (`src/EngagementHandler.ts`), and the global per-IP limiter
-  caps all requests at 1000/minute (`src/GlobalRateLimit.ts`). `http-crud.js`
-  paces each VU with `sleep(1)` per iteration to stay well under both by
-  default; if you raise `VUS` substantially, watch `http_req_failed` for 429s
+  caps all requests at 1000/minute (`src/GlobalRateLimit.ts`).
+  `http-crud.js` paces each VU with `sleep(SLEEP_SECONDS)` (default 3s)
+  between iterations to stay comfortably under both: each iteration issues 6
+  requests, 2 of them engagement writes, so a 3s floor caps any one VU at
+  ~20 iterations/minute — at the default `VUS=USERS=5` (one VU per user),
+  that's ≤40 engagement writes/minute/user (33% of the 120 cap) and ≤600
+  requests/minute total (60% of the 1000 cap). Raising `VUS` and/or lowering
+  `SLEEP_SECONDS` shrinks that margin — watch `http_req_failed` for 429s
   creeping in as a sign you've crossed one of these rather than found a real
   capacity ceiling.
 
@@ -70,14 +85,16 @@ directly constrain how these scripts are written:
 ```bash
 bun run loadtest:http
 # or directly, with overrides:
-k6 run -e BASE_URL=http://localhost:3000 -e USERS=5 -e VUS=20 -e DURATION=2m scripts/loadtest/http-crud.js
+k6 run -e BASE_URL=http://localhost:3000 -e USERS=5 -e VUS=20 -e DURATION=2m -e SLEEP_SECONDS=3 scripts/loadtest/http-crud.js
 ```
 
 `setup()` logs in `USERS` accounts (default 5) and creates one shared group
 chat. Each VU repeatedly: creates a post, lists posts, likes its post,
-comments on it, sends a chat message, and lists the chat's messages —
-picking one of the seeded accounts round-robin by VU number. `VUS` (default
-= `USERS`) and `DURATION` (default `1m`) control the load shape.
+comments on it, sends a chat message, and lists the chat's messages, then
+sleeps `SLEEP_SECONDS` — picking one of the seeded accounts round-robin by VU
+number. `VUS` (default = `USERS`) and `DURATION` (default `1m`) control the
+load shape; see the rate-limits section above before raising `VUS` or
+lowering `SLEEP_SECONDS` (default 3) much.
 
 ## `ws-fanout.js`
 
@@ -96,7 +113,9 @@ fans the event out to every participant, including the sender — see
 `ChatsHandler.ts` — so no separate correlation channel is needed). Latency
 lands in the `ws_fanout_latency_ms` trend metric; a VU that doesn't see its
 event within `EVENT_TIMEOUT_MS` counts against `ws_fanout_timeouts` instead
-of hanging the run.
+of hanging the run, and a socket that errors before that (a failed
+connection/handshake) counts against `ws_fanout_errors` instead of silently
+settling the iteration.
 
 Since every VU publishes into the same chat concurrently, "the next
 `chat_updated` a VU observes after its own send" occasionally belongs to

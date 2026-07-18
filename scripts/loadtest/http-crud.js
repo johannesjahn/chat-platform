@@ -21,6 +21,21 @@ import {
 const USER_COUNT = Number(__ENV.USERS || 5);
 const VUS = Number(__ENV.VUS || USER_COUNT);
 const DURATION = __ENV.DURATION || "1m";
+// Each iteration issues 6 requests (4 in "posts", 2 in "chat"), 2 of them
+// engagement writes (like + comment). At the default VUS=USERS=5, every VU
+// maps to a distinct user 1:1, so a VU's iteration rate is also that user's
+// engagement-write rate. A 3s floor between iterations keeps that at
+// <=20/min/VU — <=40 engagement writes/min/user (33% of the 120/min/user
+// cap, EngagementHandler.ts) and <=600 requests/min total (60% of the
+// 1000/min/IP global cap, GlobalRateLimit.ts) — see README.md for the full
+// math and how it scales if you raise VUS.
+const SLEEP_SECONDS = Number(__ENV.SLEEP_SECONDS || 3);
+
+if (USER_COUNT < 2) {
+  throw new Error(
+    "USERS must be at least 2 — createGroupChat needs at least one participant besides the creator",
+  );
+}
 
 export const options = {
   scenarios: {
@@ -122,5 +137,5 @@ export default function (data) {
     check(listRes, { "messages listed": (r) => r.status === 200 });
   });
 
-  sleep(1);
+  sleep(SLEEP_SECONDS);
 }

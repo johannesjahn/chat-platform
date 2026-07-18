@@ -10,7 +10,7 @@ import http from "k6/http";
 import { check } from "k6";
 import { Counter, Trend } from "k6/metrics";
 import { WebSocket } from "k6/experimental/websockets";
-import { setTimeout, clearTimeout } from "k6/experimental/timers";
+import { setTimeout, clearTimeout } from "k6/timers";
 import {
   BASE_URL,
   WS_URL,
@@ -29,6 +29,12 @@ const ITERATIONS_PER_VU = Number(__ENV.ITERATIONS || 20);
 // chat_updated echo before giving up on that iteration.
 const EVENT_TIMEOUT_MS = Number(__ENV.EVENT_TIMEOUT_MS || 5000);
 
+if (PARTICIPANT_COUNT < 2) {
+  throw new Error(
+    "WS_PARTICIPANTS must be at least 2 — createGroupChat needs at least one participant besides the creator",
+  );
+}
+
 export const options = {
   scenarios: {
     ws_fanout: {
@@ -41,11 +47,17 @@ export const options = {
   thresholds: {
     ws_fanout_latency_ms: ["p(95)<1000"],
     ws_fanout_timeouts: ["count<1"],
+    ws_fanout_errors: ["count<1"],
   },
 };
 
 const fanoutLatency = new Trend("ws_fanout_latency_ms", true);
 const fanoutTimeouts = new Counter("ws_fanout_timeouts");
+// A connection/handshake failure settles an iteration without hitting the
+// message or timeout handlers — counted separately so a run where sockets
+// fail to connect shows up as a threshold failure instead of quietly
+// reporting "0 timeouts, few samples" as if it were a clean, low-traffic run.
+const fanoutErrors = new Counter("ws_fanout_errors");
 
 export function setup() {
   const users = [];
@@ -136,9 +148,13 @@ export default function (data) {
     }
   });
 
-  ws.addEventListener("error", () => {
+  ws.addEventListener("error", (event) => {
     if (settled) return;
     settled = true;
+    fanoutErrors.add(1);
+    console.error(
+      `ws-fanout: VU ${__VU} iter ${__ITER} socket error: ${event.error}`,
+    );
     clearTimeout(timeoutId);
   });
 }
