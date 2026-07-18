@@ -23,9 +23,12 @@ import {
   Forbidden,
   InvalidChatRequest,
   MAX_GROUP_PARTICIPANTS,
+  MAX_INVITES_PER_CHAT,
   NotFound,
   type Chat,
+  type ChatInvite,
   type ChatParticipant,
+  type ChatRole,
   type Message,
 } from "./Api.ts";
 import {
@@ -40,14 +43,28 @@ import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import {
+  chatInvites,
   chatParticipants,
   chats,
   messageReads,
   messages,
   users,
   type DbChat,
+  type DbChatInvite,
   type DbMessage,
 } from "./db/schema.ts";
+
+const toApiChatInvite = (row: DbChatInvite): ChatInvite => ({
+  id: row.id,
+  chatId: row.chatId,
+  code: row.code,
+  createdBy: row.createdBy,
+  createdAt: row.createdAt.getTime(),
+  expiresAt: row.expiresAt ? row.expiresAt.getTime() : null,
+  maxUses: row.maxUses,
+  useCount: row.useCount,
+  revokedAt: row.revokedAt ? row.revokedAt.getTime() : null,
+});
 
 const toApiMessage = (
   row: DbMessage,
@@ -75,11 +92,35 @@ const getParticipants = (
         userId: chatParticipants.userId,
         username: users.username,
         displayName: users.displayName,
+        role: chatParticipants.role,
       })
       .from(chatParticipants)
       .innerJoin(users, eq(users.id, chatParticipants.userId))
       .where(eq(chatParticipants.chatId, chatId)),
   ).pipe(Effect.orDie);
+
+// A participant's per-chat role, or `null` if they aren't (or are no longer)
+// a participant of `chatId`.
+const getParticipantRole = (
+  db: DrizzleDb,
+  chatId: number,
+  userId: number,
+): Effect.Effect<ChatRole | null> =>
+  Effect.tryPromise(() =>
+    db
+      .select({ role: chatParticipants.role })
+      .from(chatParticipants)
+      .where(
+        and(
+          eq(chatParticipants.chatId, chatId),
+          eq(chatParticipants.userId, userId),
+        ),
+      )
+      .limit(1),
+  ).pipe(
+    Effect.orDie,
+    Effect.map((rows) => rows[0]?.role ?? null),
+  );
 
 // Increments `chats.version` for every participant-visible mutation other
 // than chat creation (a freshly-created chat's row already carries its
@@ -211,6 +252,7 @@ const getParticipantsForChats = (
             userId: chatParticipants.userId,
             username: users.username,
             displayName: users.displayName,
+            role: chatParticipants.role,
           })
           .from(chatParticipants)
           .innerJoin(users, eq(users.id, chatParticipants.userId))
@@ -318,13 +360,29 @@ const getUnreadCountsForChats = (
         Effect.map((rows) => new Map(rows.map((r) => [r.chatId, r.total]))),
       );
 
-// Admins can edit/delete any message; everyone else only their own — mirrors
-// PostsHandler's `canModify`.
+// Site-wide admins can edit/delete any message; everyone else only their
+// own — mirrors PostsHandler's `canModify`. Editing stays this strict even
+// after issue #220 (only deletion was extended to chat owners/admins below).
 const canModifyMessage = (
   currentUser: { readonly id: number; readonly role: string },
   message: { readonly senderId: number },
 ): boolean =>
   currentUser.role === "admin" || message.senderId === currentUser.id;
+
+// Deleting is broader than editing (issue #220): the message's own sender, a
+// site-wide admin, or the chat's own owner/admin (moderating their group) may
+// delete it.
+const canDeleteMessage = (
+  db: DrizzleDb,
+  currentUser: { readonly id: number; readonly role: string },
+  chatId: number,
+  message: { readonly senderId: number },
+): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    if (canModifyMessage(currentUser, message)) return true;
+    const role = yield* getParticipantRole(db, chatId, currentUser.id);
+    return role === "owner" || role === "admin";
+  });
 
 const getMessageOr404 = (
   db: DrizzleDb,
@@ -409,17 +467,53 @@ const requireParticipant = (db: DrizzleDb, chatId: number, userId: number) =>
       );
   });
 
-// Group-chat management actions (removeParticipant, deleteChat, and
-// transferOwnership's normal path) are gated on this rather than
-// `requireParticipant` — the creator (or an admin, per issue #66) can act
-// even without re-checking plain participation, and an admin may act on a
-// chat they don't participate in at all.
-const canManageChat = (
+// Group-chat management actions (updateChat, addParticipants,
+// removeParticipant, deleteChat) are gated on this rather than
+// `requireParticipant` — the chat's owner or an admin (per-chat role, issue
+// #220; formerly creator-only, issue #66) can act even without re-checking
+// plain participation, and a site-wide admin may act on a chat they don't
+// participate in at all.
+const requireChatManager = (
+  db: DrizzleDb,
   currentUser: { readonly id: number; readonly role: string },
-  chat: { readonly createdBy: number | null },
-): boolean =>
-  currentUser.role === "admin" ||
-  (chat.createdBy !== null && chat.createdBy === currentUser.id);
+  chat: { readonly id: number; readonly createdBy: number | null },
+): Effect.Effect<void, Forbidden> =>
+  Effect.gen(function* () {
+    if (currentUser.role === "admin") return;
+    const role = yield* getParticipantRole(db, chat.id, currentUser.id);
+    if (role !== "owner" && role !== "admin")
+      return yield* Effect.fail(
+        new Forbidden({
+          message: "Only the chat owner or an admin can perform this action",
+        }),
+      );
+  });
+
+// Stricter than `requireChatManager`: only the chat's owner (or a site-wide
+// admin) may reassign ownership or grant/revoke the "admin" role — an admin
+// can moderate a chat day-to-day but can't create peers or displace the
+// owner. Mirrors an ownerless chat's existing "any participant may claim it"
+// escape hatch (issue #66) via the caller-supplied `canClaim`.
+const requireChatOwner = (
+  db: DrizzleDb,
+  currentUser: { readonly id: number; readonly role: string },
+  chat: { readonly id: number; readonly createdBy: number | null },
+): Effect.Effect<void, Forbidden> =>
+  Effect.gen(function* () {
+    if (currentUser.role === "admin") return;
+    const role = yield* getParticipantRole(db, chat.id, currentUser.id);
+    if (role !== "owner")
+      return yield* Effect.fail(
+        new Forbidden({
+          // "admin" here means a *site-wide* admin, not this chat's
+          // "admin" role (that's exactly who this check excludes) — spelled
+          // out so the message doesn't read as self-contradictory to
+          // whoever it just rejected.
+          message:
+            "Only the chat owner (or a site admin) can perform this action",
+        }),
+      );
+  });
 
 // Shared by `leaveChat` and `removeParticipant`: removes `departingUserId`
 // from `chatRow`, then either deletes the chat outright (if that emptied it
@@ -476,6 +570,17 @@ const departParticipant = (
             .update(chats)
             .set({ createdBy: newOwner.userId })
             .where(eq(chats.id, chatRow.id));
+          // Keep the per-chat role in sync with `createdBy` — see the "role"
+          // column comment in db/schema.ts.
+          await tx
+            .update(chatParticipants)
+            .set({ role: "owner" })
+            .where(
+              and(
+                eq(chatParticipants.chatId, chatRow.id),
+                eq(chatParticipants.userId, newOwner.userId),
+              ),
+            );
         }
 
         const updated = await tx
@@ -828,6 +933,10 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 chatId: chatRow.id,
                 userId,
                 joinedAt: now,
+                role:
+                  userId === currentUser.id
+                    ? ("owner" as const)
+                    : ("member" as const),
               })),
             ),
           ).pipe(Effect.orDie);
@@ -854,12 +963,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 message: "Only group chats can be renamed",
               }),
             );
-          if (existing.createdBy !== currentUser.id)
-            return yield* Effect.fail(
-              new Forbidden({
-                message: "Only the creator can rename this chat",
-              }),
-            );
+          yield* requireChatManager(db, currentUser, existing);
 
           const updated = yield* Effect.tryPromise(() =>
             db
@@ -899,12 +1003,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 message: "Only group chats can have participants added",
               }),
             );
-          if (existing.createdBy !== currentUser.id)
-            return yield* Effect.fail(
-              new Forbidden({
-                message: "Only the creator can add participants",
-              }),
-            );
+          yield* requireChatManager(db, currentUser, existing);
 
           // Existence-check the requested users up front — unrelated to the
           // cap race below, so it doesn't need to be inside the transaction.
@@ -996,12 +1095,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 message: "Only group chats can have participants removed",
               }),
             );
-          if (!canManageChat(currentUser, chatRow))
-            return yield* Effect.fail(
-              new Forbidden({
-                message: "Only the creator or an admin can remove participants",
-              }),
-            );
+          yield* requireChatManager(db, currentUser, chatRow);
           if (userId === currentUser.id)
             return yield* Effect.fail(
               new InvalidChatRequest({
@@ -1010,7 +1104,8 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             );
 
           const existingParticipants = yield* getParticipants(db, id);
-          if (!existingParticipants.some((p) => p.userId === userId))
+          const target = existingParticipants.find((p) => p.userId === userId);
+          if (!target)
             return yield* Effect.fail(
               new NotFound({
                 message: `User ${userId} is not a participant of chat ${id}`,
@@ -1021,6 +1116,18 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               new InvalidChatRequest({
                 message:
                   "Cannot remove the last participant — delete the chat instead",
+              }),
+            );
+          // A chat-level admin can remove other members/admins but not the
+          // owner — otherwise an admin could force the automatic
+          // reassignment in `departParticipant` to hand ownership to
+          // whoever's next in line, effectively deposing the owner. Only a
+          // site-wide admin (already past `requireChatManager` here) may.
+          if (target.role === "owner" && currentUser.role !== "admin")
+            return yield* Effect.fail(
+              new Forbidden({
+                message:
+                  "The chat owner can't be removed — transfer ownership first",
               }),
             );
 
@@ -1083,12 +1190,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 message: "Only group chats can be deleted",
               }),
             );
-          if (!canManageChat(currentUser, chatRow))
-            return yield* Effect.fail(
-              new Forbidden({
-                message: "Only the creator or an admin can delete this chat",
-              }),
-            );
+          yield* requireChatManager(db, currentUser, chatRow);
 
           const participants = yield* getParticipants(db, id);
           yield* Effect.tryPromise(() =>
@@ -1114,19 +1216,14 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          // Normally creator/admin-only, but an ownerless chat (createdBy
+          // Normally owner/site-admin-only, but an ownerless chat (createdBy
           // null — see Chat.createdBy in Api.ts) can be claimed by any
           // current participant, so it doesn't stay permanently
           // unmanageable once its creator's account is gone (issue #66).
           const canClaim =
             chatRow.createdBy === null &&
             (yield* isParticipant(db, id, currentUser.id));
-          if (!canManageChat(currentUser, chatRow) && !canClaim)
-            return yield* Effect.fail(
-              new Forbidden({
-                message: "Only the creator or an admin can transfer ownership",
-              }),
-            );
+          if (!canClaim) yield* requireChatOwner(db, currentUser, chatRow);
 
           const participants = yield* getParticipants(db, id);
           if (!participants.some((p) => p.userId === payload.userId))
@@ -1136,27 +1233,126 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          const updated = yield* Effect.tryPromise(() =>
-            db
-              .update(chats)
-              .set({
-                createdBy: payload.userId,
-                version: sql`${chats.version} + 1`,
-              })
-              .where(eq(chats.id, id))
-              .returning(),
+          const previousOwnerId = chatRow.createdBy;
+          const row = yield* Effect.tryPromise(() =>
+            db.transaction(async (tx) => {
+              const updated = await tx
+                .update(chats)
+                .set({
+                  createdBy: payload.userId,
+                  version: sql`${chats.version} + 1`,
+                })
+                .where(eq(chats.id, id))
+                .returning();
+              // Keep per-chat roles in sync with `createdBy`: the new owner
+              // is promoted, and the previous owner (if they're still a
+              // participant and aren't the same person, e.g. re-claiming) is
+              // demoted all the way to "member" — an explicit transfer hands
+              // off every management right, same as the old creator-only
+              // behavior this replaces (issue #220), rather than leaving
+              // them as an "admin" who could still act on the chat.
+              await tx
+                .update(chatParticipants)
+                .set({ role: "owner" })
+                .where(
+                  and(
+                    eq(chatParticipants.chatId, id),
+                    eq(chatParticipants.userId, payload.userId),
+                  ),
+                );
+              if (
+                previousOwnerId !== null &&
+                previousOwnerId !== payload.userId
+              ) {
+                await tx
+                  .update(chatParticipants)
+                  .set({ role: "member" })
+                  .where(
+                    and(
+                      eq(chatParticipants.chatId, id),
+                      eq(chatParticipants.userId, previousOwnerId),
+                    ),
+                  );
+              }
+              return updated[0];
+            }),
           ).pipe(Effect.orDie);
-          const row = updated[0];
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
 
+          // Refetch rather than reusing `participants` — the transaction
+          // above just changed the new/previous owner's roles, and the
+          // response should reflect that.
+          const refreshedParticipants = yield* getParticipants(db, id);
           yield* notifyChatUpdated(
             connections,
             id,
             row.version,
+            refreshedParticipants.map((p) => p.userId),
+          );
+          return yield* buildChat(
+            db,
+            row,
+            currentUser.id,
+            refreshedParticipants,
+          );
+        }),
+      )
+      .handle("updateParticipantRole", ({ path: { id, userId }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const chatRow = yield* getChatOr404(db, id);
+          if (chatRow.type !== "group")
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "Only group chats have participant roles",
+              }),
+            );
+          yield* requireChatOwner(db, currentUser, chatRow);
+
+          if (userId === chatRow.createdBy)
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "Use POST /chats/:id/owner to change the owner's role",
+              }),
+            );
+
+          const targetRole = yield* getParticipantRole(db, id, userId);
+          if (targetRole === null)
+            return yield* Effect.fail(
+              new NotFound({
+                message: `User ${userId} is not a participant of chat ${id}`,
+              }),
+            );
+
+          yield* Effect.tryPromise(() =>
+            db
+              .update(chatParticipants)
+              .set({ role: payload.role })
+              .where(
+                and(
+                  eq(chatParticipants.chatId, id),
+                  eq(chatParticipants.userId, userId),
+                ),
+              ),
+          ).pipe(Effect.orDie);
+
+          const version = yield* bumpChatVersion(db, id);
+          const participants = yield* getParticipants(db, id);
+          yield* notifyChatUpdated(
+            connections,
+            id,
+            version,
             participants.map((p) => p.userId),
           );
-          return yield* buildChat(db, row, currentUser.id, participants);
+          return yield* buildChat(
+            db,
+            { ...chatRow, version },
+            currentUser.id,
+            participants,
+          );
         }),
       )
       .handle("listMessages", ({ path: { id }, urlParams }) =>
@@ -1525,10 +1721,17 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
           const existing = yield* getMessageOr404(db, id, messageId);
-          if (!canModifyMessage(currentUser, existing))
+          const canDelete = yield* canDeleteMessage(
+            db,
+            currentUser,
+            id,
+            existing,
+          );
+          if (!canDelete)
             return yield* Effect.fail(
               new Forbidden({
-                message: "You can only delete your own messages",
+                message:
+                  "You can only delete your own messages, unless you're the chat's owner or an admin",
               }),
             );
 
@@ -1543,6 +1746,246 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             id,
             version,
             participants.map((p) => p.userId),
+          );
+        }),
+      )
+      .handle("createChatInvite", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const chatRow = yield* getChatOr404(db, id);
+          if (chatRow.type !== "group")
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "Only group chats support invite links",
+              }),
+            );
+          yield* requireChatManager(db, currentUser, chatRow);
+
+          const now = new Date();
+          // Only still-active invites (not revoked, not expired) count
+          // toward the cap — a revoked or expired one no longer occupies a
+          // "slot" a caller could ever redeem, so it shouldn't keep this
+          // chat permanently stuck at the limit (matches the "revoke an old
+          // one first" wording below: revoking must actually free a slot).
+          const existingCount = yield* Effect.tryPromise(() =>
+            db
+              .select({ total: count() })
+              .from(chatInvites)
+              .where(
+                and(
+                  eq(chatInvites.chatId, id),
+                  isNull(chatInvites.revokedAt),
+                  or(
+                    isNull(chatInvites.expiresAt),
+                    gt(chatInvites.expiresAt, now),
+                  ),
+                ),
+              ),
+          ).pipe(
+            Effect.orDie,
+            Effect.map((rows) => rows[0]?.total ?? 0),
+          );
+          if (existingCount >= MAX_INVITES_PER_CHAT)
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: `This chat has reached its limit of ${MAX_INVITES_PER_CHAT} active invites — revoke an old one first`,
+              }),
+            );
+          const created = yield* Effect.tryPromise(() =>
+            db
+              .insert(chatInvites)
+              .values({
+                chatId: id,
+                code: crypto.randomUUID().replaceAll("-", ""),
+                createdBy: currentUser.id,
+                createdAt: now,
+                expiresAt:
+                  payload.expiresInHours !== undefined
+                    ? new Date(
+                        now.getTime() + payload.expiresInHours * 3_600_000,
+                      )
+                    : null,
+                maxUses: payload.maxUses ?? null,
+              })
+              .returning(),
+          ).pipe(Effect.orDie);
+          const row = created[0];
+          if (!row)
+            return yield* Effect.die(new Error("INSERT returned no rows"));
+          return toApiChatInvite(row);
+        }),
+      )
+      .handle("listChatInvites", ({ path: { id } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const chatRow = yield* getChatOr404(db, id);
+          yield* requireChatManager(db, currentUser, chatRow);
+
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select()
+              .from(chatInvites)
+              .where(eq(chatInvites.chatId, id))
+              .orderBy(desc(chatInvites.createdAt)),
+          ).pipe(Effect.orDie);
+          return rows.map(toApiChatInvite);
+        }),
+      )
+      .handle("revokeChatInvite", ({ path: { id, inviteId } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const chatRow = yield* getChatOr404(db, id);
+          yield* requireChatManager(db, currentUser, chatRow);
+
+          // Only matches a still-active invite (`revokedAt IS NULL`) — an
+          // already-revoked one 404s on a second call rather than silently
+          // no-op'ing, so a caller can tell "I revoked it" from "someone
+          // else already had".
+          const updated = yield* Effect.tryPromise(() =>
+            db
+              .update(chatInvites)
+              .set({ revokedAt: new Date() })
+              .where(
+                and(
+                  eq(chatInvites.id, inviteId),
+                  eq(chatInvites.chatId, id),
+                  isNull(chatInvites.revokedAt),
+                ),
+              )
+              .returning({ id: chatInvites.id }),
+          ).pipe(Effect.orDie);
+          if (updated.length === 0)
+            return yield* Effect.fail(
+              new NotFound({
+                message: `Invite ${inviteId} not found (or already revoked) in chat ${id}`,
+              }),
+            );
+        }),
+      )
+      .handle("joinChatViaInvite", ({ path: { code } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select()
+              .from(chatInvites)
+              .where(eq(chatInvites.code, code))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          const invite = rows[0];
+          if (!invite)
+            return yield* Effect.fail(
+              new NotFound({ message: "Invite not found" }),
+            );
+          if (invite.revokedAt !== null)
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "This invite has been revoked",
+              }),
+            );
+          if (
+            invite.expiresAt !== null &&
+            invite.expiresAt.getTime() <= Date.now()
+          )
+            return yield* Effect.fail(
+              new InvalidChatRequest({ message: "This invite has expired" }),
+            );
+          // The plain read above is just a fast-path rejection for an
+          // already-obviously-exhausted invite — the authoritative check is
+          // the guarded UPDATE inside the transaction below, which is immune
+          // to the TOCTOU race two concurrent redemptions of a
+          // `maxUses`-limited invite would otherwise hit if this were the
+          // only check.
+          if (invite.maxUses !== null && invite.useCount >= invite.maxUses)
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "This invite has reached its use limit",
+              }),
+            );
+
+          const chatRow = yield* getChatOr404(db, invite.chatId);
+          const alreadyIn = yield* isParticipant(
+            db,
+            chatRow.id,
+            currentUser.id,
+          );
+          if (alreadyIn) return yield* buildChat(db, chatRow, currentUser.id);
+
+          // Participant cap, `useCount` bump, and the join itself all run
+          // inside one `serializable` transaction, same reasoning as
+          // `addParticipants` for the cap. The `useCount` bump is additionally
+          // guarded by a conditional `WHERE useCount < maxUses` (skipped
+          // entirely when unlimited) rather than just re-reading `useCount` —
+          // two concurrent redemptions of a `maxUses: 1` invite could
+          // otherwise both read "0 < 1" and both proceed. Ordered cap-check
+          // first, then the guarded bump, then the insert, so a request that
+          // fails either check never mutates `chatInvites` or
+          // `chatParticipants`.
+          const result = yield* Effect.tryPromise(() =>
+            db.transaction(
+              async (tx) => {
+                const currentParticipants = await tx
+                  .select({ id: chatParticipants.id })
+                  .from(chatParticipants)
+                  .where(eq(chatParticipants.chatId, chatRow.id));
+                if (currentParticipants.length >= MAX_GROUP_PARTICIPANTS)
+                  return { ok: false as const, reason: "cap" as const };
+
+                const useCountGuard =
+                  invite.maxUses !== null
+                    ? and(
+                        eq(chatInvites.id, invite.id),
+                        lt(chatInvites.useCount, invite.maxUses),
+                      )
+                    : eq(chatInvites.id, invite.id);
+                const bumped = await tx
+                  .update(chatInvites)
+                  .set({ useCount: sql`${chatInvites.useCount} + 1` })
+                  .where(useCountGuard)
+                  .returning({ id: chatInvites.id });
+                if (bumped.length === 0)
+                  return { ok: false as const, reason: "maxUses" as const };
+
+                await tx.insert(chatParticipants).values({
+                  chatId: chatRow.id,
+                  userId: currentUser.id,
+                  joinedAt: new Date(),
+                  role: "member",
+                });
+                return { ok: true as const };
+              },
+              { isolationLevel: "serializable" },
+            ),
+          ).pipe(Effect.orDie);
+          if (!result.ok)
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message:
+                  result.reason === "maxUses"
+                    ? "This invite has reached its use limit"
+                    : `Group chats can have at most ${MAX_GROUP_PARTICIPANTS} participants`,
+              }),
+            );
+
+          const version = yield* bumpChatVersion(db, chatRow.id);
+          const participants = yield* getParticipants(db, chatRow.id);
+          yield* notifyChatUpdated(
+            connections,
+            chatRow.id,
+            version,
+            participants.map((p) => p.userId),
+          );
+          return yield* buildChat(
+            db,
+            { ...chatRow, version },
+            currentUser.id,
+            participants,
           );
         }),
       ),

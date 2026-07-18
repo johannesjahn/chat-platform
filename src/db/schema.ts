@@ -303,6 +303,19 @@ export const chatParticipants = pgTable(
     joinedAt: timestamp("joined_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
+    // Per-chat role (issue #220) — distinct from `users.role` (site-wide
+    // admin). Only meaningful for group chats: the creator is seeded as
+    // "owner" at creation, added participants default to "member", and
+    // "admin" is granted by the owner via `updateParticipantRole`. Direct
+    // chats leave every participant at the "member" default since there's
+    // nothing to manage. Kept in sync with `chats.createdBy` at every point
+    // that reassigns ownership (transferOwnership, and the automatic
+    // reassignment in `departParticipant` — see ChatsHandler.ts) so exactly
+    // one participant holds "owner" whenever the chat has a non-null
+    // `createdBy`.
+    role: text("role", { enum: ["owner", "admin", "member"] })
+      .notNull()
+      .default("member"),
   },
   (table) => [
     unique().on(table.chatId, table.userId),
@@ -388,3 +401,47 @@ export const messageReads = pgTable(
 
 export type DbMessageRead = typeof messageReads.$inferSelect;
 export type NewDbMessageRead = typeof messageReads.$inferInsert;
+
+// Invite links/codes (issue #220) that let a user join a group chat without
+// being added directly by an owner/admin. `code` is the opaque, unguessable
+// token carried in the invite URL — looked up directly (see
+// `chat_invites_code_idx`) rather than via `chatId`, since redeeming a link
+// only ever has the code on hand. An invite is valid to redeem while
+// `revokedAt` is null, `expiresAt` is null or in the future, and (if
+// `maxUses` is set) `useCount < maxUses` — all enforced in the application
+// layer at redemption time (see ChatsHandler.ts), not by constraints here.
+export const chatInvites = pgTable(
+  "chat_invites",
+  {
+    id: serial("id").primaryKey(),
+    chatId: integer("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    createdBy: integer("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    // Null means "never expires".
+    expiresAt: timestamp("expires_at", { mode: "date" }),
+    // Null means "unlimited uses".
+    maxUses: integer("max_uses"),
+    useCount: integer("use_count").notNull().default(0),
+    // Null while still active; set (rather than deleting the row) when an
+    // owner/admin revokes the invite, so revoked links leave an audit trail
+    // instead of silently vanishing.
+    revokedAt: timestamp("revoked_at", { mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("chat_invites_code_idx").on(table.code),
+    // `listChatInvites` filters by chatId; Postgres doesn't auto-index FK
+    // columns, so without this every list (and the cascade delete from
+    // `chats`) scans the whole table.
+    index("chat_invites_chat_id_idx").on(table.chatId),
+  ],
+);
+
+export type DbChatInvite = typeof chatInvites.$inferSelect;
+export type NewDbChatInvite = typeof chatInvites.$inferInsert;

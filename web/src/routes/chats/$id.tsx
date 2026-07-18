@@ -4,11 +4,15 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Check,
+  Copy,
   Crown,
+  Link2,
   Loader2,
   LogOut,
   Pencil,
   Search,
+  Shield,
+  ShieldOff,
   Trash2,
   UserMinus,
   UserPlus,
@@ -114,6 +118,25 @@ function ChatView({ id }: { id: string }) {
     "delete",
     "/chats/{id}/messages/{messageId}",
   );
+  const updateParticipantRole = $api.useMutation(
+    "patch",
+    "/chats/{id}/participants/{userId}/role",
+  );
+  const createInvite = $api.useMutation("post", "/chats/{id}/invites");
+  const revokeInvite = $api.useMutation(
+    "delete",
+    "/chats/{id}/invites/{inviteId}",
+  );
+  const {
+    data: invites,
+    isLoading: invitesLoading,
+    refetch: refetchInvites,
+  } = $api.useQuery(
+    "get",
+    "/chats/{id}/invites",
+    { params: { path: { id: String(chatId) } } },
+    { enabled: false },
+  );
 
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -122,6 +145,8 @@ function ChatView({ id }: { id: string }) {
   const [selectedToAdd, setSelectedToAdd] = useState<number[]>([]);
   const [managingParticipants, setManagingParticipants] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [managingInvites, setManagingInvites] = useState(false);
+  const [copiedInviteId, setCopiedInviteId] = useState<number | null>(null);
 
   const addParticipantsQuery = useDebouncedValue(
     addParticipantsSearch.trim(),
@@ -304,11 +329,19 @@ function ChatView({ id }: { id: string }) {
   }
 
   const name = chatDisplayName(chat, session.user.id);
-  const isCreator = chat.createdBy === session.user.id;
-  // Mirrors the backend's `canManageChat` (see ChatsHandler.ts): the
-  // creator, or an admin — an admin only reaches this UI at all once
-  // they're a participant, since `getChat` still requires that.
-  const canManage = isCreator || session.user.role === "admin";
+  const myRole = chat.participants.find(
+    (p) => p.userId === session.user.id,
+  )?.role;
+  // Mirrors the backend's `requireChatManager` (see ChatsHandler.ts): the
+  // chat's owner or admin (per-chat role, issue #220), or a site-wide
+  // admin — a site admin only reaches this UI at all once they're a
+  // participant, since `getChat` still requires that.
+  const canManage =
+    myRole === "owner" || myRole === "admin" || session.user.role === "admin";
+  // Stricter than `canManage` — mirrors `requireChatOwner`: only the chat's
+  // owner (or a site-wide admin) may promote/demote between "admin" and
+  // "member", or transfer ownership outright.
+  const canManageRoles = myRole === "owner" || session.user.role === "admin";
   // A chat with no creator (its creator's account was deleted — see
   // `Chat.createdBy`) can be claimed by any participant via
   // transferOwnership, so it doesn't stay permanently unmanageable
@@ -450,6 +483,63 @@ function ChatView({ id }: { id: string }) {
     }
   }
 
+  async function handleUpdateParticipantRole(
+    userId: number,
+    role: "admin" | "member",
+  ) {
+    setActionError(null);
+    try {
+      await updateParticipantRole.mutateAsync({
+        params: { path: { id: String(chatId), userId: String(userId) } },
+        body: { role },
+      });
+      await queryClient.invalidateQueries({
+        queryKey: chatDetailQueryKey(chatId),
+      });
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleCreateInvite() {
+    setActionError(null);
+    try {
+      await createInvite.mutateAsync({
+        params: { path: { id: String(chatId) } },
+        body: {},
+      });
+      await refetchInvites();
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleRevokeInvite(inviteId: number) {
+    setActionError(null);
+    try {
+      await revokeInvite.mutateAsync({
+        params: { path: { id: String(chatId), inviteId: String(inviteId) } },
+      });
+      await refetchInvites();
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleCopyInviteLink(inviteId: number, code: string) {
+    const url = `${window.location.origin}/chats/join/${code}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedInviteId(inviteId);
+      setTimeout(
+        () => setCopiedInviteId((prev) => (prev === inviteId ? null : prev)),
+        2000,
+      );
+    } catch {
+      setActionError("Couldn't copy the link — copy it manually.");
+    }
+  }
+
   async function handleLeave() {
     if (!window.confirm("Leave this chat?")) return;
     setActionError(null);
@@ -567,7 +657,7 @@ function ChatView({ id }: { id: string }) {
             </>
           )}
 
-          {chat.type === "group" && isCreator && !renaming && (
+          {chat.type === "group" && canManage && !renaming && (
             <Button
               size="icon"
               variant="ghost"
@@ -580,7 +670,7 @@ function ChatView({ id }: { id: string }) {
               <Pencil className="size-4" />
             </Button>
           )}
-          {chat.type === "group" && isCreator && canAddMore && (
+          {chat.type === "group" && canManage && canAddMore && (
             <Button
               size="icon"
               variant="ghost"
@@ -591,6 +681,21 @@ function ChatView({ id }: { id: string }) {
               }}
             >
               <UserPlus className="size-4" />
+            </Button>
+          )}
+          {chat.type === "group" && canManage && (
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="Manage invite links"
+              onClick={() => {
+                setManagingInvites((v) => {
+                  if (!v) void refetchInvites();
+                  return !v;
+                });
+              }}
+            >
+              <Link2 className="size-4" />
             </Button>
           )}
           {chat.type === "group" && (
@@ -626,22 +731,58 @@ function ChatView({ id }: { id: string }) {
                 const isOwner = chat.createdBy === p.userId;
                 const isSelf = p.userId === session.user.id;
                 const label = userLabel(p);
+                // A chat-level admin can remove other members/admins but not
+                // the owner — mirrors `requireChatManager` plus the
+                // owner-removal guard in `removeParticipant` (ChatsHandler.ts).
+                const canRemove =
+                  canManage &&
+                  !isSelf &&
+                  (!isOwner ||
+                    myRole === "owner" ||
+                    session.user.role === "admin");
                 return (
                   <li
                     key={p.userId}
                     className="flex items-center justify-between gap-2 text-xs"
                   >
                     <span className="flex min-w-0 items-center gap-1.5 truncate">
-                      {isOwner && (
+                      {isOwner ? (
                         <Crown className="size-3.5 shrink-0 text-amber-500" />
-                      )}
+                      ) : p.role === "admin" ? (
+                        <Shield className="size-3.5 shrink-0 text-primary" />
+                      ) : null}
                       <span className="truncate">
                         {label}
                         {isSelf ? " (you)" : ""}
                       </span>
                     </span>
                     <span className="flex shrink-0 items-center gap-1">
-                      {(canManage || canClaimOwnership) && !isOwner && (
+                      {canManageRoles && !isOwner && !isSelf && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-6"
+                          aria-label={
+                            p.role === "admin"
+                              ? `Remove admin from ${label}`
+                              : `Make ${label} an admin`
+                          }
+                          disabled={updateParticipantRole.isPending}
+                          onClick={() =>
+                            void handleUpdateParticipantRole(
+                              p.userId,
+                              p.role === "admin" ? "member" : "admin",
+                            )
+                          }
+                        >
+                          {p.role === "admin" ? (
+                            <ShieldOff className="size-3.5" />
+                          ) : (
+                            <Shield className="size-3.5" />
+                          )}
+                        </Button>
+                      )}
+                      {(canManageRoles || canClaimOwnership) && !isOwner && (
                         <Button
                           size="sm"
                           variant="ghost"
@@ -654,7 +795,7 @@ function ChatView({ id }: { id: string }) {
                           Make owner
                         </Button>
                       )}
-                      {canManage && !isSelf && (
+                      {canRemove && (
                         <Button
                           size="icon"
                           variant="ghost"
@@ -684,6 +825,102 @@ function ChatView({ id }: { id: string }) {
                 <Trash2 className="size-3.5" />
                 Delete chat
               </Button>
+            )}
+          </div>
+        )}
+
+        {managingInvites && chat.type === "group" && canManage && (
+          <div className="flex flex-col gap-2 border-b border-border bg-accent/20 px-4 py-3">
+            {actionError && (
+              <p className="text-xs text-destructive">{actionError}</p>
+            )}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                Anyone with a link can join this chat.
+              </p>
+              <Button
+                size="sm"
+                className="h-7 px-2 text-xs"
+                disabled={createInvite.isPending}
+                onClick={() => void handleCreateInvite()}
+              >
+                {createInvite.isPending && (
+                  <Loader2 className="size-3.5 animate-spin" />
+                )}
+                New invite link
+              </Button>
+            </div>
+            {invitesLoading ? (
+              <p className="text-xs text-muted-foreground">Loading…</p>
+            ) : (
+              (() => {
+                const activeInvites = (invites ?? []).filter(
+                  (i) => i.revokedAt === null,
+                );
+                return activeInvites.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No active invite links.
+                  </p>
+                ) : (
+                  <ul className="flex flex-col gap-1.5">
+                    {activeInvites.map((invite) => {
+                      const expired =
+                        invite.expiresAt !== null &&
+                        invite.expiresAt <= Date.now();
+                      const usedUp =
+                        invite.maxUses !== null &&
+                        invite.useCount >= invite.maxUses;
+                      return (
+                        <li
+                          key={invite.id}
+                          className="flex items-center justify-between gap-2 text-xs"
+                        >
+                          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                            {invite.code.slice(0, 10)}…
+                            {(expired || usedUp) && (
+                              <span className="ml-1 text-destructive">
+                                ({expired ? "expired" : "used up"})
+                              </span>
+                            )}
+                            {invite.maxUses !== null &&
+                              ` · ${invite.useCount}/${invite.maxUses} used`}
+                          </span>
+                          <span className="flex shrink-0 items-center gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-6"
+                              aria-label="Copy invite link"
+                              onClick={() =>
+                                void handleCopyInviteLink(
+                                  invite.id,
+                                  invite.code,
+                                )
+                              }
+                            >
+                              {copiedInviteId === invite.id ? (
+                                <Check className="size-3.5 text-green-600" />
+                              ) : (
+                                <Copy className="size-3.5" />
+                              )}
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-6 text-destructive hover:text-destructive"
+                              aria-label="Revoke invite link"
+                              disabled={revokeInvite.isPending}
+                              onClick={() => void handleRevokeInvite(invite.id)}
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                );
+              })()
             )}
           </div>
         )}
@@ -794,6 +1031,7 @@ function ChatView({ id }: { id: string }) {
                     isOwn={isOwn}
                     isRead={message.readByUserIds.length > 0}
                     canModify={isOwn || session.user.role === "admin"}
+                    canDeleteOthers={!isOwn && canManage}
                     onEdit={(content) => handleEditMessage(message.id, content)}
                     onDelete={() => handleDeleteMessage(message.id)}
                     senderLabel={

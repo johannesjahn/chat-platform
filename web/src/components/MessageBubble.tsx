@@ -26,6 +26,11 @@ type MessageBubbleProps = {
   senderLabel?: string;
   isRead: boolean;
   canModify: boolean;
+  // Lets a chat's owner/admin (or a site-wide admin) delete someone else's
+  // message for moderation — distinct from `canModify`, which only ever
+  // applies to the sender's own messages and also allows editing (issue
+  // #220 extended deletion, but not editing, to chat owners/admins).
+  canDeleteOthers?: boolean;
   onEdit: (content: string) => Promise<void>;
   onDelete: () => Promise<void>;
   style?: CSSProperties;
@@ -37,6 +42,7 @@ export function MessageBubble({
   senderLabel,
   isRead,
   canModify,
+  canDeleteOthers = false,
   onEdit,
   onDelete,
   style,
@@ -264,6 +270,26 @@ export function MessageBubble({
             ))}
         </div>
       </div>
+
+      {!isOwn && canDeleteOthers && !isEditing && (
+        <div className="flex shrink-0 items-center gap-0.5 opacity-0 translate-x-2 scale-95 transition-all duration-300 ease-smooth group-hover:opacity-100 group-hover:translate-x-0 group-hover:scale-100">
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label="Delete message"
+            disabled={deleting}
+            onClick={() => void handleDelete()}
+            className="size-6 text-destructive hover:text-destructive"
+          >
+            {deleting ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Trash2 className="size-3" />
+            )}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
