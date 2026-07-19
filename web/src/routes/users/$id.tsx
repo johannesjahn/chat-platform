@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
@@ -19,6 +19,15 @@ function UserProfilePage() {
   const { id } = Route.useParams();
   const session = useSession();
   const queryClient = useQueryClient();
+  const router = useRouter();
+
+  const goBack = () => {
+    if (router.history.canGoBack()) {
+      router.history.back();
+    } else {
+      router.navigate({ to: "/users" });
+    }
+  };
 
   const {
     data: user,
@@ -50,11 +59,9 @@ function UserProfilePage() {
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 py-10">
-      <Button asChild variant="ghost" size="sm" className="mb-4">
-        <Link to="/users">
-          <ArrowLeft className="size-4" />
-          Back to users
-        </Link>
+      <Button variant="ghost" size="sm" className="mb-4" onClick={goBack}>
+        <ArrowLeft className="size-4" />
+        Back
       </Button>
 
       {isLoading ? (
