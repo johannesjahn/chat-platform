@@ -204,7 +204,7 @@ minio:
   # minio-init-job.yaml) — MinIO doesn't create buckets on its own.
   mcImage:
     repository: minio/mc
-    tag: "RELEASE.2024-11-05T11-29-45Z"
+    tag: "RELEASE.2025-08-13T08-35-41Z"
 
   auth:
     # Secret with access-key/secret-key data keys — doubles as MinIO's own
