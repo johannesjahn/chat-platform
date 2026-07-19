@@ -270,18 +270,28 @@ function CommentItem({
   const replyRows = replies.data?.pages.flatMap((p) => p.comments) ?? [];
 
   const reactionPending = addReaction.isPending || removeReaction.isPending;
+  const [reactionError, setReactionError] = useState<string | null>(null);
   const toggleReaction = async (emoji: string) => {
     const mine = comment.reactions.find((r) => r.emoji === emoji)?.reactedByMe;
     const mutation = mine ? removeReaction : addReaction;
-    await mutation.mutateAsync({
-      params: { path: { id: String(comment.id) } },
-      body: { emoji: emoji as ReactionEmoji },
-    });
-    await invalidateComments();
+    setReactionError(null);
+    try {
+      await mutation.mutateAsync({
+        params: { path: { id: String(comment.id) } },
+        body: { emoji: emoji as ReactionEmoji },
+      });
+      await invalidateComments();
+    } catch (err) {
+      setReactionError(errorMessage(err));
+    }
   };
 
   return (
-    <div className={cn("flex gap-3", isReply && "ml-9")}>
+    <div
+      className={cn("flex gap-3", isReply && "ml-9")}
+      data-testid="comment"
+      data-comment-id={comment.id}
+    >
       <Link
         to="/users/$id"
         params={{ id: String(comment.authorId) }}
@@ -328,6 +338,9 @@ function CommentItem({
           )}
         </div>
 
+        {reactionError && (
+          <p className="pl-1 text-xs text-destructive">{reactionError}</p>
+        )}
         <div className="flex flex-wrap items-center gap-1 pl-1">
           <ReactionPicker
             reactions={comment.reactions}
