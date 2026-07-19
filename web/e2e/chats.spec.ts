@@ -106,6 +106,12 @@ test("a user can redeem a group invite through the join page and via a direct in
   apiUrl,
   request,
 }) => {
+  // This one spins up four browser contexts and registers four users through
+  // the UI (seed + A + B + C), which alone flirts with the default 30s budget
+  // on the slower sharded CI runners — every assertion passes, it just tips
+  // over during teardown. Give it the tripled "slow" budget so that timing
+  // headroom, not a logic change, is what keeps it green.
+  test.slow();
   // A seed user just so the group can be created (a group needs at least one
   // other participant); B and C below join purely through the invite flow.
   const contextSeed = await browser.newContext();
