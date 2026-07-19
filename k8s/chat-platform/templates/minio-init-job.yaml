@@ -3,11 +3,21 @@
 # Creates the bucket the backend uploads into — MinIO doesn't create buckets
 # on its own the way a managed cloud bucket is provisioned out-of-band before
 # pointing S3_ENDPOINT at it (see docker-compose.yml's `minio-init` service,
-# which does the same thing for local dev). Unlike
-# backend-migration-job.yaml, this isn't a Helm hook: it only needs to
+# which does the same thing for local dev).
+#
+# This is a Helm hook (like backend-migration-job.yaml) rather than a plain
+# Job: under ArgoCD, `.Release.Revision` never increments (ArgoCD renders via
+# `helm template`, not a real `helm install`/`upgrade`), so a plain Job would
+# always be named `{{ $fullname }}-minio-init-1`. Combined with
+# ttlSecondsAfterFinished cleaning it up a few minutes after it succeeds,
+# ArgoCD would see that resource as permanently "missing" and flag the whole
+# app OutOfSync forever (see issue #235). Helm hook resources are translated
+# into ArgoCD's own hooks and excluded from that tracked/diffed resource
+# list, so this avoids the perpetual drift. It's post-install/post-upgrade
+# (rather than pre-, like the migration job) since it only needs to
 # eventually succeed once the minio Deployment above is up, not to run
-# strictly before the rest of the release, so a plain Job (retrying via
-# backoffLimit until minio's Service is reachable) is enough.
+# strictly before the rest of the release — backoffLimit retries until
+# minio's Service is reachable.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -15,6 +25,9 @@ metadata:
   labels:
     {{- include "chat-platform.labels" . | nindent 4 }}
     app.kubernetes.io/component: minio-init
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
 spec:
   backoffLimit: 10
   ttlSecondsAfterFinished: 300
