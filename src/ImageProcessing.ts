@@ -17,18 +17,28 @@ const BLURHASH_SAMPLE_PX = 32;
 const BLURHASH_COMPONENTS_X = 4;
 const BLURHASH_COMPONENTS_Y = 3;
 
-// Formats that get scaled down and re-encoded. Animated GIF is deliberately
-// excluded: sharp represents an animated image's frames internally as one
-// tall vertically-stacked strip, and re-encoding through the same
-// single-frame resize path used here risks mangling frame boundaries or
-// silently flattening the animation to its first frame. GIF uploads keep
-// their original bytes; they still get real dimensions and a blurhash below,
-// just derived from the first frame rather than driving a re-encode.
+// Formats that get scaled down and transcoded to WebP (see below). Animated
+// GIF is deliberately excluded: sharp represents an animated image's frames
+// internally as one tall vertically-stacked strip, and re-encoding through
+// the same single-frame resize path used here risks mangling frame
+// boundaries or silently flattening the animation to its first frame. GIF
+// uploads keep their original bytes; they still get real dimensions and a
+// blurhash below, just derived from the first frame rather than driving a
+// re-encode.
 const RESCALABLE_IMAGE_MIME_TYPES = new Set<string>([
   "image/jpeg",
   "image/png",
   "image/webp",
 ]);
+
+// Rescaled images are always transcoded to WebP rather than kept in their
+// original format: it compresses meaningfully better than JPEG at
+// equivalent visual quality, *and* — unlike JPEG — supports alpha
+// transparency, so it strictly dominates both JPEG and PNG as a stored
+// format regardless of what was uploaded. Preserving the input format
+// would leave PNG photo uploads (common from screenshots) at full lossless
+// size even after scaling, defeating the point of re-encoding at all.
+const OUTPUT_CONTENT_TYPE = "image/webp";
 
 export type ProcessedImage = {
   readonly data: Uint8Array;
@@ -83,11 +93,12 @@ export const processImage = async (
       fit: "inside",
       withoutEnlargement: true,
     })
+    .webp()
     .toBuffer({ resolveWithObject: true });
 
   return {
     data,
-    contentType: `image/${info.format}`,
+    contentType: OUTPUT_CONTENT_TYPE,
     width: info.width,
     height: info.height,
     blurhash,

@@ -249,8 +249,11 @@ test("uploadAttachment stores the file and returns metadata with a usable url", 
         blurhash: string | null;
         url: string;
       };
+      // The original filename is kept as-is even though the stored bytes
+      // get transcoded to WebP (see ImageProcessing.ts) — it's just
+      // upload/display metadata, not what's actually served.
       expect(attachment.filename).toBe("photo.png");
-      expect(attachment.mimeType).toBe("image/png");
+      expect(attachment.mimeType).toBe("image/webp");
       expect(attachment.size).toBeGreaterThan(0);
       expect(typeof attachment.id).toBe("number");
       // Below the 2048px scaling cap, so dimensions pass through unchanged.
@@ -261,7 +264,7 @@ test("uploadAttachment stores the file and returns metadata with a usable url", 
       // No real S3/MinIO is configured in tests, so AttachmentStorageLive
       // falls back to the in-memory backend, which serves bytes back as a
       // `data:` URL rather than a presigned link (see AttachmentStorage.ts).
-      expect(attachment.url.startsWith("data:image/png;base64,")).toBe(true);
+      expect(attachment.url.startsWith("data:image/webp;base64,")).toBe(true);
     }),
   ));
 
