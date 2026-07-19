@@ -140,6 +140,24 @@
       matchPackageNames: ["postgres", "pgautoupgrade/pgautoupgrade"],
       groupName: "Postgres major version",
     },
+
+    // MinIO ships tags like `RELEASE.2024-11-07T00-52-20Z` (see the `minio`
+    // and `minio-init` services in docker-compose.yml, and
+    // `minio.image`/`minio.mcImage` in k8s/chat-platform/values.yaml)
+    // instead of semver, so Renovate's default docker versioning can't
+    // parse or order them and would silently never propose an update.
+    // Regex-capture the date and hour/minute as major/minor/patch/build/
+    // revision so tags are compared and sorted correctly — seconds are
+    // dropped since they're finer-grained than any two real MinIO releases
+    // land apart. minio/minio and minio/mc are versioned independently
+    // upstream, so this only fixes comparison for each; it doesn't group
+    // them into one PR the way the Bun/Postgres rules above do.
+    {
+      matchDatasources: ["docker"],
+      matchPackageNames: ["minio/minio", "minio/mc"],
+      versioning:
+        "regex:^RELEASE\\.(?<major>\\d{4})-(?<minor>\\d{2})-(?<patch>\\d{2})T(?<build>\\d{2})-(?<revision>\\d{2})-\\d{2}Z$",
+    },
   ],
 
   customManagers: [
