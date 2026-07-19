@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { $api } from "@/lib/api";
+import { errorMessage } from "@/lib/errors";
 import { patchCachedPost } from "@/lib/posts";
 import type { ReactionEmoji } from "@/lib/reactions";
 import { cn } from "@/lib/utils";
@@ -90,23 +91,29 @@ export function PostCard({
   const addReaction = $api.useMutation("post", "/posts/{id}/reactions");
   const removeReaction = $api.useMutation("delete", "/posts/{id}/reactions");
   const reactionPending = addReaction.isPending || removeReaction.isPending;
+  const [reactionError, setReactionError] = useState<string | null>(null);
 
   const toggleReaction = async (emoji: string) => {
     const mine = post.reactions.find((r) => r.emoji === emoji)?.reactedByMe;
     const mutation = mine ? removeReaction : addReaction;
-    // The endpoint returns the authoritative `reactions` array — patch it
-    // straight into the cache rather than refetching. `reactedByMe` only ever
-    // changes for the acting client, so it's reconciled here from the
-    // response; the feed-wide `reaction_changed` broadcast updates every
-    // other client's counts in place (see useRealtimeSocket).
-    const result = await mutation.mutateAsync({
-      params: { path: { id: String(post.id) } },
-      body: { emoji: emoji as ReactionEmoji },
-    });
-    patchCachedPost(queryClient, post.id, (p) => ({
-      ...p,
-      reactions: result.reactions,
-    }));
+    setReactionError(null);
+    try {
+      // The endpoint returns the authoritative `reactions` array — patch it
+      // straight into the cache rather than refetching. `reactedByMe` only ever
+      // changes for the acting client, so it's reconciled here from the
+      // response; the feed-wide `reaction_changed` broadcast updates every
+      // other client's counts in place (see useRealtimeSocket).
+      const result = await mutation.mutateAsync({
+        params: { path: { id: String(post.id) } },
+        body: { emoji: emoji as ReactionEmoji },
+      });
+      patchCachedPost(queryClient, post.id, (p) => ({
+        ...p,
+        reactions: result.reactions,
+      }));
+    } catch (err) {
+      setReactionError(errorMessage(err));
+    }
   };
 
   return (
@@ -258,6 +265,9 @@ export function PostCard({
             )}
           </span>
         </div>
+        {reactionError && (
+          <p className="px-3 pb-2 text-xs text-destructive">{reactionError}</p>
+        )}
       </CardFooter>
       {showComments && <CommentsSection postId={post.id} />}
     </Card>
