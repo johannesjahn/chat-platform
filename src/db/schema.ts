@@ -93,6 +93,17 @@ export const attachments = pgTable(
     mimeType: text("mime_type").notNull(),
     size: integer("size").notNull(),
     storageKey: text("storage_key").notNull(),
+    // Set only for image attachments (issue #248) — populated from the
+    // scaled-down variant actually stored, not the original upload, so they
+    // always match what `storageKey` serves. Null for non-image attachments
+    // (video/audio/pdf) and for rows written before this migration.
+    width: integer("width"),
+    height: integer("height"),
+    // A compact ~20-30 char BlurHash string (https://blurha.sh/) the
+    // frontend decodes into a low-res placeholder shown while the real image
+    // loads (see AttachmentPreview.tsx), eliminating the pop-in a bare
+    // `bg-muted` box left. Same nullability as width/height above.
+    blurhash: text("blurhash"),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),

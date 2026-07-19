@@ -256,6 +256,14 @@ export const Attachment = Schema.Struct({
   mimeType: Schema.String,
   size: Schema.Number,
   url: Schema.String,
+  // Set only for image attachments — the dimensions of the scaled-down
+  // variant actually stored/served (not the original upload) and a BlurHash
+  // string (https://blurha.sh/) the frontend decodes into a low-res
+  // placeholder shown while the full image loads (issue #248). Null for
+  // non-image attachments and for rows uploaded before this was added.
+  width: Schema.NullOr(Schema.Number),
+  height: Schema.NullOr(Schema.Number),
+  blurhash: Schema.NullOr(Schema.String),
 }).annotations({ identifier: "Attachment" });
 export type Attachment = typeof Attachment.Type;
 

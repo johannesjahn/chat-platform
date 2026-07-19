@@ -8,6 +8,7 @@ import {
 } from "@effect/platform";
 import { BunHttpServer } from "@effect/platform-bun";
 import { Effect, Layer, Schema } from "effect";
+import sharp from "sharp";
 import {
   ChatApi,
   CreateMessageBody,
@@ -129,6 +130,21 @@ const registerAndLogin = (username: string, password: string) =>
     return { user, accessToken };
   });
 
+// Real (decodable) PNG bytes for tests exercising the image-processing path
+// (AttachmentsHandler.ts / ImageProcessing.ts, issue #248) — a solid-color
+// image is enough to drive scaling/blurhash without needing a fixture file.
+const makePng = (width: number, height: number): Promise<Uint8Array> =>
+  sharp({
+    create: {
+      width,
+      height,
+      channels: 3,
+      background: { r: 120, g: 180, b: 220 },
+    },
+  })
+    .png()
+    .toBuffer();
+
 type UploadResult = { readonly status: number; readonly body: unknown };
 
 // Drives `POST /attachments` with a real multipart/form-data body — the
@@ -214,7 +230,7 @@ test("uploadAttachment stores the file and returns metadata with a usable url", 
         "uploader3",
         "pw-testpass",
       );
-      const data = new Uint8Array([137, 80, 78, 71, 1, 2, 3, 4]);
+      const data = yield* Effect.promise(() => makePng(40, 30));
       const result = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
           filename: "photo.png",
@@ -228,16 +244,73 @@ test("uploadAttachment stores the file and returns metadata with a usable url", 
         filename: string;
         mimeType: string;
         size: number;
+        width: number | null;
+        height: number | null;
+        blurhash: string | null;
         url: string;
       };
       expect(attachment.filename).toBe("photo.png");
       expect(attachment.mimeType).toBe("image/png");
-      expect(attachment.size).toBe(data.length);
+      expect(attachment.size).toBeGreaterThan(0);
       expect(typeof attachment.id).toBe("number");
+      // Below the 2048px scaling cap, so dimensions pass through unchanged.
+      expect(attachment.width).toBe(40);
+      expect(attachment.height).toBe(30);
+      expect(typeof attachment.blurhash).toBe("string");
+      expect(attachment.blurhash?.length).toBeGreaterThan(0);
       // No real S3/MinIO is configured in tests, so AttachmentStorageLive
       // falls back to the in-memory backend, which serves bytes back as a
       // `data:` URL rather than a presigned link (see AttachmentStorage.ts).
       expect(attachment.url.startsWith("data:image/png;base64,")).toBe(true);
+    }),
+  ));
+
+test("uploadAttachment scales an oversized image down to the max dimension", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-scale",
+        "pw-testpass",
+      );
+      // 3000x1500 exceeds the 2048px longest-edge cap — the 2:1 aspect ratio
+      // should be preserved through the scale-down.
+      const data = yield* Effect.promise(() => makePng(3000, 1500));
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "big.png",
+          contentType: "image/png",
+          data,
+        }),
+      );
+      expect(result.status).toBe(201);
+      const attachment = result.body as {
+        size: number;
+        width: number | null;
+        height: number | null;
+        blurhash: string | null;
+      };
+      expect(attachment.width).toBe(2048);
+      expect(attachment.height).toBe(1024);
+      expect(attachment.blurhash).not.toBeNull();
+      expect(attachment.size).toBeLessThan(data.length);
+    }),
+  ));
+
+test("uploadAttachment rejects a file claiming an image mime type it isn't", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-badimg",
+        "pw-testpass",
+      );
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "not-a-photo.png",
+          contentType: "image/png",
+          data: new Uint8Array([1, 2, 3, 4]),
+        }),
+      );
+      expect(result.status).toBe(415);
     }),
   ));
 
@@ -295,8 +368,8 @@ test("createMessage rejects an attachmentId the sender doesn't own", () =>
 
       const upload = yield* Effect.promise(() =>
         uploadFile(handler, alice.accessToken, {
-          filename: "mine.png",
-          contentType: "image/png",
+          filename: "mine.pdf",
+          contentType: "application/pdf",
           data: new Uint8Array([1, 2, 3]),
         }),
       );
@@ -310,7 +383,7 @@ test("createMessage rejects an attachmentId the sender doesn't own", () =>
           path: { id: chat.id },
           payload: {
             contentType: "attachment",
-            content: "mine.png",
+            content: "mine.pdf",
             attachmentId,
           },
         })
