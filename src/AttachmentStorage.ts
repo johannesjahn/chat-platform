@@ -8,9 +8,13 @@ import { Context, Effect, Layer } from "effect";
 export class AttachmentStorage extends Context.Tag("AttachmentStorage")<
   AttachmentStorage,
   {
+    // `Uint8Array` in addition to `BunFile` so callers that re-encode an
+    // upload in memory (the image scaling step in AttachmentsHandler.ts, see
+    // issue #248) can hand over the processed bytes directly rather than
+    // round-tripping them through a temp file just to get a `BunFile` back.
     readonly upload: (
       key: string,
-      file: BunFile,
+      file: BunFile | Uint8Array,
       contentType: string,
     ) => Effect.Effect<void, unknown>;
     // Synchronous by design: a presigned S3 URL is just a locally-computed
@@ -95,7 +99,10 @@ export const InMemoryAttachmentStorageLive = Layer.sync(
     return {
       upload: (key, file, contentType) =>
         Effect.tryPromise(async () => {
-          const data = new Uint8Array(await file.arrayBuffer());
+          const data =
+            file instanceof Uint8Array
+              ? file
+              : new Uint8Array(await file.arrayBuffer());
           store.set(key, { data, contentType });
         }),
       presignGetUrl: (key) => {

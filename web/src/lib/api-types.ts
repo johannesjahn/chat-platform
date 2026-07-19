@@ -736,6 +736,9 @@ export interface components {
             mimeType: string;
             size: number;
             url: string;
+            width: number | null;
+            height: number | null;
+            blurhash: string | null;
         };
         ReactionSummary: {
             emoji: string;
@@ -3627,6 +3630,9 @@ export interface operations {
                         mimeType: string;
                         size: number;
                         url: string;
+                        width: number | null;
+                        height: number | null;
+                        blurhash: string | null;
                     };
                 };
             };

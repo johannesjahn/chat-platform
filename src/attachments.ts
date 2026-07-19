@@ -19,6 +19,9 @@ export const toApiAttachment = (
   mimeType: row.mimeType,
   size: row.size,
   url,
+  width: row.width,
+  height: row.height,
+  blurhash: row.blurhash,
 });
 
 // A message/post's `attachmentId` is nullable — resolves to `null` both when

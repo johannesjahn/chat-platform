@@ -1,4 +1,5 @@
 import { FileText } from "lucide-react";
+import { BlurhashImage } from "@/components/BlurhashImage";
 import {
   attachmentKind,
   formatBytes,
@@ -23,14 +24,13 @@ export function AttachmentPreview({
 
   if (kind === "image") {
     return (
-      <img
+      <BlurhashImage
         src={attachment.url}
         alt={attachment.filename}
-        loading="lazy"
-        className={cn(
-          "max-h-72 w-full rounded-lg bg-muted object-cover",
-          className,
-        )}
+        width={attachment.width}
+        height={attachment.height}
+        blurhash={attachment.blurhash}
+        className={cn("max-h-72 w-full rounded-lg", className)}
       />
     );
   }
