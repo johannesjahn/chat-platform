@@ -46,20 +46,26 @@ export const S3AttachmentStorageLive = Layer.sync(AttachmentStorage, () => {
   // docker-compose/Kubernetes that's normally an internal service hostname
   // (e.g. `http://minio:9000`), which isn't reachable from a browser holding
   // a presigned URL. When the browser-facing address differs,
-  // `S3_PUBLIC_ENDPOINT` overrides just the scheme+host+port of presigned
-  // URLs, leaving the path/query (and therefore the signature) untouched.
-  // Left unset for real cloud storage, where both are the same public
-  // endpoint.
+  // `S3_PUBLIC_ENDPOINT` gives presigned URLs the public host instead.
+  //
+  // This has to happen by presigning against a *second* client configured
+  // with that endpoint, not by rewriting the URL string after the fact:
+  // `presign()` signs with `X-Amz-SignedHeaders=host`, so the host is baked
+  // into the signature itself. Swapping the host post-signature (however
+  // carefully) invalidates it — the bucket recomputes the signature from
+  // the actual request Host and rejects a mismatch with
+  // `SignatureDoesNotMatch` (see #246). Left unset for real cloud storage,
+  // where both are the same public endpoint.
   const publicEndpoint = process.env.S3_PUBLIC_ENDPOINT;
-  const rewritePublicHost = (url: string): string => {
-    if (!publicEndpoint) return url;
-    const rewritten = new URL(url);
-    const publicUrl = new URL(publicEndpoint);
-    rewritten.protocol = publicUrl.protocol;
-    rewritten.hostname = publicUrl.hostname;
-    rewritten.port = publicUrl.port;
-    return rewritten.toString();
-  };
+  const presignClient = publicEndpoint
+    ? new S3Client({
+        bucket: process.env.S3_BUCKET_NAME,
+        endpoint: publicEndpoint,
+        region: process.env.S3_REGION,
+        accessKeyId: process.env.S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+      })
+    : client;
 
   return {
     upload: (key, file, contentType) =>
@@ -67,12 +73,10 @@ export const S3AttachmentStorageLive = Layer.sync(AttachmentStorage, () => {
         client.write(key, file, { type: contentType }),
       ).pipe(Effect.asVoid),
     presignGetUrl: (key) =>
-      rewritePublicHost(
-        client.presign(key, {
-          method: "GET",
-          expiresIn: PRESIGNED_URL_TTL_SECONDS,
-        }),
-      ),
+      presignClient.presign(key, {
+        method: "GET",
+        expiresIn: PRESIGNED_URL_TTL_SECONDS,
+      }),
   };
 });
 
