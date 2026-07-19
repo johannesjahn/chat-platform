@@ -78,17 +78,22 @@ test("group chats can be created, renamed by the creator, and show all participa
   await expect(pageA.getByText("2 participants")).toBeVisible();
 
   // Only the creator can rename — the rename control shouldn't even render
-  // for B, and the chat still shows up in B's list under the old name.
+  // for B inside the group settings dialog, and the chat still shows up in
+  // B's list under the old name.
   await pageB.goto("/chats");
   await expect(pageB.getByText("Playwright squad")).toBeVisible();
   await pageB.getByText("Playwright squad").click();
+  await pageB.getByRole("button", { name: "Manage group" }).click();
   await expect(pageB.getByRole("button", { name: "Rename chat" })).toHaveCount(
     0,
   );
 
+  await pageA.getByRole("button", { name: "Manage group" }).click();
   await pageA.getByRole("button", { name: "Rename chat" }).click();
   await pageA.fill("input", "Renamed squad");
   await pageA.keyboard.press("Enter");
+  // Close the dialog so the assertion matches only the chat header title.
+  await pageA.getByRole("button", { name: "Close group settings" }).click();
   await expect(pageA.getByText("Renamed squad")).toBeVisible();
 
   await contextA.close();
@@ -156,7 +161,10 @@ test("the creator can add participants to a group chat, and the new participant 
   await expect(pageA).toHaveURL(/\/chats\/\d+/);
   await expect(pageA.getByText("2 participants")).toBeVisible();
 
-  await pageA.getByRole("button", { name: "Add participants" }).click();
+  await pageA.getByRole("button", { name: "Manage group" }).click();
+  await pageA
+    .getByRole("button", { name: "Add participants", exact: true })
+    .click();
   await pageA.getByPlaceholder("Search users to add…").fill(usernameC);
   await pageA.getByRole("button", { name: `@${usernameC}` }).click();
   await pageA.getByRole("button", { name: /^Add 1/ }).click();

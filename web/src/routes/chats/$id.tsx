@@ -1,26 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { onlineManager, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import {
-  ArrowLeft,
-  Check,
-  Copy,
-  Crown,
-  Link2,
-  Loader2,
-  LogOut,
-  Pencil,
-  Search,
-  Shield,
-  ShieldOff,
-  Trash2,
-  UserMinus,
-  UserPlus,
-  Users,
-  X,
-} from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ArrowLeft, Loader2, Settings2, Users } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { ChatComposer } from "@/components/ChatComposer";
+import { GroupManagementDialog } from "@/components/GroupManagementDialog";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { MessageBubble } from "@/components/MessageBubble";
 import { PendingMessageBubble } from "@/components/PendingMessageBubble";
@@ -28,12 +12,10 @@ import { PresenceDot } from "@/components/PresenceDot";
 import { TypingDots } from "@/components/reactbits/TypingDots";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
+import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import {
-  MAX_GROUP_PARTICIPANTS,
   appendSentMessage,
   chatDetailQueryKey,
   chatDisplayName,
@@ -52,9 +34,7 @@ import {
 import { useOnlineStatus } from "@/lib/online";
 import { useIsOnline } from "@/lib/presence";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
-import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { userLabel } from "@/lib/users";
-import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/chats/$id")({
   component: ChatViewPage,
@@ -72,7 +52,6 @@ function ChatView({ id }: { id: string }) {
   const chatId = Number(id);
   const session = useSession();
   const queryClient = useQueryClient();
-  const router = useRouter();
   const isOnline = useOnlineStatus();
 
   const {
@@ -101,15 +80,6 @@ function ChatView({ id }: { id: string }) {
 
   const sendMessage = $api.useMutation("post", "/chats/{id}/messages");
   const markRead = $api.useMutation("post", "/chats/{id}/read");
-  const updateChat = $api.useMutation("put", "/chats/{id}");
-  const addParticipants = $api.useMutation("post", "/chats/{id}/participants");
-  const removeParticipant = $api.useMutation(
-    "delete",
-    "/chats/{id}/participants/{userId}",
-  );
-  const leaveChat = $api.useMutation("post", "/chats/{id}/leave");
-  const deleteChat = $api.useMutation("delete", "/chats/{id}");
-  const transferOwnership = $api.useMutation("post", "/chats/{id}/owner");
   const updateMessage = $api.useMutation(
     "put",
     "/chats/{id}/messages/{messageId}",
@@ -118,51 +88,8 @@ function ChatView({ id }: { id: string }) {
     "delete",
     "/chats/{id}/messages/{messageId}",
   );
-  const updateParticipantRole = $api.useMutation(
-    "patch",
-    "/chats/{id}/participants/{userId}/role",
-  );
-  const createInvite = $api.useMutation("post", "/chats/{id}/invites");
-  const revokeInvite = $api.useMutation(
-    "delete",
-    "/chats/{id}/invites/{inviteId}",
-  );
-  const {
-    data: invites,
-    isLoading: invitesLoading,
-    refetch: refetchInvites,
-  } = $api.useQuery(
-    "get",
-    "/chats/{id}/invites",
-    { params: { path: { id: String(chatId) } } },
-    { enabled: false },
-  );
 
-  const [renaming, setRenaming] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
-  const [addingParticipants, setAddingParticipants] = useState(false);
-  const [addParticipantsSearch, setAddParticipantsSearch] = useState("");
-  const [selectedToAdd, setSelectedToAdd] = useState<number[]>([]);
-  const [managingParticipants, setManagingParticipants] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [managingInvites, setManagingInvites] = useState(false);
-  const [copiedInviteId, setCopiedInviteId] = useState<number | null>(null);
-
-  const addParticipantsQuery = useDebouncedValue(
-    addParticipantsSearch.trim(),
-    300,
-  );
-  const addParticipantsSearchReady =
-    addParticipantsQuery.length >= MIN_USER_SEARCH_QUERY_LENGTH;
-  const { data: userSearchResults, isLoading: userSearchLoading } =
-    $api.useQuery(
-      "get",
-      "/users/search",
-      { params: { query: { q: addParticipantsQuery } } },
-      {
-        enabled: !!session && addingParticipants && addParticipantsSearchReady,
-      },
-    );
+  const [managingGroup, setManagingGroup] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastMessageIdRef = useRef<number | null>(null);
@@ -338,20 +265,6 @@ function ChatView({ id }: { id: string }) {
   // participant, since `getChat` still requires that.
   const canManage =
     myRole === "owner" || myRole === "admin" || session.user.role === "admin";
-  // Stricter than `canManage` — mirrors `requireChatOwner`: only the chat's
-  // owner (or a site-wide admin) may promote/demote between "admin" and
-  // "member", or transfer ownership outright.
-  const canManageRoles = myRole === "owner" || session.user.role === "admin";
-  // A chat with no creator (its creator's account was deleted — see
-  // `Chat.createdBy`) can be claimed by any participant via
-  // transferOwnership, so it doesn't stay permanently unmanageable
-  // (issue #66).
-  const canClaimOwnership = chat.createdBy === null;
-  const canAddMore =
-    chat.type === "group" && chat.participants.length < MAX_GROUP_PARTICIPANTS;
-  const candidatesToAdd = (userSearchResults ?? []).filter(
-    (u) => !chat.participants.some((p) => p.userId === u.id),
-  );
 
   async function handleSend(values: {
     contentType: "text" | "image_url" | "attachment";
@@ -414,161 +327,6 @@ function ChatView({ id }: { id: string }) {
     });
   }
 
-  async function handleRenameSubmit() {
-    const title = titleDraft.trim();
-    if (!title) return;
-    setActionError(null);
-    try {
-      await updateChat.mutateAsync({
-        params: { path: { id: String(chatId) } },
-        body: { title },
-      });
-      await queryClient.invalidateQueries({
-        queryKey: chatDetailQueryKey(chatId),
-      });
-      await queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
-      setRenaming(false);
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleAddParticipants() {
-    if (selectedToAdd.length === 0) return;
-    setActionError(null);
-    try {
-      await addParticipants.mutateAsync({
-        params: { path: { id: String(chatId) } },
-        body: { participantIds: selectedToAdd },
-      });
-      await queryClient.invalidateQueries({
-        queryKey: chatDetailQueryKey(chatId),
-      });
-      setSelectedToAdd([]);
-      setAddingParticipants(false);
-      setAddParticipantsSearch("");
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleRemoveParticipant(userId: number, label: string) {
-    if (!window.confirm(`Remove ${label} from this chat?`)) return;
-    setActionError(null);
-    try {
-      await removeParticipant.mutateAsync({
-        params: { path: { id: String(chatId), userId: String(userId) } },
-      });
-      await queryClient.invalidateQueries({
-        queryKey: chatDetailQueryKey(chatId),
-      });
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleTransferOwnership(userId: number, label: string) {
-    if (!window.confirm(`Make ${label} the owner of this chat?`)) return;
-    setActionError(null);
-    try {
-      await transferOwnership.mutateAsync({
-        params: { path: { id: String(chatId) } },
-        body: { userId },
-      });
-      await queryClient.invalidateQueries({
-        queryKey: chatDetailQueryKey(chatId),
-      });
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleUpdateParticipantRole(
-    userId: number,
-    role: "admin" | "member",
-  ) {
-    setActionError(null);
-    try {
-      await updateParticipantRole.mutateAsync({
-        params: { path: { id: String(chatId), userId: String(userId) } },
-        body: { role },
-      });
-      await queryClient.invalidateQueries({
-        queryKey: chatDetailQueryKey(chatId),
-      });
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleCreateInvite() {
-    setActionError(null);
-    try {
-      await createInvite.mutateAsync({
-        params: { path: { id: String(chatId) } },
-        body: {},
-      });
-      await refetchInvites();
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleRevokeInvite(inviteId: number) {
-    setActionError(null);
-    try {
-      await revokeInvite.mutateAsync({
-        params: { path: { id: String(chatId), inviteId: String(inviteId) } },
-      });
-      await refetchInvites();
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleCopyInviteLink(inviteId: number, code: string) {
-    const url = `${window.location.origin}/chats/join/${code}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopiedInviteId(inviteId);
-      setTimeout(
-        () => setCopiedInviteId((prev) => (prev === inviteId ? null : prev)),
-        2000,
-      );
-    } catch {
-      setActionError("Couldn't copy the link — copy it manually.");
-    }
-  }
-
-  async function handleLeave() {
-    if (!window.confirm("Leave this chat?")) return;
-    setActionError(null);
-    try {
-      await leaveChat.mutateAsync({
-        params: { path: { id: String(chatId) } },
-      });
-      await queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
-      await router.navigate({ to: "/chats" });
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleDelete() {
-    if (!window.confirm("Delete this chat for everyone? This can't be undone."))
-      return;
-    setActionError(null);
-    try {
-      await deleteChat.mutateAsync({
-        params: { path: { id: String(chatId) } },
-      });
-      await queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
-      await router.navigate({ to: "/chats" });
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-10">
       <Card className="overflow-hidden py-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
@@ -605,397 +363,36 @@ function ChatView({ id }: { id: string }) {
               </div>
             </Link>
           ) : (
-            <>
-              <div className="relative shrink-0">
-                <div className="flex size-9 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
-                  <Users className="size-4" />
-                </div>
+            <button
+              type="button"
+              onClick={() => setManagingGroup(true)}
+              className="group/hdr flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-accent/50"
+            >
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground transition-transform motion-safe:group-hover/hdr:scale-105">
+                <Users className="size-4" />
               </div>
-
               <div className="flex min-w-0 flex-1 flex-col leading-tight">
-                {renaming ? (
-                  <form
-                    className="flex items-center gap-1"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void handleRenameSubmit();
-                    }}
-                  >
-                    <Input
-                      autoFocus
-                      value={titleDraft}
-                      onChange={(e) => setTitleDraft(e.target.value)}
-                      maxLength={100}
-                      className="h-7 py-0"
-                    />
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      type="submit"
-                      className="size-7"
-                    >
-                      <Check className="size-3.5" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      type="button"
-                      className="size-7"
-                      onClick={() => setRenaming(false)}
-                    >
-                      <X className="size-3.5" />
-                    </Button>
-                  </form>
-                ) : (
-                  <span className="truncate font-semibold">{name}</span>
-                )}
+                <span className="truncate font-semibold">{name}</span>
                 <span className="truncate text-xs text-muted-foreground">
                   {chat.participants.length} participant
-                  {chat.participants.length === 1 ? "" : "s"}
+                  {chat.participants.length === 1 ? "" : "s"} · Tap to manage
                 </span>
               </div>
-            </>
+            </button>
           )}
 
-          {chat.type === "group" && canManage && !renaming && (
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label="Rename chat"
-              onClick={() => {
-                setTitleDraft(chat.title ?? "");
-                setRenaming(true);
-              }}
-            >
-              <Pencil className="size-4" />
-            </Button>
-          )}
-          {chat.type === "group" && canManage && canAddMore && (
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label="Add participants"
-              onClick={() => {
-                setAddingParticipants((v) => !v);
-                setAddParticipantsSearch("");
-              }}
-            >
-              <UserPlus className="size-4" />
-            </Button>
-          )}
-          {chat.type === "group" && canManage && (
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label="Manage invite links"
-              onClick={() => {
-                setManagingInvites((v) => {
-                  if (!v) void refetchInvites();
-                  return !v;
-                });
-              }}
-            >
-              <Link2 className="size-4" />
-            </Button>
-          )}
           {chat.type === "group" && (
             <Button
-              size="icon"
-              variant="ghost"
-              aria-label="Manage participants"
-              onClick={() => setManagingParticipants((v) => !v)}
+              variant="outline"
+              size="sm"
+              aria-label="Manage group"
+              onClick={() => setManagingGroup(true)}
             >
-              <Users className="size-4" />
-            </Button>
-          )}
-          {chat.type === "group" && (
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label="Leave chat"
-              disabled={leaveChat.isPending}
-              onClick={() => void handleLeave()}
-            >
-              <LogOut className="size-4" />
+              <Settings2 className="size-4" />
+              <span className="hidden sm:inline">Manage</span>
             </Button>
           )}
         </CardHeader>
-
-        {managingParticipants && chat.type === "group" && (
-          <div className="flex flex-col gap-2 border-b border-border bg-accent/20 px-4 py-3">
-            {actionError && (
-              <p className="text-xs text-destructive">{actionError}</p>
-            )}
-            <ul className="flex flex-col gap-1.5">
-              {chat.participants.map((p) => {
-                const isOwner = chat.createdBy === p.userId;
-                const isSelf = p.userId === session.user.id;
-                const label = userLabel(p);
-                // A chat-level admin can remove other members/admins but not
-                // the owner — mirrors `requireChatManager` plus the
-                // owner-removal guard in `removeParticipant` (ChatsHandler.ts).
-                const canRemove =
-                  canManage &&
-                  !isSelf &&
-                  (!isOwner ||
-                    myRole === "owner" ||
-                    session.user.role === "admin");
-                return (
-                  <li
-                    key={p.userId}
-                    className="flex items-center justify-between gap-2 text-xs"
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5 truncate">
-                      {isOwner ? (
-                        <Crown className="size-3.5 shrink-0 text-amber-500" />
-                      ) : p.role === "admin" ? (
-                        <Shield className="size-3.5 shrink-0 text-primary" />
-                      ) : null}
-                      <span className="truncate">
-                        {label}
-                        {isSelf ? " (you)" : ""}
-                      </span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-1">
-                      {canManageRoles && !isOwner && !isSelf && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-6"
-                          aria-label={
-                            p.role === "admin"
-                              ? `Remove admin from ${label}`
-                              : `Make ${label} an admin`
-                          }
-                          disabled={updateParticipantRole.isPending}
-                          onClick={() =>
-                            void handleUpdateParticipantRole(
-                              p.userId,
-                              p.role === "admin" ? "member" : "admin",
-                            )
-                          }
-                        >
-                          {p.role === "admin" ? (
-                            <ShieldOff className="size-3.5" />
-                          ) : (
-                            <Shield className="size-3.5" />
-                          )}
-                        </Button>
-                      )}
-                      {(canManageRoles || canClaimOwnership) && !isOwner && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 px-2 text-xs"
-                          disabled={transferOwnership.isPending}
-                          onClick={() =>
-                            void handleTransferOwnership(p.userId, label)
-                          }
-                        >
-                          Make owner
-                        </Button>
-                      )}
-                      {canRemove && (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-6"
-                          aria-label={`Remove ${label}`}
-                          disabled={removeParticipant.isPending}
-                          onClick={() =>
-                            void handleRemoveParticipant(p.userId, label)
-                          }
-                        >
-                          <UserMinus className="size-3.5" />
-                        </Button>
-                      )}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-            {canManage && (
-              <Button
-                size="sm"
-                variant="destructive"
-                className="self-end"
-                disabled={deleteChat.isPending}
-                onClick={() => void handleDelete()}
-              >
-                <Trash2 className="size-3.5" />
-                Delete chat
-              </Button>
-            )}
-          </div>
-        )}
-
-        {managingInvites && chat.type === "group" && canManage && (
-          <div className="flex flex-col gap-2 border-b border-border bg-accent/20 px-4 py-3">
-            {actionError && (
-              <p className="text-xs text-destructive">{actionError}</p>
-            )}
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">
-                Anyone with a link can join this chat.
-              </p>
-              <Button
-                size="sm"
-                className="h-7 px-2 text-xs"
-                disabled={createInvite.isPending}
-                onClick={() => void handleCreateInvite()}
-              >
-                {createInvite.isPending && (
-                  <Loader2 className="size-3.5 animate-spin" />
-                )}
-                New invite link
-              </Button>
-            </div>
-            {invitesLoading ? (
-              <p className="text-xs text-muted-foreground">Loading…</p>
-            ) : (
-              (() => {
-                const activeInvites = (invites ?? []).filter(
-                  (i) => i.revokedAt === null,
-                );
-                return activeInvites.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    No active invite links.
-                  </p>
-                ) : (
-                  <ul className="flex flex-col gap-1.5">
-                    {activeInvites.map((invite) => {
-                      const expired =
-                        invite.expiresAt !== null &&
-                        invite.expiresAt <= Date.now();
-                      const usedUp =
-                        invite.maxUses !== null &&
-                        invite.useCount >= invite.maxUses;
-                      return (
-                        <li
-                          key={invite.id}
-                          className="flex items-center justify-between gap-2 text-xs"
-                        >
-                          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
-                            {invite.code.slice(0, 10)}…
-                            {(expired || usedUp) && (
-                              <span className="ml-1 text-destructive">
-                                ({expired ? "expired" : "used up"})
-                              </span>
-                            )}
-                            {invite.maxUses !== null &&
-                              ` · ${invite.useCount}/${invite.maxUses} used`}
-                          </span>
-                          <span className="flex shrink-0 items-center gap-1">
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="size-6"
-                              aria-label="Copy invite link"
-                              onClick={() =>
-                                void handleCopyInviteLink(
-                                  invite.id,
-                                  invite.code,
-                                )
-                              }
-                            >
-                              {copiedInviteId === invite.id ? (
-                                <Check className="size-3.5 text-green-600" />
-                              ) : (
-                                <Copy className="size-3.5" />
-                              )}
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="size-6 text-destructive hover:text-destructive"
-                              aria-label="Revoke invite link"
-                              disabled={revokeInvite.isPending}
-                              onClick={() => void handleRevokeInvite(invite.id)}
-                            >
-                              <X className="size-3.5" />
-                            </Button>
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                );
-              })()
-            )}
-          </div>
-        )}
-
-        {addingParticipants && (
-          <div className="flex flex-col gap-2 border-b border-border bg-accent/20 px-4 py-3">
-            {actionError && (
-              <p className="text-xs text-destructive">{actionError}</p>
-            )}
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={addParticipantsSearch}
-                onChange={(e) => setAddParticipantsSearch(e.target.value)}
-                placeholder="Search users to add…"
-                className="h-8 pl-8 text-xs"
-              />
-            </div>
-            {!addParticipantsSearchReady ? (
-              <p className="text-xs text-muted-foreground">
-                Type at least {MIN_USER_SEARCH_QUERY_LENGTH} characters to
-                search.
-              </p>
-            ) : userSearchLoading ? (
-              <p className="text-xs text-muted-foreground">Searching…</p>
-            ) : candidatesToAdd.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                No matching users to add.
-              </p>
-            ) : (
-              <>
-                <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto">
-                  {candidatesToAdd.map((u) => {
-                    const isSelected = selectedToAdd.includes(u.id);
-                    return (
-                      <button
-                        key={u.id}
-                        type="button"
-                        onClick={() =>
-                          setSelectedToAdd((prev) =>
-                            isSelected
-                              ? prev.filter((id) => id !== u.id)
-                              : [...prev, u.id],
-                          )
-                        }
-                        className={cn(
-                          "rounded-full border px-3 py-1 text-xs transition-colors duration-200",
-                          isSelected
-                            ? "border-primary bg-primary text-primary-foreground"
-                            : "border-border bg-background/60 hover:border-primary/40",
-                        )}
-                      >
-                        {userLabel(u)}
-                      </button>
-                    );
-                  })}
-                </div>
-                <Button
-                  size="sm"
-                  className="self-end"
-                  disabled={
-                    selectedToAdd.length === 0 || addParticipants.isPending
-                  }
-                  onClick={() => void handleAddParticipants()}
-                >
-                  {addParticipants.isPending && (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  )}
-                  Add {selectedToAdd.length || ""}
-                </Button>
-              </>
-            )}
-          </div>
-        )}
-
         <CardContent className="px-0">
           <div
             ref={scrollRef}
@@ -1076,6 +473,15 @@ function ChatView({ id }: { id: string }) {
 
         <ChatComposer chatId={chatId} onSend={handleSend} />
       </Card>
+
+      {chat.type === "group" && (
+        <GroupManagementDialog
+          chat={chat}
+          currentUser={session.user}
+          open={managingGroup}
+          onClose={() => setManagingGroup(false)}
+        />
+      )}
     </main>
   );
 }
