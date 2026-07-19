@@ -219,6 +219,21 @@ minio:
 
   bucketName: chat-platform-attachments
 
+  # Exposes only the S3 API (port 9000) publicly — required for browsers to
+  # be able to fetch presigned attachment URLs at all (see issue #238 and
+  # chat-platform.s3PublicEndpoint in _helpers.tpl). Never exposes the admin
+  # console (port 9001). Leave disabled only if backend.s3.* is used instead
+  # (minio.enabled: false) to point at an already-public cloud bucket.
+  ingress:
+    enabled: true
+    className: "traefik"
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+    host: s3.chat-platform.johannes-jahn.com
+    tls:
+      enabled: true
+      secretName: chat-platform-s3-tls
+
   persistence:
     enabled: true
     size: 10Gi
