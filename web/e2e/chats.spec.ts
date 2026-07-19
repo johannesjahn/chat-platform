@@ -100,6 +100,88 @@ test("group chats can be created, renamed by the creator, and show all participa
   await contextB.close();
 });
 
+test("a user can redeem a group invite through the join page and via a direct invite link", async ({
+  browser,
+  injectApiUrl,
+  apiUrl,
+  request,
+}) => {
+  // A seed user just so the group can be created (a group needs at least one
+  // other participant); B and C below join purely through the invite flow.
+  const contextSeed = await browser.newContext();
+  await injectApiUrl(contextSeed);
+  const pageSeed = await contextSeed.newPage();
+  const { username: usernameSeed } = await registerViaUi(pageSeed);
+  await contextSeed.close();
+
+  // Owner A creates a group chat and mints an invite code for it. The code is
+  // created over the API (the UI only ever exposes it truncated + via
+  // clipboard) so the test can drive the join UI deterministically.
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  await registerViaUi(pageA);
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Group chat" }).click();
+  await pageA.fill("#group-title", "Invite squad");
+  await pageA.fill("#user-search", usernameSeed);
+  await pageA.getByRole("button", { name: `@${usernameSeed}` }).click();
+  await pageA.getByRole("button", { name: /^Create group/ }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+  const chatId = pageA.url().split("/").pop();
+
+  const sessionA = await pageA.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  const inviteResponse = await request.post(
+    `${apiUrl}/chats/${chatId}/invites`,
+    {
+      headers: { Authorization: `Bearer ${sessionA.accessToken}` },
+      data: {},
+    },
+  );
+  expect(inviteResponse.ok()).toBe(true);
+  const { code } = await inviteResponse.json();
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  await registerViaUi(pageB);
+
+  // Path 1: B pastes the code into the join page and clicks Continue. The
+  // confirmation step (a child route) must actually render — the regression
+  // was that `/chats/join/$code` never mounted because its parent join route
+  // had no `<Outlet />`, so this page silently stayed on the form.
+  await pageB.goto("/chats/join");
+  await pageB.getByLabel("Invite link or code").fill(code);
+  await pageB.getByRole("button", { name: "Continue" }).click();
+  await expect(pageB).toHaveURL(`/chats/join/${code}`);
+  await expect(pageB.getByText("You've been invited to a chat")).toBeVisible();
+
+  await pageB.getByRole("button", { name: "Join chat" }).click();
+  await expect(pageB).toHaveURL(/\/chats\/\d+/);
+  await expect(pageB.getByText("Invite squad")).toBeVisible();
+
+  // Path 2: a brand-new user opening the shared invite link directly (the
+  // `<origin>/chats/join/<code>` shape the copy-link button produces) also
+  // lands on the confirmation page rather than the join form.
+  const contextC = await browser.newContext();
+  await injectApiUrl(contextC);
+  const pageC = await contextC.newPage();
+  await registerViaUi(pageC);
+
+  await pageC.goto(`/chats/join/${code}`);
+  await expect(pageC.getByText("You've been invited to a chat")).toBeVisible();
+  await pageC.getByRole("button", { name: "Join chat" }).click();
+  await expect(pageC).toHaveURL(/\/chats\/\d+/);
+  await expect(pageC.getByText("Invite squad")).toBeVisible();
+
+  await contextA.close();
+  await contextB.close();
+  await contextC.close();
+});
+
 test("long messages are collapsed behind a Show more toggle", async ({
   browser,
   injectApiUrl,
