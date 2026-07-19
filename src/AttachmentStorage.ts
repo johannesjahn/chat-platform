@@ -56,7 +56,8 @@ export const S3AttachmentStorageLive = Layer.sync(AttachmentStorage, () => {
     const rewritten = new URL(url);
     const publicUrl = new URL(publicEndpoint);
     rewritten.protocol = publicUrl.protocol;
-    rewritten.host = publicUrl.host;
+    rewritten.hostname = publicUrl.hostname;
+    rewritten.port = publicUrl.port;
     return rewritten.toString();
   };
 
