@@ -198,7 +198,7 @@ minio:
 
   image:
     repository: minio/minio
-    tag: "RELEASE.2024-11-07T00-52-20Z"
+    tag: "RELEASE.2024-12-18T13-15-44Z"
 
   # The `mc` CLI image, used only by the one-shot bucket-creation Job (see
   # minio-init-job.yaml) — MinIO doesn't create buckets on its own.
