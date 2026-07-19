@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSession } from "@/lib/auth";
 
-export const Route = createFileRoute("/chats/join")({
+export const Route = createFileRoute("/chats/join/")({
   component: JoinChatPage,
 });
 
