@@ -1,0 +1,41 @@
+{{- if and .Values.minio.enabled .Values.minio.ingress.enabled -}}
+# Exposes only the S3 API port (9000) publicly — never the admin console
+# (9001, see minio-service.yaml), which has no business being reachable
+# outside the cluster. Needed so presigned attachment GET URLs (see
+# src/AttachmentStorage.ts and chat-platform.s3PublicEndpoint in
+# _helpers.tpl) resolve to something a browser can actually reach; without
+# it, S3_PUBLIC_ENDPOINT has nothing to point at and attachments silently
+# fail to load in the frontend (issue #238).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-minio
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  {{- with .Values.minio.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.minio.ingress.className }}
+  ingressClassName: {{ .Values.minio.ingress.className }}
+  {{- end }}
+  {{- if .Values.minio.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.minio.ingress.host }}
+      secretName: {{ .Values.minio.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.minio.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "chat-platform.fullname" . }}-minio
+                port:
+                  name: s3
+{{- end }}

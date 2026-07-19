@@ -93,6 +93,26 @@ access/secret key instead.
 {{- end -}}
 
 {{/*
+Resolved public endpoint for presigned attachment URLs handed to the browser
+(see src/AttachmentStorage.ts's S3_PUBLIC_ENDPOINT). When minio.enabled, this
+is the in-cluster MinIO's own Ingress (see minio-ingress.yaml) if it's
+turned on — MinIO's internal Service address isn't reachable from a
+browser. Otherwise it comes from backend.s3.publicEndpoint (a real cloud
+bucket's public endpoint, if it differs from backend.s3.endpoint). Empty if
+neither applies, e.g. minio.ingress.enabled is false — attachments then
+simply won't be viewable outside the cluster, same as before this existed.
+*/}}
+{{- define "chat-platform.s3PublicEndpoint" -}}
+{{- if .Values.minio.enabled -}}
+{{- if .Values.minio.ingress.enabled -}}
+{{- printf "%s://%s" (ternary "https" "http" .Values.minio.ingress.tls.enabled) .Values.minio.ingress.host -}}
+{{- end -}}
+{{- else -}}
+{{- .Values.backend.s3.publicEndpoint -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Shared env-var block for the S3-compatible client (see
 src/AttachmentStorage.ts). Used by both the backend Deployment and the
 minio-init Job. When minio.enabled, endpoint/bucket point at the in-cluster
@@ -102,9 +122,10 @@ bucket).
 {{- define "chat-platform.s3Env" -}}
 - name: S3_ENDPOINT
   value: {{ if .Values.minio.enabled }}{{ printf "http://%s-minio:9000" (include "chat-platform.fullname" .) | quote }}{{ else }}{{ .Values.backend.s3.endpoint | quote }}{{ end }}
-{{- if .Values.backend.s3.publicEndpoint }}
+{{- $publicEndpoint := include "chat-platform.s3PublicEndpoint" . }}
+{{- if $publicEndpoint }}
 - name: S3_PUBLIC_ENDPOINT
-  value: {{ .Values.backend.s3.publicEndpoint | quote }}
+  value: {{ $publicEndpoint | quote }}
 {{- end }}
 - name: S3_BUCKET_NAME
   value: {{ if .Values.minio.enabled }}{{ .Values.minio.bucketName | quote }}{{ else }}{{ .Values.backend.s3.bucketName | quote }}{{ end }}
