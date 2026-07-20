@@ -199,5 +199,31 @@
       depNameTemplate: "helmfile/helmfile",
       datasourceTemplate: "github-releases",
     },
+
+    // ffmpeg is installed via apt (see the Dockerfile and ci.yml comments),
+    // which none of Renovate's built-in managers cover, so it's tracked via
+    // the repology datasource instead — it aggregates package versions
+    // across distro repos, keyed as "<repology repo>/<package>". The
+    // Dockerfile's base image (oven/bun) is Debian trixie (Debian 13) and
+    // the CI runner is ubuntu-latest (Ubuntu 24.04); those are different
+    // apt archives with independently-versioned ffmpeg builds, so each gets
+    // its own regex manager rather than being grouped like the Bun version
+    // above.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^Dockerfile$/"],
+      matchStrings: ["ARG FFMPEG_VERSION=(?<currentValue>\\S+)"],
+      depNameTemplate: "debian_13/ffmpeg",
+      datasourceTemplate: "repology",
+      versioningTemplate: "loose",
+    },
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^\\.github/workflows/ci\\.yml$/"],
+      matchStrings: ["FFMPEG_VERSION:\\s*(?<currentValue>\\S+)"],
+      depNameTemplate: "ubuntu_24_04/ffmpeg",
+      datasourceTemplate: "repology",
+      versioningTemplate: "loose",
+    },
   ],
 }

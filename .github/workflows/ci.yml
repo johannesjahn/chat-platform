@@ -308,8 +308,14 @@ jobs:
       # VideoProcessing.ts (issue #251) shells out to ffmpeg/ffprobe via
       # Bun.$ — not bundled with Bun or any npm dep, so the runner needs it
       # installed for attachments.test.ts's video-processing tests to pass.
+      # Pinned to an exact version rather than left floating (this runner is
+      # Ubuntu, a different apt archive from the Dockerfile's Debian trixie
+      # base, so it tracks its own ubuntu_24_04/ffmpeg regex manager in
+      # .github/renovate.json5, separate from the Dockerfile's pin).
       - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        env:
+          FFMPEG_VERSION: 7:6.1.1-3ubuntu5
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg=${FFMPEG_VERSION}
 
       - name: Run backend tests with coverage
         # bunfig.toml's [test] timeout is a no-op in this Bun version — the
