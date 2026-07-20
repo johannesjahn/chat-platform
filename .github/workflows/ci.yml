@@ -310,8 +310,10 @@ jobs:
       # installed for attachments.test.ts's video-processing tests to pass.
       # Pinned to an exact version rather than left floating (this runner is
       # Ubuntu, a different apt archive from the Dockerfile's Debian trixie
-      # base, so it tracks its own ubuntu_24_04/ffmpeg regex manager in
-      # .github/renovate.json5, separate from the Dockerfile's pin).
+      # base, hence a different pinned version). Bumped by hand, not by
+      # Renovate — see the Dockerfile's comment on why the repology-based
+      # regex manager for this was dropped (issue #156). Check
+      # https://packages.ubuntu.com/noble/ffmpeg for newer point releases.
       - name: Install ffmpeg
         env:
           FFMPEG_VERSION: 7:6.1.1-3ubuntu5
