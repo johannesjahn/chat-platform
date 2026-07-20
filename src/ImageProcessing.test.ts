@@ -62,3 +62,54 @@ test("processImage strips EXIF/GPS metadata from a re-encoded image (#258)", asy
   expect(outputText).not.toContain(DEVICE_MODEL);
   expect(outputText).not.toContain(DEVICE_MAKE);
 });
+
+// Trailing bytes appended after a GIF's valid trailer (0x3B) aren't part of
+// what any GIF decoder reads — sharp included — so if `processImage` ever
+// regresses to passing GIF bytes through unchanged (issue #257), this exact
+// marker would ride along into what gets served to other users.
+const SMUGGLED_MARKER = "SMUGGLED-PAYLOAD-AFTER-GIF-TRAILER";
+
+const makeAnimatedGif = async (
+  width: number,
+  height: number,
+): Promise<Uint8Array> => {
+  const frame = async (r: number, g: number, b: number) =>
+    sharp({
+      create: { width, height, channels: 3, background: { r, g, b } },
+    })
+      .png()
+      .toBuffer();
+  const frames = [
+    await frame(255, 0, 0),
+    await frame(0, 255, 0),
+    await frame(0, 0, 255),
+  ];
+  const gif = await sharp(frames, { join: { animated: true } })
+    .gif()
+    .toBuffer();
+  return new Uint8Array(
+    Buffer.concat([gif, Buffer.from(SMUGGLED_MARKER, "latin1")]),
+  );
+};
+
+test("processImage re-encodes animated GIFs instead of passing original bytes through (#257)", async () => {
+  const input = await makeAnimatedGif(40, 30);
+
+  const inputMeta = await sharp(input, { animated: true }).metadata();
+  expect(inputMeta.pages).toBe(3);
+
+  const processed = await processImage(input, "image/gif");
+
+  // The whole point: stored/served bytes must be sharp's re-encode output,
+  // not the uploaded bytes verbatim — so nothing appended past the GIF
+  // trailer survives.
+  const outputText = Buffer.from(processed.data).toString("latin1");
+  expect(outputText).not.toContain(SMUGGLED_MARKER);
+
+  expect(processed.contentType).toBe("image/webp");
+  expect(processed.width).toBe(40);
+  expect(processed.height).toBe(30);
+
+  const outputMeta = await sharp(processed.data, { animated: true }).metadata();
+  expect(outputMeta.pages).toBe(3);
+});
