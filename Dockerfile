@@ -8,9 +8,12 @@ WORKDIR /app
 # npm-distributed ffmpeg binary this repo shells out to, so it has to come
 # from the base image's package manager. Pinned to an exact Debian trixie
 # (this image's base OS) package version rather than left floating, so
-# builds stay reproducible. Renovate has no built-in datasource for apt
-# packages, so it's tracked via the debian_13/ffmpeg regex manager in
-# .github/renovate.json5 (repology datasource) instead.
+# builds stay reproducible. Bumped by hand, not by Renovate: Renovate's
+# repology datasource is the only way to track apt package versions, but
+# it's unreliable in practice (frequent lookup failures against
+# repology.org — see issue #156) and was dropped from
+# .github/renovate.json5 for this reason. Check
+# https://packages.debian.org/trixie/ffmpeg for newer point releases.
 ARG FFMPEG_VERSION=7:7.1.5-0+deb13u1
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg=${FFMPEG_VERSION} \
   && rm -rf /var/lib/apt/lists/*
