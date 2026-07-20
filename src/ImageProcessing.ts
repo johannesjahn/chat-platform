@@ -85,6 +85,13 @@ export const processImage = async (
     };
   }
 
+  // Deliberately no `.withMetadata()` call here: sharp's default behavior
+  // strips all EXIF/GPS/IPTC/XMP metadata on re-encode, and that's relied
+  // upon as a privacy control — stored/served images shouldn't leak where
+  // or on what device they were taken. Do not add `.withMetadata()` (e.g.
+  // to preserve color profile data) without deliberately re-adding
+  // EXIF/GPS stripping first; see the regression test in
+  // ImageProcessing.test.ts and issue #258.
   const { data, info } = await sharp(input)
     .rotate()
     .resize({
