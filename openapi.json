@@ -4039,7 +4039,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AttachmentTooLarge"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AttachmentTooLarge"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AttachmentQuotaExceeded"
+                    }
+                  ]
                 }
               }
             }
@@ -4090,6 +4097,64 @@
             }
           },
           "required": true
+        }
+      }
+    },
+    "/attachments/{id}": {
+      "delete": {
+        "tags": [
+          "attachments"
+        ],
+        "operationId": "attachments.deleteAttachment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -5617,6 +5682,25 @@
             "type": "string",
             "enum": [
               "AttachmentTooLarge"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "AttachmentQuotaExceeded": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "AttachmentQuotaExceeded"
             ]
           }
         },

@@ -1,8 +1,10 @@
 import { HttpApiBuilder } from "@effect/platform";
 import type { BunFile } from "bun";
+import { eq, sql } from "drizzle-orm";
 import { Effect, Metric, MetricLabel } from "effect";
 import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
+  AttachmentQuotaExceeded,
   AttachmentTooLarge,
   ChatApi,
   MAX_ATTACHMENT_SIZE_BYTES,
@@ -10,10 +12,10 @@ import {
   UnsupportedAttachmentType,
 } from "./Api.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
-import { toApiAttachment } from "./attachments.ts";
+import { getOwnedAttachmentOr404, toApiAttachment } from "./attachments.ts";
 import { processAudio } from "./AudioProcessing.ts";
 import { CurrentUser } from "./Auth.ts";
-import { Db } from "./Db.ts";
+import { Db, type DrizzleDb } from "./Db.ts";
 import { processImage } from "./ImageProcessing.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { RateLimiter } from "./RateLimiter.ts";
@@ -50,124 +52,181 @@ const enforceUploadLimit = (userId: number) =>
     }
   });
 
+// Bounds total storage a single user can accumulate across every upload —
+// unlike enforceUploadLimit above (velocity: uploads per minute) or
+// MAX_ATTACHMENT_SIZE_BYTES (one file's size), nothing previously bounded
+// how much a user could pile up over time by uploading steadily rather than
+// in a burst (issue #256).
+export const ATTACHMENT_QUOTA_MAX_BYTES = 500 * 1024 * 1024; // 500MB per user
+
+const enforceUploadQuota = (
+  db: DrizzleDb,
+  userId: number,
+  incomingSize: number,
+) =>
+  Effect.gen(function* () {
+    const rows = yield* Effect.tryPromise(() =>
+      db
+        .select({
+          totalBytes: sql<string>`coalesce(sum(${attachments.size}), 0)`,
+        })
+        .from(attachments)
+        .where(eq(attachments.uploaderId, userId)),
+    ).pipe(Effect.orDie);
+    const currentTotal = Number(rows[0]?.totalBytes ?? 0);
+    if (currentTotal + incomingSize > ATTACHMENT_QUOTA_MAX_BYTES) {
+      return yield* Effect.fail(
+        new AttachmentQuotaExceeded({
+          message: `Storage quota exceeded: uploads are capped at ${ATTACHMENT_QUOTA_MAX_BYTES} bytes per user`,
+        }),
+      );
+    }
+  });
+
 export const AttachmentsHandlerLive = HttpApiBuilder.group(
   ChatApi,
   "attachments",
   (handlers) =>
-    handlers.handle("uploadAttachment", ({ payload }) =>
-      Effect.gen(function* () {
-        const currentUser = yield* CurrentUser;
-        yield* enforceUploadLimit(currentUser.id);
+    handlers
+      .handle("uploadAttachment", ({ payload }) =>
+        Effect.gen(function* () {
+          const currentUser = yield* CurrentUser;
+          yield* enforceUploadLimit(currentUser.id);
 
-        const db = yield* Db;
-        const storage = yield* AttachmentStorage;
-        const file = payload.file;
+          const db = yield* Db;
+          const storage = yield* AttachmentStorage;
+          const file = payload.file;
 
-        if (
-          !(ALLOWED_ATTACHMENT_MIME_TYPES as ReadonlyArray<string>).includes(
-            file.contentType,
+          if (
+            !(ALLOWED_ATTACHMENT_MIME_TYPES as ReadonlyArray<string>).includes(
+              file.contentType,
+            )
           )
-        )
-          return yield* Effect.fail(
-            new UnsupportedAttachmentType({
-              message: `Unsupported file type: ${file.contentType}`,
-            }),
+            return yield* Effect.fail(
+              new UnsupportedAttachmentType({
+                message: `Unsupported file type: ${file.contentType}`,
+              }),
+            );
+
+          const bunFile = Bun.file(file.path);
+          const originalSize = bunFile.size;
+          if (originalSize > MAX_ATTACHMENT_SIZE_BYTES)
+            return yield* Effect.fail(
+              new AttachmentTooLarge({
+                message: `File exceeds the maximum size of ${MAX_ATTACHMENT_SIZE_BYTES} bytes`,
+              }),
+            );
+
+          // Checked against the original (pre-processing) size, same as the
+          // AttachmentTooLarge check above — the actual stored size (after
+          // image/video/audio re-encoding) is usually smaller, so this is a
+          // conservative upper bound that avoids spending CPU on processing
+          // before rejecting an upload that's already over quota.
+          yield* enforceUploadQuota(db, currentUser.id, originalSize);
+
+          // Images get scaled down and re-encoded (and a BlurHash placeholder
+          // generated) before being stored — see ImageProcessing.ts and issue
+          // #248. Videos get scaled down and transcoded to WebM — see
+          // VideoProcessing.ts and issue #251. Audio gets transcoded to a
+          // capped Ogg/Opus format — see AudioProcessing.ts and issue #252.
+          let uploadData: BunFile | Uint8Array = bunFile;
+          let uploadContentType = file.contentType;
+          let size = originalSize;
+          let width: number | null = null;
+          let height: number | null = null;
+          let blurhash: string | null = null;
+
+          if (file.contentType.startsWith("image/")) {
+            const processed = yield* Effect.tryPromise({
+              try: async () =>
+                processImage(await bunFile.bytes(), file.contentType),
+              catch: () =>
+                new UnsupportedAttachmentType({
+                  message: "Uploaded file is not a valid image",
+                }),
+            });
+            uploadData = processed.data;
+            uploadContentType = processed.contentType;
+            size = processed.data.length;
+            width = processed.width;
+            height = processed.height;
+            blurhash = processed.blurhash;
+          } else if (file.contentType.startsWith("video/")) {
+            const processed = yield* Effect.tryPromise({
+              try: () => processVideo(file.path),
+              catch: () =>
+                new UnsupportedAttachmentType({
+                  message: "Uploaded file is not a valid video",
+                }),
+            });
+            uploadData = processed.data;
+            uploadContentType = processed.contentType;
+            size = processed.data.length;
+            width = processed.width;
+            height = processed.height;
+          } else if (file.contentType.startsWith("audio/")) {
+            const processed = yield* Effect.tryPromise({
+              try: async () => processAudio(await bunFile.bytes()),
+              catch: () =>
+                new UnsupportedAttachmentType({
+                  message: "Uploaded file is not a valid audio file",
+                }),
+            });
+            uploadData = processed.data;
+            uploadContentType = processed.contentType;
+            size = processed.data.length;
+          }
+
+          const storageKey = `attachments/${crypto.randomUUID()}`;
+          yield* storage
+            .upload(storageKey, uploadData, uploadContentType)
+            .pipe(Effect.orDie);
+
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .insert(attachments)
+              .values({
+                uploaderId: currentUser.id,
+                filename: file.name,
+                mimeType: uploadContentType,
+                size,
+                storageKey,
+                width,
+                height,
+                blurhash,
+              })
+              .returning(),
+          ).pipe(Effect.orDie);
+          const row = rows[0];
+          if (!row)
+            return yield* Effect.die(new Error("INSERT returned no rows"));
+
+          yield* Metric.update(
+            Metric.taggedWithLabels(contentCreatedTotal, [
+              MetricLabel.make("type", "attachment"),
+            ]),
+            1,
           );
 
-        const bunFile = Bun.file(file.path);
-        const originalSize = bunFile.size;
-        if (originalSize > MAX_ATTACHMENT_SIZE_BYTES)
-          return yield* Effect.fail(
-            new AttachmentTooLarge({
-              message: `File exceeds the maximum size of ${MAX_ATTACHMENT_SIZE_BYTES} bytes`,
-            }),
+          return toApiAttachment(row, storage.presignGetUrl(row.storageKey));
+        }),
+      )
+      .handle("deleteAttachment", ({ path }) =>
+        Effect.gen(function* () {
+          const currentUser = yield* CurrentUser;
+          const db = yield* Db;
+          const storage = yield* AttachmentStorage;
+
+          const row = yield* getOwnedAttachmentOr404(
+            db,
+            path.id,
+            currentUser.id,
           );
 
-        // Images get scaled down and re-encoded (and a BlurHash placeholder
-        // generated) before being stored — see ImageProcessing.ts and issue
-        // #248. Videos get scaled down and transcoded to WebM — see
-        // VideoProcessing.ts and issue #251. Audio gets transcoded to a
-        // capped Ogg/Opus format — see AudioProcessing.ts and issue #252.
-        let uploadData: BunFile | Uint8Array = bunFile;
-        let uploadContentType = file.contentType;
-        let size = originalSize;
-        let width: number | null = null;
-        let height: number | null = null;
-        let blurhash: string | null = null;
-
-        if (file.contentType.startsWith("image/")) {
-          const processed = yield* Effect.tryPromise({
-            try: async () =>
-              processImage(await bunFile.bytes(), file.contentType),
-            catch: () =>
-              new UnsupportedAttachmentType({
-                message: "Uploaded file is not a valid image",
-              }),
-          });
-          uploadData = processed.data;
-          uploadContentType = processed.contentType;
-          size = processed.data.length;
-          width = processed.width;
-          height = processed.height;
-          blurhash = processed.blurhash;
-        } else if (file.contentType.startsWith("video/")) {
-          const processed = yield* Effect.tryPromise({
-            try: () => processVideo(file.path),
-            catch: () =>
-              new UnsupportedAttachmentType({
-                message: "Uploaded file is not a valid video",
-              }),
-          });
-          uploadData = processed.data;
-          uploadContentType = processed.contentType;
-          size = processed.data.length;
-          width = processed.width;
-          height = processed.height;
-        } else if (file.contentType.startsWith("audio/")) {
-          const processed = yield* Effect.tryPromise({
-            try: async () => processAudio(await bunFile.bytes()),
-            catch: () =>
-              new UnsupportedAttachmentType({
-                message: "Uploaded file is not a valid audio file",
-              }),
-          });
-          uploadData = processed.data;
-          uploadContentType = processed.contentType;
-          size = processed.data.length;
-        }
-
-        const storageKey = `attachments/${crypto.randomUUID()}`;
-        yield* storage
-          .upload(storageKey, uploadData, uploadContentType)
-          .pipe(Effect.orDie);
-
-        const rows = yield* Effect.tryPromise(() =>
-          db
-            .insert(attachments)
-            .values({
-              uploaderId: currentUser.id,
-              filename: file.name,
-              mimeType: uploadContentType,
-              size,
-              storageKey,
-              width,
-              height,
-              blurhash,
-            })
-            .returning(),
-        ).pipe(Effect.orDie);
-        const row = rows[0];
-        if (!row)
-          return yield* Effect.die(new Error("INSERT returned no rows"));
-
-        yield* Metric.update(
-          Metric.taggedWithLabels(contentCreatedTotal, [
-            MetricLabel.make("type", "attachment"),
-          ]),
-          1,
-        );
-
-        return toApiAttachment(row, storage.presignGetUrl(row.storageKey));
-      }),
-    ),
+          yield* storage.delete(row.storageKey).pipe(Effect.orDie);
+          yield* Effect.tryPromise(() =>
+            db.delete(attachments).where(eq(attachments.id, row.id)),
+          ).pipe(Effect.orDie);
+        }),
+      ),
 );

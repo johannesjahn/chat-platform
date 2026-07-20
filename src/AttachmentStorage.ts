@@ -23,6 +23,10 @@ export class AttachmentStorage extends Context.Tag("AttachmentStorage")<
     // compute a fresh, never-stale URL on every read without threading an
     // extra async step through every message/post-building helper.
     readonly presignGetUrl: (key: string) => string;
+    // Used by deleteAttachment (AttachmentsHandler.ts) and the orphaned-
+    // upload sweep (AttachmentCleanup.ts, issue #256). Deleting a key that
+    // doesn't exist is not an error in either backend.
+    readonly delete: (key: string) => Effect.Effect<void, unknown>;
   }
 >() {}
 
@@ -81,6 +85,7 @@ export const S3AttachmentStorageLive = Layer.sync(AttachmentStorage, () => {
         method: "GET",
         expiresIn: PRESIGNED_URL_TTL_SECONDS,
       }),
+    delete: (key) => Effect.tryPromise(() => client.unlink(key)),
   };
 });
 
@@ -110,6 +115,10 @@ export const InMemoryAttachmentStorageLive = Layer.sync(
         if (!entry) return "";
         return `data:${entry.contentType};base64,${Buffer.from(entry.data).toString("base64")}`;
       },
+      delete: (key) =>
+        Effect.sync(() => {
+          store.delete(key);
+        }),
     };
   },
 );
