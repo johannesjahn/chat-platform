@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 import sharp from "sharp";
-import { processImage } from "./ImageProcessing.ts";
+import {
+  AVATAR_VARIANT_PX,
+  MIN_AVATAR_SOURCE_PX,
+  processAvatar,
+  processImage,
+} from "./ImageProcessing.ts";
 
 // GPS coordinates and device info embedded via EXIF, the way a real
 // phone/camera photo would carry them — processImage re-encodes rescalable
@@ -112,4 +117,125 @@ test("processImage re-encodes animated GIFs instead of passing original bytes th
 
   const outputMeta = await sharp(processed.data, { animated: true }).metadata();
   expect(outputMeta.pages).toBe(3);
+});
+
+// Four solid-colored quadrants — lets a test assert *which* region of the
+// source `processAvatar` actually kept, not just the output's dimensions.
+const makeQuadrantImage = async (size: number): Promise<Uint8Array> => {
+  const half = size / 2;
+  const quadrant = (r: number, g: number, b: number) =>
+    sharp({
+      create: {
+        width: half,
+        height: half,
+        channels: 3,
+        background: { r, g, b },
+      },
+    })
+      .png()
+      .toBuffer();
+  return sharp({
+    create: {
+      width: size,
+      height: size,
+      channels: 3,
+      background: { r: 10, g: 10, b: 10 },
+    },
+  })
+    .composite([
+      { input: await quadrant(255, 0, 0), left: 0, top: 0 }, // top-left: red
+      { input: await quadrant(0, 255, 0), left: half, top: 0 }, // top-right: green
+      { input: await quadrant(0, 0, 255), left: 0, top: half }, // bottom-left: blue
+      { input: await quadrant(255, 255, 0), left: half, top: half }, // bottom-right: yellow
+    ])
+    .png()
+    .toBuffer();
+};
+
+const averageColor = async (
+  data: Uint8Array,
+): Promise<{ r: number; g: number; b: number }> => {
+  const { data: raw, info } = await sharp(data)
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  const pixels = info.width * info.height;
+  for (let i = 0; i < raw.length; i += info.channels) {
+    r += raw[i]!;
+    g += raw[i + 1]!;
+    b += raw[i + 2]!;
+  }
+  return { r: r / pixels, g: g / pixels, b: b / pixels };
+};
+
+test("processAvatar crops the chosen square region before resizing into the 3 fixed sizes", async () => {
+  const size = 512;
+  const input = await makeQuadrantImage(size);
+  const half = size / 2;
+
+  // Crop the top-right (green) quadrant.
+  const processed = await processAvatar(input, { x: half, y: 0, size: half });
+  expect(processed.contentType).toBe("image/webp");
+
+  for (const [variant, target] of [
+    ["small", AVATAR_VARIANT_PX.small],
+    ["medium", AVATAR_VARIANT_PX.medium],
+    ["large", AVATAR_VARIANT_PX.large],
+  ] as const) {
+    const bytes = processed[variant];
+    const meta = await sharp(bytes).metadata();
+    expect(meta.width).toBe(target);
+    expect(meta.height).toBe(target);
+
+    const avg = await averageColor(bytes);
+    expect(avg.r).toBeLessThan(50);
+    expect(avg.g).toBeGreaterThan(200);
+    expect(avg.b).toBeLessThan(50);
+  }
+});
+
+test("processAvatar rejects a source image smaller than MIN_AVATAR_SOURCE_PX", async () => {
+  const input = await sharp({
+    create: {
+      width: MIN_AVATAR_SOURCE_PX - 1,
+      height: MIN_AVATAR_SOURCE_PX - 1,
+      channels: 3,
+      background: { r: 1, g: 2, b: 3 },
+    },
+  })
+    .png()
+    .toBuffer();
+
+  await expect(
+    processAvatar(input, { x: 0, y: 0, size: 100 }),
+  ).rejects.toThrow();
+});
+
+test("processAvatar rejects a crop region outside the image bounds", async () => {
+  const input = await sharp({
+    create: {
+      width: 512,
+      height: 512,
+      channels: 3,
+      background: { r: 1, g: 2, b: 3 },
+    },
+  })
+    .png()
+    .toBuffer();
+
+  await expect(
+    processAvatar(input, { x: 400, y: 400, size: 200 }),
+  ).rejects.toThrow();
+});
+
+test("processAvatar strips EXIF/GPS metadata from every stored variant (mirrors #258 for avatars)", async () => {
+  const input = await makeJpegWithGpsExif(512, 512);
+  const processed = await processAvatar(input, { x: 0, y: 0, size: 512 });
+
+  for (const variant of ["small", "medium", "large"] as const) {
+    const outputMeta = await sharp(processed[variant]).metadata();
+    expect(outputMeta.exif).toBeUndefined();
+  }
 });

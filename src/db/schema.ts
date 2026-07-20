@@ -22,6 +22,18 @@ export const users = pgTable(
     // to `username` (display name) or initials (avatar) in the UI.
     displayName: text("display_name"),
     avatarUrl: text("avatar_url"),
+    // Uploaded-and-cropped avatar (issue #269), stored as three fixed-size
+    // `data:image/webp;base64,...` URLs (see `processAvatar`/`AVATAR_VARIANT_PX`
+    // in ImageProcessing.ts) rather than object-storage keys: avatars are
+    // small enough post-crop-and-resize (tens of KB total) that embedding
+    // them directly in the row avoids needing a presigned-URL round trip (and
+    // its 15-minute expiry, see AttachmentStorage.ts) just to keep the
+    // header/session avatar rendering — and doesn't require an S3-compatible
+    // bucket to be configured just for this feature. Mutually exclusive with
+    // `avatarUrl`: setting one clears the other (see UsersHandler.ts).
+    avatarSmall: text("avatar_small"),
+    avatarMedium: text("avatar_medium"),
+    avatarLarge: text("avatar_large"),
     role: text("role", { enum: ["user", "admin"] })
       .notNull()
       .default("user"),

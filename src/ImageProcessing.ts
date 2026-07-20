@@ -48,6 +48,109 @@ export type ProcessedImage = {
   readonly blurhash: string;
 };
 
+// Minimum source dimensions an avatar upload must clear *before* any
+// cropping (issue #269) — rejects images too small to produce a decent
+// `large` variant (see AVATAR_VARIANT_PX below) regardless of what square
+// region within it ends up chosen.
+export const MIN_AVATAR_SOURCE_PX = 256;
+
+// Fixed output sizes an avatar is resized to (issue #269), replacing
+// `AVATAR_SIZES`' old approach of serving one full-resolution image scaled
+// down by CSS everywhere. Roughly 2x the largest CSS box each is displayed
+// in (see `AVATAR_SIZES` in web/src/components/Avatar.tsx: sm/md both map to
+// "small", lg to "medium", xl to "large") for a reasonably crisp look on
+// high-DPI screens without storing/serving anything close to the original
+// upload's resolution.
+export const AVATAR_VARIANT_PX = {
+  small: 96,
+  medium: 192,
+  large: 320,
+} as const;
+
+export type AvatarCropRegion = {
+  readonly x: number;
+  readonly y: number;
+  readonly size: number;
+};
+
+export type ProcessedAvatar = {
+  readonly small: Uint8Array;
+  readonly medium: Uint8Array;
+  readonly large: Uint8Array;
+  readonly contentType: string;
+};
+
+// Crops `input` to the square region described by `crop` and resizes it into
+// the 3 fixed AVATAR_VARIANT_PX sizes, re-encoded as WebP (see
+// OUTPUT_CONTENT_TYPE's rationale above — same tradeoffs apply here).
+// Throws (mapped by the caller — UsersHandler.ts — to a typed
+// InvalidAvatarUpload error) if `input` isn't a decodable image, is smaller
+// than MIN_AVATAR_SOURCE_PX in either dimension, or `crop` falls outside the
+// image's actual bounds.
+export const processAvatar = async (
+  input: Uint8Array,
+  crop: AvatarCropRegion,
+): Promise<ProcessedAvatar> => {
+  // Rotate once up front (EXIF-orientation-aware, like processImage above)
+  // and materialize the result: sharp's `.metadata()` reports the raw file's
+  // *pre*-rotation dimensions even with `.rotate()` queued ahead of it, but
+  // `crop` is computed by the frontend against the image as the browser
+  // displays it (i.e. already auto-rotated) — so the only reliable way to
+  // validate/extract against matching dimensions is to actually apply the
+  // rotation first.
+  const { data: oriented, info } = await sharp(input)
+    .rotate()
+    .toBuffer({ resolveWithObject: true });
+
+  if (info.width < MIN_AVATAR_SOURCE_PX || info.height < MIN_AVATAR_SOURCE_PX) {
+    throw new Error(
+      `Image must be at least ${MIN_AVATAR_SOURCE_PX}x${MIN_AVATAR_SOURCE_PX}px (got ${info.width}x${info.height})`,
+    );
+  }
+
+  const { x, y, size } = crop;
+  if (
+    !Number.isFinite(size) ||
+    size <= 0 ||
+    x < 0 ||
+    y < 0 ||
+    x + size > info.width ||
+    y + size > info.height
+  ) {
+    throw new Error("Crop region is outside the image bounds");
+  }
+
+  const cropped = sharp(oriented).extract({
+    left: Math.round(x),
+    top: Math.round(y),
+    width: Math.round(size),
+    height: Math.round(size),
+  });
+
+  // Deliberately no `.withMetadata()` — same EXIF/GPS-stripping privacy
+  // rationale as processImage above, and the regression test in
+  // ImageProcessing.test.ts covers this for avatars too.
+  const [small, medium, large] = await Promise.all([
+    cropped
+      .clone()
+      .resize(AVATAR_VARIANT_PX.small, AVATAR_VARIANT_PX.small)
+      .webp()
+      .toBuffer(),
+    cropped
+      .clone()
+      .resize(AVATAR_VARIANT_PX.medium, AVATAR_VARIANT_PX.medium)
+      .webp()
+      .toBuffer(),
+    cropped
+      .clone()
+      .resize(AVATAR_VARIANT_PX.large, AVATAR_VARIANT_PX.large)
+      .webp()
+      .toBuffer(),
+  ]);
+
+  return { small, medium, large, contentType: OUTPUT_CONTENT_TYPE };
+};
+
 const blurhashFromFirstFrame = async (input: Uint8Array): Promise<string> => {
   const { data, info } = await sharp(input, { page: 0 })
     .rotate()

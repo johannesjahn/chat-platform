@@ -132,6 +132,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users/me/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["users.uploadAvatar"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users/{id}/role": {
         parameters: {
             query?: never;
@@ -589,7 +605,13 @@ export interface components {
             username: string;
             displayName: string | null;
             avatarUrl: string | null;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
             role: components["schemas"]["UserRole"];
+        };
+        AvatarVariants: {
+            small: string;
+            medium: string;
+            large: string;
         };
         /** @enum {string} */
         UserRole: "user" | "admin";
@@ -718,6 +740,18 @@ export interface components {
         UpdateProfileBody: {
             displayName: components["schemas"]["NonEmptyTrimmedString"] | null;
             avatarUrl: string | null;
+        };
+        /** Format: binary */
+        PersistedFile: string;
+        InvalidAvatarUpload: {
+            message: string;
+            /** @enum {string} */
+            _tag: "InvalidAvatarUpload";
+        };
+        AvatarTooLarge: {
+            message: string;
+            /** @enum {string} */
+            _tag: "AvatarTooLarge";
         };
         DeleteAccountBody: {
             /**
@@ -964,8 +998,6 @@ export interface components {
             useCount: number;
             revokedAt: number | null;
         };
-        /** Format: binary */
-        PersistedFile: string;
         UnsupportedAttachmentType: {
             message: string;
             /** @enum {string} */
@@ -1107,6 +1139,7 @@ export interface operations {
                         username: string;
                         displayName: string | null;
                         avatarUrl: string | null;
+                        avatarVariants: components["schemas"]["AvatarVariants"] | null;
                         role: components["schemas"]["UserRole"];
                     };
                 };
@@ -1402,6 +1435,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvalidCredentials"] | components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequests"];
+                };
+            };
+        };
+    };
+    "users.uploadAvatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * itemsCount(1)
+                     * @description an array of exactly 1 item(s)
+                     */
+                    file: components["schemas"]["PersistedFile"][];
+                    /** @description a string to be decoded into a number */
+                    x: string;
+                    /** @description a string to be decoded into a number */
+                    y: string;
+                    /** @description a string to be decoded into a number */
+                    size: string;
+                };
+            };
+        };
+        responses: {
+            /** @description User */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidAvatarUpload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description AvatarTooLarge */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AvatarTooLarge"];
                 };
             };
             /** @description TooManyRequests */

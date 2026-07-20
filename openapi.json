@@ -150,6 +150,7 @@
                     "username",
                     "displayName",
                     "avatarUrl",
+                    "avatarVariants",
                     "role"
                   ],
                   "properties": {
@@ -173,6 +174,16 @@
                       "anyOf": [
                         {
                           "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "avatarVariants": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/AvatarVariants"
                         },
                         {
                           "type": "null"
@@ -576,6 +587,120 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/DeleteAccountBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/users/me/avatar": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users.uploadAvatar",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidAvatarUpload"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "AvatarTooLarge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvatarTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "TooManyRequests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyRequests"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file",
+                  "x",
+                  "y",
+                  "size"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/PersistedFile"
+                    },
+                    "description": "an array of exactly 1 item(s)",
+                    "title": "itemsCount(1)",
+                    "minItems": 1,
+                    "maxItems": 1
+                  },
+                  "x": {
+                    "type": "string",
+                    "description": "a string to be decoded into a number"
+                  },
+                  "y": {
+                    "type": "string",
+                    "description": "a string to be decoded into a number"
+                  },
+                  "size": {
+                    "type": "string",
+                    "description": "a string to be decoded into a number"
+                  }
+                },
+                "additionalProperties": false
               }
             }
           },
@@ -4255,6 +4380,7 @@
           "username",
           "displayName",
           "avatarUrl",
+          "avatarVariants",
           "role"
         ],
         "properties": {
@@ -4284,8 +4410,38 @@
               }
             ]
           },
+          "avatarVariants": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvatarVariants"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "role": {
             "$ref": "#/components/schemas/UserRole"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AvatarVariants": {
+        "type": "object",
+        "required": [
+          "small",
+          "medium",
+          "large"
+        ],
+        "properties": {
+          "small": {
+            "type": "string"
+          },
+          "medium": {
+            "type": "string"
+          },
+          "large": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -4675,6 +4831,48 @@
               {
                 "type": "null"
               }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "PersistedFile": {
+        "type": "string",
+        "format": "binary"
+      },
+      "InvalidAvatarUpload": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "InvalidAvatarUpload"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "AvatarTooLarge": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "AvatarTooLarge"
             ]
           }
         },
@@ -5644,10 +5842,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "PersistedFile": {
-        "type": "string",
-        "format": "binary"
       },
       "UnsupportedAttachmentType": {
         "type": "object",

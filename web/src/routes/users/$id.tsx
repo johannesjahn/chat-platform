@@ -86,6 +86,7 @@ function UserProfilePage() {
             <Avatar
               name={user.displayName || user.username}
               avatarUrl={user.avatarUrl}
+              avatarVariants={user.avatarVariants}
               size="xl"
             />
             <div className="flex flex-col leading-tight">

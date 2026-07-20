@@ -140,6 +140,7 @@ function UsersPage() {
                       <Avatar
                         name={user.displayName || user.username}
                         avatarUrl={user.avatarUrl}
+                        avatarVariants={user.avatarVariants}
                         size="sm"
                       />
                       <span className="truncate font-medium">

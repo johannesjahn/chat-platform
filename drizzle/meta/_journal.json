@@ -99,6 +99,13 @@
       "when": 1784502463795,
       "tag": "0013_lovely_mentor",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1784579820622,
+      "tag": "0014_fast_strong_guy",
+      "breakpoints": true
     }
   ]
 }

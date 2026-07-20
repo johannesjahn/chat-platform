@@ -1330,6 +1330,7 @@ test("updateProfile updates displayName and avatarUrl, reflected by getUser, wit
         username: "xander",
         displayName: "Xander Prime",
         avatarUrl: "https://i.imgur.com/avatar.png",
+        avatarVariants: null,
         role: "user",
       });
 

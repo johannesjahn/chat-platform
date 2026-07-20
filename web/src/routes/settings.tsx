@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Loader2, Trash2 } from "lucide-react";
-import { Avatar } from "@/components/Avatar";
+import { ImageUp, KeyRound, Loader2, Trash2 } from "lucide-react";
+import { Avatar, type AvatarVariants } from "@/components/Avatar";
+import { AvatarCropDialog } from "@/components/AvatarCropDialog";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { GradientText } from "@/components/reactbits/GradientText";
 import {
@@ -23,6 +24,7 @@ import {
 } from "@/lib/api";
 import { clearSession, setSession, useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
+import { isAllowedAvatarFile } from "@/lib/avatar";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -60,11 +62,16 @@ function EditProfileCard() {
   const session = useSession();
   const queryClient = useQueryClient();
   const updateProfile = $api.useMutation("put", "/users/me");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [displayName, setDisplayName] = useState(
     session?.user.displayName ?? "",
   );
   const [avatarUrl, setAvatarUrl] = useState(session?.user.avatarUrl ?? "");
+  const [avatarVariants, setAvatarVariants] = useState<AvatarVariants | null>(
+    session?.user.avatarVariants ?? null,
+  );
+  const [cropFile, setCropFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -85,6 +92,20 @@ function EditProfileCard() {
             Profile updated.
           </p>
         )}
+        {cropFile && (
+          <AvatarCropDialog
+            file={cropFile}
+            onClose={() => setCropFile(null)}
+            onUploaded={async (updated) => {
+              setCropFile(null);
+              setAvatarUrl(updated.avatarUrl ?? "");
+              setAvatarVariants(updated.avatarVariants);
+              if (session) setSession({ ...session, user: updated });
+              await queryClient.invalidateQueries({ queryKey: usersQueryKey });
+              setSuccess(true);
+            }}
+          />
+        )}
         <form
           className="flex flex-col gap-4"
           onSubmit={async (event) => {
@@ -100,6 +121,10 @@ function EditProfileCard() {
                 },
               });
               setSession({ ...session, user: updated });
+              // A full-replace `updateProfile` always clears any uploaded
+              // avatar server-side (see UsersHandler.ts) — reflect that here
+              // rather than leaving a stale preview.
+              setAvatarVariants(updated.avatarVariants);
               await queryClient.invalidateQueries({ queryKey: usersQueryKey });
               setSuccess(true);
             } catch (err) {
@@ -111,16 +136,50 @@ function EditProfileCard() {
             <Avatar
               name={displayName.trim() || session?.user.username || ""}
               avatarUrl={avatarUrl.trim() || null}
+              avatarVariants={avatarVariants}
               size="lg"
             />
             <div className="flex flex-1 flex-col gap-2">
-              <Label htmlFor="avatar-url">Avatar URL</Label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  setError(null);
+                  if (!isAllowedAvatarFile(file)) {
+                    setError("Avatars must be a JPEG, PNG, or WebP image.");
+                    return;
+                  }
+                  setCropFile(file);
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="self-start"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <ImageUp className="size-4" />
+                Upload avatar
+              </Button>
+              <Label htmlFor="avatar-url">Or link an image URL</Label>
               <Input
                 id="avatar-url"
                 type="url"
                 placeholder="https://example.com/avatar.png"
                 value={avatarUrl}
-                onChange={(e) => setAvatarUrl(e.target.value)}
+                onChange={(e) => {
+                  setAvatarUrl(e.target.value);
+                  // Typing a URL here means "use this instead of the
+                  // uploaded avatar" — updateProfile enforces the same
+                  // mutual exclusivity server-side on submit.
+                  setAvatarVariants(null);
+                }}
               />
             </div>
           </div>
