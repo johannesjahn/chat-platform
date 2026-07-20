@@ -17,18 +17,18 @@ const BLURHASH_SAMPLE_PX = 32;
 const BLURHASH_COMPONENTS_X = 4;
 const BLURHASH_COMPONENTS_Y = 3;
 
-// Formats that get scaled down and transcoded to WebP (see below). Animated
-// GIF is deliberately excluded: sharp represents an animated image's frames
-// internally as one tall vertically-stacked strip, and re-encoding through
-// the same single-frame resize path used here risks mangling frame
-// boundaries or silently flattening the animation to its first frame. GIF
-// uploads keep their original bytes; they still get real dimensions and a
-// blurhash below, just derived from the first frame rather than driving a
-// re-encode.
+// Formats that get scaled down and transcoded to WebP (see below). GIF is
+// included: sharp/libvips reads every frame when given `{ animated: true }`
+// and preserves them through `.resize()`/`.webp()`, so animated GIFs come
+// out as animated WebP rather than being passed through as original bytes
+// (issue #257) — passthrough meant anything smuggled into GIF trailer bytes
+// or comment/application extension blocks rode along unmodified into what
+// got served to other users.
 const RESCALABLE_IMAGE_MIME_TYPES = new Set<string>([
   "image/jpeg",
   "image/png",
   "image/webp",
+  "image/gif",
 ]);
 
 // Rescaled images are always transcoded to WebP rather than kept in their
@@ -92,7 +92,13 @@ export const processImage = async (
   // to preserve color profile data) without deliberately re-adding
   // EXIF/GPS stripping first; see the regression test in
   // ImageProcessing.test.ts and issue #258.
-  const { data, info } = await sharp(input)
+  // `animated: true` reads every frame of a multi-frame GIF (equivalent to
+  // `pages: -1`) instead of just the first; it's a no-op for already
+  // single-frame formats. `.resize()`/`.webp()` then apply per-frame and
+  // re-encode the whole animation, rather than only ever touching frame 0.
+  const { data, info } = await sharp(input, {
+    animated: contentType === "image/gif",
+  })
     .rotate()
     .resize({
       width: MAX_IMAGE_DIMENSION_PX,
@@ -103,11 +109,14 @@ export const processImage = async (
     .webp()
     .toBuffer({ resolveWithObject: true });
 
+  // For animated output, `info.height` is the total stacked-frame canvas
+  // height (`pageHeight` * frame count) — `pageHeight` is the actual
+  // per-frame height callers want for display sizing.
   return {
     data,
     contentType: OUTPUT_CONTENT_TYPE,
     width: info.width,
-    height: info.height,
+    height: info.pageHeight ?? info.height,
     blurhash,
   };
 };
