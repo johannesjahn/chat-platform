@@ -741,18 +741,19 @@ test("uploadAttachment succeeds when comfortably under the per-user storage quot
       yield* Effect.promise(() =>
         db.insert(attachments).values({
           uploaderId: user.id,
-          filename: "existing.mp3",
-          mimeType: "audio/mpeg",
+          filename: "existing.png",
+          mimeType: "image/webp",
           size: 1024,
           storageKey: "attachments/existing-ok",
         }),
       );
 
+      const data = yield* Effect.promise(() => makePng(10, 10));
       const result = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
-          filename: "small.mp3",
-          contentType: "audio/mpeg",
-          data: new Uint8Array(100),
+          filename: "small.png",
+          contentType: "image/png",
+          data,
         }),
       );
       expect(result.status).toBe(201);
@@ -778,11 +779,12 @@ test("deleteAttachment removes an attachment owned by the caller", () =>
         "deleter1",
         "pw-testpass",
       );
+      const data = yield* Effect.promise(() => makePng(10, 10));
       const upload = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
-          filename: "mine.mp3",
-          contentType: "audio/mpeg",
-          data: new Uint8Array([1, 2, 3]),
+          filename: "mine.png",
+          contentType: "image/png",
+          data,
         }),
       );
       const attachmentId = (upload.body as { id: number }).id;
@@ -806,11 +808,12 @@ test("deleteAttachment 404s for an attachment the caller doesn't own", () =>
       const alice = yield* registerAndLogin("alice-del", "pw-testpass");
       const bob = yield* registerAndLogin("bob-del", "pw-testpass");
 
+      const data = yield* Effect.promise(() => makePng(10, 10));
       const upload = yield* Effect.promise(() =>
         uploadFile(handler, alice.accessToken, {
-          filename: "alices.mp3",
-          contentType: "audio/mpeg",
-          data: new Uint8Array([1, 2, 3]),
+          filename: "alices.png",
+          contentType: "image/png",
+          data,
         }),
       );
       const attachmentId = (upload.body as { id: number }).id;
