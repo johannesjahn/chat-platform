@@ -9,6 +9,10 @@ import {
   TooManyRequests,
   UnsupportedAttachmentType,
 } from "./Api.ts";
+import {
+  ATTACHMENT_SIGNATURE_PREFIX_BYTES,
+  hasValidAttachmentSignature,
+} from "./AttachmentSignature.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { toApiAttachment } from "./attachments.ts";
 import { CurrentUser } from "./Auth.ts";
@@ -79,6 +83,23 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
           return yield* Effect.fail(
             new AttachmentTooLarge({
               message: `File exceeds the maximum size of ${MAX_ATTACHMENT_SIZE_BYTES} bytes`,
+            }),
+          );
+
+        // Video/audio containers each start with a fixed magic-byte
+        // signature (see AttachmentSignature.ts); checking it here catches
+        // an arbitrary file spoofing one of these content types before it's
+        // ever stored, mirroring the protection sharp/ffmpeg already give
+        // images and video via a real decode (issue #254). A no-op for
+        // content types with no registered signature (e.g. images, which
+        // get their own check below).
+        const signaturePrefix = yield* Effect.tryPromise(() =>
+          bunFile.slice(0, ATTACHMENT_SIGNATURE_PREFIX_BYTES).bytes(),
+        ).pipe(Effect.orDie);
+        if (!hasValidAttachmentSignature(file.contentType, signaturePrefix))
+          return yield* Effect.fail(
+            new UnsupportedAttachmentType({
+              message: `Uploaded file does not match declared type: ${file.contentType}`,
             }),
           );
 

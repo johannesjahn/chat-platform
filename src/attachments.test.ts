@@ -161,6 +161,21 @@ const makeMp4 = async (width: number, height: number): Promise<Uint8Array> => {
   }
 };
 
+// Real (decodable) WebM bytes, for the same reason as makeMp4 above — a
+// video/webm upload still has to clear the EBML signature check
+// (AttachmentSignature.ts, issue #254) *and* ffmpeg's decode
+// (VideoProcessing.ts, issue #251), so a synthetic magic-byte-only fixture
+// isn't enough to exercise the accept path end to end.
+const makeWebm = async (width: number, height: number): Promise<Uint8Array> => {
+  const path = join(tmpdir(), `attachments-test-${crypto.randomUUID()}.webm`);
+  try {
+    await Bun.$`ffmpeg -y -f lavfi -i ${`color=c=blue:s=${width}x${height}:d=1:r=5`} -c:v libvpx-vp9 ${path}`.quiet();
+    return await Bun.file(path).bytes();
+  } finally {
+    await Bun.$`rm -f ${path}`.quiet().nothrow();
+  }
+};
+
 type UploadResult = { readonly status: number; readonly body: unknown };
 
 // Drives `POST /attachments` with a real multipart/form-data body — the
@@ -436,6 +451,107 @@ test("uploadAttachment rejects a file claiming a video mime type it isn't", () =
     }),
   ));
 
+// Magic-byte fixtures for the audio/video container signature checks added
+// for issue #254 — deliberately minimal (just enough leading bytes to pass
+// or fail the signature), since the check only inspects a small prefix
+// rather than fully decoding the file (unlike sharp/ffmpeg for images and
+// video, see AttachmentSignature.ts).
+const ID3_MP3_PREFIX = new Uint8Array([
+  0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 1, 2, 3, 4,
+]);
+const FRAME_SYNC_MP3_PREFIX = new Uint8Array([0xff, 0xfb, 0x90, 0x00, 1, 2]);
+const OGG_PREFIX = new Uint8Array([
+  0x4f, 0x67, 0x67, 0x53, 0x00, 0x02, 0x00, 0x00,
+]);
+const WAV_PREFIX = new Uint8Array([
+  0x52,
+  0x49,
+  0x46,
+  0x46, // "RIFF"
+  0x00,
+  0x00,
+  0x00,
+  0x00, // chunk size (unchecked)
+  0x57,
+  0x41,
+  0x56,
+  0x45, // "WAVE"
+]);
+test.each([
+  ["audio/mpeg (ID3)", "audio/mpeg", ID3_MP3_PREFIX],
+  ["audio/mpeg (frame sync)", "audio/mpeg", FRAME_SYNC_MP3_PREFIX],
+  ["audio/ogg", "audio/ogg", OGG_PREFIX],
+  ["audio/wav", "audio/wav", WAV_PREFIX],
+])(
+  "uploadAttachment accepts a %s file with a matching signature",
+  (_label, contentType, data) =>
+    run(({ handler }) =>
+      Effect.gen(function* () {
+        const { accessToken } = yield* registerAndLogin(
+          `u-${contentType.split("/")[1]}-${crypto.randomUUID().slice(0, 8)}`,
+          "pw-testpass",
+        );
+        const result = yield* Effect.promise(() =>
+          uploadFile(handler, accessToken, {
+            filename: `file.${contentType.split("/")[1]}`,
+            contentType,
+            data,
+          }),
+        );
+        expect(result.status).toBe(201);
+      }),
+    ),
+);
+
+// Unlike the audio cases above, video/webm still has to clear ffmpeg's
+// decode after the signature check (VideoProcessing.ts, issue #251), so it
+// needs a real fixture rather than a magic-bytes-only one — kept separate
+// from the audio test.each for that reason.
+test("uploadAttachment accepts a video/webm file with a matching signature", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-webm",
+        "pw-testpass",
+      );
+      const data = yield* Effect.promise(() => makeWebm(320, 240));
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "clip.webm",
+          contentType: "video/webm",
+          data,
+        }),
+      );
+      expect(result.status).toBe(201);
+    }),
+  ));
+
+test.each([
+  ["audio/mpeg", "audio/mpeg"],
+  ["audio/ogg", "audio/ogg"],
+  ["audio/wav", "audio/wav"],
+  ["video/webm", "video/webm"],
+])(
+  "uploadAttachment rejects a file claiming %s it isn't",
+  (_label, contentType) =>
+    run(({ handler }) =>
+      Effect.gen(function* () {
+        const { accessToken } = yield* registerAndLogin(
+          `ub-${contentType.split("/")[1]}-${crypto.randomUUID().slice(0, 8)}`,
+          "pw-testpass",
+        );
+        const result = yield* Effect.promise(() =>
+          uploadFile(handler, accessToken, {
+            filename: `file.${contentType.split("/")[1]}`,
+            contentType,
+            data: new Uint8Array([1, 2, 3, 4, 5]),
+          }),
+        );
+        expect(result.status).toBe(415);
+      }),
+    ),
+);
+
 test("createMessage attaches an uploaded file the sender owns", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
@@ -447,7 +563,7 @@ test("createMessage attaches an uploaded file the sender owns", () =>
         uploadFile(handler, alice.accessToken, {
           filename: "report.mp3",
           contentType: "audio/mpeg",
-          data: new Uint8Array([1, 2, 3, 4, 5]),
+          data: ID3_MP3_PREFIX,
         }),
       );
       expect(upload.status).toBe(201);
@@ -492,7 +608,7 @@ test("createMessage rejects an attachmentId the sender doesn't own", () =>
         uploadFile(handler, alice.accessToken, {
           filename: "mine.mp3",
           contentType: "audio/mpeg",
-          data: new Uint8Array([1, 2, 3]),
+          data: ID3_MP3_PREFIX,
         }),
       );
       const attachmentId = (upload.body as { id: number }).id;
