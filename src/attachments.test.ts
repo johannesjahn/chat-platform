@@ -558,7 +558,7 @@ test("createMessage attaches an uploaded file the sender owns", () =>
       const upload = yield* Effect.promise(() =>
         uploadFile(handler, alice.accessToken, {
           filename: "report.mp3",
-          contentType: "audio/mpeg",
+          contentType: "audio/wav",
           data,
         }),
       );
@@ -607,7 +607,7 @@ test("createMessage rejects an attachmentId the sender doesn't own", () =>
       const upload = yield* Effect.promise(() =>
         uploadFile(handler, alice.accessToken, {
           filename: "mine.mp3",
-          contentType: "audio/mpeg",
+          contentType: "audio/wav",
           data,
         }),
       );

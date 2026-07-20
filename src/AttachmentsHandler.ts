@@ -11,6 +11,10 @@ import {
   TooManyRequests,
   UnsupportedAttachmentType,
 } from "./Api.ts";
+import {
+  ATTACHMENT_SIGNATURE_PREFIX_BYTES,
+  hasValidAttachmentSignature,
+} from "./AttachmentSignature.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { getOwnedAttachmentOr404, toApiAttachment } from "./attachments.ts";
 import { processAudio } from "./AudioProcessing.ts";
@@ -152,6 +156,20 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
             height = processed.height;
             blurhash = processed.blurhash;
           } else if (file.contentType.startsWith("video/")) {
+            // Cheap container-signature check ahead of the ffmpeg decode
+            // below — rejects obviously non-video bytes (e.g. a script or
+            // executable labeled `video/mp4`) without spending a subprocess
+            // on them. See AttachmentSignature.ts and issue #254.
+            const prefix = yield* Effect.promise(() =>
+              bunFile.slice(0, ATTACHMENT_SIGNATURE_PREFIX_BYTES).bytes(),
+            );
+            if (!hasValidAttachmentSignature(file.contentType, prefix))
+              return yield* Effect.fail(
+                new UnsupportedAttachmentType({
+                  message: "Uploaded file is not a valid video",
+                }),
+              );
+
             const processed = yield* Effect.tryPromise({
               try: () => processVideo(file.path),
               catch: () =>
@@ -165,6 +183,16 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
             width = processed.width;
             height = processed.height;
           } else if (file.contentType.startsWith("audio/")) {
+            const prefix = yield* Effect.promise(() =>
+              bunFile.slice(0, ATTACHMENT_SIGNATURE_PREFIX_BYTES).bytes(),
+            );
+            if (!hasValidAttachmentSignature(file.contentType, prefix))
+              return yield* Effect.fail(
+                new UnsupportedAttachmentType({
+                  message: "Uploaded file is not a valid audio file",
+                }),
+              );
+
             const processed = yield* Effect.tryPromise({
               try: async () => processAudio(await bunFile.bytes()),
               catch: () =>
