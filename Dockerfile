@@ -6,8 +6,13 @@ WORKDIR /app
 # and audio (AudioProcessing.ts, issue #252) attachment processing — sharp
 # (used for images) bundles its own native libs, but there's no
 # npm-distributed ffmpeg binary this repo shells out to, so it has to come
-# from the base image's package manager.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# from the base image's package manager. Pinned to an exact Debian trixie
+# (this image's base OS) package version rather than left floating, so
+# builds stay reproducible. Renovate has no built-in datasource for apt
+# packages, so it's tracked via the debian_13/ffmpeg regex manager in
+# .github/renovate.json5 (repology datasource) instead.
+ARG FFMPEG_VERSION=7:7.1.5-0+deb13u1
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg=${FFMPEG_VERSION} \
   && rm -rf /var/lib/apt/lists/*
 
 # Install first, from just the manifest + lockfile, so this layer is cached
