@@ -16,6 +16,12 @@ bun run dev            # backend on http://localhost:3000 (--hot reload)
 http://localhost:3000/docs. The database is a local PGlite data directory
 (`DB_PATH`, unset = in-memory), created and migrated automatically on startup.
 
+Uploaded audio attachments are transcoded via the `ffmpeg`/`ffprobe` binaries
+(see [`src/AudioProcessing.ts`](src/AudioProcessing.ts)) rather than a bundled
+npm package, so they need to be installed and on `PATH` to run the backend or
+its tests outside Docker (the `docker-compose.yml`/`Dockerfile` image installs
+them automatically).
+
 `GET /health` (liveness — the process is up) and `GET /ready` (readiness —
 the DB, and Redis when `REDIS_URL` is set, are reachable) are unauthenticated
 ops endpoints for orchestrators/load balancers; see

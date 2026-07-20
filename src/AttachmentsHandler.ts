@@ -11,6 +11,7 @@ import {
 } from "./Api.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { toApiAttachment } from "./attachments.ts";
+import { processAudio } from "./AudioProcessing.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db } from "./Db.ts";
 import { processImage } from "./ImageProcessing.ts";
@@ -85,8 +86,8 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
         // Images get scaled down and re-encoded (and a BlurHash placeholder
         // generated) before being stored — see ImageProcessing.ts and issue
         // #248. Videos get scaled down and transcoded to WebM — see
-        // VideoProcessing.ts and issue #251. Other allowed types (audio/pdf)
-        // upload unprocessed, as before.
+        // VideoProcessing.ts and issue #251. Audio gets transcoded to a
+        // capped Ogg/Opus format — see AudioProcessing.ts and issue #252.
         let uploadData: BunFile | Uint8Array = bunFile;
         let uploadContentType = file.contentType;
         let size = originalSize;
@@ -122,6 +123,17 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
           size = processed.data.length;
           width = processed.width;
           height = processed.height;
+        } else if (file.contentType.startsWith("audio/")) {
+          const processed = yield* Effect.tryPromise({
+            try: async () => processAudio(await bunFile.bytes()),
+            catch: () =>
+              new UnsupportedAttachmentType({
+                message: "Uploaded file is not a valid audio file",
+              }),
+          });
+          uploadData = processed.data;
+          uploadContentType = processed.contentType;
+          size = processed.data.length;
         }
 
         const storageKey = `attachments/${crypto.randomUUID()}`;

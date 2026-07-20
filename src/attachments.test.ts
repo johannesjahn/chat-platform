@@ -161,6 +161,40 @@ const makeMp4 = async (width: number, height: number): Promise<Uint8Array> => {
   }
 };
 
+// Real (decodable) WAV bytes for tests exercising the audio-processing path
+// (AttachmentsHandler.ts / AudioProcessing.ts, issue #252) — a short synth
+// tone from ffmpeg's `lavfi` source is enough to drive transcoding/channel
+// downmixing without needing a fixture file.
+const makeWav = async (
+  durationSeconds: number,
+  channels: number,
+): Promise<Uint8Array> => {
+  const proc = Bun.spawn(
+    [
+      "ffmpeg",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      `sine=frequency=440:duration=${durationSeconds}`,
+      "-ar",
+      "44100",
+      "-ac",
+      String(channels),
+      "-f",
+      "wav",
+      "pipe:1",
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  const data = new Uint8Array(await new Response(proc.stdout).arrayBuffer());
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) throw new Error("ffmpeg fixture generation failed");
+  return data;
+};
+
 type UploadResult = { readonly status: number; readonly body: unknown };
 
 // Drives `POST /attachments` with a real multipart/form-data body — the
@@ -436,6 +470,78 @@ test("uploadAttachment rejects a file claiming a video mime type it isn't", () =
     }),
   ));
 
+test("uploadAttachment transcodes audio to Ogg/Opus and shrinks the size", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-audio",
+        "pw-testpass",
+      );
+      const data = yield* Effect.promise(() => makeWav(1, 1));
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "voice.wav",
+          contentType: "audio/wav",
+          data,
+        }),
+      );
+      expect(result.status).toBe(201);
+      const attachment = result.body as {
+        filename: string;
+        mimeType: string;
+        size: number;
+        url: string;
+      };
+      expect(attachment.filename).toBe("voice.wav");
+      expect(attachment.mimeType).toBe("audio/ogg");
+      expect(attachment.size).toBeGreaterThan(0);
+      expect(attachment.size).toBeLessThan(data.length);
+      expect(attachment.url.startsWith("data:audio/ogg;base64,")).toBe(true);
+    }),
+  ));
+
+test("uploadAttachment downmixes an audio file with more than stereo channels", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-audio-downmix",
+        "pw-testpass",
+      );
+      // 6-channel (5.1) source — should be downmixed to stereo rather than
+      // rejected or carried through as-is (issue #252).
+      const data = yield* Effect.promise(() => makeWav(0.5, 6));
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "surround.wav",
+          contentType: "audio/wav",
+          data,
+        }),
+      );
+      expect(result.status).toBe(201);
+      const attachment = result.body as { mimeType: string; size: number };
+      expect(attachment.mimeType).toBe("audio/ogg");
+      expect(attachment.size).toBeGreaterThan(0);
+    }),
+  ));
+
+test("uploadAttachment rejects a file claiming an audio mime type it isn't", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-badaudio",
+        "pw-testpass",
+      );
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "not-a-song.mp3",
+          contentType: "audio/mpeg",
+          data: new Uint8Array([1, 2, 3, 4]),
+        }),
+      );
+      expect(result.status).toBe(415);
+    }),
+  ));
+
 test("createMessage attaches an uploaded file the sender owns", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
@@ -443,11 +549,12 @@ test("createMessage attaches an uploaded file the sender owns", () =>
       const bob = yield* registerAndLogin("bob-att", "pw-testpass");
       const authedAlice = yield* makeAuthedClient(alice.accessToken);
 
+      const data = yield* Effect.promise(() => makeWav(0.5, 1));
       const upload = yield* Effect.promise(() =>
         uploadFile(handler, alice.accessToken, {
           filename: "report.mp3",
           contentType: "audio/mpeg",
-          data: new Uint8Array([1, 2, 3, 4, 5]),
+          data,
         }),
       );
       expect(upload.status).toBe(201);
@@ -467,7 +574,10 @@ test("createMessage attaches an uploaded file the sender owns", () =>
       expect(message.contentType).toBe("attachment");
       expect(message.attachment).not.toBeNull();
       expect(message.attachment?.filename).toBe("report.mp3");
-      expect(message.attachment?.mimeType).toBe("audio/mpeg");
+      // The original filename/content-type claim is kept as upload
+      // metadata even though the stored bytes get transcoded to Ogg/Opus
+      // (see AudioProcessing.ts) — same rationale as the image path.
+      expect(message.attachment?.mimeType).toBe("audio/ogg");
 
       // Reading the message back (as the other participant) resolves a
       // fresh attachment url rather than replaying a stored one.
@@ -488,11 +598,12 @@ test("createMessage rejects an attachmentId the sender doesn't own", () =>
       const bob = yield* registerAndLogin("bob-att2", "pw-testpass");
       const authedBob = yield* makeAuthedClient(bob.accessToken);
 
+      const data = yield* Effect.promise(() => makeWav(0.5, 1));
       const upload = yield* Effect.promise(() =>
         uploadFile(handler, alice.accessToken, {
           filename: "mine.mp3",
           contentType: "audio/mpeg",
-          data: new Uint8Array([1, 2, 3]),
+          data,
         }),
       );
       const attachmentId = (upload.body as { id: number }).id;
