@@ -9,6 +9,10 @@ export type Attachment = components["schemas"]["Attachment"];
 // file/oversized file before spending a round trip on it, the same way
 // PostForm/ChatComposer already validate image URLs and content length
 // client-side.
+//
+// PDF uploads are disabled: `application/pdf` intentionally isn't listed
+// here. `attachmentKind` below still recognizes "pdf" so attachments
+// uploaded before this change keep rendering via AttachmentPreview.
 export const ALLOWED_ATTACHMENT_MIME_TYPES = [
   "image/jpeg",
   "image/png",
@@ -19,7 +23,6 @@ export const ALLOWED_ATTACHMENT_MIME_TYPES = [
   "audio/mpeg",
   "audio/ogg",
   "audio/wav",
-  "application/pdf",
 ] as const;
 
 export const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024;

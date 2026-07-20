@@ -268,10 +268,15 @@ export const Attachment = Schema.Struct({
 export type Attachment = typeof Attachment.Type;
 
 // Mime types `POST /attachments` accepts — deliberately curated rather than
-// "anything" (issue #221 only asks for previews of these four families), and
+// "anything" (issue #221 only asks for previews of these families), and
 // mainly to avoid ever storing/serving something like `text/html` or
 // `image/svg+xml` from the bucket's origin, which could be used for stored
 // XSS against whoever opens the presigned/data URL.
+//
+// PDF uploads are disabled: `application/pdf` intentionally isn't listed
+// here. Attachment rows created before this change may still have
+// `mimeType: "application/pdf"` and keep rendering fine (see
+// attachmentKind/AttachmentPreview) — only new uploads are blocked.
 export const ALLOWED_ATTACHMENT_MIME_TYPES = [
   "image/jpeg",
   "image/png",
@@ -282,7 +287,6 @@ export const ALLOWED_ATTACHMENT_MIME_TYPES = [
   "audio/mpeg",
   "audio/ogg",
   "audio/wav",
-  "application/pdf",
 ] as const;
 
 // A generous ceiling for chat/post media while still bounding worst-case
