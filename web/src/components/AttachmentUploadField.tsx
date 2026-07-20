@@ -160,7 +160,7 @@ export function AttachmentUploadField({
         <Paperclip className="size-5" />
         <span>Drag & drop a file, or click to browse</span>
         <span className="text-xs">
-          Images, video, audio, or PDF — up to{" "}
+          Images, video, or audio — up to{" "}
           {formatBytes(MAX_ATTACHMENT_SIZE_BYTES)}
         </span>
       </button>

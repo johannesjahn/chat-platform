@@ -204,6 +204,24 @@ test("uploadAttachment rejects an unsupported mime type", () =>
     }),
   ));
 
+test("uploadAttachment rejects a PDF file", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-pdf",
+        "pw-testpass",
+      );
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "report.pdf",
+          contentType: "application/pdf",
+          data: new Uint8Array([1, 2, 3, 4, 5]),
+        }),
+      );
+      expect(result.status).toBe(415);
+    }),
+  ));
+
 test("uploadAttachment rejects a file over the size limit", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
@@ -326,8 +344,8 @@ test("createMessage attaches an uploaded file the sender owns", () =>
 
       const upload = yield* Effect.promise(() =>
         uploadFile(handler, alice.accessToken, {
-          filename: "report.pdf",
-          contentType: "application/pdf",
+          filename: "report.mp3",
+          contentType: "audio/mpeg",
           data: new Uint8Array([1, 2, 3, 4, 5]),
         }),
       );
@@ -341,14 +359,14 @@ test("createMessage attaches an uploaded file the sender owns", () =>
         path: { id: chat.id },
         payload: {
           contentType: "attachment",
-          content: "report.pdf",
+          content: "report.mp3",
           attachmentId,
         },
       });
       expect(message.contentType).toBe("attachment");
       expect(message.attachment).not.toBeNull();
-      expect(message.attachment?.filename).toBe("report.pdf");
-      expect(message.attachment?.mimeType).toBe("application/pdf");
+      expect(message.attachment?.filename).toBe("report.mp3");
+      expect(message.attachment?.mimeType).toBe("audio/mpeg");
 
       // Reading the message back (as the other participant) resolves a
       // fresh attachment url rather than replaying a stored one.
@@ -358,7 +376,7 @@ test("createMessage attaches an uploaded file the sender owns", () =>
         urlParams: {},
       });
       const fetched = page.messages.find((m) => m.id === message.id);
-      expect(fetched?.attachment?.filename).toBe("report.pdf");
+      expect(fetched?.attachment?.filename).toBe("report.mp3");
     }),
   ));
 
@@ -371,8 +389,8 @@ test("createMessage rejects an attachmentId the sender doesn't own", () =>
 
       const upload = yield* Effect.promise(() =>
         uploadFile(handler, alice.accessToken, {
-          filename: "mine.pdf",
-          contentType: "application/pdf",
+          filename: "mine.mp3",
+          contentType: "audio/mpeg",
           data: new Uint8Array([1, 2, 3]),
         }),
       );
@@ -386,7 +404,7 @@ test("createMessage rejects an attachmentId the sender doesn't own", () =>
           path: { id: chat.id },
           payload: {
             contentType: "attachment",
-            content: "mine.pdf",
+            content: "mine.mp3",
             attachmentId,
           },
         })
