@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   FetchHttpClient,
   HttpApiBuilder,
@@ -144,6 +146,20 @@ const makePng = (width: number, height: number): Promise<Uint8Array> =>
   })
     .png()
     .toBuffer();
+
+// Real (decodable) MP4 bytes for tests exercising the video-processing path
+// (AttachmentsHandler.ts / VideoProcessing.ts, issue #251) — a short
+// solid-color clip generated via ffmpeg's `lavfi` test source is enough to
+// drive downscaling without needing a fixture file.
+const makeMp4 = async (width: number, height: number): Promise<Uint8Array> => {
+  const path = join(tmpdir(), `attachments-test-${crypto.randomUUID()}.mp4`);
+  try {
+    await Bun.$`ffmpeg -y -f lavfi -i ${`color=c=blue:s=${width}x${height}:d=1:r=5`} -pix_fmt yuv420p -c:v libx264 ${path}`.quiet();
+    return await Bun.file(path).bytes();
+  } finally {
+    await Bun.$`rm -f ${path}`.quiet().nothrow();
+  }
+};
 
 type UploadResult = { readonly status: number; readonly body: unknown };
 
@@ -335,6 +351,91 @@ test("uploadAttachment rejects a file claiming an image mime type it isn't", () 
     }),
   ));
 
+test("uploadAttachment stores a video file transcoded to webm", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-video",
+        "pw-testpass",
+      );
+      const data = yield* Effect.promise(() => makeMp4(320, 240));
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "clip.mp4",
+          contentType: "video/mp4",
+          data,
+        }),
+      );
+      expect(result.status).toBe(201);
+      const attachment = result.body as {
+        filename: string;
+        mimeType: string;
+        size: number;
+        width: number | null;
+        height: number | null;
+        url: string;
+      };
+      // The original filename is kept as-is even though the stored bytes
+      // get transcoded to WebM (see VideoProcessing.ts) — it's just
+      // upload/display metadata, not what's actually served.
+      expect(attachment.filename).toBe("clip.mp4");
+      expect(attachment.mimeType).toBe("video/webm");
+      expect(attachment.size).toBeGreaterThan(0);
+      // Below the 1280px scaling cap, so dimensions pass through unchanged.
+      expect(attachment.width).toBe(320);
+      expect(attachment.height).toBe(240);
+      // No real S3/MinIO is configured in tests, so AttachmentStorageLive
+      // falls back to the in-memory backend, which serves bytes back as a
+      // `data:` URL rather than a presigned link (see AttachmentStorage.ts).
+      expect(attachment.url.startsWith("data:video/webm;base64,")).toBe(true);
+    }),
+  ));
+
+test("uploadAttachment scales an oversized video down to the max dimension", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-vscale",
+        "pw-testpass",
+      );
+      // 1920x1080 exceeds the 1280px longest-edge cap — the 16:9 aspect
+      // ratio should be preserved through the scale-down.
+      const data = yield* Effect.promise(() => makeMp4(1920, 1080));
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "big.mp4",
+          contentType: "video/mp4",
+          data,
+        }),
+      );
+      expect(result.status).toBe(201);
+      const attachment = result.body as {
+        width: number | null;
+        height: number | null;
+      };
+      expect(attachment.width).toBe(1280);
+      expect(attachment.height).toBe(720);
+    }),
+  ));
+
+test("uploadAttachment rejects a file claiming a video mime type it isn't", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-badvideo",
+        "pw-testpass",
+      );
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "not-a-video.mp4",
+          contentType: "video/mp4",
+          data: new Uint8Array([1, 2, 3, 4]),
+        }),
+      );
+      expect(result.status).toBe(415);
+    }),
+  ));
+
 test("createMessage attaches an uploaded file the sender owns", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
@@ -425,11 +526,12 @@ test("createPost attaches an uploaded file", () =>
       );
       const authed = yield* makeAuthedClient(accessToken);
 
+      const data = yield* Effect.promise(() => makeMp4(320, 240));
       const upload = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
           filename: "clip.mp4",
           contentType: "video/mp4",
-          data: new Uint8Array([1, 2, 3, 4]),
+          data,
         }),
       );
       const attachmentId = (upload.body as { id: number }).id;
@@ -443,7 +545,9 @@ test("createPost attaches an uploaded file", () =>
       });
       expect(post.contentType).toBe("attachment");
       expect(post.attachment?.filename).toBe("clip.mp4");
-      expect(post.attachment?.mimeType).toBe("video/mp4");
+      // Stored bytes are transcoded to WebM regardless of the uploaded
+      // container/codec — see VideoProcessing.ts.
+      expect(post.attachment?.mimeType).toBe("video/webm");
     }),
   ));
 

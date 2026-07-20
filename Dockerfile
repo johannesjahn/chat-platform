@@ -2,6 +2,13 @@ FROM oven/bun:1.3.14
 
 WORKDIR /app
 
+# ffmpeg is a system dependency for video attachment processing
+# (VideoProcessing.ts, issue #251) — sharp (used for images) bundles its own
+# native libs, but there's no npm-distributed ffmpeg binary this repo shells
+# out to via Bun.$, so it has to come from the base image's package manager.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
 # Install first, from just the manifest + lockfile, so this layer is cached
 # across rebuilds that only change application source.
 COPY package.json bun.lock ./

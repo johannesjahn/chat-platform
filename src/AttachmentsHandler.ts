@@ -17,6 +17,7 @@ import { processImage } from "./ImageProcessing.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { attachments } from "./db/schema.ts";
+import { processVideo } from "./VideoProcessing.ts";
 
 // Uploads are heavier than a typical write (disk I/O, a bucket round trip),
 // so — like EngagementHandler's write limiter — this bounds a scripted flood
@@ -83,8 +84,9 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
 
         // Images get scaled down and re-encoded (and a BlurHash placeholder
         // generated) before being stored — see ImageProcessing.ts and issue
-        // #248. Other allowed types (video/audio/pdf) upload unprocessed, as
-        // before.
+        // #248. Videos get scaled down and transcoded to WebM — see
+        // VideoProcessing.ts and issue #251. Other allowed types (audio/pdf)
+        // upload unprocessed, as before.
         let uploadData: BunFile | Uint8Array = bunFile;
         let uploadContentType = file.contentType;
         let size = originalSize;
@@ -107,6 +109,19 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
           width = processed.width;
           height = processed.height;
           blurhash = processed.blurhash;
+        } else if (file.contentType.startsWith("video/")) {
+          const processed = yield* Effect.tryPromise({
+            try: () => processVideo(file.path),
+            catch: () =>
+              new UnsupportedAttachmentType({
+                message: "Uploaded file is not a valid video",
+              }),
+          });
+          uploadData = processed.data;
+          uploadContentType = processed.contentType;
+          size = processed.data.length;
+          width = processed.width;
+          height = processed.height;
         }
 
         const storageKey = `attachments/${crypto.randomUUID()}`;

@@ -305,6 +305,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # VideoProcessing.ts (issue #251) shells out to ffmpeg/ffprobe via
+      # Bun.$ — not bundled with Bun or any npm dep, so the runner needs it
+      # installed for attachments.test.ts's video-processing tests to pass.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Run backend tests with coverage
         # bunfig.toml's [test] timeout is a no-op in this Bun version — the
         # --timeout flag is what actually raises it above the 5000ms default
