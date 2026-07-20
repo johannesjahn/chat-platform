@@ -96,7 +96,7 @@ export const attachments = pgTable(
     // Set only for image attachments (issue #248) — populated from the
     // scaled-down variant actually stored, not the original upload, so they
     // always match what `storageKey` serves. Null for non-image attachments
-    // (video/audio/pdf) and for rows written before this migration.
+    // (video/audio) and for rows written before this migration.
     width: integer("width"),
     height: integer("height"),
     // A compact ~20-30 char BlurHash string (https://blurha.sh/) the
