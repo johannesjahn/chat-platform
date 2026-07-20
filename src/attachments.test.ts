@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import {
   FetchHttpClient,
   HttpApiBuilder,
@@ -17,11 +18,15 @@ import {
   CreatePostBody,
   MAX_ATTACHMENT_SIZE_BYTES,
 } from "./Api.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
+import {
+  ATTACHMENT_QUOTA_MAX_BYTES,
+  AttachmentsHandlerLive,
+} from "./AttachmentsHandler.ts";
 import { AttachmentStorageLive } from "./AttachmentStorage.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
+import { attachments } from "./db/schema.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { JwtLive } from "./Jwt.ts";
 import { EngagementHandlerLive } from "./EngagementHandler.ts";
@@ -689,3 +694,158 @@ test("CreatePostBody accepts a well-formed attachment payload", () => {
   });
   expect(result._tag).toBe("Right");
 });
+
+// Quota (issue #256): rather than actually uploading hundreds of megabytes,
+// seed the user's existing usage directly so a small follow-up upload is
+// the one that tips them over ATTACHMENT_QUOTA_MAX_BYTES.
+test("uploadAttachment rejects an upload that would exceed the per-user storage quota", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { user, accessToken } = yield* registerAndLogin(
+        "uploader-quota",
+        "pw-testpass",
+      );
+      const db = yield* Db;
+      yield* Effect.promise(() =>
+        db.insert(attachments).values({
+          uploaderId: user.id,
+          filename: "existing.mp3",
+          mimeType: "audio/mpeg",
+          size: ATTACHMENT_QUOTA_MAX_BYTES - 10,
+          storageKey: "attachments/existing",
+        }),
+      );
+
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "one-more.mp3",
+          contentType: "audio/mpeg",
+          data: new Uint8Array(100),
+        }),
+      );
+      expect(result.status).toBe(413);
+      expect((result.body as { _tag?: string })._tag).toBe(
+        "AttachmentQuotaExceeded",
+      );
+    }),
+  ));
+
+test("uploadAttachment succeeds when comfortably under the per-user storage quota", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { user, accessToken } = yield* registerAndLogin(
+        "uploader-quota-ok",
+        "pw-testpass",
+      );
+      const db = yield* Db;
+      yield* Effect.promise(() =>
+        db.insert(attachments).values({
+          uploaderId: user.id,
+          filename: "existing.mp3",
+          mimeType: "audio/mpeg",
+          size: 1024,
+          storageKey: "attachments/existing-ok",
+        }),
+      );
+
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "small.mp3",
+          contentType: "audio/mpeg",
+          data: new Uint8Array(100),
+        }),
+      );
+      expect(result.status).toBe(201);
+    }),
+  ));
+
+test("deleteAttachment rejects an unauthenticated request", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const response = yield* Effect.promise(() =>
+        handler(
+          new Request("http://localhost/attachments/1", { method: "DELETE" }),
+        ),
+      );
+      expect(response.status).toBe(401);
+    }),
+  ));
+
+test("deleteAttachment removes an attachment owned by the caller", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "deleter1",
+        "pw-testpass",
+      );
+      const upload = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "mine.mp3",
+          contentType: "audio/mpeg",
+          data: new Uint8Array([1, 2, 3]),
+        }),
+      );
+      const attachmentId = (upload.body as { id: number }).id;
+
+      const authed = yield* makeAuthedClient(accessToken);
+      yield* authed.attachments.deleteAttachment({
+        path: { id: attachmentId },
+      });
+
+      const db = yield* Db;
+      const rows = yield* Effect.promise(() =>
+        db.select().from(attachments).where(eq(attachments.id, attachmentId)),
+      );
+      expect(rows.length).toBe(0);
+    }),
+  ));
+
+test("deleteAttachment 404s for an attachment the caller doesn't own", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice-del", "pw-testpass");
+      const bob = yield* registerAndLogin("bob-del", "pw-testpass");
+
+      const upload = yield* Effect.promise(() =>
+        uploadFile(handler, alice.accessToken, {
+          filename: "alices.mp3",
+          contentType: "audio/mpeg",
+          data: new Uint8Array([1, 2, 3]),
+        }),
+      );
+      const attachmentId = (upload.body as { id: number }).id;
+
+      const authedBob = yield* makeAuthedClient(bob.accessToken);
+      const result = yield* authedBob.attachments
+        .deleteAttachment({ path: { id: attachmentId } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+      }
+
+      const db = yield* Db;
+      const rows = yield* Effect.promise(() =>
+        db.select().from(attachments).where(eq(attachments.id, attachmentId)),
+      );
+      expect(rows.length).toBe(1);
+    }),
+  ));
+
+test("deleteAttachment 404s for a nonexistent attachment id", () =>
+  run(() =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "deleter-missing",
+        "pw-testpass",
+      );
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.attachments
+        .deleteAttachment({ path: { id: 999999 } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));

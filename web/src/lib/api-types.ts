@@ -532,6 +532,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/attachments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["attachments.deleteAttachment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/version": {
         parameters: {
             query?: never;
@@ -959,6 +975,11 @@ export interface components {
             message: string;
             /** @enum {string} */
             _tag: "AttachmentTooLarge";
+        };
+        AttachmentQuotaExceeded: {
+            message: string;
+            /** @enum {string} */
+            _tag: "AttachmentQuotaExceeded";
         };
         VersionResponse: {
             version: string;
@@ -3660,7 +3681,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AttachmentTooLarge"];
+                    "application/json": components["schemas"]["AttachmentTooLarge"] | components["schemas"]["AttachmentQuotaExceeded"];
                 };
             };
             /** @description UnsupportedAttachmentType */
@@ -3679,6 +3700,53 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TooManyRequests"];
+                };
+            };
+        };
+    };
+    "attachments.deleteAttachment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
                 };
             };
         };

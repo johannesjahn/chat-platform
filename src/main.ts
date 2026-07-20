@@ -3,6 +3,7 @@ import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Config, Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { ActiveUsersMetricsLive } from "./ActiveUsersMetrics.ts";
+import { AttachmentCleanupLive } from "./AttachmentCleanup.ts";
 import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
 import { AttachmentStorageLive } from "./AttachmentStorage.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
@@ -74,6 +75,7 @@ const ServerLive = Layer.mergeAll(
   ReadyRouteLive,
   MetricsRouteLive,
   RefreshTokenCleanupLive,
+  AttachmentCleanupLive,
   ActiveUsersMetricsLive,
 ).pipe(
   Layer.provide(ApiLive),
@@ -84,6 +86,11 @@ const ServerLive = Layer.mergeAll(
   Layer.provide(RateLimiterLive),
   Layer.provide(WsTicketLive),
   Layer.provide(DbLive),
+  // AttachmentCleanupLive (a sibling of ApiLive in the mergeAll above, not
+  // nested under it) needs its own AttachmentStorage — ApiLive's internal
+  // Layer.provide(AttachmentStorageLive) only satisfies layers within
+  // ApiLive itself.
+  Layer.provide(AttachmentStorageLive),
   Layer.provide(
     Layer.unwrapEffect(
       Config.integer("PORT").pipe(

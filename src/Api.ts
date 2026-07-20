@@ -303,6 +303,16 @@ export class AttachmentTooLarge extends Schema.TaggedError<AttachmentTooLarge>()
   { message: Schema.String },
 ) {}
 
+// Raised when an upload would push a user's total stored-attachment bytes
+// past ATTACHMENT_QUOTA_MAX_BYTES (see AttachmentsHandler.ts) — bounds total
+// storage per user, distinct from AttachmentTooLarge (one file's size) and
+// the upload rate limiter (uploads per minute), neither of which caps how
+// much a user can accumulate over time (issue #256).
+export class AttachmentQuotaExceeded extends Schema.TaggedError<AttachmentQuotaExceeded>()(
+  "AttachmentQuotaExceeded",
+  { message: Schema.String },
+) {}
+
 // Content types a post's body can hold. Extend this union (and the handler's
 // per-type validation, if any is ever needed) to support new post kinds.
 export const PostContentType = Schema.Literal(
@@ -1360,15 +1370,30 @@ const UploadAttachmentBody = HttpApiSchema.Multipart(
   { maxFileSize: Option.some(MAX_ATTACHMENT_SIZE_BYTES * 2) },
 );
 
-const AttachmentsGroup = HttpApiGroup.make("attachments").add(
-  HttpApiEndpoint.post("uploadAttachment", "/attachments")
-    .setPayload(UploadAttachmentBody)
-    .addSuccess(Attachment, { status: 201 })
-    .addError(UnsupportedAttachmentType, { status: 415 })
-    .addError(AttachmentTooLarge, { status: 413 })
-    .addError(TooManyRequests, { status: 429 })
-    .middleware(Authentication),
-);
+const AttachmentsGroup = HttpApiGroup.make("attachments")
+  .add(
+    HttpApiEndpoint.post("uploadAttachment", "/attachments")
+      .setPayload(UploadAttachmentBody)
+      .addSuccess(Attachment, { status: 201 })
+      .addError(UnsupportedAttachmentType, { status: 415 })
+      .addError(AttachmentTooLarge, { status: 413 })
+      .addError(AttachmentQuotaExceeded, { status: 413 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Scoped to the caller's own uploads (see getOwnedAttachmentOr404 in
+    // attachments.ts) — folds "doesn't exist" and "exists but isn't mine"
+    // into the same 404 rather than a 403, mirroring that helper. A
+    // message/post that already referenced this attachment just loses it
+    // (the FK is `set null` on delete — see db/schema.ts), it doesn't block
+    // the delete.
+    HttpApiEndpoint.del("deleteAttachment", "/attachments/:id")
+      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
+      .addSuccess(Schema.Void)
+      .addError(NotFound, { status: 404 })
+      .middleware(Authentication),
+  );
 
 export const VersionResponse = Schema.Struct({
   version: Schema.String,
