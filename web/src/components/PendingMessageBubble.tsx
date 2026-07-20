@@ -66,7 +66,7 @@ export function PendingMessageBubble({
             src={item.content}
             alt=""
             loading="lazy"
-            className="max-h-72 w-full rounded-lg bg-muted object-cover"
+            className="max-h-72 w-72 max-w-full rounded-lg bg-muted object-cover"
           />
         ) : (
           <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">

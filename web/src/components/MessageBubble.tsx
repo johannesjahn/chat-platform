@@ -13,6 +13,7 @@ import {
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { attachmentKind } from "@/lib/attachments";
 import { cn } from "@/lib/utils";
 import {
   MAX_MESSAGE_CONTENT_LENGTH,
@@ -62,6 +63,20 @@ export function MessageBubble({
     trimmedDraft.length > 0 &&
     trimmedDraft.length <= MAX_MESSAGE_CONTENT_LENGTH &&
     trimmedDraft !== message.content;
+
+  // Chat bubbles size to content (no definite width), so a percentage-width
+  // media element can't resolve against it and collapses to its intrinsic
+  // pixel size instead — give image/video/audio attachments a fixed,
+  // reasonable width. File/PDF rows aren't affected by that bug and should
+  // keep sizing to their content.
+  const attachmentWidthClassName =
+    message.contentType === "attachment" &&
+    message.attachment &&
+    ["image", "video", "audio"].includes(
+      attachmentKind(message.attachment.mimeType),
+    )
+      ? "w-72 max-w-full"
+      : undefined;
 
   async function handleSave() {
     if (!canSave || saving) return;
@@ -208,10 +223,13 @@ export function MessageBubble({
             src={message.content}
             alt=""
             loading="lazy"
-            className="max-h-72 w-full rounded-lg bg-muted object-cover"
+            className="max-h-72 w-72 max-w-full rounded-lg bg-muted object-cover"
           />
         ) : message.contentType === "attachment" && message.attachment ? (
-          <AttachmentPreview attachment={message.attachment} />
+          <AttachmentPreview
+            attachment={message.attachment}
+            className={attachmentWidthClassName}
+          />
         ) : (
           <>
             <p
