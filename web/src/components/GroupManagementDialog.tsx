@@ -484,12 +484,16 @@ function GroupManagementBody({
                         {p.role === "admin" ? (
                           <>
                             <ShieldOff className="size-3.5" />
-                            Unadmin
+                            <span className="hidden min-[420px]:inline">
+                              Unadmin
+                            </span>
                           </>
                         ) : (
                           <>
                             <Shield className="size-3.5" />
-                            Make admin
+                            <span className="hidden min-[420px]:inline">
+                              Make admin
+                            </span>
                           </>
                         )}
                       </Button>
@@ -499,13 +503,16 @@ function GroupManagementBody({
                         size="sm"
                         variant="ghost"
                         className="h-8 px-2 text-xs"
+                        aria-label={`Make ${label} the owner`}
                         disabled={transferOwnership.isPending}
                         onClick={() =>
                           void handleTransferOwnership(p.userId, label)
                         }
                       >
                         <Crown className="size-3.5" />
-                        Make owner
+                        <span className="hidden min-[420px]:inline">
+                          Make owner
+                        </span>
                       </Button>
                     )}
                     {canRemove && (
