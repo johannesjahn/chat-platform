@@ -77,6 +77,16 @@ export function AvatarCropDialog({
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   useEffect(() => {
     const url = URL.createObjectURL(file);
+    // Defense-in-depth, not just a formality: `URL.createObjectURL` is
+    // documented/specified to always return exactly `blob:<origin>/<uuid>`
+    // — it can never echo the file's name/contents or produce a
+    // `javascript:`/`data:` scheme — but asserting that explicitly here
+    // means a future refactor that swapped in some other URL source would
+    // fail loudly instead of quietly handing an unvalidated string to
+    // `<img src>` below.
+    if (!url.startsWith("blob:")) {
+      throw new Error(`Expected a blob: URL, got ${url}`);
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect -- see above: this isn't deriving state from a prop, it's synchronizing an external resource (a blob) with this component's lifetime.
     setObjectUrl(url);
     return () => URL.revokeObjectURL(url);
@@ -213,16 +223,10 @@ export function AvatarCropDialog({
           onPointerCancel={handlePointerUp}
         >
           <img
-            // `objectUrl` is never attacker-influenced text: it's always
-            // exactly what `URL.createObjectURL(file)` returns (see above),
-            // a same-origin `blob:<origin>/<uuid>` the browser mints itself.
-            // It can't be a `javascript:`/`data:` URI or embed arbitrary
-            // markup regardless of the file's name or contents, so there's
-            // no DOM XSS sink here — CodeQL's `js/xss-through-dom` doesn't
-            // model `createObjectURL` as taint-neutralizing, hence the flag.
-            // The suppression marker below has to be on this exact line —
-            // GitHub's inline-suppression matcher keys off the alert's
-            // reported line number, not a preceding comment block.
+            // `objectUrl` is validated to start with `blob:` before it's
+            // ever stored (see the effect above) — it's a same-origin
+            // browser-minted reference, never text derived from the file's
+            // name/contents, so there's nothing here to escape.
             src={objectUrl ?? undefined} // codeql[js/xss-through-dom]
             alt=""
             draggable={false}
