@@ -213,15 +213,17 @@ export function AvatarCropDialog({
           onPointerCancel={handlePointerUp}
         >
           <img
-            // codeql[js/xss-through-dom] -- `objectUrl` is never
-            // attacker-influenced text: it's always exactly what
-            // `URL.createObjectURL(file)` returns (see above), a same-origin
-            // `blob:<origin>/<uuid>` the browser mints itself. It can't be a
-            // `javascript:`/`data:` URI or embed arbitrary markup regardless
-            // of the file's name or contents, so there's no DOM XSS sink
-            // here — CodeQL's `js/xss-through-dom` doesn't model
-            // `createObjectURL` as taint-neutralizing, hence the flag.
-            src={objectUrl ?? undefined}
+            // `objectUrl` is never attacker-influenced text: it's always
+            // exactly what `URL.createObjectURL(file)` returns (see above),
+            // a same-origin `blob:<origin>/<uuid>` the browser mints itself.
+            // It can't be a `javascript:`/`data:` URI or embed arbitrary
+            // markup regardless of the file's name or contents, so there's
+            // no DOM XSS sink here — CodeQL's `js/xss-through-dom` doesn't
+            // model `createObjectURL` as taint-neutralizing, hence the flag.
+            // The suppression marker below has to be on this exact line —
+            // GitHub's inline-suppression matcher keys off the alert's
+            // reported line number, not a preceding comment block.
+            src={objectUrl ?? undefined} // codeql[js/xss-through-dom]
             alt=""
             draggable={false}
             onLoad={handleImageLoad}
