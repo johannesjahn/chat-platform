@@ -24,7 +24,11 @@ import {
 } from "@/lib/api";
 import { clearSession, setSession, useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
-import { isAllowedAvatarFile } from "@/lib/avatar";
+import { formatBytes } from "@/lib/attachments";
+import {
+  MAX_AVATAR_UPLOAD_SIZE_BYTES,
+  isAllowedAvatarFile,
+} from "@/lib/avatar";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -152,6 +156,12 @@ function EditProfileCard() {
                   setError(null);
                   if (!isAllowedAvatarFile(file)) {
                     setError("Avatars must be a JPEG, PNG, or WebP image.");
+                    return;
+                  }
+                  if (file.size > MAX_AVATAR_UPLOAD_SIZE_BYTES) {
+                    setError(
+                      `File exceeds the ${formatBytes(MAX_AVATAR_UPLOAD_SIZE_BYTES)} limit`,
+                    );
                     return;
                   }
                   setCropFile(file);
