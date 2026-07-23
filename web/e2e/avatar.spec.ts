@@ -65,9 +65,9 @@ test("removes an uploaded avatar back to the initials placeholder", async ({
 
   await expect(page.getByText("Profile updated.")).toBeVisible();
   await expect(page.locator("form img")).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Remove photo" }),
-  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove photo" })).toHaveCount(
+    0,
+  );
 
   // Reflected on the user's own profile page too, on a fresh navigation.
   await page.getByRole("link", { name: /^@/ }).click();
