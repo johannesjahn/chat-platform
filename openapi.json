@@ -151,7 +151,10 @@
                     "displayName",
                     "avatarUrl",
                     "avatarVariants",
-                    "role"
+                    "role",
+                    "statusText",
+                    "statusEmoji",
+                    "statusExpiresAt"
                   ],
                   "properties": {
                     "id": {
@@ -192,6 +195,36 @@
                     },
                     "role": {
                       "$ref": "#/components/schemas/UserRole"
+                    },
+                    "statusText": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "statusEmoji": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "statusExpiresAt": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "additionalProperties": false
@@ -786,6 +819,62 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateUserRoleBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/users/me/status": {
+      "put": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users.updateStatus",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStatusBody"
               }
             }
           },
@@ -4572,7 +4661,10 @@
           "displayName",
           "avatarUrl",
           "avatarVariants",
-          "role"
+          "role",
+          "statusText",
+          "statusEmoji",
+          "statusExpiresAt"
         ],
         "properties": {
           "id": {
@@ -4613,6 +4705,36 @@
           },
           "role": {
             "$ref": "#/components/schemas/UserRole"
+          },
+          "statusText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "statusEmoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "statusExpiresAt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -5111,6 +5233,49 @@
             "enum": [
               "Forbidden"
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateStatusBody": {
+        "type": "object",
+        "required": [
+          "statusText",
+          "statusEmoji"
+        ],
+        "properties": {
+          "statusText": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NonEmptyTrimmedString",
+                "description": "a string at most 100 character(s) long",
+                "title": "maxLength(100)",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "statusEmoji": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NonEmptyTrimmedString",
+                "description": "a string at most 8 character(s) long",
+                "title": "maxLength(8)",
+                "maxLength": 8
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expiresInMinutes": {
+            "type": "integer",
+            "description": "a number between 1 and 43200",
+            "title": "between(1, 43200)",
+            "minimum": 1,
+            "maximum": 43200
           }
         },
         "additionalProperties": false
@@ -5631,7 +5796,10 @@
           "displayName",
           "avatarUrl",
           "avatarVariants",
-          "role"
+          "role",
+          "statusText",
+          "statusEmoji",
+          "statusExpiresAt"
         ],
         "properties": {
           "userId": {
@@ -5672,6 +5840,36 @@
           },
           "role": {
             "$ref": "#/components/schemas/ChatRole"
+          },
+          "statusText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "statusEmoji": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "statusExpiresAt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false

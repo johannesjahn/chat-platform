@@ -20,6 +20,7 @@ import { processAvatar } from "./ImageProcessing.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
 import { authEventsTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { PubSub } from "./PubSub.ts";
+import { RealtimeConnections } from "./Realtime.ts";
 import { clientIp } from "./ClientIp.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { refreshTokens, users } from "./db/schema.ts";
@@ -117,6 +118,9 @@ type UserRow = {
   avatarMedium: string | null;
   avatarLarge: string | null;
   role: "user" | "admin";
+  statusText: string | null;
+  statusEmoji: string | null;
+  statusExpiresAt: Date | null;
 };
 
 // Shared with ChatsHandler.ts, which needs the same fold for a chat
@@ -134,6 +138,30 @@ export const toAvatarVariants = (row: {
       }
     : null;
 
+// A status past its `statusExpiresAt` is treated as fully unset wherever a
+// user is read, rather than needing a background sweep to null the columns
+// out — mirrors `toAvatarVariants`'s role of folding raw DB columns into the
+// API shape. Shared with ChatsHandler.ts for the same reason `toAvatarVariants`
+// is.
+export const effectiveStatus = (row: {
+  statusText: string | null;
+  statusEmoji: string | null;
+  statusExpiresAt: Date | null;
+}): {
+  statusText: string | null;
+  statusEmoji: string | null;
+  statusExpiresAt: number | null;
+} => {
+  if (row.statusExpiresAt && row.statusExpiresAt.getTime() <= Date.now()) {
+    return { statusText: null, statusEmoji: null, statusExpiresAt: null };
+  }
+  return {
+    statusText: row.statusText,
+    statusEmoji: row.statusEmoji,
+    statusExpiresAt: row.statusExpiresAt ? row.statusExpiresAt.getTime() : null,
+  };
+};
+
 const toPublicUser = (row: UserRow) => ({
   id: row.id,
   username: row.username,
@@ -141,6 +169,7 @@ const toPublicUser = (row: UserRow) => ({
   avatarUrl: row.avatarUrl,
   avatarVariants: toAvatarVariants(row),
   role: row.role,
+  ...effectiveStatus(row),
 });
 
 // Auth funnel counter (issue #196) — labeled only by `event`
@@ -263,6 +292,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 avatarMedium: users.avatarMedium,
                 avatarLarge: users.avatarLarge,
                 role: users.role,
+                statusText: users.statusText,
+                statusEmoji: users.statusEmoji,
+                statusExpiresAt: users.statusExpiresAt,
               })
               .from(users)
               .where(ilike(users.username, pattern))
@@ -286,6 +318,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 avatarMedium: users.avatarMedium,
                 avatarLarge: users.avatarLarge,
                 role: users.role,
+                statusText: users.statusText,
+                statusEmoji: users.statusEmoji,
+                statusExpiresAt: users.statusExpiresAt,
               })
               .from(users)
               .where(eq(users.id, id))
@@ -352,6 +387,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 avatarMedium: users.avatarMedium,
                 avatarLarge: users.avatarLarge,
                 role: users.role,
+                statusText: users.statusText,
+                statusEmoji: users.statusEmoji,
+                statusExpiresAt: users.statusExpiresAt,
               }),
           ).pipe(Effect.orDie);
           if (!rows[0])
@@ -691,6 +729,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 avatarMedium: users.avatarMedium,
                 avatarLarge: users.avatarLarge,
                 role: users.role,
+                statusText: users.statusText,
+                statusEmoji: users.statusEmoji,
+                statusExpiresAt: users.statusExpiresAt,
               }),
           ).pipe(Effect.orDie);
           const updated = rows[0];
@@ -767,6 +808,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 avatarMedium: users.avatarMedium,
                 avatarLarge: users.avatarLarge,
                 role: users.role,
+                statusText: users.statusText,
+                statusEmoji: users.statusEmoji,
+                statusExpiresAt: users.statusExpiresAt,
               }),
           ).pipe(Effect.orDie);
           const updated = rows[0];
@@ -853,6 +897,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 avatarMedium: users.avatarMedium,
                 avatarLarge: users.avatarLarge,
                 role: users.role,
+                statusText: users.statusText,
+                statusEmoji: users.statusEmoji,
+                statusExpiresAt: users.statusExpiresAt,
               }),
           ).pipe(Effect.orDie);
           const updated = rows[0];
@@ -867,6 +914,57 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             .pipe(Effect.ignore);
 
           return toPublicUser(updated);
+        }),
+      )
+      .handle("updateStatus", ({ payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+
+          // Omitted entirely means "never expires"; `requireStatusForExpiry`
+          // in Api.ts already rejects it alongside a fully-cleared status.
+          const statusExpiresAt =
+            payload.expiresInMinutes !== undefined
+              ? new Date(Date.now() + payload.expiresInMinutes * 60_000)
+              : null;
+
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .update(users)
+              .set({
+                statusText: payload.statusText,
+                statusEmoji: payload.statusEmoji,
+                statusExpiresAt,
+              })
+              .where(eq(users.id, currentUser.id))
+              .returning({
+                id: users.id,
+                username: users.username,
+                displayName: users.displayName,
+                avatarUrl: users.avatarUrl,
+                avatarSmall: users.avatarSmall,
+                avatarMedium: users.avatarMedium,
+                avatarLarge: users.avatarLarge,
+                role: users.role,
+                statusText: users.statusText,
+                statusEmoji: users.statusEmoji,
+                statusExpiresAt: users.statusExpiresAt,
+              }),
+          ).pipe(Effect.orDie);
+          const updated = rows[0];
+          if (!updated)
+            return yield* Effect.die(new Error("UPDATE returned no rows"));
+
+          const publicUser = toPublicUser(updated);
+          yield* connections.broadcastAll({
+            type: "status_changed",
+            userId: currentUser.id,
+            statusText: publicUser.statusText,
+            statusEmoji: publicUser.statusEmoji,
+            statusExpiresAt: publicUser.statusExpiresAt,
+          });
+          return publicUser;
         }),
       ),
 );

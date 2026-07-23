@@ -7,9 +7,11 @@ import { LoginPrompt } from "@/components/LoginPrompt";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
+import { useUserStatus } from "@/lib/status";
 
 export const Route = createFileRoute("/users/$id")({
   component: UserProfilePage,
@@ -42,6 +44,7 @@ function UserProfilePage() {
 
   const updateUserRole = $api.useMutation("patch", "/users/{id}/role");
   const [roleError, setRoleError] = useState<string | null>(null);
+  const status = useUserStatus(user?.id, user);
 
   if (!session) {
     return (
@@ -98,6 +101,7 @@ function UserProfilePage() {
                   @{user.username}
                 </span>
               )}
+              <UserStatusBadge status={status} className="text-sm" />
               <span className="text-sm capitalize text-muted-foreground">
                 {user.role}
               </span>

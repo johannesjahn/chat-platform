@@ -10,6 +10,7 @@ import { MessageBubble } from "@/components/MessageBubble";
 import { PendingMessageBubble } from "@/components/PendingMessageBubble";
 import { PresenceDot } from "@/components/PresenceDot";
 import { TypingDots } from "@/components/reactbits/TypingDots";
+import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,6 +34,7 @@ import {
 } from "@/lib/offlineQueue";
 import { useOnlineStatus } from "@/lib/online";
 import { useIsOnline } from "@/lib/presence";
+import { isStatusVisible, useUserStatus } from "@/lib/status";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
 import { userLabel } from "@/lib/users";
 
@@ -75,6 +77,10 @@ function ChatView({ id }: { id: string }) {
       : undefined;
   const otherParticipantId = otherParticipant?.userId;
   const otherParticipantOnline = useIsOnline(otherParticipantId);
+  const otherParticipantStatus = useUserStatus(
+    otherParticipantId,
+    otherParticipant,
+  );
   const typingUsers = useTypingUsers(chatId).filter(
     (t) => t.userId !== session?.user.id,
   );
@@ -362,9 +368,20 @@ function ChatView({ id }: { id: string }) {
               </div>
               <div className="flex min-w-0 flex-1 flex-col leading-tight">
                 <span className="truncate font-semibold">{name}</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {otherParticipantOnline ? "Online" : "Direct message"}
-                </span>
+                <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                  <span className="shrink-0">
+                    {otherParticipantOnline ? "Online" : "Direct message"}
+                  </span>
+                  {isStatusVisible(otherParticipantStatus) && (
+                    <>
+                      <span className="shrink-0">·</span>
+                      <UserStatusBadge
+                        status={otherParticipantStatus}
+                        className="min-w-0"
+                      />
+                    </>
+                  )}
+                </div>
               </div>
             </Link>
           ) : (

@@ -21,6 +21,7 @@ import {
 import { Avatar } from "@/components/Avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import type { Session } from "@/lib/api";
 import {
@@ -30,6 +31,7 @@ import {
   type Chat,
 } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
+import { useUserStatus } from "@/lib/status";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { userAvatarName, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
@@ -447,95 +449,29 @@ function GroupManagementBody({
                   myRole === "owner" ||
                   currentUser.role === "admin");
               return (
-                <li
+                <ParticipantRow
                   key={p.userId}
-                  className="flex items-center gap-3 rounded-xl border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-accent/30 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1"
-                  style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
-                >
-                  <Avatar
-                    name={userAvatarName(p)}
-                    avatarUrl={p.avatarUrl}
-                    avatarVariants={p.avatarVariants}
-                    size="md"
-                  />
-                  <div className="flex min-w-0 flex-1 flex-col leading-tight">
-                    <span className="truncate text-sm font-medium">
-                      {label}
-                      {isSelf && (
-                        <span className="text-muted-foreground"> (you)</span>
-                      )}
-                    </span>
-                    <RoleBadge isOwner={isOwner} role={p.role} />
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {canManageRoles && !isOwner && !isSelf && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 px-2 text-xs"
-                        aria-label={
-                          p.role === "admin"
-                            ? `Remove admin from ${label}`
-                            : `Make ${label} an admin`
-                        }
-                        disabled={updateParticipantRole.isPending}
-                        onClick={() =>
-                          void handleUpdateParticipantRole(
-                            p.userId,
-                            p.role === "admin" ? "member" : "admin",
-                          )
-                        }
-                      >
-                        {p.role === "admin" ? (
-                          <>
-                            <ShieldOff className="size-3.5" />
-                            <span className="hidden min-[420px]:inline">
-                              Unadmin
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            <Shield className="size-3.5" />
-                            <span className="hidden min-[420px]:inline">
-                              Make admin
-                            </span>
-                          </>
-                        )}
-                      </Button>
-                    )}
-                    {(canManageRoles || canClaimOwnership) && !isOwner && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 px-2 text-xs"
-                        aria-label={`Make ${label} the owner`}
-                        disabled={transferOwnership.isPending}
-                        onClick={() =>
-                          void handleTransferOwnership(p.userId, label)
-                        }
-                      >
-                        <Crown className="size-3.5" />
-                        <span className="hidden min-[420px]:inline">
-                          Make owner
-                        </span>
-                      </Button>
-                    )}
-                    {canRemove && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="size-8 text-destructive hover:text-destructive"
-                        aria-label={`Remove ${label}`}
-                        disabled={removeParticipant.isPending}
-                        onClick={() =>
-                          void handleRemoveParticipant(p.userId, label)
-                        }
-                      >
-                        <UserMinus className="size-4" />
-                      </Button>
-                    )}
-                  </div>
-                </li>
+                  participant={p}
+                  index={i}
+                  isOwner={isOwner}
+                  isSelf={isSelf}
+                  label={label}
+                  canRemove={canRemove}
+                  canManageRoles={canManageRoles}
+                  canClaimOwnership={canClaimOwnership}
+                  updateRolePending={updateParticipantRole.isPending}
+                  transferOwnershipPending={transferOwnership.isPending}
+                  removePending={removeParticipant.isPending}
+                  onUpdateRole={(userId, role) =>
+                    void handleUpdateParticipantRole(userId, role)
+                  }
+                  onTransferOwnership={(userId, label) =>
+                    void handleTransferOwnership(userId, label)
+                  }
+                  onRemove={(userId, label) =>
+                    void handleRemoveParticipant(userId, label)
+                  }
+                />
               );
             })}
           </ul>
@@ -758,6 +694,127 @@ function GroupManagementBody({
         </Section>
       </div>
     </>
+  );
+}
+
+type ParticipantRowProps = {
+  participant: Chat["participants"][number];
+  index: number;
+  isOwner: boolean;
+  isSelf: boolean;
+  label: string;
+  canRemove: boolean;
+  canManageRoles: boolean;
+  canClaimOwnership: boolean;
+  updateRolePending: boolean;
+  transferOwnershipPending: boolean;
+  removePending: boolean;
+  onUpdateRole: (userId: number, role: "admin" | "member") => void;
+  onTransferOwnership: (userId: number, label: string) => void;
+  onRemove: (userId: number, label: string) => void;
+};
+
+// Split out from the plain `.map()` body it used to be so `useUserStatus`
+// (a hook) has a stable per-participant component instance to attach to —
+// calling a hook a variable number of times inside a single `.map()`
+// callback in the parent's own render would violate the rules of hooks
+// whenever the member count changes (someone joins/leaves) between renders.
+function ParticipantRow({
+  participant: p,
+  index: i,
+  isOwner,
+  isSelf,
+  label,
+  canRemove,
+  canManageRoles,
+  canClaimOwnership,
+  updateRolePending,
+  transferOwnershipPending,
+  removePending,
+  onUpdateRole,
+  onTransferOwnership,
+  onRemove,
+}: ParticipantRowProps) {
+  const status = useUserStatus(p.userId, p);
+
+  return (
+    <li
+      className="flex items-center gap-3 rounded-xl border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-accent/30 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1"
+      style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
+    >
+      <Avatar
+        name={userAvatarName(p)}
+        avatarUrl={p.avatarUrl}
+        avatarVariants={p.avatarVariants}
+        size="md"
+      />
+      <div className="flex min-w-0 flex-1 flex-col leading-tight">
+        <span className="truncate text-sm font-medium">
+          {label}
+          {isSelf && <span className="text-muted-foreground"> (you)</span>}
+        </span>
+        <RoleBadge isOwner={isOwner} role={p.role} />
+        <UserStatusBadge
+          status={status}
+          className="text-xs text-muted-foreground"
+        />
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {canManageRoles && !isOwner && !isSelf && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 px-2 text-xs"
+            aria-label={
+              p.role === "admin"
+                ? `Remove admin from ${label}`
+                : `Make ${label} an admin`
+            }
+            disabled={updateRolePending}
+            onClick={() =>
+              onUpdateRole(p.userId, p.role === "admin" ? "member" : "admin")
+            }
+          >
+            {p.role === "admin" ? (
+              <>
+                <ShieldOff className="size-3.5" />
+                <span className="hidden min-[420px]:inline">Unadmin</span>
+              </>
+            ) : (
+              <>
+                <Shield className="size-3.5" />
+                <span className="hidden min-[420px]:inline">Make admin</span>
+              </>
+            )}
+          </Button>
+        )}
+        {(canManageRoles || canClaimOwnership) && !isOwner && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 px-2 text-xs"
+            aria-label={`Make ${label} the owner`}
+            disabled={transferOwnershipPending}
+            onClick={() => onTransferOwnership(p.userId, label)}
+          >
+            <Crown className="size-3.5" />
+            <span className="hidden min-[420px]:inline">Make owner</span>
+          </Button>
+        )}
+        {canRemove && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-8 text-destructive hover:text-destructive"
+            aria-label={`Remove ${label}`}
+            disabled={removePending}
+            onClick={() => onRemove(p.userId, label)}
+          >
+            <UserMinus className="size-4" />
+          </Button>
+        )}
+      </div>
+    </li>
   );
 }
 

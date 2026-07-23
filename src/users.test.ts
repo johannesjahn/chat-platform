@@ -12,6 +12,8 @@ import {
   ChatApi,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_PASSWORD_LENGTH,
+  MAX_STATUS_EMOJI_LENGTH,
+  MAX_STATUS_TEXT_LENGTH,
   MAX_USER_SEARCH_QUERY_LENGTH,
   MAX_USERNAME_LENGTH,
   MIN_PASSWORD_LENGTH,
@@ -1332,6 +1334,9 @@ test("updateProfile updates displayName and avatarUrl, reflected by getUser, wit
         avatarUrl: "https://i.imgur.com/avatar.png",
         avatarVariants: null,
         role: "user",
+        statusText: null,
+        statusEmoji: null,
+        statusExpiresAt: null,
       });
 
       const fetched = yield* authed.users.getUser({ path: { id: created.id } });
@@ -1693,5 +1698,188 @@ test("updateUserRole promotes a user to admin, immediately invalidating their ou
         payload: { username: "louise", password: "pw-louise1" },
       });
       expect(reloggedUser.role).toBe("admin");
+    }),
+  ));
+
+test("updateStatus sets and clears statusText/statusEmoji, reflected by getUser", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const created = yield* c.users.register({
+        payload: { username: "stella", password: "pw-stella1" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "stella", password: "pw-stella1" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const updated = yield* authed.users.updateStatus({
+        payload: { statusText: "In a meeting", statusEmoji: "📅" },
+      });
+      expect(updated.statusText).toBe("In a meeting");
+      expect(updated.statusEmoji).toBe("📅");
+      expect(updated.statusExpiresAt).toBeNull();
+
+      const fetched = yield* authed.users.getUser({ path: { id: created.id } });
+      expect(fetched.statusText).toBe("In a meeting");
+      expect(fetched.statusEmoji).toBe("📅");
+
+      const cleared = yield* authed.users.updateStatus({
+        payload: { statusText: null, statusEmoji: null },
+      });
+      expect(cleared.statusText).toBeNull();
+      expect(cleared.statusEmoji).toBeNull();
+      expect(cleared.statusExpiresAt).toBeNull();
+    }),
+  ));
+
+test("updateStatus sets a future statusExpiresAt from expiresInMinutes", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "tobias", password: "pw-tobias1" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "tobias", password: "pw-tobias1" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const before = Date.now();
+      const updated = yield* authed.users.updateStatus({
+        payload: {
+          statusText: "AFK",
+          statusEmoji: null,
+          expiresInMinutes: 30,
+        },
+      });
+      expect(updated.statusExpiresAt).not.toBeNull();
+      expect(updated.statusExpiresAt as number).toBeGreaterThan(before);
+      expect(updated.statusExpiresAt as number).toBeLessThanOrEqual(
+        before + 31 * 60_000,
+      );
+    }),
+  ));
+
+test("updateStatus rejects a statusText over the maximum length", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "ursula", password: "pw-ursula1" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "ursula", password: "pw-ursula1" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const result = yield* authed.users
+        .updateStatus({
+          payload: {
+            statusText: "a".repeat(MAX_STATUS_TEXT_LENGTH + 1),
+            statusEmoji: null,
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("updateStatus rejects a statusEmoji over the maximum length", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "vance", password: "pw-vance123" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "vance", password: "pw-vance123" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const result = yield* authed.users
+        .updateStatus({
+          payload: {
+            statusText: null,
+            statusEmoji: "e".repeat(MAX_STATUS_EMOJI_LENGTH + 1),
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("updateStatus rejects expiresInMinutes when clearing the status", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "wendy", password: "pw-wendy123" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "wendy", password: "pw-wendy123" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const result = yield* authed.users
+        .updateStatus({
+          payload: {
+            statusText: null,
+            statusEmoji: null,
+            expiresInMinutes: 30,
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
+test("a status past its expiry reads back as null everywhere", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const created = yield* c.users.register({
+        payload: { username: "xena", password: "pw-xena1234" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "xena", password: "pw-xena1234" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      yield* authed.users.updateStatus({
+        payload: { statusText: "Vacationing", statusEmoji: "🏖️" },
+      });
+
+      // Directly backdate the expiry behind the scenes (bypassing the
+      // endpoint's `expiresInMinutes` floor of 1) to simulate one that has
+      // since elapsed.
+      const db = yield* Effect.promise(getTestDb);
+      yield* Effect.tryPromise(() =>
+        db
+          .update(users)
+          .set({ statusExpiresAt: new Date(Date.now() - 1_000) })
+          .where(eq(users.id, created.id)),
+      ).pipe(Effect.orDie);
+
+      const fetched = yield* authed.users.getUser({ path: { id: created.id } });
+      expect(fetched.statusText).toBeNull();
+      expect(fetched.statusEmoji).toBeNull();
+      expect(fetched.statusExpiresAt).toBeNull();
+    }),
+  ));
+
+test("updateStatus rejects an unauthenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const result = yield* c.users
+        .updateStatus({
+          payload: { statusText: "Busy", statusEmoji: null },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
     }),
   ));

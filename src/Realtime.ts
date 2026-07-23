@@ -109,6 +109,20 @@ export type TypingEvent = {
   readonly displayName: string | null;
 };
 
+// Pushed to every connected user whenever someone sets/clears/updates their
+// custom status (issue #218, see `updateStatus` in UsersHandler.ts) —
+// broadcast like `PresenceEvent` rather than scoped to a chat's participants,
+// since a status is a property of the user, not of any one conversation.
+// Carries the full, already-expiry-resolved state (see `effectiveStatus` in
+// UsersHandler.ts) so a client never needs a follow-up fetch to render it.
+export type StatusEvent = {
+  readonly type: "status_changed";
+  readonly userId: number;
+  readonly statusText: string | null;
+  readonly statusEmoji: string | null;
+  readonly statusExpiresAt: number | null;
+};
+
 // Event payloads mostly carry no data beyond an id — clients refetch the
 // affected queries over the existing REST endpoints rather than trusting a
 // duplicated copy of the state pushed over the socket. Presence/typing are
@@ -121,7 +135,8 @@ export type RealtimeEvent =
   | CommentEvent
   | ReactionEvent
   | PresenceEvent
-  | TypingEvent;
+  | TypingEvent
+  | StatusEvent;
 
 // A connected client's outbound channel — bound to one open `/ws` socket.
 type Writer = (chunk: string) => Effect.Effect<void, unknown>;
