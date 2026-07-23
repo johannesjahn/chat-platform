@@ -145,6 +145,32 @@ type ChatMessagesPage = {
   hasEarlier: boolean;
 };
 
+// Applies `update` to a single message in the cached window for `chatId`,
+// without a refetch — mirrors `patchCachedPost` in lib/posts.ts. Used to
+// reflect a reaction toggle from the `reaction_changed` realtime event's
+// `reactions` payload (and the acting client's own mutation response) in
+// place, rather than invalidating the whole message window on every reaction
+// for every participant.
+export function patchCachedMessage(
+  queryClient: QueryClient,
+  chatId: number,
+  messageId: number,
+  update: (message: ChatMessage) => ChatMessage,
+) {
+  queryClient.setQueryData<ChatMessagesPage>(
+    chatMessagesQueryKey(chatId),
+    (prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        messages: prev.messages.map((m) =>
+          m.id === messageId ? update(m) : m,
+        ),
+      };
+    },
+  );
+}
+
 // Appends a just-sent message straight into the cached page instead of
 // waiting for the `chat_updated` WS round trip (server -> pubsub -> socket
 // -> invalidate -> refetch) to bring it back — the POST response already

@@ -649,6 +649,10 @@ export const Message = Schema.Struct({
   // read state is tracked per message/user, not as a single chat-wide flag,
   // so the UI can show WhatsApp/Telegram-style read receipts.
   readByUserIds: Schema.Array(Schema.Number),
+  // Emoji reactions on this message (issue #216) — computed on read (see
+  // reactions.ts) rather than stored, same convention as `Post.reactions`/
+  // `Comment.reactions`: one entry per emoji with at least one reaction.
+  reactions: Schema.Array(ReactionSummary),
 }).annotations({ identifier: "Message" });
 export type Message = typeof Message.Type;
 
@@ -1386,6 +1390,38 @@ const ChatsGroup = HttpApiGroup.make("chats")
     HttpApiEndpoint.del("deleteMessage", "/chats/:id/messages/:messageId")
       .setPath(MessageIdPath)
       .addSuccess(Schema.Void)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Idempotent add-reaction on a chat message (issue #216) — reacting with
+    // an emoji already reacted with is a no-op, returning the current state.
+    // Any participant may react, not just the sender (mirrors `addPostReaction`
+    // /`addCommentReaction`). Emits a `reaction_changed` event to every
+    // participant of the message's chat.
+    HttpApiEndpoint.post(
+      "addMessageReaction",
+      "/chats/:id/messages/:messageId/reactions",
+    )
+      .setPath(MessageIdPath)
+      .setPayload(ReactionBody)
+      .addSuccess(ReactionState)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Removes one specific emoji reaction from a message — a user may have
+    // reacted with more than one emoji, so this only clears the one named in
+    // the payload.
+    HttpApiEndpoint.del(
+      "removeMessageReaction",
+      "/chats/:id/messages/:messageId/reactions",
+    )
+      .setPath(MessageIdPath)
+      .setPayload(ReactionBody)
+      .addSuccess(ReactionState)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })
       .middleware(Authentication),

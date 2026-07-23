@@ -11,6 +11,7 @@ import {
   chatDetailQueryKey,
   chatMessagesQueryKey,
   chatsListQueryKey,
+  patchCachedMessage,
 } from "./chats";
 import { commentsQueryKeyRoot } from "./comments";
 import {
@@ -30,8 +31,9 @@ type RealtimeSocketEvent =
   | { type: "comment_changed"; postId: number; commentId: number }
   | {
       type: "reaction_changed";
-      targetType: "post" | "comment";
+      targetType: "post" | "comment" | "message";
       targetId: number;
+      chatId?: number;
       reactions: ReadonlyArray<{ emoji: string; count: number }>;
     }
   | { type: "presence"; userId: number; online: boolean }
@@ -222,7 +224,10 @@ export function useRealtimeSocket(enabled: boolean): void {
             // non-actor, and the actor already reconciled it from its own
             // mutation response (see mergeReactionCounts). A comment
             // reaction arrives scoped to the post room (far lower volume),
-            // so it just refetches the comment queries.
+            // so it just refetches the comment queries. A message reaction
+            // arrives scoped to the message's chat participants and carries
+            // `chatId` (see ReactionEvent in src/Realtime.ts), so it's patched
+            // in place too, the same way a post reaction is.
             if (parsed.targetType === "post") {
               patchCachedPost(queryClient, parsed.targetId, (post) => ({
                 ...post,
@@ -231,6 +236,21 @@ export function useRealtimeSocket(enabled: boolean): void {
                   parsed.reactions,
                 ),
               }));
+            } else if (parsed.targetType === "message") {
+              if (parsed.chatId != null) {
+                patchCachedMessage(
+                  queryClient,
+                  parsed.chatId,
+                  parsed.targetId,
+                  (message) => ({
+                    ...message,
+                    reactions: mergeReactionCounts(
+                      message.reactions,
+                      parsed.reactions,
+                    ),
+                  }),
+                );
+              }
             } else {
               void queryClient.invalidateQueries({
                 queryKey: commentsQueryKeyRoot,
