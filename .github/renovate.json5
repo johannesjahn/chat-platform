@@ -157,6 +157,26 @@
       matchPackageNames: ["minio/minio", "minio/mc"],
       versioning: "regex:^RELEASE\\.(?<major>\\d{4})-(?<minor>\\d{2})-(?<patch>\\d{2})T(?<build>\\d{2})-(?<revision>\\d{2})-\\d{2}Z$",
     },
+
+    // web/package.json's "js-yaml" entry under `overrides` isn't a direct
+    // dependency — it force-pins the version used by transitive consumers,
+    // notably @redocly/openapi-core (bundled inside openapi-typescript,
+    // used by `gen:types`). js-yaml v5 is a full rewrite (see its
+    // changelog: "Replaced the Type API with a tags API", "Reduced the set
+    // of exported schemas") that dropped the old `types` namespace export.
+    // @redocly/openapi-core's bundled js-yaml wrapper still reads
+    // `js_yaml_1.types.merge` and hasn't been updated for v5, so bumping
+    // the override to any 5.x throws `TypeError: Cannot read properties of
+    // undefined (reading 'merge')` at import time and fails the `openapi`
+    // CI job's `gen:types` step (see PR #278, which hit exactly this).
+    // Block major bumps here until @redocly/openapi-core ships v5 support
+    // upstream — remove this rule once it does.
+    {
+      matchManagers: ["bun"],
+      matchPackageNames: ["js-yaml"],
+      matchUpdateTypes: ["major"],
+      enabled: false,
+    },
   ],
 
   customManagers: [
