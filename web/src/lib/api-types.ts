@@ -904,6 +904,8 @@ export interface components {
             userId: number;
             username: string;
             displayName: string | null;
+            avatarUrl: string | null;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
             role: components["schemas"]["ChatRole"];
         };
         /** @enum {string} */

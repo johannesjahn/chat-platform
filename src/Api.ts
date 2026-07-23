@@ -614,6 +614,11 @@ export const ChatParticipant = Schema.Struct({
   userId: Schema.Number,
   username: Schema.String,
   displayName: Schema.NullOr(Schema.String),
+  // Same avatar fields as `User` above, mirrored here so a chat's participant
+  // list (chat header, member list, chat-list preview) can render the same
+  // avatar as everywhere else instead of falling back to initials.
+  avatarUrl: Schema.NullOr(Schema.String),
+  avatarVariants: Schema.NullOr(AvatarVariants),
   role: ChatRole,
 }).annotations({ identifier: "ChatParticipant" });
 export type ChatParticipant = typeof ChatParticipant.Type;

@@ -69,10 +69,11 @@ function ChatView({ id }: { id: string }) {
   // group chats don't show a single presence dot. Both hooks must run
   // unconditionally (before the loading/error early returns below), so they
   // tolerate `chat`/`session` still being undefined.
-  const otherParticipantId =
+  const otherParticipant =
     chat?.type === "direct"
-      ? chat.participants.find((p) => p.userId !== session?.user.id)?.userId
+      ? chat.participants.find((p) => p.userId !== session?.user.id)
       : undefined;
+  const otherParticipantId = otherParticipant?.userId;
   const otherParticipantOnline = useIsOnline(otherParticipantId);
   const typingUsers = useTypingUsers(chatId).filter(
     (t) => t.userId !== session?.user.id,
@@ -349,7 +350,11 @@ function ChatView({ id }: { id: string }) {
               className="flex min-w-0 flex-1 items-center gap-3"
             >
               <div className="relative shrink-0">
-                <Avatar name={name} />
+                <Avatar
+                  name={name}
+                  avatarUrl={otherParticipant?.avatarUrl}
+                  avatarVariants={otherParticipant?.avatarVariants}
+                />
                 <PresenceDot
                   online={otherParticipantOnline}
                   className="absolute -bottom-0.5 -right-0.5"

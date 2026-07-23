@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { Loader2, MessageCircle, Search, Users } from "lucide-react";
+import { Avatar } from "@/components/Avatar";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { Button } from "@/components/ui/button";
 import {
@@ -218,9 +219,12 @@ function NewChatPage() {
                           isSelected && "border-primary/60 bg-accent/60",
                         )}
                       >
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-                          {userAvatarName(user).slice(0, 1).toUpperCase()}
-                        </span>
+                        <Avatar
+                          name={userAvatarName(user)}
+                          avatarUrl={user.avatarUrl}
+                          avatarVariants={user.avatarVariants}
+                          size="sm"
+                        />
                         <span className="flex-1 font-medium">
                           {userLabel(user)}
                         </span>

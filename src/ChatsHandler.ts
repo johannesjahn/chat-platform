@@ -44,6 +44,7 @@ import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { messageReactionInfo, messageReactionInfoOne } from "./reactions.ts";
 import { RealtimeConnections } from "./Realtime.ts";
+import { toAvatarVariants } from "./UsersHandler.ts";
 import {
   chatInvites,
   chatParticipants,
@@ -99,12 +100,28 @@ const getParticipants = (
         userId: chatParticipants.userId,
         username: users.username,
         displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+        avatarSmall: users.avatarSmall,
+        avatarMedium: users.avatarMedium,
+        avatarLarge: users.avatarLarge,
         role: chatParticipants.role,
       })
       .from(chatParticipants)
       .innerJoin(users, eq(users.id, chatParticipants.userId))
       .where(eq(chatParticipants.chatId, chatId)),
-  ).pipe(Effect.orDie);
+  ).pipe(
+    Effect.orDie,
+    Effect.map((rows) =>
+      rows.map(({ avatarSmall, avatarMedium, avatarLarge, ...rest }) => ({
+        ...rest,
+        avatarVariants: toAvatarVariants({
+          avatarSmall,
+          avatarMedium,
+          avatarLarge,
+        }),
+      })),
+    ),
+  );
 
 // A participant's per-chat role, or `null` if they aren't (or are no longer)
 // a participant of `chatId`.
@@ -264,6 +281,10 @@ const getParticipantsForChats = (
             userId: chatParticipants.userId,
             username: users.username,
             displayName: users.displayName,
+            avatarUrl: users.avatarUrl,
+            avatarSmall: users.avatarSmall,
+            avatarMedium: users.avatarMedium,
+            avatarLarge: users.avatarLarge,
             role: chatParticipants.role,
           })
           .from(chatParticipants)
@@ -273,9 +294,22 @@ const getParticipantsForChats = (
         Effect.orDie,
         Effect.map((rows) => {
           const byChat = new Map<number, ChatParticipant[]>();
-          for (const { chatId, ...participant } of rows) {
+          for (const {
+            chatId,
+            avatarSmall,
+            avatarMedium,
+            avatarLarge,
+            ...participant
+          } of rows) {
             const list = byChat.get(chatId) ?? [];
-            list.push(participant);
+            list.push({
+              ...participant,
+              avatarVariants: toAvatarVariants({
+                avatarSmall,
+                avatarMedium,
+                avatarLarge,
+              }),
+            });
             byChat.set(chatId, list);
           }
           return byChat;

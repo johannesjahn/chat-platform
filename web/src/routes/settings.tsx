@@ -79,6 +79,30 @@ function EditProfileCard() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  const hasAvatar = !!avatarVariants || avatarUrl.trim().length > 0;
+
+  async function removeAvatar() {
+    setError(null);
+    setSuccess(false);
+    if (!session) return;
+    try {
+      // A full-replace `updateProfile` with `avatarUrl: null` clears both the
+      // linked URL and any uploaded avatar (they're mutually exclusive
+      // server-side — see UsersHandler.ts), so this is a real "remove" rather
+      // than just clearing the URL field.
+      const updated = await updateProfile.mutateAsync({
+        body: { displayName: displayName.trim() || null, avatarUrl: null },
+      });
+      setSession({ ...session, user: updated });
+      setAvatarUrl("");
+      setAvatarVariants(null);
+      await queryClient.invalidateQueries({ queryKey: usersQueryKey });
+      setSuccess(true);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
   return (
     <Card className="w-full motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
       <CardHeader>
@@ -167,16 +191,31 @@ function EditProfileCard() {
                   setCropFile(file);
                 }}
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="self-start"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <ImageUp className="size-4" />
-                Upload avatar
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="self-start"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <ImageUp className="size-4" />
+                  Upload avatar
+                </Button>
+                {hasAvatar && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-start text-destructive hover:text-destructive"
+                    disabled={updateProfile.isPending}
+                    onClick={() => void removeAvatar()}
+                  >
+                    <Trash2 className="size-4" />
+                    Remove photo
+                  </Button>
+                )}
+              </div>
               <Label htmlFor="avatar-url">Or link an image URL</Label>
               <Input
                 id="avatar-url"

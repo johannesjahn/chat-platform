@@ -45,6 +45,36 @@ test("uploads and crops an avatar from settings, replacing the initials everywhe
   );
 });
 
+test("removes an uploaded avatar back to the initials placeholder", async ({
+  page,
+}) => {
+  await registerViaUi(page);
+  await page.goto("/settings");
+
+  const png = makeSolidPng(300, 300, [60, 140, 220]);
+  await page.setInputFiles('input[type="file"]', {
+    name: "avatar.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
+  await expect(page.getByRole("dialog", { name: "Crop avatar" })).toBeVisible();
+  await page.getByRole("button", { name: "Save avatar" }).click();
+  await expect(page.locator("form img")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Remove photo" }).click();
+
+  await expect(page.getByText("Profile updated.")).toBeVisible();
+  await expect(page.locator("form img")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove photo" })).toHaveCount(
+    0,
+  );
+
+  // Reflected on the user's own profile page too, on a fresh navigation.
+  await page.getByRole("link", { name: /^@/ }).click();
+  await expect(page).toHaveURL(/\/users\/\d+/);
+  await expect(page.locator("img")).toHaveCount(0);
+});
+
 test("uploadAvatar rejects an image smaller than the minimum dimensions, before any upload", async ({
   page,
 }) => {

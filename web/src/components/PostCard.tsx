@@ -13,7 +13,7 @@ import {
   Type,
 } from "lucide-react";
 import { AttachmentPreview } from "@/components/AttachmentPreview";
-import { Avatar } from "@/components/Avatar";
+import { Avatar, type AvatarVariants } from "@/components/Avatar";
 import { CommentsSection, ReactionPicker } from "@/components/CommentsSection";
 import { Spotlight } from "@/components/reactbits/Spotlight";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,8 @@ type PostCardProps = {
   post: Post;
   authorId: number;
   authorLabel: string;
+  authorAvatarUrl?: string | null;
+  authorAvatarVariants?: AvatarVariants | null;
   canModify: boolean;
   onDelete: () => void;
   isDeleting: boolean;
@@ -76,6 +78,8 @@ export function PostCard({
   post,
   authorId,
   authorLabel,
+  authorAvatarUrl,
+  authorAvatarVariants,
   canModify,
   onDelete,
   isDeleting,
@@ -147,6 +151,8 @@ export function PostCard({
         >
           <Avatar
             name={authorLabel}
+            avatarUrl={authorAvatarUrl}
+            avatarVariants={authorAvatarVariants}
             className="transition-transform duration-300 ease-smooth group-hover:scale-105"
           />
           <div className="flex flex-1 flex-col leading-tight">

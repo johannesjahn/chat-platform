@@ -5629,6 +5629,8 @@
           "userId",
           "username",
           "displayName",
+          "avatarUrl",
+          "avatarVariants",
           "role"
         ],
         "properties": {
@@ -5642,6 +5644,26 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarVariants": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvatarVariants"
               },
               {
                 "type": "null"

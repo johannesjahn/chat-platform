@@ -65,7 +65,12 @@ export function ChatListItem({
           aria-label={`View ${userAvatarName(otherParticipant)}'s profile`}
           className="relative shrink-0"
         >
-          <Avatar name={name} size="lg" />
+          <Avatar
+            name={name}
+            avatarUrl={otherParticipant.avatarUrl}
+            avatarVariants={otherParticipant.avatarVariants}
+            size="lg"
+          />
           <PresenceDot
             online={otherParticipantOnline}
             className="absolute -bottom-0.5 -right-0.5"

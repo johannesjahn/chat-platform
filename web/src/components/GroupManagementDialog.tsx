@@ -452,7 +452,12 @@ function GroupManagementBody({
                   className="flex items-center gap-3 rounded-xl border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-accent/30 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1"
                   style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
                 >
-                  <Avatar name={userAvatarName(p)} size="md" />
+                  <Avatar
+                    name={userAvatarName(p)}
+                    avatarUrl={p.avatarUrl}
+                    avatarVariants={p.avatarVariants}
+                    size="md"
+                  />
                   <div className="flex min-w-0 flex-1 flex-col leading-tight">
                     <span className="truncate text-sm font-medium">
                       {label}
