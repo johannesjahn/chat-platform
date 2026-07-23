@@ -181,8 +181,9 @@ jobs:
       # advisory (GHSA-67mh-4wv8-2f99) via its bundled, deprecated
       # @esbuild-kit/* deps — a dev-only esbuild dev-server issue with no
       # upstream fix yet. Gate on high/critical so that's tracked (via
-      # Dependabot) without blocking every PR; raise this back to the
-      # default (moderate) once it's resolved upstream.
+      # Renovate, which replaced Dependabot — see issue #151) without
+      # blocking every PR; raise this back to the default (moderate) once
+      # it's resolved upstream.
       - name: Audit backend dependencies
         run: bun audit --audit-level=high
 
