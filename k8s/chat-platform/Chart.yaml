@@ -5,5 +5,5 @@ description: >-
   Kubernetes cluster. The frontend (web/) is deployed separately to Cloudflare
   Workers — see ../README.md.
 type: application
-version: 0.16.3
-appVersion: "0.16.3"
+version: 0.16.4
+appVersion: "0.16.4"
