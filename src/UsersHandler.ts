@@ -119,19 +119,27 @@ type UserRow = {
   role: "user" | "admin";
 };
 
+// Shared with ChatsHandler.ts, which needs the same fold for a chat
+// participant's avatar columns (see ChatParticipant in Api.ts).
+export const toAvatarVariants = (row: {
+  avatarSmall: string | null;
+  avatarMedium: string | null;
+  avatarLarge: string | null;
+}) =>
+  row.avatarSmall && row.avatarMedium && row.avatarLarge
+    ? {
+        small: row.avatarSmall,
+        medium: row.avatarMedium,
+        large: row.avatarLarge,
+      }
+    : null;
+
 const toPublicUser = (row: UserRow) => ({
   id: row.id,
   username: row.username,
   displayName: row.displayName,
   avatarUrl: row.avatarUrl,
-  avatarVariants:
-    row.avatarSmall && row.avatarMedium && row.avatarLarge
-      ? {
-          small: row.avatarSmall,
-          medium: row.avatarMedium,
-          large: row.avatarLarge,
-        }
-      : null,
+  avatarVariants: toAvatarVariants(row),
   role: row.role,
 });
 

@@ -155,6 +155,10 @@ function PostsFeedPage() {
                 post={post}
                 authorId={post.authorId}
                 authorLabel={authorLabelFor(post.authorId)}
+                authorAvatarUrl={authorById.get(post.authorId)?.avatarUrl}
+                authorAvatarVariants={
+                  authorById.get(post.authorId)?.avatarVariants
+                }
                 canModify={
                   session.user.id === post.authorId ||
                   session.user.role === "admin"

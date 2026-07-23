@@ -297,7 +297,12 @@ function CommentItem({
         params={{ id: String(comment.authorId) }}
         className="mt-0.5 shrink-0"
       >
-        <Avatar name={authorName} className="size-7 text-xs" />
+        <Avatar
+          name={authorName}
+          avatarUrl={author?.avatarUrl}
+          avatarVariants={author?.avatarVariants}
+          className="size-7 text-xs"
+        />
       </Link>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="rounded-2xl bg-muted/60 px-3 py-2">
