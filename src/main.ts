@@ -24,6 +24,7 @@ import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { redactedLogger } from "./RedactedLogger.ts";
 import { RefreshTokenCleanupLive } from "./RefreshTokenCleanup.ts";
+import { SearchHandlerLive } from "./SearchHandler.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
 import { allowedOrigins } from "./WebOrigin.ts";
@@ -44,6 +45,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(PostsHandlerLive),
   Layer.provide(EngagementHandlerLive),
   Layer.provide(ChatsHandlerLive),
+  Layer.provide(SearchHandlerLive),
   Layer.provide(AttachmentsHandlerLive),
   Layer.provide(VersionHandlerLive),
   Layer.provide(RealtimeHandlerLive),

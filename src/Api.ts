@@ -324,6 +324,16 @@ export class InvalidCommentRequest extends Schema.TaggedError<InvalidCommentRequ
   { message: Schema.String },
 ) {}
 
+// Raised for a malformed full-text-search pagination cursor (issue #224) —
+// mirrors `InvalidPostsRequest`'s role for `listPosts`. The search *query*
+// text itself never lands here: it's decoded through Postgres'
+// `websearch_to_tsquery`, which tolerates any input rather than erroring (see
+// SearchHandler.ts), so only the opaque cursor can be malformed.
+export class InvalidSearchRequest extends Schema.TaggedError<InvalidSearchRequest>()(
+  "InvalidSearchRequest",
+  { message: Schema.String },
+) {}
+
 // Uploaded file metadata (issue #221) — attached to a post/message via
 // `attachmentId` in Create/UpdatePostBody/CreateMessageBody/UpdateMessageBody
 // below. `url` is a fresh, short-lived presigned (or `data:`, in the
@@ -1279,6 +1289,143 @@ export const ChatsPage = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.String),
 }).annotations({ identifier: "ChatsPage" });
 
+// ---------------------------------------------------------------------------
+// Full-text search (issue #224)
+//
+// Three keyset-paginated endpoints — posts, comments, chat messages — each
+// backed by a Postgres GIN index over a generated `tsvector` column (see
+// migration 0016 and SearchHandler.ts). Ordered newest-match-first (`id desc`)
+// with the same opaque single-column cursor as `listPosts`, rather than by
+// relevance rank: recency keyset paginates cleanly and predictably, and the
+// highlighted snippet already gives the user the relevance context inline.
+// ---------------------------------------------------------------------------
+
+// Short enough to still be a useful search (a two-letter tsquery lexeme is
+// already selective once stemmed), but a floor so a single-character `q`
+// can't ask Postgres to headline half the table. Mirrors
+// MIN_USER_SEARCH_QUERY_LENGTH's rationale (issue #48), a touch lower since
+// FTS is index-served rather than an ILIKE scan.
+export const MIN_SEARCH_QUERY_LENGTH = 2;
+
+// Bounds the request; no real search phrase approaches this, and a longer
+// string can only be noise `websearch_to_tsquery` would discard anyway.
+export const MAX_SEARCH_QUERY_LENGTH = 100;
+
+export const DEFAULT_SEARCH_LIMIT = 20;
+export const MAX_SEARCH_LIMIT = 50;
+
+// Left un-`identifier`-annotated for the same reason as `PostsPageQuery`
+// above (see CLAUDE.md) — it's inlined into query parameters. `q` is trimmed
+// and length-bounded here; its *contents* are never interpreted as SQL — the
+// handler always passes it to `websearch_to_tsquery` as a bound parameter.
+export const SearchQuery = Schema.Struct({
+  q: Schema.Trim.pipe(
+    Schema.minLength(MIN_SEARCH_QUERY_LENGTH),
+    Schema.maxLength(MAX_SEARCH_QUERY_LENGTH),
+  ),
+  cursor: Schema.optional(Schema.String),
+  limit: Schema.optional(
+    Schema.NumberFromString.pipe(
+      Schema.int(),
+      Schema.between(1, MAX_SEARCH_LIMIT),
+    ),
+  ),
+});
+
+// One run of a matched snippet. The backend splits Postgres'
+// `ts_headline` output on private-use sentinel delimiters into an ordered
+// list of runs, each flagged `match` or not, so the frontend can render the
+// highlight as escaped React text (a `<mark>` around matched runs) — never as
+// raw HTML — keeping user content that happens to contain markup inert
+// (no stored XSS via the snippet).
+export const SearchSnippetSegment = Schema.Struct({
+  text: Schema.String,
+  match: Schema.Boolean,
+}).annotations({ identifier: "SearchSnippetSegment" });
+export type SearchSnippetSegment = typeof SearchSnippetSegment.Type;
+
+export const PostSearchResult = Schema.Struct({
+  post: Post,
+  snippet: Schema.Array(SearchSnippetSegment),
+}).annotations({ identifier: "PostSearchResult" });
+
+export const PostSearchPage = Schema.Struct({
+  results: Schema.Array(PostSearchResult),
+  limit: Schema.Number,
+  nextCursor: Schema.NullOr(Schema.String),
+}).annotations({ identifier: "PostSearchPage" });
+
+export const CommentSearchResult = Schema.Struct({
+  // Carries `postId`, so the frontend can deep-link to the post the matched
+  // comment lives under without a second lookup.
+  comment: Comment,
+  snippet: Schema.Array(SearchSnippetSegment),
+}).annotations({ identifier: "CommentSearchResult" });
+
+export const CommentSearchPage = Schema.Struct({
+  results: Schema.Array(CommentSearchResult),
+  limit: Schema.Number,
+  nextCursor: Schema.NullOr(Schema.String),
+}).annotations({ identifier: "CommentSearchPage" });
+
+// Lightweight chat context for a message hit — just enough for the results
+// list to render the same name/avatar the chat list does (group title, or the
+// other participant of a direct chat) and link through, without paying for a
+// full `Chat` (last message, unread count, version) per row. Deduplicated per
+// page into `MessageSearchPage.chats`, keyed by `id`.
+export const MessageSearchChat = Schema.Struct({
+  id: Schema.Number,
+  type: ChatType,
+  title: Schema.NullOr(Schema.String),
+  participants: Schema.Array(ChatParticipant),
+}).annotations({ identifier: "MessageSearchChat" });
+export type MessageSearchChat = typeof MessageSearchChat.Type;
+
+export const MessageSearchResult = Schema.Struct({
+  // Carries `chatId`; resolve its `MessageSearchChat` from the page's `chats`.
+  message: Message,
+  snippet: Schema.Array(SearchSnippetSegment),
+}).annotations({ identifier: "MessageSearchResult" });
+
+export const MessageSearchPage = Schema.Struct({
+  results: Schema.Array(MessageSearchResult),
+  // Every chat referenced by a result in `results`, deduplicated — only chats
+  // the current user still participates in are ever searched (the handler
+  // joins on their participant rows), so a hit can never leak a message from a
+  // chat they're not in.
+  chats: Schema.Array(MessageSearchChat),
+  limit: Schema.Number,
+  nextCursor: Schema.NullOr(Schema.String),
+}).annotations({ identifier: "MessageSearchPage" });
+
+const SearchGroup = HttpApiGroup.make("search")
+  .add(
+    // Full-text search over text posts, newest match first.
+    HttpApiEndpoint.get("searchPosts", "/search/posts")
+      .setUrlParams(SearchQuery)
+      .addSuccess(PostSearchPage)
+      .addError(InvalidSearchRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Full-text search over comments and replies, newest match first.
+    HttpApiEndpoint.get("searchComments", "/search/comments")
+      .setUrlParams(SearchQuery)
+      .addSuccess(CommentSearchPage)
+      .addError(InvalidSearchRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Full-text search over messages in chats the current user participates
+    // in (access-scoped by a join on their participant rows), newest match
+    // first.
+    HttpApiEndpoint.get("searchMessages", "/search/messages")
+      .setUrlParams(SearchQuery)
+      .addSuccess(MessageSearchPage)
+      .addError(InvalidSearchRequest, { status: 400 })
+      .middleware(Authentication),
+  );
+
 const ChatsGroup = HttpApiGroup.make("chats")
   .add(
     // All chats the current user participates in, newest-activity-first,
@@ -1630,6 +1777,7 @@ export class ChatApi extends HttpApi.make("chat-platform")
   .add(PostsGroup)
   .add(CommentsGroup)
   .add(ChatsGroup)
+  .add(SearchGroup)
   .add(AttachmentsGroup)
   .add(MetaGroup)
   .add(RealtimeGroup)
