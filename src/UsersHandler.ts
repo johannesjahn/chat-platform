@@ -3,15 +3,20 @@ import { and, eq, ilike, isNull, sql } from "drizzle-orm";
 import { Context, Effect, FiberRef, Metric, MetricLabel } from "effect";
 import { currentLogUser } from "./RedactedLogger.ts";
 import {
+  ALLOWED_AVATAR_MIME_TYPES,
+  AvatarTooLarge,
   ChatApi,
   Forbidden,
+  InvalidAvatarUpload,
   InvalidCredentials,
+  MAX_AVATAR_UPLOAD_SIZE_BYTES,
   NotFound,
   TooManyRequests,
   UsernameTaken,
 } from "./Api.ts";
 import { CurrentUser, TokenVersionCache } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
+import { processAvatar } from "./ImageProcessing.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
 import { authEventsTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { PubSub } from "./PubSub.ts";
@@ -53,6 +58,14 @@ const CHANGE_PASSWORD_WINDOW_SECONDS = 15 * 60;
 const DELETE_ACCOUNT_MAX_ATTEMPTS_PER_ACCOUNT = 5;
 const DELETE_ACCOUNT_WINDOW_SECONDS = 15 * 60;
 
+// Avatar uploads involve real image-decoding/resizing work (processAvatar,
+// ImageProcessing.ts) and are a rare, deliberate action (changing your
+// avatar), not something a normal client ever does in a burst — mirrors
+// AttachmentsHandler's enforceUploadLimit's rationale for bounding a
+// scripted flood tighter than the global per-IP limiter.
+const AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT = 10;
+const AVATAR_UPLOAD_WINDOW_SECONDS = 60 * 60;
+
 // Escapes LIKE/ILIKE wildcard characters in user-supplied search text so a
 // query containing "%" or "_" is matched literally instead of as a wildcard.
 const escapeLikePattern = (value: string): string =>
@@ -88,6 +101,39 @@ const enforceRateLimit = (
       );
     }
   });
+
+// Columns every "return a User" query below selects, and the shape
+// `toPublicUser` transforms them from — `avatarSmall`/`avatarMedium`/
+// `avatarLarge` (three flat DB columns, issue #269) fold into the API's
+// single nested `avatarVariants` field, present only when all three are set
+// (they're always written/cleared together — see updateProfile/uploadAvatar
+// below).
+type UserRow = {
+  id: number;
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  avatarSmall: string | null;
+  avatarMedium: string | null;
+  avatarLarge: string | null;
+  role: "user" | "admin";
+};
+
+const toPublicUser = (row: UserRow) => ({
+  id: row.id,
+  username: row.username,
+  displayName: row.displayName,
+  avatarUrl: row.avatarUrl,
+  avatarVariants:
+    row.avatarSmall && row.avatarMedium && row.avatarLarge
+      ? {
+          small: row.avatarSmall,
+          medium: row.avatarMedium,
+          large: row.avatarLarge,
+        }
+      : null,
+  role: row.role,
+});
 
 // Auth funnel counter (issue #196) — labeled only by `event`
 // ("signup"/"login"/"refresh") and `outcome` ("success"/"failure"), never by
@@ -198,13 +244,16 @@ export const UsersHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const pattern = `%${escapeLikePattern(q)}%`;
-          return yield* Effect.tryPromise(() =>
+          const rows = yield* Effect.tryPromise(() =>
             db
               .select({
                 id: users.id,
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
+                avatarSmall: users.avatarSmall,
+                avatarMedium: users.avatarMedium,
+                avatarLarge: users.avatarLarge,
                 role: users.role,
               })
               .from(users)
@@ -212,6 +261,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               .orderBy(users.username)
               .limit(USER_SEARCH_RESULTS_LIMIT),
           ).pipe(Effect.orDie);
+          return rows.map(toPublicUser);
         }),
       )
       .handle("getUser", ({ path: { id } }) =>
@@ -224,6 +274,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
+                avatarSmall: users.avatarSmall,
+                avatarMedium: users.avatarMedium,
+                avatarLarge: users.avatarLarge,
                 role: users.role,
               })
               .from(users)
@@ -234,7 +287,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             return yield* Effect.fail(
               new NotFound({ message: `User ${id} not found` }),
             );
-          return rows[0];
+          return toPublicUser(rows[0]);
         }),
       )
       .handle("register", ({ payload }) =>
@@ -287,6 +340,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
+                avatarSmall: users.avatarSmall,
+                avatarMedium: users.avatarMedium,
+                avatarLarge: users.avatarLarge,
                 role: users.role,
               }),
           ).pipe(Effect.orDie);
@@ -294,7 +350,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             return yield* Effect.die(new Error("INSERT returned no rows"));
           yield* recordAuthEvent("signup", "success");
           yield* FiberRef.set(currentLogUser, rows[0].username);
-          return rows[0];
+          return toPublicUser(rows[0]);
         }),
       )
       .handle("login", ({ payload }) =>
@@ -342,13 +398,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             );
           }
 
-          const publicUser = {
-            id: user.id,
-            username: user.username,
-            displayName: user.displayName,
-            avatarUrl: user.avatarUrl,
-            role: user.role,
-          };
+          const publicUser = toPublicUser(user);
           const tokenUser = {
             id: user.id,
             username: user.username,
@@ -607,12 +657,21 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
 
+          // Full-replace (see UpdateProfileBody's comment in Api.ts) also
+          // clears any uploaded avatar — `avatarUrl` and the uploaded
+          // avatarSmall/Medium/Large columns are mutually exclusive, so a
+          // caller explicitly setting (or clearing) `avatarUrl` here always
+          // means "stop using the uploaded one". `uploadAvatar` below is the
+          // inverse.
           const rows = yield* Effect.tryPromise(() =>
             db
               .update(users)
               .set({
                 displayName: payload.displayName,
                 avatarUrl: payload.avatarUrl,
+                avatarSmall: null,
+                avatarMedium: null,
+                avatarLarge: null,
               })
               .where(eq(users.id, currentUser.id))
               .returning({
@@ -620,13 +679,92 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
+                avatarSmall: users.avatarSmall,
+                avatarMedium: users.avatarMedium,
+                avatarLarge: users.avatarLarge,
                 role: users.role,
               }),
           ).pipe(Effect.orDie);
           const updated = rows[0];
           if (!updated)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
-          return updated;
+          return toPublicUser(updated);
+        }),
+      )
+      .handle("uploadAvatar", ({ payload }) =>
+        Effect.gen(function* () {
+          const currentUser = yield* CurrentUser;
+          const db = yield* Db;
+          const limiter = yield* RateLimiter;
+
+          yield* enforceRateLimit(
+            limiter,
+            `avatar-upload:account:${currentUser.id}`,
+            AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT,
+            AVATAR_UPLOAD_WINDOW_SECONDS,
+          );
+
+          if (
+            !(ALLOWED_AVATAR_MIME_TYPES as ReadonlyArray<string>).includes(
+              payload.file.contentType,
+            )
+          )
+            return yield* Effect.fail(
+              new InvalidAvatarUpload({
+                message: `Unsupported file type: ${payload.file.contentType}`,
+              }),
+            );
+
+          const bunFile = Bun.file(payload.file.path);
+          if (bunFile.size > MAX_AVATAR_UPLOAD_SIZE_BYTES)
+            return yield* Effect.fail(
+              new AvatarTooLarge({
+                message: `File exceeds the maximum size of ${MAX_AVATAR_UPLOAD_SIZE_BYTES} bytes`,
+              }),
+            );
+
+          const processed = yield* Effect.tryPromise({
+            try: async () =>
+              processAvatar(await bunFile.bytes(), {
+                x: payload.x,
+                y: payload.y,
+                size: payload.size,
+              }),
+            catch: (err) =>
+              new InvalidAvatarUpload({
+                message:
+                  err instanceof Error ? err.message : "Invalid avatar image",
+              }),
+          });
+
+          const toDataUrl = (bytes: Uint8Array) =>
+            `data:${processed.contentType};base64,${Buffer.from(bytes).toString("base64")}`;
+
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .update(users)
+              .set({
+                avatarUrl: null,
+                avatarSmall: toDataUrl(processed.small),
+                avatarMedium: toDataUrl(processed.medium),
+                avatarLarge: toDataUrl(processed.large),
+              })
+              .where(eq(users.id, currentUser.id))
+              .returning({
+                id: users.id,
+                username: users.username,
+                displayName: users.displayName,
+                avatarUrl: users.avatarUrl,
+                avatarSmall: users.avatarSmall,
+                avatarMedium: users.avatarMedium,
+                avatarLarge: users.avatarLarge,
+                role: users.role,
+              }),
+          ).pipe(Effect.orDie);
+          const updated = rows[0];
+          if (!updated)
+            return yield* Effect.die(new Error("UPDATE returned no rows"));
+          return toPublicUser(updated);
         }),
       )
       .handle("deleteAccount", ({ payload }) =>
@@ -703,6 +841,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
+                avatarSmall: users.avatarSmall,
+                avatarMedium: users.avatarMedium,
+                avatarLarge: users.avatarLarge,
                 role: users.role,
               }),
           ).pipe(Effect.orDie);
@@ -717,7 +858,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             .publish("auth:invalidation", String(id))
             .pipe(Effect.ignore);
 
-          return updated;
+          return toPublicUser(updated);
         }),
       ),
 );

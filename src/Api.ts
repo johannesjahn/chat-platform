@@ -73,6 +73,19 @@ const AvatarUrl = Schema.String.pipe(
   ),
 );
 
+// Self-contained `data:image/webp;base64,...` URLs for the 3 fixed sizes an
+// uploaded-and-cropped avatar is stored/served at (issue #269) — see
+// `processAvatar`/`AVATAR_VARIANT_PX` in ImageProcessing.ts for how they're
+// produced, and the comment on `users.avatarSmall` (db/schema.ts) for why
+// they're embedded directly rather than resolved via a presigned URL like
+// `Attachment.url`. Mutually exclusive with `avatarUrl` on `User` below —
+// exactly one of the two is ever non-null.
+const AvatarVariants = Schema.Struct({
+  small: Schema.String,
+  medium: Schema.String,
+  large: Schema.String,
+}).annotations({ identifier: "AvatarVariants" });
+
 // Public representation of a user — never exposes the password hash.
 // `identifier` annotations surface these as named schemas in the OpenAPI spec.
 export const User = Schema.Struct({
@@ -83,6 +96,12 @@ export const User = Schema.Struct({
   // web/src/components/Avatar.tsx).
   displayName: Schema.NullOr(Schema.String),
   avatarUrl: Schema.NullOr(Schema.String),
+  // Set instead of `avatarUrl` when the user has uploaded/cropped an avatar
+  // via `POST /users/me/avatar` (issue #269) rather than linked an external
+  // image. The frontend picks whichever size variant matches where it's
+  // rendering the avatar (see `AVATAR_SIZES` in Avatar.tsx) and otherwise
+  // falls back to `avatarUrl`, then initials.
+  avatarVariants: Schema.NullOr(AvatarVariants),
   role: UserRole,
 }).annotations({ identifier: "User" });
 export type User = typeof User.Type;
@@ -310,6 +329,23 @@ export class AttachmentTooLarge extends Schema.TaggedError<AttachmentTooLarge>()
 // much a user can accumulate over time (issue #256).
 export class AttachmentQuotaExceeded extends Schema.TaggedError<AttachmentQuotaExceeded>()(
   "AttachmentQuotaExceeded",
+  { message: Schema.String },
+) {}
+
+// Raised by `POST /users/me/avatar` (issue #269) for anything wrong with the
+// upload other than its size: an unsupported content type, bytes that don't
+// decode as an image, a source image smaller than MIN_AVATAR_SOURCE_PX in
+// either dimension, or a crop rectangle that doesn't fit within the actual
+// decoded image bounds. `message` carries the specific reason (see
+// UsersHandler.ts) — unlike the generic messages elsewhere in this file,
+// there's no enumeration/timing concern here worth flattening it for.
+export class InvalidAvatarUpload extends Schema.TaggedError<InvalidAvatarUpload>()(
+  "InvalidAvatarUpload",
+  { message: Schema.String },
+) {}
+
+export class AvatarTooLarge extends Schema.TaggedError<AvatarTooLarge>()(
+  "AvatarTooLarge",
   { message: Schema.String },
 ) {}
 
@@ -793,6 +829,39 @@ export const UserSearchQuery = Schema.Struct({
   ),
 });
 
+// Mime types `POST /users/me/avatar` accepts (issue #269) — narrower than
+// `ALLOWED_ATTACHMENT_MIME_TYPES`: no GIF (animated avatars are explicitly
+// out of scope for the initial cut) and no video/audio.
+export const ALLOWED_AVATAR_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+] as const;
+
+// Avatars don't need anywhere near MAX_ATTACHMENT_SIZE_BYTES's budget — a
+// single photo, not arbitrary chat media.
+export const MAX_AVATAR_UPLOAD_SIZE_BYTES = 8 * 1024 * 1024;
+
+// Multipart payload: the image file plus the square crop rectangle chosen by
+// the frontend's crop UI, in the pixel coordinates of the (EXIF-rotated)
+// uploaded image — see `processAvatar` in ImageProcessing.ts, which
+// re-validates it against the actual decoded image rather than trusting
+// these values. Left un-`identifier`-annotated like `UploadAttachmentBody`
+// below. `maxFileSize` here is the same coarse in-stream backstop
+// `UploadAttachmentBody` uses — set looser than MAX_AVATAR_UPLOAD_SIZE_BYTES
+// so an ordinary too-large upload trips the handler's precise, typed
+// AvatarTooLarge (413) check instead of a generic 400 from the multipart
+// parser itself.
+const UploadAvatarBody = HttpApiSchema.Multipart(
+  Schema.Struct({
+    file: Multipart.SingleFileSchema,
+    x: Schema.NumberFromString.pipe(Schema.int(), Schema.nonNegative()),
+    y: Schema.NumberFromString.pipe(Schema.int(), Schema.nonNegative()),
+    size: Schema.NumberFromString.pipe(Schema.int(), Schema.positive()),
+  }),
+  { maxFileSize: Option.some(MAX_AVATAR_UPLOAD_SIZE_BYTES * 2) },
+);
+
 const UsersGroup = HttpApiGroup.make("users")
   .add(
     // Replaces the old unpaginated "list every user" endpoint (issue #48):
@@ -862,6 +931,20 @@ const UsersGroup = HttpApiGroup.make("users")
     HttpApiEndpoint.put("updateProfile", "/users/me")
       .setPayload(UpdateProfileBody)
       .addSuccess(User)
+      .middleware(Authentication),
+  )
+  .add(
+    // Uploads and stores a square-cropped avatar (issue #269), overwriting
+    // any existing uploaded avatar and clearing `avatarUrl` — the two are
+    // mutually exclusive (see UsersHandler.ts). `updateProfile` above is the
+    // inverse: setting `avatarUrl` (or clearing it) always clears an
+    // uploaded avatar back to unset.
+    HttpApiEndpoint.post("uploadAvatar", "/users/me/avatar")
+      .setPayload(UploadAvatarBody)
+      .addSuccess(User)
+      .addError(InvalidAvatarUpload, { status: 400 })
+      .addError(AvatarTooLarge, { status: 413 })
+      .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),
   )
   .add(
