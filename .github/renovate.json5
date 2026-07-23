@@ -177,6 +177,25 @@
       matchUpdateTypes: ["major"],
       enabled: false,
     },
+
+    // TypeScript 7.0 is a hard break for two things this repo's CI depends
+    // on, confirmed by PR #161 (which bumped to 7.0.2 and left every one of
+    // these failing): typescript-eslint refuses to run at all against TS
+    // 7.0 ("typescript-eslint does not support TS 7.0" — see
+    // https://github.com/typescript-eslint/typescript-eslint/issues/10940),
+    // failing the `lint` CI job outright, and openapi-typescript's bundled
+    // `ts.mjs` calls `ts.factory.createKeywordTypeNode` in a way TS 7's
+    // reshaped factory API no longer supports, throwing
+    // `TypeError: Cannot read properties of undefined (reading
+    // 'createKeywordTypeNode')` and failing the `openapi` job's
+    // `gen:types` step. Block major bumps here until both upstream
+    // projects ship TS 7 support — remove this rule once they do.
+    {
+      matchManagers: ["bun"],
+      matchPackageNames: ["typescript"],
+      matchUpdateTypes: ["major"],
+      enabled: false,
+    },
   ],
 
   customManagers: [
