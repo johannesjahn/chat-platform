@@ -933,6 +933,188 @@ test("deleteMessage removes the message and its read receipts, and is forbidden 
     }),
   ));
 
+// --- Message reactions (issue #216) -----------------------------------------
+
+// Finds one emoji's summary in a `reactions` array, or a zero/false default
+// if that emoji has no reactions at all (mirrors the same helper in
+// engagement.test.ts — see ReactionSummary in reactions.ts).
+const reactionOf = (
+  reactions: ReadonlyArray<{
+    emoji: string;
+    count: number;
+    reactedByMe: boolean;
+  }>,
+  emoji: string,
+) =>
+  reactions.find((r) => r.emoji === emoji) ?? {
+    emoji,
+    count: 0,
+    reactedByMe: false,
+  };
+
+test("a new message starts with no reactions", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const message = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "hi bob" },
+      });
+      expect(message.reactions).toEqual([]);
+    }),
+  ));
+
+test("addMessageReaction/removeMessageReaction toggle reaction state, visible to any participant", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const message = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "hi bob" },
+      });
+
+      // Any participant may react, not just the sender.
+      const reacted = yield* bob.client.chats.addMessageReaction({
+        path: { id: chat.id, messageId: message.id },
+        payload: { emoji: "👍" },
+      });
+      expect(reactionOf(reacted.reactions, "👍")).toEqual({
+        emoji: "👍",
+        count: 1,
+        reactedByMe: true,
+      });
+
+      // Visible (with reactedByMe from their own perspective) via listMessages
+      // to every participant, not just the reactor.
+      const listed = yield* alice.client.chats.listMessages({
+        path: { id: chat.id },
+        urlParams: {},
+      });
+      const seen = listed.messages.find((m) => m.id === message.id)!;
+      expect(reactionOf(seen.reactions, "👍")).toEqual({
+        emoji: "👍",
+        count: 1,
+        reactedByMe: false,
+      });
+
+      const removed = yield* bob.client.chats.removeMessageReaction({
+        path: { id: chat.id, messageId: message.id },
+        payload: { emoji: "👍" },
+      });
+      expect(reactionOf(removed.reactions, "👍").count).toBe(0);
+    }),
+  ));
+
+test("addMessageReaction is idempotent, and a user can react with more than one distinct emoji", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const message = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "hi bob" },
+      });
+
+      yield* bob.client.chats.addMessageReaction({
+        path: { id: chat.id, messageId: message.id },
+        payload: { emoji: "❤️" },
+      });
+      const state = yield* bob.client.chats.addMessageReaction({
+        path: { id: chat.id, messageId: message.id },
+        payload: { emoji: "❤️" },
+      });
+      expect(reactionOf(state.reactions, "❤️")).toEqual({
+        emoji: "❤️",
+        count: 1,
+        reactedByMe: true,
+      });
+
+      const withSecond = yield* bob.client.chats.addMessageReaction({
+        path: { id: chat.id, messageId: message.id },
+        payload: { emoji: "😂" },
+      });
+      expect(reactionOf(withSecond.reactions, "❤️").count).toBe(1);
+      expect(reactionOf(withSecond.reactions, "😂")).toEqual({
+        emoji: "😂",
+        count: 1,
+        reactedByMe: true,
+      });
+    }),
+  ));
+
+test("addMessageReaction is forbidden for non-participants and 404s for a missing message", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const eve = yield* registerAndLogin("eve", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const message = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "hi bob" },
+      });
+
+      const forbidden = yield* eve.client.chats
+        .addMessageReaction({
+          path: { id: chat.id, messageId: message.id },
+          payload: { emoji: "👍" },
+        })
+        .pipe(Effect.either);
+      expect(forbidden._tag).toBe("Left");
+      if (forbidden._tag === "Left") {
+        expect((forbidden.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+
+      const notFound = yield* alice.client.chats
+        .addMessageReaction({
+          path: { id: chat.id, messageId: 9999 },
+          payload: { emoji: "👍" },
+        })
+        .pipe(Effect.either);
+      expect(notFound._tag).toBe("Left");
+      if (notFound._tag === "Left") {
+        expect((notFound.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("addMessageReaction rejects an emoji outside the standard set", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const message = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "hi bob" },
+      });
+
+      const result = yield* alice.client.chats
+        .addMessageReaction({
+          path: { id: chat.id, messageId: message.id },
+          // @ts-expect-error deliberately outside ReactionEmoji's literal union
+          payload: { emoji: "🚀" },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+    }),
+  ));
+
 // `version` (see db/schema.ts) is what lets a client detect deterministically
 // that it missed a `chat_updated` event (issue #55) instead of just
 // refetching blind whenever the next one happens to arrive — this pins the

@@ -53,22 +53,30 @@ export type CommentEvent = {
   readonly commentId: number;
 };
 
-// Pushed when a reaction on a post or a comment/reply is added or removed
-// (issue #215 — widened from the original binary "like", issue #67). A
-// reaction on a *post* goes out feed-wide (via `broadcastAll`, like
-// `post_changed`) — reaction counts are low-volume and relevant to anyone
-// viewing the feed. A reaction on a *comment* is scoped to that post's room
-// (`notifyPostRoom`) instead, to avoid flooding the whole feed with
-// per-comment activity. Unlike the id-only events, this carries the fresh
-// per-emoji counts so a viewer's counts update without every client having to
-// refetch on every toggle — but never `reactedByMe`, which is inherently
-// per-viewer and can't be baked into one broadcast payload shared by every
-// recipient (each client's own reaction state is reconciled from its own
-// mutation response instead — see EngagementHandler.ts).
+// Pushed when a reaction on a post, a comment/reply, or a chat message is
+// added or removed (issue #216 extended this to messages; issue #215 widened
+// it from the original binary "like", issue #67). A reaction on a *post*
+// goes out feed-wide (via `broadcastAll`, like `post_changed`) — reaction
+// counts are low-volume and relevant to anyone viewing the feed. A reaction
+// on a *comment* is scoped to that post's room (`notifyPostRoom`) instead, to
+// avoid flooding the whole feed with per-comment activity. A reaction on a
+// *message* is scoped to the message's chat participants (`notifyUsers`,
+// like `chat_updated`) — chat messages are private to their participants,
+// unlike posts/comments. `chatId` is only ever set for a message reaction; it
+// carries the chat the client needs to know which cached message list to
+// patch (see patchCachedMessage in web/src/lib/chats.ts), since `targetId`
+// alone (the message id) isn't enough to locate it client-side. Unlike the
+// id-only events, this carries the fresh per-emoji counts so a viewer's
+// counts update without every client having to refetch on every toggle — but
+// never `reactedByMe`, which is inherently per-viewer and can't be baked into
+// one broadcast payload shared by every recipient (each client's own reaction
+// state is reconciled from its own mutation response instead — see
+// EngagementHandler.ts/ChatsHandler.ts).
 export type ReactionEvent = {
   readonly type: "reaction_changed";
-  readonly targetType: "post" | "comment";
+  readonly targetType: "post" | "comment" | "message";
   readonly targetId: number;
+  readonly chatId?: number;
   readonly reactions: ReadonlyArray<{
     readonly emoji: string;
     readonly count: number;

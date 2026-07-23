@@ -136,6 +136,57 @@ export const commentReactionInfo = async (
   return result;
 };
 
+// Same as `postReactionInfo`, for chat message ids (issue #216) — messages
+// share the `likes` table with posts and comments/replies (see the `likes`
+// comment in db/schema.ts).
+export const messageReactionInfo = async (
+  db: DrizzleDb,
+  messageIds: ReadonlyArray<number>,
+  userId: number,
+): Promise<Map<number, ReactionSummary[]>> => {
+  const result = new Map<number, ReactionSummary[]>();
+  if (messageIds.length === 0) return result;
+  const ids = [...messageIds];
+
+  const counts = await db
+    .select({ messageId: likes.messageId, emoji: likes.emoji, total: count() })
+    .from(likes)
+    .where(inArray(likes.messageId, ids))
+    .groupBy(likes.messageId, likes.emoji);
+  const mine = await db
+    .select({ messageId: likes.messageId, emoji: likes.emoji })
+    .from(likes)
+    .where(and(eq(likes.userId, userId), inArray(likes.messageId, ids)));
+
+  const mineByMessage = new Map<number, Set<string>>();
+  for (const row of mine) {
+    if (row.messageId === null) continue;
+    const set = mineByMessage.get(row.messageId) ?? new Set<string>();
+    set.add(row.emoji);
+    mineByMessage.set(row.messageId, set);
+  }
+  const countsByMessage = new Map<
+    number,
+    Array<{ emoji: string; total: number }>
+  >();
+  for (const row of counts) {
+    if (row.messageId === null) continue;
+    const arr = countsByMessage.get(row.messageId) ?? [];
+    arr.push({ emoji: row.emoji, total: Number(row.total) });
+    countsByMessage.set(row.messageId, arr);
+  }
+  for (const id of ids) {
+    result.set(
+      id,
+      buildSummaries(
+        countsByMessage.get(id) ?? [],
+        mineByMessage.get(id) ?? new Set(),
+      ),
+    );
+  }
+  return result;
+};
+
 // Convenience single-target lookups for the add/remove-reaction endpoints,
 // which need exactly one target's state to return. Fall back to an empty
 // array if the target somehow has no rows (e.g. removing the last reaction of
@@ -153,3 +204,10 @@ export const commentReactionInfoOne = async (
   userId: number,
 ): Promise<ReactionSummary[]> =>
   (await commentReactionInfo(db, [commentId], userId)).get(commentId) ?? [];
+
+export const messageReactionInfoOne = async (
+  db: DrizzleDb,
+  messageId: number,
+  userId: number,
+): Promise<ReactionSummary[]> =>
+  (await messageReactionInfo(db, [messageId], userId)).get(messageId) ?? [];

@@ -30,6 +30,7 @@ import {
   type ChatParticipant,
   type ChatRole,
   type Message,
+  type ReactionSummary,
 } from "./Api.ts";
 import {
   getOwnedAttachmentOr404,
@@ -41,11 +42,13 @@ import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
+import { messageReactionInfo, messageReactionInfoOne } from "./reactions.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import {
   chatInvites,
   chatParticipants,
   chats,
+  likes,
   messageReads,
   messages,
   users,
@@ -66,10 +69,13 @@ const toApiChatInvite = (row: DbChatInvite): ChatInvite => ({
   revokedAt: row.revokedAt ? row.revokedAt.getTime() : null,
 });
 
+const NO_REACTIONS: ReactionSummary[] = [];
+
 const toApiMessage = (
   row: DbMessage,
   readByUserIds: ReadonlyArray<number>,
   attachment: Attachment | null = null,
+  reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
 ): Message => ({
   id: row.id,
   chatId: row.chatId,
@@ -80,6 +86,7 @@ const toApiMessage = (
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
   readByUserIds: [...readByUserIds],
+  reactions: [...reactions],
 });
 
 const getParticipants = (
@@ -180,6 +187,7 @@ const notifyChatUpdated = (
 const getLastMessage = (
   db: DrizzleDb,
   chatId: number,
+  userId: number,
 ): Effect.Effect<Message | null, never, AttachmentStorage> =>
   Effect.gen(function* () {
     const rows = yield* Effect.tryPromise(() =>
@@ -199,10 +207,14 @@ const getLastMessage = (
         .where(eq(messageReads.messageId, row.id)),
     ).pipe(Effect.orDie);
     const attachment = yield* resolveAttachment(db, row.attachmentId);
+    const reactions = yield* Effect.tryPromise(() =>
+      messageReactionInfoOne(db, row.id, userId),
+    ).pipe(Effect.orDie);
     return toApiMessage(
       row,
       readers.map((r) => r.userId),
       attachment,
+      reactions,
     );
   });
 
@@ -273,6 +285,7 @@ const getParticipantsForChats = (
 const getLastMessagesForChats = (
   db: DrizzleDb,
   chatIds: ReadonlyArray<number>,
+  userId: number,
 ): Effect.Effect<Map<number, Message>, never, AttachmentStorage> =>
   Effect.gen(function* () {
     const byChat = new Map<number, Message>();
@@ -314,6 +327,13 @@ const getLastMessagesForChats = (
       db,
       rows.map((r) => r.attachmentId),
     );
+    const reactionsByMessage = yield* Effect.tryPromise(() =>
+      messageReactionInfo(
+        db,
+        rows.map((r) => r.id),
+        userId,
+      ),
+    ).pipe(Effect.orDie);
     for (const row of rows) {
       byChat.set(
         row.chatId,
@@ -323,6 +343,7 @@ const getLastMessagesForChats = (
           row.attachmentId !== null
             ? (attachmentsByRow.get(row.attachmentId) ?? null)
             : null,
+          reactionsByMessage.get(row.id),
         ),
       );
     }
@@ -610,7 +631,7 @@ const buildChat = (
   Effect.gen(function* () {
     const resolvedParticipants =
       participants ?? (yield* getParticipants(db, row.id));
-    const lastMessage = yield* getLastMessage(db, row.id);
+    const lastMessage = yield* getLastMessage(db, row.id, currentUserId);
     const unreadCount = yield* getUnreadCount(db, row.id, currentUserId);
     return {
       id: row.id,
@@ -737,7 +758,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const [participantsByChat, lastMessageByChat, unreadByChat] =
             yield* Effect.all([
               getParticipantsForChats(db, chatIds),
-              getLastMessagesForChats(db, chatIds),
+              getLastMessagesForChats(db, chatIds, currentUser.id),
               getUnreadCountsForChats(db, chatIds, currentUser.id),
             ]);
 
@@ -1464,6 +1485,9 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             db,
             rows.map((r) => r.attachmentId),
           );
+          const reactionsByMessage = yield* Effect.tryPromise(() =>
+            messageReactionInfo(db, messageIds, currentUser.id),
+          ).pipe(Effect.orDie);
 
           return {
             messages: rows.map((row) =>
@@ -1473,6 +1497,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 row.attachmentId !== null
                   ? (attachmentsByRow.get(row.attachmentId) ?? null)
                   : null,
+                reactionsByMessage.get(row.id),
               ),
             ),
             limit,
@@ -1702,6 +1727,9 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             return yield* Effect.die(new Error("UPDATE returned no rows"));
 
           const readers = yield* getReaders(db, messageId);
+          const reactions = yield* Effect.tryPromise(() =>
+            messageReactionInfoOne(db, messageId, currentUser.id),
+          ).pipe(Effect.orDie);
           const version = yield* bumpChatVersion(db, id);
           const participants = yield* getParticipants(db, id);
           yield* notifyChatUpdated(
@@ -1710,7 +1738,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             version,
             participants.map((p) => p.userId),
           );
-          return toApiMessage(row, readers, attachment);
+          return toApiMessage(row, readers, attachment, reactions);
         }),
       )
       .handle("deleteMessage", ({ path: { id, messageId } }) =>
@@ -1747,6 +1775,96 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             version,
             participants.map((p) => p.userId),
           );
+        }),
+      )
+      .handle("addMessageReaction", ({ path: { id, messageId }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+          yield* getMessageOr404(db, id, messageId);
+          // Idempotent: the (userId, messageId, emoji) unique constraint
+          // turns a repeat reaction with the same emoji into a no-op rather
+          // than a duplicate row or an error — same convention as
+          // `addPostReaction`/`addCommentReaction` (see EngagementHandler.ts).
+          const inserted = yield* Effect.tryPromise(() =>
+            db
+              .insert(likes)
+              .values({
+                userId: currentUser.id,
+                messageId,
+                emoji: payload.emoji,
+              })
+              .onConflictDoNothing()
+              .returning(),
+          ).pipe(Effect.orDie);
+          const reactions = yield* Effect.tryPromise(() =>
+            messageReactionInfoOne(db, messageId, currentUser.id),
+          ).pipe(Effect.orDie);
+          if (inserted.length > 0) {
+            // Scoped to the message's chat participants, not broadcast — a
+            // chat message is private to them, unlike a post's feed-wide
+            // reaction (see ReactionEvent in Realtime.ts).
+            const participants = yield* getParticipants(db, id);
+            yield* connections.notifyUsers(
+              participants.map((p) => p.userId),
+              {
+                type: "reaction_changed",
+                targetType: "message",
+                targetId: messageId,
+                chatId: id,
+                reactions: reactions.map(({ emoji, count }) => ({
+                  emoji,
+                  count,
+                })),
+              },
+            );
+          }
+          return { reactions };
+        }),
+      )
+      .handle("removeMessageReaction", ({ path: { id, messageId }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+          yield* getMessageOr404(db, id, messageId);
+          const deleted = yield* Effect.tryPromise(() =>
+            db
+              .delete(likes)
+              .where(
+                and(
+                  eq(likes.userId, currentUser.id),
+                  eq(likes.messageId, messageId),
+                  eq(likes.emoji, payload.emoji),
+                ),
+              )
+              .returning(),
+          ).pipe(Effect.orDie);
+          const reactions = yield* Effect.tryPromise(() =>
+            messageReactionInfoOne(db, messageId, currentUser.id),
+          ).pipe(Effect.orDie);
+          if (deleted.length > 0) {
+            const participants = yield* getParticipants(db, id);
+            yield* connections.notifyUsers(
+              participants.map((p) => p.userId),
+              {
+                type: "reaction_changed",
+                targetType: "message",
+                targetId: messageId,
+                chatId: id,
+                reactions: reactions.map(({ emoji, count }) => ({
+                  emoji,
+                  count,
+                })),
+              },
+            );
+          }
+          return { reactions };
         }),
       )
       .handle("createChatInvite", ({ path: { id }, payload }) =>
