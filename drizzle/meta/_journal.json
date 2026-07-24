@@ -134,6 +134,13 @@
       "when": 1784901363912,
       "tag": "0018_goofy_bloodaxe",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784906851539,
+      "tag": "0019_pink_husk",
+      "breakpoints": true
     }
   ]
 }

@@ -325,6 +325,19 @@ export const messages = pgTable(
     attachmentId: integer("attachment_id").references(() => attachments.id, {
       onDelete: "set null",
     }),
+    // Threaded/quoted replies (issue #217) — null for a normal message, set to
+    // the id of the message this one is replying to. Validated at create time
+    // (see ChatsHandler.ts) to reference a message in the *same* chat. The
+    // `AnyPgColumn` return annotation is required for this self-referencing FK
+    // (same as `comments.parentCommentId`), without which the column type
+    // would be inferred circularly. `set null` (not cascade): deleting a
+    // message that others replied to should leave those replies in place — the
+    // quoted preview just falls back to "message unavailable" client-side —
+    // rather than silently removing every reply along with it.
+    parentMessageId: integer("parent_message_id").references(
+      (): AnyPgColumn => messages.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -345,6 +358,9 @@ export const messages = pgTable(
     index("messages_sender_id_idx").on(table.senderId),
     // Same rationale as `posts_attachment_id_idx` above.
     index("messages_attachment_id_idx").on(table.attachmentId),
+    // Serves the self-referential `set null` FK (finding replies when a parent
+    // is deleted) — Postgres doesn't auto-index FK columns, same as above.
+    index("messages_parent_message_id_idx").on(table.parentMessageId),
   ],
 );
 

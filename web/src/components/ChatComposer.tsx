@@ -3,8 +3,10 @@ import {
   ImageIcon,
   Loader2,
   Paperclip,
+  Reply,
   SendHorizontal,
   Type,
+  X,
 } from "lucide-react";
 import { AttachmentUploadField } from "@/components/AttachmentUploadField";
 import { Button } from "@/components/ui/button";
@@ -27,16 +29,41 @@ import {
 // firing a request on every keystroke.
 const TYPING_THROTTLE_MS = 2_500;
 
+// The message the composer is quoting a reply to (issue #217) — just what the
+// reply banner needs to render; the id is threaded through to the send as
+// `parentMessageId`.
+export type ReplyTarget = {
+  id: number;
+  senderName: string;
+  contentType: MessageContentType;
+  content: string;
+};
+
 type ChatComposerProps = {
   chatId: number;
   onSend: (values: {
     contentType: MessageContentType;
     content: string;
     attachmentId?: number;
+    parentMessageId?: number;
   }) => Promise<void>;
+  // The message being replied to, or null when composing a normal message.
+  replyingTo?: ReplyTarget | null;
+  onCancelReply?: () => void;
 };
 
-export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
+function replyPreviewText(target: ReplyTarget): string {
+  if (target.contentType === "image_url") return "📷 Photo";
+  if (target.contentType === "attachment") return "📎 Attachment";
+  return target.content;
+}
+
+export function ChatComposer({
+  chatId,
+  onSend,
+  replyingTo,
+  onCancelReply,
+}: ChatComposerProps) {
   const [contentType, setContentType] = useState<MessageContentType>("text");
   const [content, setContent] = useState("");
   const [attachment, setAttachment] = useState<Attachment | null>(null);
@@ -55,6 +82,12 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
     const newHeight = Math.min(textarea.scrollHeight, 160);
     textarea.style.height = `${newHeight}px`;
   }, [content, contentType]);
+
+  // Starting a reply (from a bubble's Reply action) drops focus into the
+  // composer so the user can start typing the reply straight away.
+  useEffect(() => {
+    if (replyingTo && contentType === "text") textareaRef.current?.focus();
+  }, [replyingTo, contentType]);
 
   const trimmed = content.trim();
   const overLimit = trimmed.length > MAX_MESSAGE_CONTENT_LENGTH;
@@ -88,19 +121,24 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
     if (!canSend) return;
     setPending(true);
     try {
+      // A reply quotes the message the parent passed as `replyingTo` — thread
+      // its id through as `parentMessageId` so the send records the link.
+      const parentMessageId = replyingTo?.id;
       await onSend(
         contentType === "attachment"
           ? {
               contentType,
               content: attachment!.filename,
               attachmentId: attachment!.id,
+              parentMessageId,
             }
-          : { contentType, content: trimmed },
+          : { contentType, content: trimmed, parentMessageId },
       );
       setContent("");
       setAttachment(null);
       setContentType("text");
       lastTypingSentAtRef.current = 0;
+      onCancelReply?.();
     } finally {
       setPending(false);
     }
@@ -115,6 +153,29 @@ export function ChatComposer({ chatId, onSend }: ChatComposerProps) {
 
   return (
     <div className="flex flex-col gap-1.5 border-t border-border bg-card/70 px-4 py-3 backdrop-blur">
+      {replyingTo && (
+        <div className="flex items-center gap-2 rounded-md border-l-2 border-primary bg-muted/60 py-1.5 pl-2 pr-1 text-xs motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-200">
+          <Reply className="size-3.5 shrink-0 text-primary" />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="font-semibold text-primary">
+              Replying to {replyingTo.senderName}
+            </span>
+            <span className="truncate text-muted-foreground">
+              {replyPreviewText(replyingTo)}
+            </span>
+          </div>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label="Cancel reply"
+            className="size-6 shrink-0"
+            onClick={onCancelReply}
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+      )}
       <div className="flex items-end gap-2">
         <div className="flex shrink-0 gap-1">
           <Button

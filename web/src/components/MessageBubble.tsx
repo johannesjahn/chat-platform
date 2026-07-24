@@ -8,6 +8,7 @@ import {
   ChevronUp,
   Loader2,
   Pencil,
+  Reply,
   Trash2,
   X,
 } from "lucide-react";
@@ -50,8 +51,23 @@ type MessageBubbleProps = {
   canDeleteOthers?: boolean;
   onEdit: (content: string) => Promise<void>;
   onDelete: () => Promise<void>;
+  // Start composing a reply that quotes this message (issue #217). Omitted
+  // where replying isn't offered (e.g. a message that's mid-edit).
+  onReply?: () => void;
   style?: CSSProperties;
 };
+
+// One-line label for what a quoted parent message holds — its text (trimmed to
+// a single line by the CSS below), or a stand-in for non-text content so a
+// reply's quote reads "Photo"/"Attachment" rather than a raw URL/filename.
+function parentPreviewText(parent: {
+  contentType: "text" | "image_url" | "attachment";
+  content: string;
+}): string {
+  if (parent.contentType === "image_url") return "📷 Photo";
+  if (parent.contentType === "attachment") return "📎 Attachment";
+  return parent.content;
+}
 
 export function MessageBubble({
   message,
@@ -63,6 +79,7 @@ export function MessageBubble({
   canDeleteOthers = false,
   onEdit,
   onDelete,
+  onReply,
   style,
 }: MessageBubbleProps) {
   const queryClient = useQueryClient();
@@ -194,6 +211,18 @@ export function MessageBubble({
             className="size-6 px-0"
             iconClassName="size-3.5"
           />
+          {onReply && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label="Reply to message"
+              className="size-6"
+              onClick={onReply}
+            >
+              <Reply className="size-3.5" />
+            </Button>
+          )}
           {canModify && message.contentType === "text" && (
             <Button
               type="button"
@@ -251,6 +280,42 @@ export function MessageBubble({
             >
               {senderLabel}
             </Link>
+          )}
+
+          {/* Quoted parent (issue #217) — the message this one replies to,
+              shown as a compact snippet above the body. A left accent bar and
+              muted background set it apart from the reply's own content; it's
+              tinted to sit on whichever bubble background it's on (own vs
+              incoming). Null once the quoted message has been deleted
+              server-side (the FK is set-null), so it simply doesn't render. */}
+          {message.parentMessage && (
+            <div
+              className={cn(
+                "mb-0.5 flex flex-col gap-0.5 rounded-md border-l-2 py-1 pl-2 pr-2 text-xs",
+                isOwn
+                  ? "border-primary-foreground/50 bg-primary-foreground/10"
+                  : "border-primary/50 bg-muted",
+              )}
+            >
+              <span
+                className={cn(
+                  "font-semibold",
+                  isOwn ? "text-primary-foreground/90" : "text-primary",
+                )}
+              >
+                {message.parentMessage.senderName}
+              </span>
+              <span
+                className={cn(
+                  "line-clamp-2 break-words",
+                  isOwn
+                    ? "text-primary-foreground/80"
+                    : "text-muted-foreground",
+                )}
+              >
+                {parentPreviewText(message.parentMessage)}
+              </span>
+            </div>
           )}
 
           {isEditing ? (
@@ -409,6 +474,18 @@ export function MessageBubble({
             className="size-6 px-0"
             iconClassName="size-3.5"
           />
+          {onReply && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label="Reply to message"
+              className="size-6"
+              onClick={onReply}
+            >
+              <Reply className="size-3.5" />
+            </Button>
+          )}
           {canDeleteOthers && (
             <Button
               type="button"

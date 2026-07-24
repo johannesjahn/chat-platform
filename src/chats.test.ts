@@ -684,6 +684,202 @@ test("createMessage rejects a data: image_url", () =>
     }),
   ));
 
+test("createMessage supports replying to a message, exposing a parent preview", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+
+      const parent = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "what's for lunch?" },
+      });
+      expect(parent.parentMessage).toBeNull();
+
+      const reply = yield* bob.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: {
+          contentType: "text",
+          content: "tacos",
+          parentMessageId: parent.id,
+        },
+      });
+      expect(reply.parentMessage).not.toBeNull();
+      expect(reply.parentMessage?.id).toBe(parent.id);
+      expect(reply.parentMessage?.senderId).toBe(alice.user.id);
+      expect(reply.parentMessage?.senderName).toBe("alice");
+      expect(reply.parentMessage?.contentType).toBe("text");
+      expect(reply.parentMessage?.content).toBe("what's for lunch?");
+
+      // The preview round-trips through listMessages too, not just the
+      // create response.
+      const page = yield* bob.client.chats.listMessages({
+        path: { id: chat.id },
+        urlParams: {},
+      });
+      const listedReply = page.messages.find((m) => m.id === reply.id);
+      expect(listedReply?.parentMessage?.id).toBe(parent.id);
+      expect(listedReply?.parentMessage?.content).toBe("what's for lunch?");
+    }),
+  ));
+
+test("createMessage truncates a long parent preview and uses the sender's display name", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      yield* alice.client.users.updateProfile({
+        payload: { displayName: "Alice A.", avatarUrl: null },
+      });
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+
+      const longContent = "x".repeat(400);
+      const parent = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: longContent },
+      });
+      const reply = yield* bob.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: {
+          contentType: "text",
+          content: "long one",
+          parentMessageId: parent.id,
+        },
+      });
+      // Only a preview-length snippet rides along, not the full body.
+      expect(reply.parentMessage?.content.length).toBe(120);
+      expect(reply.parentMessage?.content).toBe("x".repeat(120));
+      // displayName wins over username.
+      expect(reply.parentMessage?.senderName).toBe("Alice A.");
+    }),
+  ));
+
+test("createMessage 404s when replying to a message from another chat", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const chatAB = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const chatAC = yield* alice.client.chats.createDirectChat({
+        payload: { userId: carol.user.id },
+      });
+
+      // A message that lives in the alice↔carol chat…
+      const otherChatMessage = yield* alice.client.chats.createMessage({
+        path: { id: chatAC.id },
+        payload: { contentType: "text", content: "hi carol" },
+      });
+      // …can't be quoted from the alice↔bob chat.
+      const result = yield* alice.client.chats
+        .createMessage({
+          path: { id: chatAB.id },
+          payload: {
+            contentType: "text",
+            content: "cross-chat reply",
+            parentMessageId: otherChatMessage.id,
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+      }
+
+      // A parent id that doesn't exist at all 404s the same way.
+      const missing = yield* alice.client.chats
+        .createMessage({
+          path: { id: chatAB.id },
+          payload: {
+            contentType: "text",
+            content: "reply to nothing",
+            parentMessageId: 999999,
+          },
+        })
+        .pipe(Effect.either);
+      expect(missing._tag).toBe("Left");
+      if (missing._tag === "Left") {
+        expect((missing.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("deleting a quoted message leaves the reply, with its parent preview nulled", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+
+      const parent = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "delete me" },
+      });
+      const reply = yield* bob.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: {
+          contentType: "text",
+          content: "still here",
+          parentMessageId: parent.id,
+        },
+      });
+
+      yield* alice.client.chats.deleteMessage({
+        path: { id: chat.id, messageId: parent.id },
+      });
+
+      // The reply survives (set-null FK, not cascade), and its quote is gone.
+      const page = yield* bob.client.chats.listMessages({
+        path: { id: chat.id },
+        urlParams: {},
+      });
+      const surviving = page.messages.find((m) => m.id === reply.id);
+      expect(surviving).toBeDefined();
+      expect(surviving?.parentMessage).toBeNull();
+    }),
+  ));
+
+test("editing a reply preserves its parent preview", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+
+      const parent = yield* alice.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: { contentType: "text", content: "original question" },
+      });
+      const reply = yield* bob.client.chats.createMessage({
+        path: { id: chat.id },
+        payload: {
+          contentType: "text",
+          content: "first answer",
+          parentMessageId: parent.id,
+        },
+      });
+
+      const edited = yield* bob.client.chats.updateMessage({
+        path: { id: chat.id, messageId: reply.id },
+        payload: { contentType: "text", content: "revised answer" },
+      });
+      expect(edited.content).toBe("revised answer");
+      expect(edited.parentMessage?.id).toBe(parent.id);
+      expect(edited.parentMessage?.content).toBe("original question");
+    }),
+  ));
+
 test("listMessages returns the newest window by default, oldest-first, and is forbidden for non-participants", () =>
   run(
     Effect.gen(function* () {

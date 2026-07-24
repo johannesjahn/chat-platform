@@ -115,6 +115,10 @@ const toApiMessage = (
   content: row.content,
   // Same reasoning as `toApiPost`: a message hit is always a text message.
   attachment: null,
+  // A search hit is a standalone result — the quoted-parent preview (issue
+  // #217) isn't part of the match and isn't rendered in the results list, so
+  // it's always null here rather than resolved per hit.
+  parentMessage: null,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
   readByUserIds: [...readByUserIds],
@@ -332,6 +336,7 @@ export const SearchHandlerLive = HttpApiBuilder.group(
                 contentType: messages.contentType,
                 content: messages.content,
                 attachmentId: messages.attachmentId,
+                parentMessageId: messages.parentMessageId,
                 createdAt: messages.createdAt,
                 updatedAt: messages.updatedAt,
                 snippet: headline(sql`${messages.content}`, q),
