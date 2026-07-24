@@ -90,7 +90,10 @@ test("group chats can be created, renamed by the creator, and show all participa
 
   await pageA.getByRole("button", { name: "Manage group" }).click();
   await pageA.getByRole("button", { name: "Rename chat" }).click();
-  await pageA.fill("input", "Renamed squad");
+  // Target the rename field specifically (placeholder) rather than a bare
+  // "input" selector — the app header now also has a search input, so a
+  // page-wide "input" would be ambiguous / hit the wrong field.
+  await pageA.getByPlaceholder("Group name").fill("Renamed squad");
   await pageA.keyboard.press("Enter");
   // Close the dialog so the assertion matches only the chat header title.
   await pageA.getByRole("button", { name: "Close group settings" }).click();

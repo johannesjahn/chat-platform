@@ -564,6 +564,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/search/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["search.searchPosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/search/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["search.searchComments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/search/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["search.searchMessages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments": {
         parameters: {
             query?: never;
@@ -1047,6 +1095,49 @@ export interface components {
             maxUses: number | null;
             useCount: number;
             revokedAt: number | null;
+        };
+        PostSearchPage: {
+            results: components["schemas"]["PostSearchResult"][];
+            limit: number;
+            nextCursor: string | null;
+        };
+        PostSearchResult: {
+            post: components["schemas"]["Post"];
+            snippet: components["schemas"]["SearchSnippetSegment"][];
+        };
+        SearchSnippetSegment: {
+            text: string;
+            match: boolean;
+        };
+        InvalidSearchRequest: {
+            message: string;
+            /** @enum {string} */
+            _tag: "InvalidSearchRequest";
+        };
+        CommentSearchPage: {
+            results: components["schemas"]["CommentSearchResult"][];
+            limit: number;
+            nextCursor: string | null;
+        };
+        CommentSearchResult: {
+            comment: components["schemas"]["Comment"];
+            snippet: components["schemas"]["SearchSnippetSegment"][];
+        };
+        MessageSearchPage: {
+            results: components["schemas"]["MessageSearchResult"][];
+            chats: components["schemas"]["MessageSearchChat"][];
+            limit: number;
+            nextCursor: string | null;
+        };
+        MessageSearchResult: {
+            message: components["schemas"]["Message"];
+            snippet: components["schemas"]["SearchSnippetSegment"][];
+        };
+        MessageSearchChat: {
+            id: number;
+            type: components["schemas"]["ChatType"];
+            title: string | null;
+            participants: components["schemas"]["ChatParticipant"][];
         };
         UnsupportedAttachmentType: {
             message: string;
@@ -3943,6 +4034,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotFound"];
+                };
+            };
+        };
+    };
+    "search.searchPosts": {
+        parameters: {
+            query: {
+                /** @description a string that will be trimmed */
+                q: string;
+                cursor?: string;
+                /** @description a string to be decoded into a number */
+                limit?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PostSearchPage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostSearchPage"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidSearchRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+        };
+    };
+    "search.searchComments": {
+        parameters: {
+            query: {
+                /** @description a string that will be trimmed */
+                q: string;
+                cursor?: string;
+                /** @description a string to be decoded into a number */
+                limit?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CommentSearchPage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentSearchPage"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidSearchRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+        };
+    };
+    "search.searchMessages": {
+        parameters: {
+            query: {
+                /** @description a string that will be trimmed */
+                q: string;
+                cursor?: string;
+                /** @description a string to be decoded into a number */
+                limit?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description MessageSearchPage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageSearchPage"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidSearchRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
                 };
             };
         };

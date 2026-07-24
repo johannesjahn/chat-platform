@@ -11,6 +11,7 @@ import { LogOut, MessagesSquare, Settings, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
+import { HeaderSearch } from "@/components/HeaderSearch";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { PwaUpdatePrompt } from "@/components/PwaUpdatePrompt";
 import { VersionFooter } from "@/components/VersionFooter";
@@ -100,6 +101,7 @@ function Nav() {
           </Link>
         </Button>
       </div>
+      {session && <HeaderSearch />}
       {session ? (
         <div className="flex items-center gap-3">
           <Link

@@ -22,6 +22,7 @@ import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
 import { AttachmentStorageLive } from "./AttachmentStorage.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
+import { SearchHandlerLive } from "./SearchHandler.ts";
 import { Db } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { JwtLive } from "./Jwt.ts";
@@ -48,6 +49,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(PostsHandlerLive),
   Layer.provide(EngagementHandlerLive),
   Layer.provide(ChatsHandlerLive),
+  Layer.provide(SearchHandlerLive),
   Layer.provide(AttachmentsHandlerLive),
   Layer.provide(AttachmentStorageLive),
   Layer.provide(VersionHandlerLive),

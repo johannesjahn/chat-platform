@@ -120,6 +120,13 @@
       "when": 1784842254715,
       "tag": "0016_marvelous_radioactive_man",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1784889344631,
+      "tag": "0017_lonely_silver_sable",
+      "breakpoints": true
     }
   ]
 }
