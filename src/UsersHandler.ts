@@ -16,7 +16,13 @@ import {
   TooManyRequests,
   UsernameTaken,
 } from "./Api.ts";
+import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser, TokenVersionCache } from "./Auth.ts";
+import {
+  avatarStorageKey,
+  avatarUrlForToken,
+  generateAvatarToken,
+} from "./avatars.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { processAvatar } from "./ImageProcessing.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
@@ -106,39 +112,57 @@ const enforceRateLimit = (
   });
 
 // Columns every "return a User" query below selects, and the shape
-// `toPublicUser` transforms them from — `avatarSmall`/`avatarMedium`/
-// `avatarLarge` (three flat DB columns, issue #269) fold into the API's
-// single nested `avatarVariants` field, present only when all three are set
-// (they're always written/cleared together — see updateProfile/uploadAvatar
-// below).
+// `toPublicUser` transforms them from — `avatarSmallKey`/`avatarMediumKey`/
+// `avatarLargeKey` (three flat DB columns holding object-storage tokens since
+// issue #289) fold into the API's single nested `avatarVariants` field of
+// proxy URLs, present only when all three are set (they're always
+// written/cleared together — see updateProfile/uploadAvatar below).
 type UserRow = {
   id: number;
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
-  avatarSmall: string | null;
-  avatarMedium: string | null;
-  avatarLarge: string | null;
+  avatarSmallKey: string | null;
+  avatarMediumKey: string | null;
+  avatarLargeKey: string | null;
   role: "user" | "admin";
   statusText: string | null;
   statusEmoji: string | null;
   statusExpiresAt: Date | null;
 };
 
-// Shared with ChatsHandler.ts, which needs the same fold for a chat
-// participant's avatar columns (see ChatParticipant in Api.ts).
+// Folds the three stored avatar tokens into the API's `avatarVariants` shape,
+// turning each into the long-cache proxy URL that serves it (see
+// avatarUrlForToken / AvatarRoute.ts). Shared with ChatsHandler.ts and
+// SearchHandler.ts, which need the same fold for a chat participant's avatar
+// columns (see ChatParticipant in Api.ts).
 export const toAvatarVariants = (row: {
-  avatarSmall: string | null;
-  avatarMedium: string | null;
-  avatarLarge: string | null;
+  avatarSmallKey: string | null;
+  avatarMediumKey: string | null;
+  avatarLargeKey: string | null;
 }) =>
-  row.avatarSmall && row.avatarMedium && row.avatarLarge
+  row.avatarSmallKey && row.avatarMediumKey && row.avatarLargeKey
     ? {
-        small: row.avatarSmall,
-        medium: row.avatarMedium,
-        large: row.avatarLarge,
+        small: avatarUrlForToken(row.avatarSmallKey),
+        medium: avatarUrlForToken(row.avatarMediumKey),
+        large: avatarUrlForToken(row.avatarLargeKey),
       }
     : null;
+
+// Best-effort removal of an old avatar's variant objects once the row has
+// stopped pointing at them (a re-upload, a clear via updateProfile, or account
+// deletion). Best-effort — an orphaned object is a harmless storage leak, not
+// a correctness problem, so a delete failure must never fail the user-facing
+// write. `null` tokens (no prior uploaded avatar) are skipped.
+const deleteAvatarObjects = (
+  storage: Context.Tag.Service<typeof AttachmentStorage>,
+  tokens: ReadonlyArray<string | null>,
+): Effect.Effect<void> =>
+  Effect.forEach(
+    tokens.filter((token): token is string => token !== null),
+    (token) => storage.delete(avatarStorageKey(token)).pipe(Effect.ignore),
+    { discard: true },
+  );
 
 // A status past its `statusExpiresAt` is treated as fully unset wherever a
 // user is read, rather than needing a background sweep to null the columns
@@ -304,9 +328,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
-                avatarSmall: users.avatarSmall,
-                avatarMedium: users.avatarMedium,
-                avatarLarge: users.avatarLarge,
+                avatarSmallKey: users.avatarSmallKey,
+                avatarMediumKey: users.avatarMediumKey,
+                avatarLargeKey: users.avatarLargeKey,
                 role: users.role,
                 statusText: users.statusText,
                 statusEmoji: users.statusEmoji,
@@ -330,9 +354,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
-                avatarSmall: users.avatarSmall,
-                avatarMedium: users.avatarMedium,
-                avatarLarge: users.avatarLarge,
+                avatarSmallKey: users.avatarSmallKey,
+                avatarMediumKey: users.avatarMediumKey,
+                avatarLargeKey: users.avatarLargeKey,
                 role: users.role,
                 statusText: users.statusText,
                 statusEmoji: users.statusEmoji,
@@ -399,9 +423,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
-                avatarSmall: users.avatarSmall,
-                avatarMedium: users.avatarMedium,
-                avatarLarge: users.avatarLarge,
+                avatarSmallKey: users.avatarSmallKey,
+                avatarMediumKey: users.avatarMediumKey,
+                avatarLargeKey: users.avatarLargeKey,
                 role: users.role,
                 statusText: users.statusText,
                 statusEmoji: users.statusEmoji,
@@ -718,13 +742,29 @@ export const UsersHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
+          const storage = yield* AttachmentStorage;
 
           // Full-replace (see UpdateProfileBody's comment in Api.ts) also
-          // clears any uploaded avatar — `avatarUrl` and the uploaded
-          // avatarSmall/Medium/Large columns are mutually exclusive, so a
-          // caller explicitly setting (or clearing) `avatarUrl` here always
-          // means "stop using the uploaded one". `uploadAvatar` below is the
-          // inverse.
+          // clears any uploaded avatar — `avatarUrl` and the uploaded avatar
+          // (legacy base64 columns + the object-storage `*Key` columns) are
+          // mutually exclusive, so a caller explicitly setting (or clearing)
+          // `avatarUrl` here always means "stop using the uploaded one".
+          // `uploadAvatar` below is the inverse. Read the current `*Key` tokens
+          // first so their storage objects can be swept once the row is cleared
+          // (a `RETURNING` list reflects post-update values, i.e. the nulls).
+          const prevRows = yield* Effect.tryPromise(() =>
+            db
+              .select({
+                avatarSmallKey: users.avatarSmallKey,
+                avatarMediumKey: users.avatarMediumKey,
+                avatarLargeKey: users.avatarLargeKey,
+              })
+              .from(users)
+              .where(eq(users.id, currentUser.id))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          const prev = prevRows[0];
+
           const rows = yield* Effect.tryPromise(() =>
             db
               .update(users)
@@ -734,6 +774,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 avatarSmall: null,
                 avatarMedium: null,
                 avatarLarge: null,
+                avatarSmallKey: null,
+                avatarMediumKey: null,
+                avatarLargeKey: null,
               })
               .where(eq(users.id, currentUser.id))
               .returning({
@@ -741,9 +784,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
-                avatarSmall: users.avatarSmall,
-                avatarMedium: users.avatarMedium,
-                avatarLarge: users.avatarLarge,
+                avatarSmallKey: users.avatarSmallKey,
+                avatarMediumKey: users.avatarMediumKey,
+                avatarLargeKey: users.avatarLargeKey,
                 role: users.role,
                 statusText: users.statusText,
                 statusEmoji: users.statusEmoji,
@@ -753,6 +796,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const updated = rows[0];
           if (!updated)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
+
+          yield* deleteAvatarObjects(storage, [
+            prev?.avatarSmallKey ?? null,
+            prev?.avatarMediumKey ?? null,
+            prev?.avatarLargeKey ?? null,
+          ]);
           return toPublicUser(updated);
         }),
       )
@@ -761,6 +810,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           const db = yield* Db;
           const limiter = yield* RateLimiter;
+          const storage = yield* AttachmentStorage;
 
           yield* enforceRateLimit(
             limiter,
@@ -802,17 +852,67 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               }),
           });
 
-          const toDataUrl = (bytes: Uint8Array) =>
-            `data:${processed.contentType};base64,${Buffer.from(bytes).toString("base64")}`;
+          // The tokens the row points at *before* this upload — their objects
+          // become orphans once the row is repointed below, so sweep them
+          // afterwards. Read up front (an UPDATE ... RETURNING would hand back
+          // the post-update values, not these).
+          const prevRows = yield* Effect.tryPromise(() =>
+            db
+              .select({
+                avatarSmallKey: users.avatarSmallKey,
+                avatarMediumKey: users.avatarMediumKey,
+                avatarLargeKey: users.avatarLargeKey,
+              })
+              .from(users)
+              .where(eq(users.id, currentUser.id))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          const prev = prevRows[0];
 
+          // Mint a fresh token per variant and push the processed bytes to
+          // object storage before touching the row — an upload that fails
+          // partway leaves at most a few unreferenced objects (cleaned up like
+          // any other orphan) rather than a row pointing at bytes that never
+          // landed. Fresh tokens (never the previous upload's) are what make
+          // the served URLs cache-bust on re-upload — see avatars.ts.
+          const smallToken = generateAvatarToken();
+          const mediumToken = generateAvatarToken();
+          const largeToken = generateAvatarToken();
+          yield* Effect.all(
+            [
+              storage.upload(
+                avatarStorageKey(smallToken),
+                processed.small,
+                processed.contentType,
+              ),
+              storage.upload(
+                avatarStorageKey(mediumToken),
+                processed.medium,
+                processed.contentType,
+              ),
+              storage.upload(
+                avatarStorageKey(largeToken),
+                processed.large,
+                processed.contentType,
+              ),
+            ],
+            { concurrency: "unbounded" },
+          ).pipe(Effect.orDie);
+
+          // Repoint the row at the freshly stored variants, nulling the legacy
+          // base64 columns at the same time so a pre-#289 avatar's bytes stop
+          // riding along in the row.
           const rows = yield* Effect.tryPromise(() =>
             db
               .update(users)
               .set({
                 avatarUrl: null,
-                avatarSmall: toDataUrl(processed.small),
-                avatarMedium: toDataUrl(processed.medium),
-                avatarLarge: toDataUrl(processed.large),
+                avatarSmall: null,
+                avatarMedium: null,
+                avatarLarge: null,
+                avatarSmallKey: smallToken,
+                avatarMediumKey: mediumToken,
+                avatarLargeKey: largeToken,
               })
               .where(eq(users.id, currentUser.id))
               .returning({
@@ -820,9 +920,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
-                avatarSmall: users.avatarSmall,
-                avatarMedium: users.avatarMedium,
-                avatarLarge: users.avatarLarge,
+                avatarSmallKey: users.avatarSmallKey,
+                avatarMediumKey: users.avatarMediumKey,
+                avatarLargeKey: users.avatarLargeKey,
                 role: users.role,
                 statusText: users.statusText,
                 statusEmoji: users.statusEmoji,
@@ -832,6 +932,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const updated = rows[0];
           if (!updated)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
+
+          yield* deleteAvatarObjects(storage, [
+            prev?.avatarSmallKey ?? null,
+            prev?.avatarMediumKey ?? null,
+            prev?.avatarLargeKey ?? null,
+          ]);
           return toPublicUser(updated);
         }),
       )
@@ -842,6 +948,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           const tokenVersionCache = yield* TokenVersionCache;
           const pubsub = yield* PubSub;
+          const storage = yield* AttachmentStorage;
 
           yield* enforceRateLimit(
             limiter,
@@ -850,9 +957,18 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             DELETE_ACCOUNT_WINDOW_SECONDS,
           );
 
+          // Also pull the avatar tokens: the row's FKs cascade to the DB, but
+          // nothing else knows to remove the account's avatar objects from the
+          // bucket (they aren't `attachments` rows, so the orphan sweep in
+          // AttachmentCleanup.ts never sees them).
           const rows = yield* Effect.tryPromise(() =>
             db
-              .select({ passwordHash: users.passwordHash })
+              .select({
+                passwordHash: users.passwordHash,
+                avatarSmallKey: users.avatarSmallKey,
+                avatarMediumKey: users.avatarMediumKey,
+                avatarLargeKey: users.avatarLargeKey,
+              })
               .from(users)
               .where(eq(users.id, currentUser.id))
               .limit(1),
@@ -873,6 +989,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           yield* Effect.tryPromise(() =>
             db.delete(users).where(eq(users.id, currentUser.id)),
           ).pipe(Effect.orDie);
+
+          yield* deleteAvatarObjects(storage, [
+            dbUser.avatarSmallKey,
+            dbUser.avatarMediumKey,
+            dbUser.avatarLargeKey,
+          ]);
 
           yield* tokenVersionCache.invalidate(currentUser.id);
           yield* pubsub
@@ -909,9 +1031,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
-                avatarSmall: users.avatarSmall,
-                avatarMedium: users.avatarMedium,
-                avatarLarge: users.avatarLarge,
+                avatarSmallKey: users.avatarSmallKey,
+                avatarMediumKey: users.avatarMediumKey,
+                avatarLargeKey: users.avatarLargeKey,
                 role: users.role,
                 statusText: users.statusText,
                 statusEmoji: users.statusEmoji,
@@ -959,9 +1081,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 username: users.username,
                 displayName: users.displayName,
                 avatarUrl: users.avatarUrl,
-                avatarSmall: users.avatarSmall,
-                avatarMedium: users.avatarMedium,
-                avatarLarge: users.avatarLarge,
+                avatarSmallKey: users.avatarSmallKey,
+                avatarMediumKey: users.avatarMediumKey,
+                avatarLargeKey: users.avatarLargeKey,
                 role: users.role,
                 statusText: users.statusText,
                 statusEmoji: users.statusEmoji,

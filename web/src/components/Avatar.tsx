@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { API_URL } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 
 const AVATAR_SIZES = {
@@ -44,6 +45,17 @@ function isSafeAvatarUrl(value: string): boolean {
   }
 }
 
+// Uploaded avatar variants are served by the backend's long-cache proxy
+// route (`GET /avatars/:token`, see src/AvatarRoute.ts / issue #289) and come
+// back from the API as a root-relative path (`/avatars/<token>`) rather than a
+// self-contained `data:` URL. Resolve it against the API base the rest of the
+// client already talks to, so the `<img>` loads from the backend regardless of
+// where the SPA itself is hosted. A value that's already absolute (defensive —
+// the backend only ever sends the relative form today) is used as-is.
+function resolveVariantSrc(value: string): string {
+  return value.startsWith("/") ? `${API_URL}${value}` : value;
+}
+
 // Usernames are single tokens today (no separate display name), so the
 // "initials" are just its first letter for now; splitting on whitespace
 // keeps this correct if a multi-word display name is ever introduced.
@@ -64,15 +76,15 @@ export function Avatar({
   // Uploaded avatars (issue #269) take priority over `avatarUrl` — the two
   // are mutually exclusive server-side (see UsersHandler.ts), but preferring
   // the variant here means a stale/cached client that still sent both
-  // renders the right one regardless. `avatarVariants` values are
-  // self-contained `data:` URLs (see AvatarVariants in Api.ts), not
-  // externally-hosted links, so they don't need the https:// host-allowlist
-  // check `avatarUrl` does below.
+  // renders the right one regardless. `avatarVariants` values are URLs served
+  // by our own backend proxy (issue #289, resolved against the API base
+  // below), not user-supplied external links, so they don't need the https://
+  // host-allowlist check `avatarUrl` does below.
   const variantSrc = avatarVariants?.[VARIANT_FOR_SIZE[size]];
   if (variantSrc) {
     return (
       <img
-        src={variantSrc}
+        src={resolveVariantSrc(variantSrc)}
         alt=""
         className={cn(
           "shrink-0 rounded-full object-cover",

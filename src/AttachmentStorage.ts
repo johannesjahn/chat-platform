@@ -23,6 +23,12 @@ export class AttachmentStorage extends Context.Tag("AttachmentStorage")<
     // compute a fresh, never-stale URL on every read without threading an
     // extra async step through every message/post-building helper.
     readonly presignGetUrl: (key: string) => string;
+    // Reads an object's bytes back out of the store, or `null` if the key
+    // isn't present. Unlike attachments (served to browsers straight from the
+    // bucket via `presignGetUrl`), avatars are proxied through the backend so
+    // they get a stable, long-cache URL (see AvatarRoute.ts / issue #289) —
+    // that proxy needs to actually stream the bytes, hence this read path.
+    readonly get: (key: string) => Effect.Effect<Uint8Array | null, unknown>;
     // Used by deleteAttachment (AttachmentsHandler.ts) and the orphaned-
     // upload sweep (AttachmentCleanup.ts, issue #256). Deleting a key that
     // doesn't exist is not an error in either backend.
@@ -85,9 +91,33 @@ export const S3AttachmentStorageLive = Layer.sync(AttachmentStorage, () => {
         method: "GET",
         expiresIn: PRESIGNED_URL_TTL_SECONDS,
       }),
+    // A missing key surfaces as a thrown S3 error (NoSuchKey) rather than a
+    // sentinel, so map that back to `null` — the avatar proxy treats "gone"
+    // as a 404, not a 500.
+    get: (key) =>
+      Effect.tryPromise(async () => {
+        const file = client.file(key);
+        if (!(await file.exists())) return null;
+        return new Uint8Array(await file.arrayBuffer());
+      }),
     delete: (key) => Effect.tryPromise(() => client.unlink(key)),
   };
 });
+
+// Process-wide store backing the in-memory fallback. Deliberately module-level
+// (a singleton) rather than created per `Layer.sync` instantiation: main.ts
+// builds AttachmentStorage in more than one place (ApiLive's upload path, the
+// avatar proxy route, the orphan-sweep — see the `Layer.provide` calls there),
+// and with the real S3 backend those all share one bucket, so the in-memory
+// fallback has to share one store too or a byte written through one layer
+// instance would be invisible to another (e.g. the avatar proxy 404ing on an
+// avatar the upload handler just stored). Keys are globally unique
+// (crypto.randomUUID-derived), so sharing one map across a process can't cause
+// collisions.
+const inMemoryStore = new Map<
+  string,
+  { data: Uint8Array; contentType: string }
+>();
 
 // Local-dev/test fallback when `S3_ENDPOINT` is unset — mirrors
 // PGlite/InMemoryPubSubLive's "no external service configured" idiom (see
@@ -99,8 +129,6 @@ export const S3AttachmentStorageLive = Layer.sync(AttachmentStorage, () => {
 export const InMemoryAttachmentStorageLive = Layer.sync(
   AttachmentStorage,
   () => {
-    const store = new Map<string, { data: Uint8Array; contentType: string }>();
-
     return {
       upload: (key, file, contentType) =>
         Effect.tryPromise(async () => {
@@ -108,16 +136,17 @@ export const InMemoryAttachmentStorageLive = Layer.sync(
             file instanceof Uint8Array
               ? file
               : new Uint8Array(await file.arrayBuffer());
-          store.set(key, { data, contentType });
+          inMemoryStore.set(key, { data, contentType });
         }),
       presignGetUrl: (key) => {
-        const entry = store.get(key);
+        const entry = inMemoryStore.get(key);
         if (!entry) return "";
         return `data:${entry.contentType};base64,${Buffer.from(entry.data).toString("base64")}`;
       },
+      get: (key) => Effect.sync(() => inMemoryStore.get(key)?.data ?? null),
       delete: (key) =>
         Effect.sync(() => {
-          store.delete(key);
+          inMemoryStore.delete(key);
         }),
     };
   },

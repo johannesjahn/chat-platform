@@ -6,6 +6,7 @@ import { ActiveUsersMetricsLive } from "./ActiveUsersMetrics.ts";
 import { AttachmentCleanupLive } from "./AttachmentCleanup.ts";
 import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
 import { AttachmentStorageLive } from "./AttachmentStorage.ts";
+import { AvatarRouteLive } from "./AvatarRoute.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
@@ -71,6 +72,11 @@ const ServerLive = Layer.mergeAll(
   // Raw `/ws` route, attached to the same shared router as `ChatApi` — see
   // RealtimeSocket.ts for why this can't be a typed HttpApiEndpoint.
   RealtimeSocketRouteLive,
+  // Raw `/avatars/:token` route serving uploaded avatar bytes from object
+  // storage with a long, immutable cache (issue #289) — see AvatarRoute.ts.
+  // A raw route (not a typed `ChatApi` endpoint) because it returns binary
+  // image bytes with custom cache headers, not a JSON-schema response.
+  AvatarRouteLive,
   // Raw `/health` (liveness), `/ready` (readiness), and `/metrics` routes —
   // see Health.ts/Metrics.ts.
   HealthRouteLive,

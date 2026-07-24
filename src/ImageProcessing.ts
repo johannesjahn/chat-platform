@@ -38,7 +38,7 @@ const RESCALABLE_IMAGE_MIME_TYPES = new Set<string>([
 // format regardless of what was uploaded. Preserving the input format
 // would leave PNG photo uploads (common from screenshots) at full lossless
 // size even after scaling, defeating the point of re-encoding at all.
-const OUTPUT_CONTENT_TYPE = "image/webp";
+export const OUTPUT_CONTENT_TYPE = "image/webp";
 
 export type ProcessedImage = {
   readonly data: Uint8Array;

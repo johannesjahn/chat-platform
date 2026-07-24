@@ -12,6 +12,7 @@ import sharp from "sharp";
 import { ChatApi, MAX_AVATAR_UPLOAD_SIZE_BYTES } from "./Api.ts";
 import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
 import { AttachmentStorageLive } from "./AttachmentStorage.ts";
+import { AvatarRouteLive } from "./AvatarRoute.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { SearchHandlerLive } from "./SearchHandler.ts";
@@ -73,6 +74,12 @@ const run = async <A, E>(
         Layer.provide(TestDbLive),
         Layer.provide(InMemoryPubSubLive),
       ),
+      // The avatar proxy route shares the same router as `ChatApi` (see
+      // main.ts) — include it here so a test can fetch a stored avatar back the
+      // way a browser would. Its in-memory AttachmentStorage is a process-wide
+      // singleton (see AttachmentStorage.ts), so it reads the very bytes the
+      // upload handler wrote through ApiLive's own storage instance.
+      AvatarRouteLive.pipe(Layer.provide(AttachmentStorageLive)),
       BunHttpServer.layerContext,
     ),
   );
@@ -324,13 +331,24 @@ test("uploadAvatar stores 3 fixed-size variants, clears avatarUrl, and is reflec
       };
       expect(body.avatarUrl).toBeNull();
       expect(body.avatarVariants).not.toBeNull();
-      expect(
-        body.avatarVariants!.small.startsWith("data:image/webp;base64,"),
-      ).toBe(true);
+      // Variants are now proxy URLs (`/avatars/<token>`), not inline base64
+      // data URLs (issue #289) — and each of the three points at a distinct
+      // stored object.
+      for (const src of Object.values(body.avatarVariants!)) {
+        expect(src).toMatch(/^\/avatars\/[0-9a-f-]+$/);
+      }
+      expect(new Set(Object.values(body.avatarVariants!)).size).toBe(3);
 
-      const smallBytes = Buffer.from(
-        body.avatarVariants!.small.split(",")[1]!,
-        "base64",
+      // Fetch the small variant back through the proxy route and confirm it
+      // serves the actual resized WebP bytes with a long, immutable cache.
+      const smallResponse = yield* Effect.promise(() =>
+        handler(new Request(`http://localhost${body.avatarVariants!.small}`)),
+      );
+      expect(smallResponse.status).toBe(200);
+      expect(smallResponse.headers.get("content-type")).toBe("image/webp");
+      expect(smallResponse.headers.get("cache-control")).toContain("immutable");
+      const smallBytes = new Uint8Array(
+        yield* Effect.promise(() => smallResponse.arrayBuffer()),
       );
       const smallMeta = yield* Effect.promise(() =>
         sharp(smallBytes).metadata(),
@@ -341,6 +359,16 @@ test("uploadAvatar stores 3 fixed-size variants, clears avatarUrl, and is reflec
       const fetched = yield* authed.users.getUser({ path: { id: user.id } });
       expect(fetched.avatarUrl).toBeNull();
       expect(fetched.avatarVariants).toEqual(body.avatarVariants);
+    }),
+  ));
+
+test("the avatar proxy route 404s for an unknown token", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const response = yield* Effect.promise(() =>
+        handler(new Request("http://localhost/avatars/does-not-exist-token")),
+      );
+      expect(response.status).toBe(404);
     }),
   ));
 
