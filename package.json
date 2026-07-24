@@ -19,6 +19,7 @@
     "bump": "bun run scripts/bump.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run scripts/migrate.ts",
+    "db:backfill-avatars": "bun run scripts/backfill-avatars.ts",
     "loadtest:http": "k6 run scripts/loadtest/http-crud.js",
     "loadtest:ws": "k6 run scripts/loadtest/ws-fanout.js"
   },

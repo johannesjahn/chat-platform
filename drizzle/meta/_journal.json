@@ -127,6 +127,13 @@
       "when": 1784889344631,
       "tag": "0017_lonely_silver_sable",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784901363912,
+      "tag": "0018_goofy_bloodaxe",
+      "breakpoints": true
     }
   ]
 }

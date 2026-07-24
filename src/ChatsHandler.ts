@@ -101,9 +101,9 @@ const getParticipants = (
         username: users.username,
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
-        avatarSmall: users.avatarSmall,
-        avatarMedium: users.avatarMedium,
-        avatarLarge: users.avatarLarge,
+        avatarSmallKey: users.avatarSmallKey,
+        avatarMediumKey: users.avatarMediumKey,
+        avatarLargeKey: users.avatarLargeKey,
         role: chatParticipants.role,
         statusText: users.statusText,
         statusEmoji: users.statusEmoji,
@@ -117,9 +117,9 @@ const getParticipants = (
     Effect.map((rows) =>
       rows.map(
         ({
-          avatarSmall,
-          avatarMedium,
-          avatarLarge,
+          avatarSmallKey,
+          avatarMediumKey,
+          avatarLargeKey,
           statusText,
           statusEmoji,
           statusExpiresAt,
@@ -127,9 +127,9 @@ const getParticipants = (
         }) => ({
           ...rest,
           avatarVariants: toAvatarVariants({
-            avatarSmall,
-            avatarMedium,
-            avatarLarge,
+            avatarSmallKey,
+            avatarMediumKey,
+            avatarLargeKey,
           }),
           ...effectiveStatus({ statusText, statusEmoji, statusExpiresAt }),
         }),
@@ -296,9 +296,9 @@ const getParticipantsForChats = (
             username: users.username,
             displayName: users.displayName,
             avatarUrl: users.avatarUrl,
-            avatarSmall: users.avatarSmall,
-            avatarMedium: users.avatarMedium,
-            avatarLarge: users.avatarLarge,
+            avatarSmallKey: users.avatarSmallKey,
+            avatarMediumKey: users.avatarMediumKey,
+            avatarLargeKey: users.avatarLargeKey,
             role: chatParticipants.role,
             statusText: users.statusText,
             statusEmoji: users.statusEmoji,
@@ -313,9 +313,9 @@ const getParticipantsForChats = (
           const byChat = new Map<number, ChatParticipant[]>();
           for (const {
             chatId,
-            avatarSmall,
-            avatarMedium,
-            avatarLarge,
+            avatarSmallKey,
+            avatarMediumKey,
+            avatarLargeKey,
             statusText,
             statusEmoji,
             statusExpiresAt,
@@ -325,9 +325,9 @@ const getParticipantsForChats = (
             list.push({
               ...participant,
               avatarVariants: toAvatarVariants({
-                avatarSmall,
-                avatarMedium,
-                avatarLarge,
+                avatarSmallKey,
+                avatarMediumKey,
+                avatarLargeKey,
               }),
               ...effectiveStatus({ statusText, statusEmoji, statusExpiresAt }),
             });

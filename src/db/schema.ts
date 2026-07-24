@@ -22,18 +22,29 @@ export const users = pgTable(
     // to `username` (display name) or initials (avatar) in the UI.
     displayName: text("display_name"),
     avatarUrl: text("avatar_url"),
-    // Uploaded-and-cropped avatar (issue #269), stored as three fixed-size
-    // `data:image/webp;base64,...` URLs (see `processAvatar`/`AVATAR_VARIANT_PX`
-    // in ImageProcessing.ts) rather than object-storage keys: avatars are
-    // small enough post-crop-and-resize (tens of KB total) that embedding
-    // them directly in the row avoids needing a presigned-URL round trip (and
-    // its 15-minute expiry, see AttachmentStorage.ts) just to keep the
-    // header/session avatar rendering — and doesn't require an S3-compatible
-    // bucket to be configured just for this feature. Mutually exclusive with
-    // `avatarUrl`: setting one clears the other (see UsersHandler.ts).
+    // Uploaded-and-cropped avatar (issue #269). Originally three fixed-size
+    // `data:image/webp;base64,...` strings embedded directly in the row; as of
+    // issue #289 the processed variants live in the S3-compatible object store
+    // (see `processAvatar`/`AVATAR_VARIANT_PX` in ImageProcessing.ts and
+    // `AttachmentStorage.ts`) exactly like every other uploaded image, and
+    // these columns hold only a short random token per variant. The token is
+    // both the object's storage key suffix (`avatars/<token>`, see
+    // src/avatars.ts) and the path segment of the long-cache proxy URL the API
+    // returns (`GET /avatars/:token`, see src/AvatarRoute.ts) — so a re-upload
+    // mints new tokens and thus fresh, cache-busted URLs. Mutually exclusive
+    // with `avatarUrl`: setting one clears the other (see UsersHandler.ts).
+    //
+    // Expand-contract migration (see CLAUDE.md): the old base64 `avatar_small`/
+    // `avatar_medium`/`avatar_large` columns are kept here (still selectable by
+    // old replicas mid-rollout) while a standalone backfill moves their bytes
+    // into object storage (`scripts/backfill-avatars.ts`); a later migration
+    // drops them once every replica reads the `*_key` columns below.
     avatarSmall: text("avatar_small"),
     avatarMedium: text("avatar_medium"),
     avatarLarge: text("avatar_large"),
+    avatarSmallKey: text("avatar_small_key"),
+    avatarMediumKey: text("avatar_medium_key"),
+    avatarLargeKey: text("avatar_large_key"),
     role: text("role", { enum: ["user", "admin"] })
       .notNull()
       .default("user"),
