@@ -13,7 +13,7 @@
     "gen:types": "bun run ../scripts/gen-openapi.ts && openapi-typescript ../openapi.json -o src/lib/api-types.ts"
   },
   "dependencies": {
-    "@radix-ui/react-slot": "1.3.1",
+    "@radix-ui/react-slot": "1.3.2",
     "@tanstack/query-sync-storage-persister": "5.101.4",
     "@tanstack/react-query": "5.101.4",
     "@tanstack/react-query-persist-client": "5.101.4",
