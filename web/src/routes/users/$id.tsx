@@ -3,6 +3,7 @@ import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { DeleteUserButton } from "@/components/DeleteUserButton";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -44,6 +45,7 @@ function UserProfilePage() {
 
   const updateUserRole = $api.useMutation("patch", "/users/{id}/role");
   const [roleError, setRoleError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const status = useUserStatus(user?.id, user);
 
   if (!session) {
@@ -144,6 +146,23 @@ function UserProfilePage() {
                   )}
                   {user.role === "admin" ? "Revoke admin" : "Make admin"}
                 </Button>
+              </div>
+              {deleteError && (
+                <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {deleteError}
+                </p>
+              )}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-muted-foreground">
+                  Delete this user
+                </span>
+                <DeleteUserButton
+                  userId={user.id}
+                  label={user.displayName || `@${user.username}`}
+                  variant="full"
+                  onDeleted={goBack}
+                  onError={setDeleteError}
+                />
               </div>
             </CardContent>
           )}

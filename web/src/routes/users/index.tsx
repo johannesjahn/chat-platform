@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Search, Users } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { DeleteUserButton } from "@/components/DeleteUserButton";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { CountUp } from "@/components/reactbits/CountUp";
 import { GradientText } from "@/components/reactbits/GradientText";
@@ -28,6 +29,7 @@ function UsersPage() {
   const session = useSession();
   const isAdmin = session?.user.role === "admin";
   const [search, setSearch] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const query = useDebouncedValue(search.trim(), 300);
   // Admins can browse the full directory with a short (including empty)
   // query; everyone else still needs a narrow-enough search (see issue #48:
@@ -124,9 +126,14 @@ function UsersPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {deleteError && (
+              <p className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {deleteError}
+              </p>
+            )}
             <ul role="list" className="flex flex-col gap-2">
               {users.map((user, i) => (
-                <li key={user.id}>
+                <li key={user.id} className="flex items-center gap-2">
                   <Link
                     to="/users/$id"
                     params={{ id: String(user.id) }}
@@ -142,7 +149,7 @@ function UsersPage() {
                       );
                     }}
                     style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
-                    className="group relative flex items-center justify-between gap-3 overflow-hidden rounded-lg border border-border bg-background/40 px-3 py-2.5 text-sm transition-[transform,border-color] duration-400 ease-out hover:-translate-y-px hover:border-primary/40 motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500"
+                    className="group relative flex min-w-0 flex-1 items-center justify-between gap-3 overflow-hidden rounded-lg border border-border bg-background/40 px-3 py-2.5 text-sm transition-[transform,border-color] duration-400 ease-out hover:-translate-y-px hover:border-primary/40 motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500"
                   >
                     <Spotlight size={220} />
                     <span className="flex min-w-0 items-center gap-2.5">
@@ -160,6 +167,14 @@ function UsersPage() {
                       #{user.id}
                     </span>
                   </Link>
+                  {isAdmin && session && user.id !== session.user.id && (
+                    <DeleteUserButton
+                      userId={user.id}
+                      label={user.displayName || `@${user.username}`}
+                      variant="icon"
+                      onError={setDeleteError}
+                    />
+                  )}
                 </li>
               ))}
             </ul>

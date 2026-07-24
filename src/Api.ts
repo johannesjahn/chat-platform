@@ -1106,6 +1106,22 @@ const UsersGroup = HttpApiGroup.make("users")
       .middleware(Authentication),
   )
   .add(
+    // Permanently deletes another user's account — admin only. Distinct from
+    // `deleteAccount` (`DELETE /users/me`), which is self-service and
+    // re-proves the caller's own password; this is an administrative action
+    // authorized purely by the caller's admin role, so it takes no body. The
+    // target `users` row's cascading/`set null` FKs (db/schema.ts) clean up
+    // everything the account owns, and — like `deleteAccount` — the target's
+    // outstanding tokens are invalidated immediately. An admin can't delete
+    // their own account here (that goes through `deleteAccount`).
+    HttpApiEndpoint.del("deleteUser", "/users/:id")
+      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
+      .addSuccess(Schema.Void)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
     // Sets or clears the current user's custom status (issue #218) — a short
     // message plus an optional emoji, with an optional auto-expiry.
     // Full-replace like `updateProfile`: setting both `statusText` and
