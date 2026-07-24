@@ -1748,6 +1748,198 @@ test("updateUserRole promotes a user to admin, immediately invalidating their ou
     }),
   ));
 
+test("deleteUser rejects an unauthenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const created = yield* c.users.register({
+        payload: { username: "unauthtarget", password: "pw-target12" },
+      });
+      const result = yield* c.users
+        .deleteUser({ path: { id: created.id } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
+    }),
+  ));
+
+test("deleteUser rejects a non-admin caller with Forbidden", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const target = yield* c.users.register({
+        payload: { username: "victim1", password: "pw-victim12" },
+      });
+      yield* c.users.register({
+        payload: { username: "regular1", password: "pw-regular1" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "regular1", password: "pw-regular1" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const result = yield* authed.users
+        .deleteUser({ path: { id: target.id } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+
+      // The target still exists — the rejected call was a no-op.
+      const stillThere = yield* authed.users.getUser({
+        path: { id: target.id },
+      });
+      expect(stillThere.id).toBe(target.id);
+    }),
+  ));
+
+test("deleteUser returns 404 for a missing target user", () =>
+  run(
+    Effect.gen(function* () {
+      const db = yield* Effect.promise(getTestDb);
+      const passwordHash = yield* Effect.tryPromise(() =>
+        Bun.password.hash("pw-admin123", { algorithm: "argon2id" }),
+      );
+      yield* Effect.tryPromise(() =>
+        db
+          .insert(users)
+          .values({ username: "adminmona", passwordHash, role: "admin" })
+          .returning(),
+      );
+      const c = yield* makeClient;
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "adminmona", password: "pw-admin123" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const result = yield* authed.users
+        .deleteUser({ path: { id: 999999 } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("deleteUser rejects an admin deleting their own account with Forbidden", () =>
+  run(
+    Effect.gen(function* () {
+      const db = yield* Effect.promise(getTestDb);
+      const passwordHash = yield* Effect.tryPromise(() =>
+        Bun.password.hash("pw-admin123", { algorithm: "argon2id" }),
+      );
+      const inserted = yield* Effect.tryPromise(() =>
+        db
+          .insert(users)
+          .values({ username: "adminself", passwordHash, role: "admin" })
+          .returning(),
+      );
+      const adminId = inserted[0]!.id;
+      const c = yield* makeClient;
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "adminself", password: "pw-admin123" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const result = yield* authed.users
+        .deleteUser({ path: { id: adminId } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+
+      // The admin's own account is untouched.
+      const stillThere = yield* authed.users.getUser({
+        path: { id: adminId },
+      });
+      expect(stillThere.id).toBe(adminId);
+    }),
+  ));
+
+test("deleteUser removes the target, cascading to its posts, and invalidates its outstanding token", () =>
+  run(
+    Effect.gen(function* () {
+      const db = yield* Effect.promise(getTestDb);
+      const adminPasswordHash = yield* Effect.tryPromise(() =>
+        Bun.password.hash("pw-admin456", { algorithm: "argon2id" }),
+      );
+      yield* Effect.tryPromise(() =>
+        db
+          .insert(users)
+          .values({
+            username: "adminpat",
+            passwordHash: adminPasswordHash,
+            role: "admin",
+          })
+          .returning(),
+      );
+
+      const c = yield* makeClient;
+      const target = yield* c.users.register({
+        payload: { username: "doomed1", password: "pw-doomed12" },
+      });
+      const targetSession = yield* c.users.login({
+        payload: { username: "doomed1", password: "pw-doomed12" },
+      });
+      const targetAuthed = yield* makeAuthedClient(targetSession.accessToken);
+      const post = yield* targetAuthed.posts.createPost({
+        payload: { contentType: "text", content: "about to be deleted" },
+      });
+
+      const { accessToken: adminToken } = yield* c.users.login({
+        payload: { username: "adminpat", password: "pw-admin456" },
+      });
+      const adminAuthed = yield* makeAuthedClient(adminToken);
+
+      yield* adminAuthed.users.deleteUser({ path: { id: target.id } });
+
+      // The account and its post are gone.
+      const getUserResult = yield* adminAuthed.users
+        .getUser({ path: { id: target.id } })
+        .pipe(Effect.either);
+      expect(getUserResult._tag).toBe("Left");
+      if (getUserResult._tag === "Left") {
+        expect((getUserResult.left as { _tag: string })._tag).toBe("NotFound");
+      }
+
+      const getPostResult = yield* adminAuthed.posts
+        .getPost({ path: { id: post.id } })
+        .pipe(Effect.either);
+      expect(getPostResult._tag).toBe("Left");
+      if (getPostResult._tag === "Left") {
+        expect((getPostResult.left as { _tag: string })._tag).toBe("NotFound");
+      }
+
+      // The target's already-issued access token is rejected immediately.
+      const staleResult = yield* targetAuthed.users
+        .getUser({ path: { id: target.id } })
+        .pipe(Effect.either);
+      expect(staleResult._tag).toBe("Left");
+      if (staleResult._tag === "Left") {
+        expect((staleResult.left as { _tag: string })._tag).toBe(
+          "Unauthorized",
+        );
+      }
+
+      // The target's refresh token no longer works either, and they can't
+      // log back in.
+      const refreshResult = yield* c.users
+        .refresh({ payload: { refreshToken: targetSession.refreshToken } })
+        .pipe(Effect.either);
+      expect(refreshResult._tag).toBe("Left");
+
+      const loginResult = yield* c.users
+        .login({ payload: { username: "doomed1", password: "pw-doomed12" } })
+        .pipe(Effect.either);
+      expect(loginResult._tag).toBe("Left");
+    }),
+  ));
+
 test("updateStatus sets and clears statusText/statusEmoji, reflected by getUser", () =>
   run(
     Effect.gen(function* () {

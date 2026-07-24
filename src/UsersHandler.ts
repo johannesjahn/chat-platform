@@ -1054,6 +1054,74 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           return toPublicUser(updated);
         }),
       )
+      .handle("deleteUser", ({ path: { id } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const tokenVersionCache = yield* TokenVersionCache;
+          const pubsub = yield* PubSub;
+          const storage = yield* AttachmentStorage;
+
+          if (currentUser.role !== "admin")
+            return yield* Effect.fail(
+              new Forbidden({ message: "Only admins can delete users" }),
+            );
+
+          // Deleting your own account goes through `deleteAccount` (which
+          // re-proves the password), not this admin endpoint — this rules out
+          // an admin wiping their own account with a single unconfirmed click
+          // and mirrors the frontend's role-management guard (see the
+          // `!isSelf` check in web/src/routes/users/$id.tsx).
+          if (currentUser.id === id)
+            return yield* Effect.fail(
+              new Forbidden({
+                message:
+                  "Admins can't delete their own account here — use account settings",
+              }),
+            );
+
+          // Pull the avatar tokens first (an account's avatar objects aren't
+          // `attachments` rows, so nothing else sweeps them once the row's FKs
+          // cascade) — same reasoning as `deleteAccount` above.
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select({
+                avatarSmallKey: users.avatarSmallKey,
+                avatarMediumKey: users.avatarMediumKey,
+                avatarLargeKey: users.avatarLargeKey,
+              })
+              .from(users)
+              .where(eq(users.id, id))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          const dbUser = rows[0];
+          if (!dbUser)
+            return yield* Effect.fail(
+              new NotFound({ message: `User ${id} not found` }),
+            );
+
+          // The `users` row's cascading/`set null` FKs (db/schema.ts) take
+          // care of everything the account owns — refresh tokens, posts,
+          // comments, likes, chat participation, sent messages, read receipts.
+          yield* Effect.tryPromise(() =>
+            db.delete(users).where(eq(users.id, id)),
+          ).pipe(Effect.orDie);
+
+          yield* deleteAvatarObjects(storage, [
+            dbUser.avatarSmallKey,
+            dbUser.avatarMediumKey,
+            dbUser.avatarLargeKey,
+          ]);
+
+          // Cut off the deleted user's outstanding access/refresh tokens
+          // immediately rather than letting them live out their TTL — mirrors
+          // `deleteAccount`.
+          yield* tokenVersionCache.invalidate(id);
+          yield* pubsub
+            .publish("auth:invalidation", String(id))
+            .pipe(Effect.ignore);
+        }),
+      )
       .handle("updateStatus", ({ payload }) =>
         Effect.gen(function* () {
           const db = yield* Db;
