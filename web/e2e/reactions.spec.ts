@@ -1,6 +1,100 @@
 import { expect, test } from "./fixtures";
 import { registerViaUi } from "./helpers";
 
+test("reacting to a chat message from the hover button adds a pill below the bubble", async ({
+  browser,
+  injectApiUrl,
+}) => {
+  // A direct chat needs a second user to exist, but only A drives the UI —
+  // A reacts to their own message (any participant may react, so the sender
+  // reacting to their own message is a valid case and keeps the test to a
+  // single page).
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  await registerViaUi(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const { username: usernameB } = await registerViaUi(pageB);
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Direct message" }).click();
+  await pageA.fill("#user-search", usernameB);
+  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+
+  await pageA.fill("textarea", "React to this chat message");
+  await pageA.keyboard.press("Enter");
+  const bubble = pageA
+    .locator("[data-message-id]")
+    .filter({ hasText: "React to this chat message" });
+  await expect(bubble).toBeVisible();
+
+  // The "add a reaction" trigger only appears on hover, beside the bubble —
+  // the same hover-only affordance as the edit/delete buttons — rather than
+  // occupying permanent space below every message.
+  await bubble.hover();
+  await bubble.getByRole("button", { name: "Add a reaction" }).click();
+  await pageA.getByRole("button", { name: "React with 👍" }).click();
+
+  const pill = bubble.getByRole("button", { name: "Remove 👍 reaction" });
+  await expect(pill).toBeVisible();
+  await expect(pill).toHaveText("👍1");
+
+  // Toggling it back off removes the pill entirely, so no empty reaction row
+  // is left behind under the bubble.
+  await pill.click();
+  await expect(
+    bubble.getByRole("button", { name: "Remove 👍 reaction" }),
+  ).toHaveCount(0);
+
+  await contextA.close();
+  await contextB.close();
+});
+
+test("a group chat shows the sender's avatar beside their message", async ({
+  browser,
+  injectApiUrl,
+}) => {
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  const { username: usernameA } = await registerViaUi(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const { username: usernameB } = await registerViaUi(pageB);
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Group chat" }).click();
+  await pageA.fill("#group-title", "Avatar squad");
+  await pageA.fill("#user-search", usernameB);
+  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+  await pageA.getByRole("button", { name: /^Create group/ }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+  const chatId = pageA.url().split("/").pop();
+
+  await pageA.fill("textarea", "Hello from A in the group");
+  await pageA.keyboard.press("Enter");
+  await expect(pageA.getByText("Hello from A in the group")).toBeVisible();
+
+  // B opens the group and sees A's incoming message with A's avatar linked to
+  // A's profile next to it — the affordance that makes the sender identifiable
+  // at a glance in a group. B's own messages don't get an avatar, so this link
+  // is unambiguous.
+  await pageB.goto(`/chats/${chatId}`);
+  await expect(pageB.getByText("Hello from A in the group")).toBeVisible();
+  await expect(
+    pageB.getByRole("link", { name: `@${usernameA}'s profile` }),
+  ).toBeVisible();
+
+  await contextA.close();
+  await contextB.close();
+});
+
 test("adding and removing a reaction on a post updates the pill through the real API", async ({
   page,
 }) => {

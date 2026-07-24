@@ -12,7 +12,8 @@ import {
   X,
 } from "lucide-react";
 import { AttachmentPreview } from "@/components/AttachmentPreview";
-import { ReactionPicker } from "@/components/CommentsSection";
+import { Avatar, type AvatarVariants } from "@/components/Avatar";
+import { ReactionAddButton, ReactionList } from "@/components/CommentsSection";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { $api } from "@/lib/api";
@@ -31,6 +32,15 @@ type MessageBubbleProps = {
   message: ChatMessage;
   isOwn: boolean;
   senderLabel?: string;
+  // The sender's avatar, shown beside an incoming message in a group chat so
+  // it's easy to tell at a glance who sent it. Only provided for other
+  // people's messages in a group; direct chats and your own messages don't
+  // get one.
+  senderAvatar?: {
+    name: string;
+    avatarUrl?: string | null;
+    avatarVariants?: AvatarVariants | null;
+  };
   isRead: boolean;
   canModify: boolean;
   // Lets a chat's owner/admin (or a site-wide admin) delete someone else's
@@ -47,6 +57,7 @@ export function MessageBubble({
   message,
   isOwn,
   senderLabel,
+  senderAvatar,
   isRead,
   canModify,
   canDeleteOthers = false,
@@ -95,6 +106,7 @@ export function MessageBubble({
     }
   };
 
+  const hasReactions = message.reactions.some((r) => r.count > 0);
   const wasEdited = message.updatedAt !== message.createdAt;
   const isLongText =
     message.contentType === "text" &&
@@ -157,9 +169,32 @@ export function MessageBubble({
           : "justify-start motion-safe:slide-in-from-left-4",
       )}
     >
-      {isOwn && canModify && !isEditing && (
+      {!isOwn && senderAvatar && (
+        <Link
+          to="/users/$id"
+          params={{ id: String(message.senderId) }}
+          className="shrink-0 self-end"
+          aria-label={senderLabel ? `${senderLabel}'s profile` : "Profile"}
+        >
+          <Avatar
+            name={senderAvatar.name}
+            avatarUrl={senderAvatar.avatarUrl}
+            avatarVariants={senderAvatar.avatarVariants}
+            size="sm"
+          />
+        </Link>
+      )}
+
+      {isOwn && !isEditing && (
         <div className="flex shrink-0 items-center gap-0.5 opacity-0 translate-x-2 scale-95 transition-all duration-300 ease-smooth group-hover:opacity-100 group-hover:translate-x-0 group-hover:scale-100">
-          {message.contentType === "text" && (
+          <ReactionAddButton
+            reactions={message.reactions}
+            pending={reactionPending}
+            onToggle={(emoji) => void toggleReaction(emoji)}
+            className="size-6 px-0"
+            iconClassName="size-3.5"
+          />
+          {canModify && message.contentType === "text" && (
             <Button
               type="button"
               size="icon"
@@ -174,21 +209,23 @@ export function MessageBubble({
               <Pencil className="size-3" />
             </Button>
           )}
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            aria-label="Delete message"
-            disabled={deleting}
-            onClick={() => void handleDelete()}
-            className="size-6 text-destructive hover:text-destructive"
-          >
-            {deleting ? (
-              <Loader2 className="size-3 animate-spin" />
-            ) : (
-              <Trash2 className="size-3" />
-            )}
-          </Button>
+          {canModify && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label="Delete message"
+              disabled={deleting}
+              onClick={() => void handleDelete()}
+              className="size-6 text-destructive hover:text-destructive"
+            >
+              {deleting ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Trash2 className="size-3" />
+              )}
+            </Button>
+          )}
         </div>
       )}
 
@@ -342,16 +379,14 @@ export function MessageBubble({
           </div>
         </div>
 
-        {!isEditing && (
-          <div
-            className={cn(
-              "transition-opacity duration-200",
-              message.reactions.some((r) => r.count > 0)
-                ? "opacity-100"
-                : "opacity-0 group-hover:opacity-100",
-            )}
-          >
-            <ReactionPicker
+        {/* The reaction pills sit below the bubble, but only once there's an
+            actual reaction to show — otherwise nothing renders here at all, so
+            the parent's `gap-1` doesn't reserve empty space under every
+            message. Adding a reaction is done from the hover-only button beside
+            the bubble instead (see the action groups on either side). */}
+        {!isEditing && hasReactions && (
+          <div className="flex flex-wrap items-center gap-1">
+            <ReactionList
               reactions={message.reactions}
               pending={reactionPending}
               onToggle={(emoji) => void toggleReaction(emoji)}
@@ -365,23 +400,32 @@ export function MessageBubble({
         )}
       </div>
 
-      {!isOwn && canDeleteOthers && !isEditing && (
+      {!isOwn && !isEditing && (
         <div className="flex shrink-0 items-center gap-0.5 opacity-0 translate-x-2 scale-95 transition-all duration-300 ease-smooth group-hover:opacity-100 group-hover:translate-x-0 group-hover:scale-100">
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            aria-label="Delete message"
-            disabled={deleting}
-            onClick={() => void handleDelete()}
-            className="size-6 text-destructive hover:text-destructive"
-          >
-            {deleting ? (
-              <Loader2 className="size-3 animate-spin" />
-            ) : (
-              <Trash2 className="size-3" />
-            )}
-          </Button>
+          <ReactionAddButton
+            reactions={message.reactions}
+            pending={reactionPending}
+            onToggle={(emoji) => void toggleReaction(emoji)}
+            className="size-6 px-0"
+            iconClassName="size-3.5"
+          />
+          {canDeleteOthers && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label="Delete message"
+              disabled={deleting}
+              onClick={() => void handleDelete()}
+              className="size-6 text-destructive hover:text-destructive"
+            >
+              {deleting ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Trash2 className="size-3" />
+              )}
+            </Button>
+          )}
         </div>
       )}
     </div>
