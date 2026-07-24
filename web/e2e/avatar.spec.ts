@@ -26,23 +26,33 @@ test("uploads and crops an avatar from settings, replacing the initials everywhe
   await page.getByRole("button", { name: "Save avatar" }).click();
 
   // The dialog closes and the profile form now shows the uploaded avatar
-  // (a data: URL <img>) instead of the initials placeholder.
+  // instead of the initials placeholder. Avatars are served from the backend's
+  // long-cache proxy route (`/avatars/<token>`, issue #289) rather than inline
+  // `data:` URLs, so the <img src> points there — and the image actually
+  // loads (naturalWidth > 0), proving the proxy serves the stored bytes
+  // end-to-end, not just that the URL was set.
   await expect(page.getByRole("dialog", { name: "Crop avatar" })).toHaveCount(
     0,
   );
   await expect(page.getByText("Profile updated.")).toBeVisible();
   const preview = page.locator("form img");
   await expect(preview).toHaveCount(1);
-  await expect(preview).toHaveAttribute("src", /^data:image\/webp;base64,/);
+  await expect(preview).toHaveAttribute("src", /\/avatars\/[0-9a-f-]+$/);
+  await expect
+    .poll(() => preview.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBeGreaterThan(0);
 
   // Reflected on the user's own profile page too, on a fresh navigation —
   // proves it round-tripped through the backend, not just local form state.
   await page.getByRole("link", { name: /^@/ }).click();
   await expect(page).toHaveURL(/\/users\/\d+/);
-  await expect(page.locator("img")).toHaveAttribute(
-    "src",
-    /^data:image\/webp;base64,/,
-  );
+  const profileImg = page.locator("img").first();
+  await expect(profileImg).toHaveAttribute("src", /\/avatars\/[0-9a-f-]+$/);
+  await expect
+    .poll(() =>
+      profileImg.evaluate((img: HTMLImageElement) => img.naturalWidth),
+    )
+    .toBeGreaterThan(0);
 });
 
 test("removes an uploaded avatar back to the initials placeholder", async ({
