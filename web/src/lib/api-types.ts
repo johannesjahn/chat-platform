@@ -1001,6 +1001,7 @@ export interface components {
             contentType: components["schemas"]["MessageContentType"];
             content: string;
             attachment: components["schemas"]["Attachment"] | null;
+            parentMessage: components["schemas"]["ParentMessagePreview"] | null;
             createdAt: number;
             updatedAt: number;
             readByUserIds: number[];
@@ -1008,6 +1009,13 @@ export interface components {
         };
         /** @enum {string} */
         MessageContentType: "text" | "image_url" | "attachment";
+        ParentMessagePreview: {
+            id: number;
+            senderId: number;
+            senderName: string;
+            contentType: components["schemas"]["MessageContentType"];
+            content: string;
+        };
         InvalidChatRequest: {
             message: string;
             /** @enum {string} */
@@ -1065,6 +1073,7 @@ export interface components {
              */
             content: components["schemas"]["NonEmptyTrimmedString"];
             attachmentId?: number;
+            parentMessageId?: number;
         };
         MarkReadBody: {
             messageId: number;
@@ -3398,6 +3407,7 @@ export interface operations {
                         contentType: components["schemas"]["MessageContentType"];
                         content: string;
                         attachment: components["schemas"]["Attachment"] | null;
+                        parentMessage: components["schemas"]["ParentMessagePreview"] | null;
                         createdAt: number;
                         updatedAt: number;
                         readByUserIds: number[];

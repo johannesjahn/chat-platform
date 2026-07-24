@@ -25,11 +25,13 @@ import {
   MAX_GROUP_PARTICIPANTS,
   MAX_INVITES_PER_CHAT,
   NotFound,
+  PARENT_MESSAGE_PREVIEW_LENGTH,
   type Chat,
   type ChatInvite,
   type ChatParticipant,
   type ChatRole,
   type Message,
+  type ParentMessagePreview,
   type ReactionSummary,
 } from "./Api.ts";
 import {
@@ -77,6 +79,7 @@ const toApiMessage = (
   readByUserIds: ReadonlyArray<number>,
   attachment: Attachment | null = null,
   reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
+  parentMessage: ParentMessagePreview | null = null,
 ): Message => ({
   id: row.id,
   chatId: row.chatId,
@@ -84,11 +87,67 @@ const toApiMessage = (
   contentType: row.contentType,
   content: row.content,
   attachment,
+  parentMessage,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
   readByUserIds: [...readByUserIds],
   reactions: [...reactions],
 });
+
+// Resolves the lightweight `parentMessage` preview (issue #217) for a batch of
+// reply messages in one query — collects the distinct non-null parent ids,
+// fetches each parent's row joined to its sender for the display name, and
+// returns them keyed by parent message id. Callers building many messages at
+// once (listMessages, the chat-list last-message batch) use this to avoid an
+// N+1 parent lookup; single-message callers use `resolveParentPreview`.
+const resolveParentPreviews = (
+  db: DrizzleDb,
+  parentIds: ReadonlyArray<number | null>,
+): Effect.Effect<Map<number, ParentMessagePreview>> =>
+  Effect.gen(function* () {
+    const ids = [
+      ...new Set(parentIds.filter((id): id is number => id !== null)),
+    ];
+    if (ids.length === 0) return new Map<number, ParentMessagePreview>();
+    const rows = yield* Effect.tryPromise(() =>
+      db
+        .select({
+          id: messages.id,
+          senderId: messages.senderId,
+          contentType: messages.contentType,
+          content: messages.content,
+          displayName: users.displayName,
+          username: users.username,
+        })
+        .from(messages)
+        .innerJoin(users, eq(users.id, messages.senderId))
+        .where(inArray(messages.id, ids)),
+    ).pipe(Effect.orDie);
+    const previews = new Map<number, ParentMessagePreview>();
+    for (const row of rows) {
+      previews.set(row.id, {
+        id: row.id,
+        senderId: row.senderId,
+        // displayName ?? username — the same fallback `userLabel` applies
+        // client-side, resolved here so the client needn't have the (possibly
+        // since-departed) sender on hand.
+        senderName: row.displayName ?? row.username,
+        contentType: row.contentType,
+        // Only a one-line snippet is ever shown in a quote — truncate rather
+        // than shipping the parent's full body on every reply.
+        content: row.content.slice(0, PARENT_MESSAGE_PREVIEW_LENGTH),
+      });
+    }
+    return previews;
+  });
+
+const resolveParentPreview = (
+  db: DrizzleDb,
+  parentId: number | null,
+): Effect.Effect<ParentMessagePreview | null> =>
+  Effect.map(resolveParentPreviews(db, [parentId]), (previews) =>
+    parentId !== null ? (previews.get(parentId) ?? null) : null,
+  );
 
 const getParticipants = (
   db: DrizzleDb,
@@ -241,11 +300,13 @@ const getLastMessage = (
     const reactions = yield* Effect.tryPromise(() =>
       messageReactionInfoOne(db, row.id, userId),
     ).pipe(Effect.orDie);
+    const parentMessage = yield* resolveParentPreview(db, row.parentMessageId);
     return toApiMessage(
       row,
       readers.map((r) => r.userId),
       attachment,
       reactions,
+      parentMessage,
     );
   });
 
@@ -389,6 +450,10 @@ const getLastMessagesForChats = (
         userId,
       ),
     ).pipe(Effect.orDie);
+    const parentPreviews = yield* resolveParentPreviews(
+      db,
+      rows.map((r) => r.parentMessageId),
+    );
     for (const row of rows) {
       byChat.set(
         row.chatId,
@@ -399,6 +464,9 @@ const getLastMessagesForChats = (
             ? (attachmentsByRow.get(row.attachmentId) ?? null)
             : null,
           reactionsByMessage.get(row.id),
+          row.parentMessageId !== null
+            ? (parentPreviews.get(row.parentMessageId) ?? null)
+            : null,
         ),
       );
     }
@@ -1543,6 +1611,10 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const reactionsByMessage = yield* Effect.tryPromise(() =>
             messageReactionInfo(db, messageIds, currentUser.id),
           ).pipe(Effect.orDie);
+          const parentPreviews = yield* resolveParentPreviews(
+            db,
+            rows.map((r) => r.parentMessageId),
+          );
 
           return {
             messages: rows.map((row) =>
@@ -1553,6 +1625,9 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                   ? (attachmentsByRow.get(row.attachmentId) ?? null)
                   : null,
                 reactionsByMessage.get(row.id),
+                row.parentMessageId !== null
+                  ? (parentPreviews.get(row.parentMessageId) ?? null)
+                  : null,
               ),
             ),
             limit,
@@ -1585,6 +1660,20 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             );
           }
 
+          // A reply must quote a message in *this* chat (issue #217).
+          // `getMessageOr404` filters on (chatId, messageId), so a parent from
+          // another chat — or one that doesn't exist — 404s here, and the
+          // returned row is reused to build the response's `parentMessage`
+          // preview rather than re-fetching it.
+          let parentMessage: ParentMessagePreview | null = null;
+          if (payload.parentMessageId !== undefined) {
+            yield* getMessageOr404(db, id, payload.parentMessageId);
+            parentMessage = yield* resolveParentPreview(
+              db,
+              payload.parentMessageId,
+            );
+          }
+
           // Inserting the message and bumping the parent chat's `updatedAt`
           // (which `listChats` sorts by) are done as one atomic statement via
           // a writable CTE, rather than two separate un-transacted round
@@ -1602,6 +1691,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 contentType: payload.contentType,
                 content: payload.content,
                 attachmentId: payload.attachmentId ?? null,
+                parentMessageId: payload.parentMessageId ?? null,
                 createdAt: now,
                 updatedAt: now,
               })
@@ -1638,7 +1728,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             version,
             participants.map((p) => p.userId),
           );
-          return toApiMessage(row, [], attachment);
+          return toApiMessage(row, [], attachment, NO_REACTIONS, parentMessage);
         }),
       )
       .handle("sendTyping", ({ path: { id } }) =>
@@ -1785,6 +1875,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const reactions = yield* Effect.tryPromise(() =>
             messageReactionInfoOne(db, messageId, currentUser.id),
           ).pipe(Effect.orDie);
+          // An edit never changes what a reply quotes (UpdateMessageBody has no
+          // `parentMessageId`), but the response must still carry the existing
+          // preview so the client doesn't drop the quote on edit.
+          const parentMessage = yield* resolveParentPreview(
+            db,
+            row.parentMessageId,
+          );
           const version = yield* bumpChatVersion(db, id);
           const participants = yield* getParticipants(db, id);
           yield* notifyChatUpdated(
@@ -1793,7 +1890,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             version,
             participants.map((p) => p.userId),
           );
-          return toApiMessage(row, readers, attachment, reactions);
+          return toApiMessage(
+            row,
+            readers,
+            attachment,
+            reactions,
+            parentMessage,
+          );
         }),
       )
       .handle("deleteMessage", ({ path: { id, messageId } }) =>

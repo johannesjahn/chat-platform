@@ -39,6 +39,11 @@ export type QueuedMessage = Owned & {
   chatId: number;
   contentType: MessageContentType;
   content: string;
+  // Set when the queued message is a reply (issue #217) — the quoted parent's
+  // id, threaded through to the send on replay. A parent is always a
+  // server-assigned id (you can only reply to an already-sent message), so it
+  // stays valid across the offline gap.
+  parentMessageId?: number;
   createdAt: number;
   status: QueuedItemStatus;
   error?: string;
@@ -139,7 +144,11 @@ function currentUserId(): number | null {
 
 export function enqueueMessage(
   chatId: number,
-  values: { contentType: MessageContentType; content: string },
+  values: {
+    contentType: MessageContentType;
+    content: string;
+    parentMessageId?: number;
+  },
 ): void {
   writeQueue([
     ...readQueue(),
@@ -150,6 +159,7 @@ export function enqueueMessage(
       chatId,
       contentType: values.contentType,
       content: values.content,
+      parentMessageId: values.parentMessageId,
       createdAt: Date.now(),
       status: "pending",
     },
@@ -280,7 +290,13 @@ async function drainQueue(queryClient: QueryClient): Promise<void> {
       try {
         result = await fetchClient.POST("/chats/{id}/messages", {
           params: { path: { id: String(next.chatId) } },
-          body: { contentType: next.contentType, content: next.content },
+          body: {
+            contentType: next.contentType,
+            content: next.content,
+            ...(next.parentMessageId !== undefined
+              ? { parentMessageId: next.parentMessageId }
+              : {}),
+          },
         });
       } catch {
         return;

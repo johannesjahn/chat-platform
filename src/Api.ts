@@ -717,6 +717,32 @@ const MessageContent = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_MESSAGE_CONTENT_LENGTH),
 );
 
+// How much of a quoted parent message's content is echoed in a reply's
+// `parentMessage` preview (issue #217). Chat bubbles show only a one-line
+// snippet of what's being replied to, so the full body (up to
+// MAX_MESSAGE_CONTENT_LENGTH) never needs to ride along on every reply — the
+// backend truncates to this before sending (see `toParentPreview` in
+// ChatsHandler.ts). Kept generous enough to fill a preview line at any
+// sensible width.
+export const PARENT_MESSAGE_PREVIEW_LENGTH = 120;
+
+// A lightweight quote of the message a reply points at (issue #217) — just
+// enough to render "replying to <sender>: <snippet>" above the reply, without
+// embedding a full (potentially itself-a-reply) `Message` and recursing.
+// `senderName` is the parent sender's resolved display name (displayName ??
+// username), joined server-side so the client needn't have that user in hand
+// (they might have since left the chat). `content` is truncated to
+// PARENT_MESSAGE_PREVIEW_LENGTH; `contentType` lets the client show "Photo"/
+// "Attachment" instead of a raw URL/filename for non-text parents.
+export const ParentMessagePreview = Schema.Struct({
+  id: Schema.Number,
+  senderId: Schema.Number,
+  senderName: Schema.String,
+  contentType: MessageContentType,
+  content: Schema.String,
+}).annotations({ identifier: "ParentMessagePreview" });
+export type ParentMessagePreview = typeof ParentMessagePreview.Type;
+
 export const Message = Schema.Struct({
   id: Schema.Number,
   chatId: Schema.Number,
@@ -725,6 +751,10 @@ export const Message = Schema.Struct({
   content: Schema.String,
   // Set only when contentType is "attachment" — see `Attachment` above.
   attachment: Schema.NullOr(Attachment),
+  // The message this one is a reply to (issue #217), as a lightweight preview
+  // — null for a normal (non-reply) message, or when the quoted message has
+  // since been deleted (the FK is `set null`, see db/schema.ts).
+  parentMessage: Schema.NullOr(ParentMessagePreview),
   createdAt: Schema.Number,
   updatedAt: Schema.Number,
   // Ids of participants (other than the sender) who have read this message —
@@ -837,6 +867,11 @@ export const CreateMessageBody = Schema.Struct({
   // Id of a previously-uploaded attachment (`POST /attachments`) owned by
   // the caller — required exactly when contentType is "attachment".
   attachmentId: Schema.optional(Schema.Number),
+  // Id of the message this one replies to (issue #217). Omitted for a normal
+  // message. Validated server-side to reference a message in this same chat —
+  // a parent from another chat (or a nonexistent one) 404s (see
+  // ChatsHandler.ts).
+  parentMessageId: Schema.optional(Schema.Number),
 })
   .pipe(
     Schema.filter(requireAllowedImageUrl),

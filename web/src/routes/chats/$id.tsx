@@ -3,7 +3,7 @@ import { onlineManager, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Loader2, Settings2, Users } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
-import { ChatComposer } from "@/components/ChatComposer";
+import { ChatComposer, type ReplyTarget } from "@/components/ChatComposer";
 import { GroupManagementDialog } from "@/components/GroupManagementDialog";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -97,6 +97,9 @@ function ChatView({ id }: { id: string }) {
   );
 
   const [managingGroup, setManagingGroup] = useState(false);
+  // The message a reply is currently being composed against (issue #217), or
+  // null when composing a normal message.
+  const [replyingTo, setReplyingTo] = useState<ReplyTarget | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastMessageIdRef = useRef<number | null>(null);
@@ -277,6 +280,7 @@ function ChatView({ id }: { id: string }) {
     contentType: "text" | "image_url" | "attachment";
     content: string;
     attachmentId?: number;
+    parentMessageId?: number;
   }) {
     // Offline: queue instead of attempting the request at all — it would
     // just fail (see lib/offlineQueue.ts, replayed once back online). An
@@ -453,6 +457,14 @@ function ChatView({ id }: { id: string }) {
                     canDeleteOthers={!isOwn && canManage}
                     onEdit={(content) => handleEditMessage(message.id, content)}
                     onDelete={() => handleDeleteMessage(message.id)}
+                    onReply={() =>
+                      setReplyingTo({
+                        id: message.id,
+                        senderName: sender ? userLabel(sender) : "Someone",
+                        contentType: message.contentType,
+                        content: message.content,
+                      })
+                    }
                     senderLabel={
                       chat.type === "group" && sender
                         ? userLabel(sender)
@@ -502,7 +514,12 @@ function ChatView({ id }: { id: string }) {
           </div>
         </CardContent>
 
-        <ChatComposer chatId={chatId} onSend={handleSend} />
+        <ChatComposer
+          chatId={chatId}
+          onSend={handleSend}
+          replyingTo={replyingTo}
+          onCancelReply={() => setReplyingTo(null)}
+        />
       </Card>
 
       {chat.type === "group" && (
