@@ -302,7 +302,7 @@ test("searchUsers returns matching users, case-insensitively, without password d
     }),
   ));
 
-test("searchUsers rejects a query shorter than the minimum length", () =>
+test("searchUsers rejects a non-admin's query shorter than the minimum length", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
@@ -318,6 +318,51 @@ test("searchUsers rejects a query shorter than the minimum length", () =>
         .searchUsers({ urlParams: { q: "ce" } })
         .pipe(Effect.either);
       expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidUserSearchRequest",
+        );
+      }
+    }),
+  ));
+
+test("searchUsers lets an admin browse the full directory with a query shorter than the minimum length, including empty", () =>
+  run(
+    Effect.gen(function* () {
+      const db = yield* Effect.promise(getTestDb);
+      const passwordHash = yield* Effect.tryPromise(() =>
+        Bun.password.hash("pw-adminnora", { algorithm: "argon2id" }),
+      );
+      yield* Effect.tryPromise(() =>
+        db
+          .insert(users)
+          .values({ username: "adminnora", passwordHash, role: "admin" })
+          .returning(),
+      );
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "nolan", password: "pw-nolan123" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "adminnora", password: "pw-adminnora" },
+      });
+
+      const authed = yield* makeAuthedClient(accessToken);
+      const shortQueryResults = yield* authed.users.searchUsers({
+        urlParams: { q: "no" },
+      });
+      expect(shortQueryResults.map((u) => u.username).sort()).toEqual([
+        "adminnora",
+        "nolan",
+      ]);
+
+      const emptyQueryResults = yield* authed.users.searchUsers({
+        urlParams: { q: "" },
+      });
+      expect(emptyQueryResults.map((u) => u.username).sort()).toEqual([
+        "adminnora",
+        "nolan",
+      ]);
     }),
   ));
 

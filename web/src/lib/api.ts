@@ -127,9 +127,11 @@ export function logout(session: Session): void {
 // searches aren't served stale (previously-disabled) data.
 export const usersQueryKey = ["get", "/users/search"] as const;
 
-// Below this, a search isn't narrow enough to be worth sending (mirrors
-// `MIN_USER_SEARCH_QUERY_LENGTH` in src/Api.ts) — keeps queries and payloads
-// bounded independent of the user base's size (see issue #48).
+// Below this, a search isn't narrow enough to be worth sending for a regular
+// user (mirrors `MIN_USER_SEARCH_QUERY_LENGTH` in src/Api.ts) — keeps queries
+// and payloads bounded independent of the user base's size (see issue #48).
+// Admins are exempt and may search — or list everyone — with a shorter
+// (including empty) query.
 export const MIN_USER_SEARCH_QUERY_LENGTH = 3;
 
 // Floor for newly chosen passwords (mirrors `MIN_PASSWORD_LENGTH` in
