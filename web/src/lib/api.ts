@@ -140,6 +140,11 @@ export const MIN_PASSWORD_LENGTH = 8;
 // Mirrors `MAX_DISPLAY_NAME_LENGTH` in src/Api.ts.
 export const MAX_DISPLAY_NAME_LENGTH = 64;
 
+// Mirrors `MAX_STATUS_TEXT_LENGTH`/`MAX_STATUS_EMOJI_LENGTH` in src/Api.ts
+// (issue #218).
+export const MAX_STATUS_TEXT_LENGTH = 100;
+export const MAX_STATUS_EMOJI_LENGTH = 8;
+
 export type PublicUser = components["schemas"]["User"];
 export type Session = components["schemas"]["LoginResponse"];
 export type Credentials = components["schemas"]["LoginBody"];

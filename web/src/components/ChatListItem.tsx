@@ -4,8 +4,10 @@ import { ImageIcon, Users } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { PresenceDot } from "@/components/PresenceDot";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { chatDisplayName, formatChatTimestamp, type Chat } from "@/lib/chats";
 import { useIsOnline } from "@/lib/presence";
+import { useUserStatus } from "@/lib/status";
 import { userAvatarName } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +51,10 @@ export function ChatListItem({
       ? chat.participants.find((p) => p.userId !== currentUserId)
       : undefined;
   const otherParticipantOnline = useIsOnline(otherParticipant?.userId);
+  const otherParticipantStatus = useUserStatus(
+    otherParticipant?.userId,
+    otherParticipant,
+  );
 
   return (
     <div
@@ -97,6 +103,12 @@ export function ChatListItem({
             </span>
           )}
         </div>
+        {chat.type === "direct" && (
+          <UserStatusBadge
+            status={otherParticipantStatus}
+            className="text-xs text-muted-foreground"
+          />
+        )}
         <div className="flex items-center justify-between gap-2">
           <span
             className={cn(

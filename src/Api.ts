@@ -103,6 +103,14 @@ export const User = Schema.Struct({
   // falls back to `avatarUrl`, then initials.
   avatarVariants: Schema.NullOr(AvatarVariants),
   role: UserRole,
+  // Custom status (issue #218) — a short message plus an optional emoji, with
+  // an optional auto-expiry. Null when unset. `statusExpiresAt` (epoch ms) in
+  // the past is already resolved to a fully-null status server-side (see
+  // `effectiveStatus` in UsersHandler.ts), so a client never has to separately
+  // check whether to still show it.
+  statusText: Schema.NullOr(Schema.String),
+  statusEmoji: Schema.NullOr(Schema.String),
+  statusExpiresAt: Schema.NullOr(Schema.Number),
 }).annotations({ identifier: "User" });
 export type User = typeof User.Type;
 
@@ -212,6 +220,59 @@ export const DeleteAccountBody = Schema.Struct({
 export const UpdateUserRoleBody = Schema.Struct({
   role: UserRole,
 }).annotations({ identifier: "UpdateUserRoleBody" });
+
+// Bounds a custom status message (issue #218) — short like a Slack/Discord
+// status, not a full post.
+export const MAX_STATUS_TEXT_LENGTH = 100;
+
+const StatusText = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_STATUS_TEXT_LENGTH),
+);
+
+// Generous enough for any real emoji grapheme (including multi-codepoint
+// ZWJ/skin-tone sequences) without allowing an arbitrary-length string in
+// what's meant to be a single status icon.
+export const MAX_STATUS_EMOJI_LENGTH = 8;
+
+const StatusEmoji = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_STATUS_EMOJI_LENGTH),
+);
+
+// A status may optionally auto-expire — bounded generously (30 days), the
+// same ceiling `CreateChatInviteBody.expiresInHours` uses.
+export const MAX_STATUS_EXPIRES_IN_MINUTES = 60 * 24 * 30;
+
+// `expiresInMinutes` only makes sense alongside an actual status — rejecting
+// it otherwise avoids a confusing no-op (an expiry timer for a status that
+// isn't there).
+const requireStatusForExpiry = (body: {
+  readonly statusText: string | null;
+  readonly statusEmoji: string | null;
+  readonly expiresInMinutes?: number | undefined;
+}): string | undefined =>
+  body.statusText === null &&
+  body.statusEmoji === null &&
+  body.expiresInMinutes !== undefined
+    ? "expiresInMinutes may only be set alongside a status"
+    : undefined;
+
+// Full-replace like `UpdateProfileBody` — setting both `statusText` and
+// `statusEmoji` to null clears the status entirely (and, per
+// `requireStatusForExpiry` above, must leave `expiresInMinutes` unset too).
+// Omitting `expiresInMinutes` while setting a status means it never
+// auto-expires.
+export const UpdateStatusBody = Schema.Struct({
+  statusText: Schema.NullOr(StatusText),
+  statusEmoji: Schema.NullOr(StatusEmoji),
+  expiresInMinutes: Schema.optional(
+    Schema.Number.pipe(
+      Schema.int(),
+      Schema.between(1, MAX_STATUS_EXPIRES_IN_MINUTES),
+    ),
+  ),
+})
+  .pipe(Schema.filter(requireStatusForExpiry))
+  .annotations({ identifier: "UpdateStatusBody" });
 
 export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
   message: Schema.String,
@@ -620,6 +681,12 @@ export const ChatParticipant = Schema.Struct({
   avatarUrl: Schema.NullOr(Schema.String),
   avatarVariants: Schema.NullOr(AvatarVariants),
   role: ChatRole,
+  // Same custom-status fields as `User` above (issue #218), so a chat's
+  // participant list (chat header, member list, chat-list preview) can render
+  // it without a separate per-user lookup.
+  statusText: Schema.NullOr(Schema.String),
+  statusEmoji: Schema.NullOr(Schema.String),
+  statusExpiresAt: Schema.NullOr(Schema.Number),
 }).annotations({ identifier: "ChatParticipant" });
 export type ChatParticipant = typeof ChatParticipant.Type;
 
@@ -979,6 +1046,18 @@ const UsersGroup = HttpApiGroup.make("users")
       .addSuccess(User)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Sets or clears the current user's custom status (issue #218) — a short
+    // message plus an optional emoji, with an optional auto-expiry.
+    // Full-replace like `updateProfile`: setting both `statusText` and
+    // `statusEmoji` to null clears the status entirely. Broadcasts a
+    // `status_changed` realtime event (see Realtime.ts) to every connected
+    // user, mirroring how presence updates propagate.
+    HttpApiEndpoint.put("updateStatus", "/users/me/status")
+      .setPayload(UpdateStatusBody)
+      .addSuccess(User)
       .middleware(Authentication),
   );
 

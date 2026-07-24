@@ -22,6 +22,7 @@ import {
 import { setRealtimeSocket } from "./postRooms";
 import { resetPresence, setUserOnline } from "./presence";
 import { mergeReactionCounts } from "./reactions";
+import { setUserStatus } from "./status";
 import { noteTyping } from "./typing";
 
 type RealtimeSocketEvent =
@@ -43,6 +44,13 @@ type RealtimeSocketEvent =
       userId: number;
       username: string;
       displayName: string | null;
+    }
+  | {
+      type: "status_changed";
+      userId: number;
+      statusText: string | null;
+      statusEmoji: string | null;
+      statusExpiresAt: number | null;
     };
 
 // A little more than the default Bun WebSocket idle timeout — sending
@@ -68,9 +76,12 @@ function realtimeSocketUrl(ticket: string): string {
 // `chat_updated` is scoped server-side to a chat's participants, so this
 // hook doesn't need to filter it. `post_changed` goes out to every connected
 // user — the feed has no notion of participants, anyone signed in sees it.
-// `presence`/`typing` don't touch React Query at all — they update the
-// standalone stores in lib/presence.ts and lib/typing.ts instead, since
-// there's no REST resource behind either to invalidate.
+// `presence`/`typing`/`status_changed` don't touch React Query at all — they
+// update the standalone stores in lib/presence.ts, lib/typing.ts, and
+// lib/status.ts instead, since there's no REST resource behind any of them to
+// invalidate (a status is instead already carried on whatever `User`/
+// `ChatParticipant` React Query has cached, and the store only overrides that
+// once something changes).
 //
 // Mounted once near the root (see `__root.tsx`'s `Nav`) so the nav's unread
 // badge, the `/chats` list, and the `/` feed all stay live even when the
@@ -267,6 +278,13 @@ export function useRealtimeSocket(enabled: boolean): void {
               parsed.username,
               parsed.displayName,
             );
+            break;
+          case "status_changed":
+            setUserStatus(parsed.userId, {
+              statusText: parsed.statusText,
+              statusEmoji: parsed.statusEmoji,
+              statusExpiresAt: parsed.statusExpiresAt,
+            });
             break;
         }
       };

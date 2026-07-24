@@ -164,6 +164,22 @@ export interface paths {
         patch: operations["users.updateUserRole"];
         trace?: never;
     };
+    "/users/me/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["users.updateStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/posts/{id}": {
         parameters: {
             query?: never;
@@ -623,6 +639,9 @@ export interface components {
             avatarUrl: string | null;
             avatarVariants: components["schemas"]["AvatarVariants"] | null;
             role: components["schemas"]["UserRole"];
+            statusText: string | null;
+            statusEmoji: string | null;
+            statusExpiresAt: number | null;
         };
         AvatarVariants: {
             small: string;
@@ -784,6 +803,15 @@ export interface components {
             /** @enum {string} */
             _tag: "Forbidden";
         };
+        UpdateStatusBody: {
+            statusText: components["schemas"]["NonEmptyTrimmedString"] | null;
+            statusEmoji: components["schemas"]["NonEmptyTrimmedString"] | null;
+            /**
+             * between(1, 43200)
+             * @description a number between 1 and 43200
+             */
+            expiresInMinutes?: number;
+        };
         Post: {
             id: number;
             authorId: number;
@@ -907,6 +935,9 @@ export interface components {
             avatarUrl: string | null;
             avatarVariants: components["schemas"]["AvatarVariants"] | null;
             role: components["schemas"]["ChatRole"];
+            statusText: string | null;
+            statusEmoji: string | null;
+            statusExpiresAt: number | null;
         };
         /** @enum {string} */
         ChatRole: "owner" | "admin" | "member";
@@ -1160,6 +1191,9 @@ export interface operations {
                         avatarUrl: string | null;
                         avatarVariants: components["schemas"]["AvatarVariants"] | null;
                         role: components["schemas"]["UserRole"];
+                        statusText: string | null;
+                        statusEmoji: string | null;
+                        statusExpiresAt: number | null;
                     };
                 };
             };
@@ -1597,6 +1631,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotFound"];
+                };
+            };
+        };
+    };
+    "users.updateStatus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateStatusBody"];
+            };
+        };
+        responses: {
+            /** @description User */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
                 };
             };
         };

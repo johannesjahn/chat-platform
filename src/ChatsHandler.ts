@@ -44,7 +44,7 @@ import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { messageReactionInfo, messageReactionInfoOne } from "./reactions.ts";
 import { RealtimeConnections } from "./Realtime.ts";
-import { toAvatarVariants } from "./UsersHandler.ts";
+import { effectiveStatus, toAvatarVariants } from "./UsersHandler.ts";
 import {
   chatInvites,
   chatParticipants,
@@ -105,6 +105,9 @@ const getParticipants = (
         avatarMedium: users.avatarMedium,
         avatarLarge: users.avatarLarge,
         role: chatParticipants.role,
+        statusText: users.statusText,
+        statusEmoji: users.statusEmoji,
+        statusExpiresAt: users.statusExpiresAt,
       })
       .from(chatParticipants)
       .innerJoin(users, eq(users.id, chatParticipants.userId))
@@ -112,14 +115,25 @@ const getParticipants = (
   ).pipe(
     Effect.orDie,
     Effect.map((rows) =>
-      rows.map(({ avatarSmall, avatarMedium, avatarLarge, ...rest }) => ({
-        ...rest,
-        avatarVariants: toAvatarVariants({
+      rows.map(
+        ({
           avatarSmall,
           avatarMedium,
           avatarLarge,
+          statusText,
+          statusEmoji,
+          statusExpiresAt,
+          ...rest
+        }) => ({
+          ...rest,
+          avatarVariants: toAvatarVariants({
+            avatarSmall,
+            avatarMedium,
+            avatarLarge,
+          }),
+          ...effectiveStatus({ statusText, statusEmoji, statusExpiresAt }),
         }),
-      })),
+      ),
     ),
   );
 
@@ -286,6 +300,9 @@ const getParticipantsForChats = (
             avatarMedium: users.avatarMedium,
             avatarLarge: users.avatarLarge,
             role: chatParticipants.role,
+            statusText: users.statusText,
+            statusEmoji: users.statusEmoji,
+            statusExpiresAt: users.statusExpiresAt,
           })
           .from(chatParticipants)
           .innerJoin(users, eq(users.id, chatParticipants.userId))
@@ -299,6 +316,9 @@ const getParticipantsForChats = (
             avatarSmall,
             avatarMedium,
             avatarLarge,
+            statusText,
+            statusEmoji,
+            statusExpiresAt,
             ...participant
           } of rows) {
             const list = byChat.get(chatId) ?? [];
@@ -309,6 +329,7 @@ const getParticipantsForChats = (
                 avatarMedium,
                 avatarLarge,
               }),
+              ...effectiveStatus({ statusText, statusEmoji, statusExpiresAt }),
             });
             byChat.set(chatId, list);
           }

@@ -42,6 +42,14 @@ export const users = pgTable(
     // to hit its own TTL — embedded in issued tokens and compared against this
     // column on every verification (src/Jwt.ts, src/UsersHandler.ts).
     tokenVersion: integer("token_version").notNull().default(0),
+    // Custom status (issue #218) — a short message plus an optional emoji,
+    // e.g. "In a meeting" 📅, with an optional auto-expiry. All three are
+    // null when unset. A status past `statusExpiresAt` is treated as unset
+    // everywhere a user is read (see `effectiveStatus` in UsersHandler.ts)
+    // rather than needing a background job to null the columns out.
+    statusText: text("status_text"),
+    statusEmoji: text("status_emoji"),
+    statusExpiresAt: timestamp("status_expires_at", { mode: "date" }),
   },
   (table) => [
     // Case-insensitive uniqueness: `Alice` and `alice` must not both be
