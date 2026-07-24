@@ -100,20 +100,13 @@ function CommentComposer({
   );
 }
 
-// The emoji reaction picker shared by posts and comments (issue #215,
-// widened from the original binary "like" of issue #67). Renders one pill per
-// emoji that has at least one reaction (highlighted if the current user is
-// one of them), plus a trigger that opens a small popover of the standard
-// emoji set for adding a new reaction. Kept generic over the caller's
-// `onToggle` (post vs comment mutations) so both look and behave identically.
-//
-// The popover is rendered through a portal into `document.body`, positioned
-// from the trigger button's own `getBoundingClientRect()`, rather than as a
-// normal absolutely-positioned child — both call sites (PostCard, and
-// CommentsSection itself) live inside a `Card` with `overflow-hidden` (for
-// its image/decorative clipping), which would otherwise clip the popover
-// invisible whenever the trigger sits near the bottom of the card.
-export function ReactionPicker({
+// The row of reaction pills — one per emoji that has at least one reaction
+// (highlighted if the current user is one of them). Renders nothing when
+// there are no active reactions, so a caller can render it unconditionally
+// without reserving empty layout space for it (the chat's MessageBubble
+// relies on this to keep the gap below a bubble only when a reaction is
+// actually present).
+export function ReactionList({
   reactions,
   pending,
   onToggle,
@@ -121,6 +114,58 @@ export function ReactionPicker({
   reactions: ReadonlyArray<ReactionSummary>;
   pending: boolean;
   onToggle: (emoji: string) => void;
+}) {
+  const active = reactions.filter((r) => r.count > 0);
+  if (active.length === 0) return null;
+  return (
+    <>
+      {active.map((reaction) => (
+        <Button
+          key={reaction.emoji}
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => onToggle(reaction.emoji)}
+          disabled={pending}
+          aria-pressed={reaction.reactedByMe}
+          aria-label={`${reaction.reactedByMe ? "Remove" : "Add"} ${reaction.emoji} reaction`}
+          className={cn(
+            "h-8 gap-1 rounded-full px-2 text-muted-foreground",
+            reaction.reactedByMe &&
+              "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
+          )}
+        >
+          <span>{reaction.emoji}</span>
+          <span className="tabular-nums">{reaction.count}</span>
+        </Button>
+      ))}
+    </>
+  );
+}
+
+// The "add a reaction" trigger and the popover of the standard emoji set it
+// opens. Split out from `ReactionPicker` so it can be placed on its own —
+// the chat's MessageBubble renders it beside the bubble, in the hover-only
+// action group next to edit/delete, rather than below the message.
+//
+// The popover is rendered through a portal into `document.body`, positioned
+// from the trigger button's own `getBoundingClientRect()`, rather than as a
+// normal absolutely-positioned child — several call sites (PostCard, and
+// CommentsSection itself) live inside a `Card` with `overflow-hidden` (for
+// its image/decorative clipping), which would otherwise clip the popover
+// invisible whenever the trigger sits near the bottom of the card.
+export function ReactionAddButton({
+  reactions,
+  pending,
+  onToggle,
+  className,
+  iconClassName,
+}: {
+  reactions: ReadonlyArray<ReactionSummary>;
+  pending: boolean;
+  onToggle: (emoji: string) => void;
+  className?: string;
+  iconClassName?: string;
 }) {
   const [pickerPos, setPickerPos] = useState<{
     top: number;
@@ -155,30 +200,8 @@ export function ReactionPicker({
     };
   }, [pickerPos]);
 
-  const active = reactions.filter((r) => r.count > 0);
-
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      {active.map((reaction) => (
-        <Button
-          key={reaction.emoji}
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => onToggle(reaction.emoji)}
-          disabled={pending}
-          aria-pressed={reaction.reactedByMe}
-          aria-label={`${reaction.reactedByMe ? "Remove" : "Add"} ${reaction.emoji} reaction`}
-          className={cn(
-            "h-8 gap-1 rounded-full px-2 text-muted-foreground",
-            reaction.reactedByMe &&
-              "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
-          )}
-        >
-          <span>{reaction.emoji}</span>
-          <span className="tabular-nums">{reaction.count}</span>
-        </Button>
-      ))}
+    <>
       <span ref={triggerRef} className="inline-flex">
         <Button
           type="button"
@@ -195,9 +218,9 @@ export function ReactionPicker({
           disabled={pending}
           aria-expanded={pickerPos !== null}
           aria-label="Add a reaction"
-          className="h-8 gap-1.5 px-2 text-muted-foreground"
+          className={cn("h-8 gap-1.5 px-2 text-muted-foreground", className)}
         >
-          <SmilePlus className="size-4" />
+          <SmilePlus className={cn("size-4", iconClassName)} />
         </Button>
       </span>
       {pickerPos &&
@@ -228,6 +251,37 @@ export function ReactionPicker({
           </div>,
           document.body,
         )}
+    </>
+  );
+}
+
+// The emoji reaction picker shared by posts and comments (issue #215,
+// widened from the original binary "like" of issue #67): the row of active
+// reaction pills followed by the "add a reaction" trigger. Kept generic over
+// the caller's `onToggle` (post vs comment mutations) so both look and behave
+// identically. The chat's MessageBubble composes `ReactionList` and
+// `ReactionAddButton` separately instead of using this combined layout.
+export function ReactionPicker({
+  reactions,
+  pending,
+  onToggle,
+}: {
+  reactions: ReadonlyArray<ReactionSummary>;
+  pending: boolean;
+  onToggle: (emoji: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <ReactionList
+        reactions={reactions}
+        pending={pending}
+        onToggle={onToggle}
+      />
+      <ReactionAddButton
+        reactions={reactions}
+        pending={pending}
+        onToggle={onToggle}
+      />
     </div>
   );
 }

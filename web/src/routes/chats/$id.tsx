@@ -36,7 +36,7 @@ import { useOnlineStatus } from "@/lib/online";
 import { useIsOnline } from "@/lib/presence";
 import { isStatusVisible, useUserStatus } from "@/lib/status";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
-import { userLabel } from "@/lib/users";
+import { userAvatarName, userLabel } from "@/lib/users";
 
 export const Route = createFileRoute("/chats/$id")({
   component: ChatViewPage,
@@ -456,6 +456,15 @@ function ChatView({ id }: { id: string }) {
                     senderLabel={
                       chat.type === "group" && sender
                         ? userLabel(sender)
+                        : undefined
+                    }
+                    senderAvatar={
+                      chat.type === "group" && sender && !isOwn
+                        ? {
+                            name: userAvatarName(sender),
+                            avatarUrl: sender.avatarUrl,
+                            avatarVariants: sender.avatarVariants,
+                          }
                         : undefined
                     }
                     style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}
