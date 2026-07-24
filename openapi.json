@@ -47,7 +47,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidUserSearchRequest"
+                    }
+                  ]
                 }
               }
             }
@@ -5105,6 +5112,25 @@
             "description": "an object to be decoded into a globally shared symbol"
           }
         ]
+      },
+      "InvalidUserSearchRequest": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "InvalidUserSearchRequest"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "Unauthorized": {
         "type": "object",

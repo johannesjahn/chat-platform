@@ -898,8 +898,12 @@ export const MessagesPage = Schema.Struct({
   latestCursor: Schema.NullOr(Schema.String),
 }).annotations({ identifier: "MessagesPage" });
 
-// Below this, a search isn't narrow enough to be worth running — keeps the
-// query cost and result size from growing with the user base (issue #48).
+// Below this, a search isn't narrow enough to be worth running for a regular
+// user — keeps the query cost and result size from growing with the user
+// base (issue #48). Admins are exempt: they need to be able to browse the
+// full directory, not just run narrow searches. The schema below can't see
+// the caller's role, so this floor is enforced in UsersHandler.ts instead,
+// only against non-admin callers.
 export const MIN_USER_SEARCH_QUERY_LENGTH = 3;
 
 // A query longer than the longest possible username can never usefully
@@ -907,13 +911,19 @@ export const MIN_USER_SEARCH_QUERY_LENGTH = 3;
 export const MAX_USER_SEARCH_QUERY_LENGTH = 64;
 
 // Left un-`identifier`-annotated for the same reason as `PostsPageQuery`
-// above (see CLAUDE.md) — it's inlined into query parameters.
+// above (see CLAUDE.md) — it's inlined into query parameters. No
+// `minLength` here (see `MIN_USER_SEARCH_QUERY_LENGTH` above) — an empty `q`
+// is how an admin lists everyone.
 export const UserSearchQuery = Schema.Struct({
-  q: Schema.Trim.pipe(
-    Schema.minLength(MIN_USER_SEARCH_QUERY_LENGTH),
-    Schema.maxLength(MAX_USER_SEARCH_QUERY_LENGTH),
-  ),
+  q: Schema.Trim.pipe(Schema.maxLength(MAX_USER_SEARCH_QUERY_LENGTH)),
 });
+
+// Raised by `searchUsers` when a non-admin caller's query is shorter than
+// `MIN_USER_SEARCH_QUERY_LENGTH` — admins never trigger this (see above).
+export class InvalidUserSearchRequest extends Schema.TaggedError<InvalidUserSearchRequest>()(
+  "InvalidUserSearchRequest",
+  { message: Schema.String },
+) {}
 
 // Mime types `POST /users/me/avatar` accepts (issue #269) — narrower than
 // `ALLOWED_ATTACHMENT_MIME_TYPES`: no GIF (animated avatars are explicitly
@@ -953,10 +963,12 @@ const UsersGroup = HttpApiGroup.make("users")
     // Replaces the old unpaginated "list every user" endpoint (issue #48):
     // the full directory isn't exposed to every authenticated user anymore,
     // only search results for a query of at least
-    // `MIN_USER_SEARCH_QUERY_LENGTH` characters.
+    // `MIN_USER_SEARCH_QUERY_LENGTH` characters — except for admins, who can
+    // pass a shorter (including empty) `q` to browse the full directory.
     HttpApiEndpoint.get("searchUsers", "/users/search")
       .setUrlParams(UserSearchQuery)
       .addSuccess(Schema.Array(User))
+      .addError(InvalidUserSearchRequest, { status: 400 })
       .middleware(Authentication),
   )
   .add(

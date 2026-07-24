@@ -9,7 +9,9 @@ import {
   Forbidden,
   InvalidAvatarUpload,
   InvalidCredentials,
+  InvalidUserSearchRequest,
   MAX_AVATAR_UPLOAD_SIZE_BYTES,
+  MIN_USER_SEARCH_QUERY_LENGTH,
   NotFound,
   TooManyRequests,
   UsernameTaken,
@@ -279,6 +281,20 @@ export const UsersHandlerLive = HttpApiBuilder.group(
     handlers
       .handle("searchUsers", ({ urlParams: { q } }) =>
         Effect.gen(function* () {
+          const currentUser = yield* CurrentUser;
+          // Only admins may browse the full directory — a query shorter
+          // than the minimum keeps ILIKE's cost/result-size bounded (issue
+          // #48) for anyone else.
+          if (
+            currentUser.role !== "admin" &&
+            q.length < MIN_USER_SEARCH_QUERY_LENGTH
+          )
+            return yield* Effect.fail(
+              new InvalidUserSearchRequest({
+                message: `q must be at least ${MIN_USER_SEARCH_QUERY_LENGTH} characters`,
+              }),
+            );
+
           const db = yield* Db;
           const pattern = `%${escapeLikePattern(q)}%`;
           const rows = yield* Effect.tryPromise(() =>

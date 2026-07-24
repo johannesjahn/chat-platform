@@ -722,6 +722,11 @@ export interface components {
             _tag: "symbol";
             key: string;
         };
+        InvalidUserSearchRequest: {
+            message: string;
+            /** @enum {string} */
+            _tag: "InvalidUserSearchRequest";
+        };
         Unauthorized: {
             message: string;
             /** @enum {string} */
@@ -1193,7 +1198,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidUserSearchRequest"];
                 };
             };
             /** @description Unauthorized */

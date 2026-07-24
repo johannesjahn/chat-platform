@@ -26,13 +26,16 @@ export const Route = createFileRoute("/users/")({
 
 function UsersPage() {
   const session = useSession();
+  const isAdmin = session?.user.role === "admin";
   const [search, setSearch] = useState("");
   const query = useDebouncedValue(search.trim(), 300);
-  const searchReady = query.length >= MIN_USER_SEARCH_QUERY_LENGTH;
+  // Admins can browse the full directory with a short (including empty)
+  // query; everyone else still needs a narrow-enough search (see issue #48:
+  // the full directory isn't exposed unpaginated to regular users).
+  const searchReady = isAdmin || query.length >= MIN_USER_SEARCH_QUERY_LENGTH;
 
   // The search endpoint is protected — only query it while logged in and
-  // once the query is long enough (see issue #48: the full directory isn't
-  // exposed unpaginated anymore, only narrow searches).
+  // once the query is ready.
   const {
     data: users,
     isLoading,
@@ -69,7 +72,11 @@ function UsersPage() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search users…"
+            placeholder={
+              isAdmin
+                ? "Search users… (or leave blank for everyone)"
+                : "Search users…"
+            }
             className="pl-8"
             autoFocus
           />
@@ -111,7 +118,9 @@ function UsersPage() {
           <CardHeader>
             <CardTitle>Matching users</CardTitle>
             <CardDescription>
-              People whose username matches “{query}”.
+              {query
+                ? `People whose username matches "${query}".`
+                : "Everyone on the platform."}
             </CardDescription>
           </CardHeader>
           <CardContent>
