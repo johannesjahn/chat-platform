@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, lt, notInArray } from "drizzle-orm";
 import { Effect, Metric, MetricLabel } from "effect";
 import {
   type Attachment,
@@ -16,6 +16,7 @@ import {
 } from "./attachments.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
+import { blockedOrMutedUserIds } from "./blocks.ts";
 import { Db } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { postReactionInfo, type ReactionSummary } from "./reactions.ts";
@@ -109,6 +110,15 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               );
           }
 
+          // Posts by users the viewer has blocked or muted are hidden from
+          // the feed (issue #219) — both actions hide posts, so this doesn't
+          // distinguish them. Kept as a `NOT IN` filter alongside the keyset
+          // cursor rather than post-filtering the page, so a page never comes
+          // back short after excluding a blocked author's posts.
+          const hiddenAuthorIds = yield* Effect.tryPromise(() =>
+            blockedOrMutedUserIds(db, currentUser.id),
+          ).pipe(Effect.orDie);
+
           // Fetch one row past `limit` instead of firing a separate
           // `COUNT(*)` — whether that extra row came back is all
           // `nextCursor` needs, and unlike a full-table count this stays
@@ -117,7 +127,14 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             db
               .select()
               .from(posts)
-              .where(after !== null ? lt(posts.id, after) : undefined)
+              .where(
+                and(
+                  after !== null ? lt(posts.id, after) : undefined,
+                  hiddenAuthorIds.length > 0
+                    ? notInArray(posts.authorId, hiddenAuthorIds)
+                    : undefined,
+                ),
+              )
               .orderBy(desc(posts.id))
               .limit(limit + 1),
           ).pipe(Effect.orDie);

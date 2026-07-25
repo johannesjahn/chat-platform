@@ -274,6 +274,38 @@ export const UpdateStatusBody = Schema.Struct({
   .pipe(Schema.filter(requireStatusForExpiry))
   .annotations({ identifier: "UpdateStatusBody" });
 
+// Privacy-control relationship kind (issue #219): "block" is the stronger
+// action (hides posts, mutes notifications, *and* blocks direct messaging
+// both ways), "mute" the softer one (hides posts + mutes notifications only).
+// See the comment on `userBlocks` in db/schema.ts.
+export const BlockType = Schema.Literal("block", "mute").annotations({
+  identifier: "BlockType",
+});
+export type BlockType = typeof BlockType.Type;
+
+// Body of `PUT /users/:id/block` — sets (or upgrades/downgrades) the caller's
+// relationship to the target user. Re-issuing with a different `type` replaces
+// the existing relationship rather than creating a second one.
+export const BlockUserBody = Schema.Struct({
+  type: BlockType,
+}).annotations({ identifier: "BlockUserBody" });
+
+// One entry in `GET /users/me/blocks` — the blocked/muted user together with
+// which action is in effect and when it was set (epoch ms), newest first.
+export const BlockedUser = Schema.Struct({
+  user: User,
+  type: BlockType,
+  createdAt: Schema.Number,
+}).annotations({ identifier: "BlockedUser" });
+export type BlockedUser = typeof BlockedUser.Type;
+
+// Raised for block/mute domain-rule violations that aren't a 404 — currently
+// only an attempt to block or mute yourself.
+export class InvalidBlockRequest extends Schema.TaggedError<InvalidBlockRequest>()(
+  "InvalidBlockRequest",
+  { message: Schema.String },
+) {}
+
 export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
   message: Schema.String,
 }) {}
@@ -1146,6 +1178,37 @@ const UsersGroup = HttpApiGroup.make("users")
     HttpApiEndpoint.put("updateStatus", "/users/me/status")
       .setPayload(UpdateStatusBody)
       .addSuccess(User)
+      .middleware(Authentication),
+  )
+  .add(
+    // Lists everyone the current user has blocked or muted (issue #219),
+    // newest first — the data backing the "Blocked & muted users" settings
+    // card. Each entry carries the target user, which action is in effect,
+    // and when it was set.
+    HttpApiEndpoint.get("listBlocks", "/users/me/blocks")
+      .addSuccess(Schema.Array(BlockedUser))
+      .middleware(Authentication),
+  )
+  .add(
+    // Blocks or mutes another user (issue #219). Idempotent per (caller,
+    // target): re-issuing with a different `type` upgrades/downgrades the
+    // existing relationship rather than stacking a second one. Returns the
+    // resulting relationship. You can't block/mute yourself (400).
+    HttpApiEndpoint.put("setBlock", "/users/:id/block")
+      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
+      .setPayload(BlockUserBody)
+      .addSuccess(BlockedUser)
+      .addError(NotFound, { status: 404 })
+      .addError(InvalidBlockRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Removes any block/mute the current user has on the target — the
+    // unblock/unmute action. Idempotent: succeeds even if no relationship
+    // exists (nothing to remove).
+    HttpApiEndpoint.del("removeBlock", "/users/:id/block")
+      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
+      .addSuccess(Schema.Void)
       .middleware(Authentication),
   );
 

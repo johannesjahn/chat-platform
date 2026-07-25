@@ -3,6 +3,7 @@ import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { BlockUserControls } from "@/components/BlockUserControls";
 import { DeleteUserButton } from "@/components/DeleteUserButton";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ function UserProfilePage() {
   const updateUserRole = $api.useMutation("patch", "/users/{id}/role");
   const [roleError, setRoleError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [blockError, setBlockError] = useState<string | null>(null);
   const status = useUserStatus(user?.id, user);
 
   if (!session) {
@@ -109,6 +111,19 @@ function UserProfilePage() {
               </span>
             </div>
           </CardHeader>
+          {!isSelf && (
+            <CardContent className="flex flex-col gap-2 border-t border-border pt-4">
+              {blockError && (
+                <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {blockError}
+                </p>
+              )}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-muted-foreground">Privacy</span>
+                <BlockUserControls userId={user.id} onError={setBlockError} />
+              </div>
+            </CardContent>
+          )}
           {canManageRole && (
             <CardContent className="flex flex-col gap-2 border-t border-border pt-4">
               {roleError && (
