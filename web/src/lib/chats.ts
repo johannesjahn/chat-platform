@@ -36,6 +36,14 @@ export const chatDetailQueryKey = (chatId: number) =>
   ["chats", chatId, "detail"] as const;
 export const chatMessagesQueryKey = (chatId: number) =>
   ["chats", chatId, "messages"] as const;
+// The chat-wide pinned list and the current user's private starred list
+// (issue #223) are their own queries, kept separate from the paginated
+// message window: a message can be pinned/starred while sitting outside the
+// currently-loaded window, so the panels can't just be derived from it.
+export const chatPinnedQueryKey = (chatId: number) =>
+  ["chats", chatId, "pinned"] as const;
+export const chatStarredQueryKey = (chatId: number) =>
+  ["chats", chatId, "starred"] as const;
 
 // Chat list is shared between the nav's unread badge and the `/chats` page —
 // same query key, so React Query dedupes the underlying request and both
@@ -111,6 +119,51 @@ export function useChatDetail(chatId: number | undefined, enabled: boolean) {
       });
       if (error) throw error;
       recordChatVersion(data.id, data.version);
+      return data;
+    },
+  });
+}
+
+// The chat's pinned messages (issue #223), newest pin first — visible to
+// every participant. Kept live by the `message_pin_changed` realtime event,
+// which invalidates this key (see realtimeSocket.ts).
+export function usePinnedMessages(
+  chatId: number | undefined,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey:
+      chatId != null ? chatPinnedQueryKey(chatId) : ["chats", "pinned", "none"],
+    enabled: enabled && chatId != null,
+    queryFn: async () => {
+      const { data, error } = await fetchClient.GET("/chats/{id}/pins", {
+        params: { path: { id: String(chatId) } },
+      });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// The current user's own starred messages in this chat (issue #223), newest
+// star first — private to them. No realtime event backs starring (it's never
+// visible to anyone else), so this is refreshed by the star/unstar mutations
+// invalidating its key.
+export function useStarredMessages(
+  chatId: number | undefined,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey:
+      chatId != null
+        ? chatStarredQueryKey(chatId)
+        : ["chats", "starred", "none"],
+    enabled: enabled && chatId != null,
+    queryFn: async () => {
+      const { data, error } = await fetchClient.GET("/chats/{id}/stars", {
+        params: { path: { id: String(chatId) } },
+      });
+      if (error) throw error;
       return data;
     },
   });

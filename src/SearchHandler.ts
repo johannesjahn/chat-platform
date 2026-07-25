@@ -123,6 +123,12 @@ const toApiMessage = (
   updatedAt: row.updatedAt.getTime(),
   readByUserIds: [...readByUserIds],
   reactions: [...reactions],
+  // Pinned/starred (issue #223) aren't part of a search hit — the results
+  // list renders a standalone snippet, not the in-thread bubble with its
+  // badges — so they're always false here rather than resolved per hit,
+  // same reasoning as `attachment`/`parentMessage` above.
+  pinned: false,
+  starred: false,
 });
 
 // Batches the `MessageSearchChat` context for every chat referenced by a page

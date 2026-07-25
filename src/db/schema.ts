@@ -394,6 +394,79 @@ export const messageReads = pgTable(
 export type DbMessageRead = typeof messageReads.$inferSelect;
 export type NewDbMessageRead = typeof messageReads.$inferInsert;
 
+// Chat-wide pinned messages (issue #223) — one row per pinned message,
+// visible to every participant of the chat. A message can be pinned at most
+// once (the unique index on `messageId`), so pinning is idempotent and
+// unpinning simply deletes the row. `chatId` is carried alongside `messageId`
+// (which alone would already identify the chat) purely so the "which messages
+// are pinned in this chat" list is a single indexed lookup rather than a join
+// back through `messages`. `pinnedBy` is `set null` (not cascade), mirroring
+// `chats.createdBy`: if the pinner's account is deleted the pin — a
+// chat-wide, shared artifact — should survive, it just loses attribution.
+export const pinnedMessages = pgTable(
+  "pinned_messages",
+  {
+    id: serial("id").primaryKey(),
+    chatId: integer("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    messageId: integer("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    pinnedBy: integer("pinned_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    // A message is pinned at most once — this also backs the cascade delete
+    // from `messages` (Postgres doesn't auto-index FK columns) and the
+    // "is this message pinned" batch lookup in pinsStars.ts.
+    uniqueIndex("pinned_messages_message_id_idx").on(table.messageId),
+    // `listPinnedMessages` filters + orders by (chatId, id desc); also serves
+    // the cascade delete from `chats`.
+    index("pinned_messages_chat_id_idx").on(table.chatId, table.id),
+  ],
+);
+
+export type DbPinnedMessage = typeof pinnedMessages.$inferSelect;
+export type NewDbPinnedMessage = typeof pinnedMessages.$inferInsert;
+
+// User-private starred messages (issue #223) — one row per (user, message),
+// a personal bookmark visible only to the user who created it. Unlike a pin,
+// starring is never broadcast and never appears to other participants. A user
+// may star a given message at most once (the unique constraint below, backed
+// by a composite (userId, messageId) btree whose leading `userId` also serves
+// the "list my starred messages in this chat" and "which of these did I star"
+// lookups in pinsStars.ts). Both FKs cascade — a deleted message or account
+// takes its stars with it.
+export const starredMessages = pgTable(
+  "starred_messages",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    messageId: integer("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    unique().on(table.userId, table.messageId),
+    // Serves the cascade delete from `messages` — the composite unique index
+    // above is `userId`-first, so it can't answer a `messageId`-only lookup.
+    index("starred_messages_message_id_idx").on(table.messageId),
+  ],
+);
+
+export type DbStarredMessage = typeof starredMessages.$inferSelect;
+export type NewDbStarredMessage = typeof starredMessages.$inferInsert;
+
 // One row per (user, target, emoji) reaction. The target is polymorphic:
 // exactly one of `postId`/`commentId`/`messageId` is set (enforced by the
 // check constraint), so a single table covers reactions on posts, comments,

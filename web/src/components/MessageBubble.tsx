@@ -8,7 +8,10 @@ import {
   ChevronUp,
   Loader2,
   Pencil,
+  Pin,
+  PinOff,
   Reply,
+  Star,
   Trash2,
   X,
 } from "lucide-react";
@@ -20,6 +23,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { $api } from "@/lib/api";
 import { attachmentKind } from "@/lib/attachments";
 import {
+  chatPinnedQueryKey,
+  chatStarredQueryKey,
   MAX_MESSAGE_CONTENT_LENGTH,
   MESSAGE_COLLAPSE_THRESHOLD,
   patchCachedMessage,
@@ -123,6 +128,89 @@ export function MessageBubble({
     }
   };
 
+  const pinMessage = $api.useMutation("post", "/chats/{id}/pins");
+  const unpinMessage = $api.useMutation(
+    "delete",
+    "/chats/{id}/pins/{messageId}",
+  );
+  const starMessage = $api.useMutation(
+    "post",
+    "/chats/{id}/messages/{messageId}/star",
+  );
+  const unstarMessage = $api.useMutation(
+    "delete",
+    "/chats/{id}/messages/{messageId}/star",
+  );
+  const pinPending = pinMessage.isPending || unpinMessage.isPending;
+  const starPending = starMessage.isPending || unstarMessage.isPending;
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Pinning is chat-wide: patch the flag straight from the mutation response
+  // (the `message_pin_changed` WS event reconciles every other participant),
+  // and invalidate the pinned panel so the message enters/leaves it. Unpin
+  // takes the id in the path; pin takes it in the body — see src/Api.ts.
+  const togglePin = async () => {
+    setActionError(null);
+    try {
+      const result = message.pinned
+        ? await unpinMessage.mutateAsync({
+            params: {
+              path: {
+                id: String(message.chatId),
+                messageId: String(message.id),
+              },
+            },
+          })
+        : await pinMessage.mutateAsync({
+            params: { path: { id: String(message.chatId) } },
+            body: { messageId: message.id },
+          });
+      patchCachedMessage(queryClient, message.chatId, message.id, (m) => ({
+        ...m,
+        pinned: result.pinned,
+      }));
+      void queryClient.invalidateQueries({
+        queryKey: chatPinnedQueryKey(message.chatId),
+      });
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  };
+
+  // Starring is private — no realtime event, so only this client's cache
+  // updates (from the mutation response), plus its own starred panel.
+  const toggleStar = async () => {
+    setActionError(null);
+    try {
+      const result = message.starred
+        ? await unstarMessage.mutateAsync({
+            params: {
+              path: {
+                id: String(message.chatId),
+                messageId: String(message.id),
+              },
+            },
+          })
+        : await starMessage.mutateAsync({
+            params: {
+              path: {
+                id: String(message.chatId),
+                messageId: String(message.id),
+              },
+            },
+          });
+      patchCachedMessage(queryClient, message.chatId, message.id, (m) => ({
+        ...m,
+        starred: result.starred,
+      }));
+      void queryClient.invalidateQueries({
+        queryKey: chatStarredQueryKey(message.chatId),
+      });
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  };
+
   const hasReactions = message.reactions.some((r) => r.count > 0);
   const wasEdited = message.updatedAt !== message.createdAt;
   const isLongText =
@@ -175,6 +263,42 @@ export function MessageBubble({
     }
   }
 
+  // Pin (chat-wide) and star (private) toggles — shown in both the own-message
+  // and incoming-message hover action groups, so the JSX is shared here rather
+  // than duplicated on each side.
+  const pinStarButtons = (
+    <>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        aria-label={message.pinned ? "Unpin message" : "Pin message"}
+        aria-pressed={message.pinned}
+        disabled={pinPending}
+        onClick={() => void togglePin()}
+        className={cn("size-6", message.pinned && "text-primary")}
+      >
+        {message.pinned ? (
+          <PinOff className="size-3.5" />
+        ) : (
+          <Pin className="size-3.5" />
+        )}
+      </Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        aria-label={message.starred ? "Unstar message" : "Star message"}
+        aria-pressed={message.starred}
+        disabled={starPending}
+        onClick={() => void toggleStar()}
+        className={cn("size-6", message.starred && "text-amber-500")}
+      >
+        <Star className={cn("size-3.5", message.starred && "fill-current")} />
+      </Button>
+    </>
+  );
+
   return (
     <div
       data-message-id={message.id}
@@ -211,6 +335,7 @@ export function MessageBubble({
             className="size-6 px-0"
             iconClassName="size-3.5"
           />
+          {pinStarButtons}
           {onReply && (
             <Button
               type="button"
@@ -428,6 +553,20 @@ export function MessageBubble({
               isOwn ? "text-primary-foreground/70" : "text-muted-foreground",
             )}
           >
+            {/* Chat-wide pin badge (everyone sees it) and the viewer's own
+                private star badge (issue #223). */}
+            {message.pinned && (
+              <Pin
+                className="size-3 shrink-0 fill-current"
+                aria-label="Pinned"
+              />
+            )}
+            {message.starred && (
+              <Star
+                className="size-3 shrink-0 fill-current text-amber-500"
+                aria-label="Starred"
+              />
+            )}
             <span>
               {new Date(message.createdAt).toLocaleTimeString([], {
                 hour: "numeric",
@@ -463,6 +602,11 @@ export function MessageBubble({
             {reactionError}
           </p>
         )}
+        {actionError && (
+          <p className="max-w-[240px] text-xs text-destructive">
+            {actionError}
+          </p>
+        )}
       </div>
 
       {!isOwn && !isEditing && (
@@ -474,6 +618,7 @@ export function MessageBubble({
             className="size-6 px-0"
             iconClassName="size-3.5"
           />
+          {pinStarButtons}
           {onReply && (
             <Button
               type="button"

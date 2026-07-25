@@ -8,6 +8,7 @@ import { GroupManagementDialog } from "@/components/GroupManagementDialog";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { MessageBubble } from "@/components/MessageBubble";
 import { PendingMessageBubble } from "@/components/PendingMessageBubble";
+import { PinnedMessagesBar } from "@/components/PinnedMessagesBar";
 import { PresenceDot } from "@/components/PresenceDot";
 import { TypingDots } from "@/components/reactbits/TypingDots";
 import { UserStatusBadge } from "@/components/UserStatusBadge";
@@ -174,6 +175,22 @@ function ChatView({ id }: { id: string }) {
     prevScrollHeightRef.current = el.scrollHeight;
     setLoadingEarlier(true);
     void loadEarlier().finally(() => setLoadingEarlier(false));
+  }
+
+  // Scroll the thread to a pinned message when its row in the pinned bar is
+  // clicked, and briefly highlight it. Only works while the message is within
+  // the loaded window — a pin can point at a message far up the history that
+  // hasn't been paged in — so a miss is a no-op rather than an error.
+  function jumpToMessage(messageId: number) {
+    const el = scrollRef.current?.querySelector<HTMLElement>(
+      `[data-message-id="${messageId}"]`,
+    );
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("bg-primary/10", "rounded-2xl");
+    window.setTimeout(() => {
+      el.classList.remove("bg-primary/10", "rounded-2xl");
+    }, 1500);
   }
 
   // Mark everything up to the newest loaded message as read once we know
@@ -419,6 +436,12 @@ function ChatView({ id }: { id: string }) {
             </Button>
           )}
         </CardHeader>
+        <PinnedMessagesBar
+          chatId={chatId}
+          participants={chat.participants}
+          enabled={!!session}
+          onJump={jumpToMessage}
+        />
         <CardContent className="px-0">
           <div
             ref={scrollRef}
