@@ -10,6 +10,7 @@ import {
 import {
   chatDetailQueryKey,
   chatMessagesQueryKey,
+  chatPinnedQueryKey,
   chatsListQueryKey,
   patchCachedMessage,
 } from "./chats";
@@ -36,6 +37,12 @@ type RealtimeSocketEvent =
       targetId: number;
       chatId?: number;
       reactions: ReadonlyArray<{ emoji: string; count: number }>;
+    }
+  | {
+      type: "message_pin_changed";
+      chatId: number;
+      messageId: number;
+      pinned: boolean;
     }
   | { type: "presence"; userId: number; online: boolean }
   | {
@@ -267,6 +274,25 @@ export function useRealtimeSocket(enabled: boolean): void {
                 queryKey: commentsQueryKeyRoot,
               });
             }
+            break;
+          case "message_pin_changed":
+            // Scoped to the chat's participants and carries the new `pinned`
+            // state (see MessagePinEvent in src/Realtime.ts), so — like a
+            // message reaction — patch the affected message's flag in place
+            // rather than refetching the whole window. The pinned *panel* is
+            // a separate query keyed by chat, so invalidate it too so the
+            // just-(un)pinned message enters/leaves the list. Starring emits
+            // no event: it's user-private, reconciled from the actor's own
+            // mutation response.
+            patchCachedMessage(
+              queryClient,
+              parsed.chatId,
+              parsed.messageId,
+              (message) => ({ ...message, pinned: parsed.pinned }),
+            );
+            void queryClient.invalidateQueries({
+              queryKey: chatPinnedQueryKey(parsed.chatId),
+            });
             break;
           case "presence":
             setUserOnline(parsed.userId, parsed.online);

@@ -95,6 +95,22 @@ export type PresenceEvent = {
   readonly online: boolean;
 };
 
+// Pushed when a message is pinned or unpinned chat-wide (issue #223). Scoped
+// to the chat's participants (`notifyUsers`, like `chat_updated`/a message
+// `reaction_changed`) rather than broadcast, since a chat and its pins are
+// private to them. Carries the new `pinned` state so a viewer's badge and the
+// pinned panel update without every client refetching on every toggle —
+// clients patch the affected message's `pinned` flag in place and refresh the
+// pinned list. Starring emits no event at all: a star is user-private (see
+// pinsStars.ts), visible only to the user who created it, so there's nothing
+// to fan out.
+export type MessagePinEvent = {
+  readonly type: "message_pin_changed";
+  readonly chatId: number;
+  readonly messageId: number;
+  readonly pinned: boolean;
+};
+
 // Pushed to a chat's other participants while `userId` is composing a
 // message in it (see `POST /chats/:id/typing` in ChatsHandler.ts). Purely
 // transient — the server keeps no "is typing" state at all, so there's no
@@ -134,6 +150,7 @@ export type RealtimeEvent =
   | PostEvent
   | CommentEvent
   | ReactionEvent
+  | MessagePinEvent
   | PresenceEvent
   | TypingEvent
   | StatusEvent;

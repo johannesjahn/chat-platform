@@ -45,6 +45,12 @@ import { CurrentUser } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { messageReactionInfo, messageReactionInfoOne } from "./reactions.ts";
+import {
+  messagePinStarInfo,
+  messagePinStarInfoOne,
+  pinnedMessageIds,
+  starredMessageIdsInChat,
+} from "./pinsStars.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { effectiveStatus, toAvatarVariants } from "./UsersHandler.ts";
 import {
@@ -54,6 +60,8 @@ import {
   likes,
   messageReads,
   messages,
+  pinnedMessages,
+  starredMessages,
   users,
   type DbChat,
   type DbChatInvite,
@@ -80,6 +88,11 @@ const toApiMessage = (
   attachment: Attachment | null = null,
   reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
   parentMessage: ParentMessagePreview | null = null,
+  // Pinned/starred flags (issue #223), computed on read (see pinsStars.ts).
+  // Default false so the many call sites that build a freshly-created message
+  // — which is never pinned or starred yet — needn't pass them.
+  pinned = false,
+  starred = false,
 ): Message => ({
   id: row.id,
   chatId: row.chatId,
@@ -92,6 +105,8 @@ const toApiMessage = (
   updatedAt: row.updatedAt.getTime(),
   readByUserIds: [...readByUserIds],
   reactions: [...reactions],
+  pinned,
+  starred,
 });
 
 // Resolves the lightweight `parentMessage` preview (issue #217) for a batch of
@@ -274,6 +289,127 @@ const notifyChatUpdated = (
     version,
   });
 
+// Hydrates a single already-fetched message row into a full `Message`
+// response for `userId` — its read receipts, attachment, reactions, quoted
+// parent preview, and pinned/starred flags. The per-message counterpart to the
+// batched builders in `listMessages`/`getLastMessagesForChats`; used by the
+// pin/star/edit endpoints, which each mutate exactly one message and return
+// its refreshed state. `pinnedOverride`/`starredOverride` let the pin/star
+// handlers skip the extra lookup and assert the state they just wrote, rather
+// than re-reading a row they know the value of.
+const buildMessageResponse = (
+  db: DrizzleDb,
+  row: DbMessage,
+  userId: number,
+  pinnedOverride?: boolean,
+  starredOverride?: boolean,
+): Effect.Effect<Message, never, AttachmentStorage> =>
+  Effect.gen(function* () {
+    const readers = yield* getReaders(db, row.id);
+    const attachment = yield* resolveAttachment(db, row.attachmentId);
+    const reactions = yield* Effect.tryPromise(() =>
+      messageReactionInfoOne(db, row.id, userId),
+    ).pipe(Effect.orDie);
+    const parentMessage = yield* resolveParentPreview(db, row.parentMessageId);
+    const pinStar =
+      pinnedOverride !== undefined && starredOverride !== undefined
+        ? { pinned: pinnedOverride, starred: starredOverride }
+        : yield* Effect.tryPromise(() =>
+            messagePinStarInfoOne(db, row.id, userId),
+          ).pipe(Effect.orDie);
+    return toApiMessage(
+      row,
+      readers,
+      attachment,
+      reactions,
+      parentMessage,
+      pinnedOverride ?? pinStar.pinned,
+      starredOverride ?? pinStar.starred,
+    );
+  });
+
+// Batched hydration of a set of already-fetched message rows into full
+// `Message` responses for `userId`, preserving the input row order — the same
+// read-receipt/attachment/reaction/parent/pin-star fan-out `listMessages`
+// does inline, factored out for the pinned/starred list endpoints (which
+// fetch rows in an explicit "newest-pinned/starred first" order and must keep
+// it). One query per facet across all ids, not per-message.
+const hydrateMessages = (
+  db: DrizzleDb,
+  rows: ReadonlyArray<DbMessage>,
+  userId: number,
+): Effect.Effect<Message[], never, AttachmentStorage> =>
+  Effect.gen(function* () {
+    if (rows.length === 0) return [];
+    const ids = rows.map((r) => r.id);
+    const readRows = yield* Effect.tryPromise(() =>
+      db
+        .select({
+          messageId: messageReads.messageId,
+          userId: messageReads.userId,
+        })
+        .from(messageReads)
+        .where(inArray(messageReads.messageId, ids)),
+    ).pipe(Effect.orDie);
+    const readersByMessage = new Map<number, number[]>();
+    for (const r of readRows) {
+      const list = readersByMessage.get(r.messageId) ?? [];
+      list.push(r.userId);
+      readersByMessage.set(r.messageId, list);
+    }
+    const attachmentsByRow = yield* resolveAttachments(
+      db,
+      rows.map((r) => r.attachmentId),
+    );
+    const reactionsByMessage = yield* Effect.tryPromise(() =>
+      messageReactionInfo(db, ids, userId),
+    ).pipe(Effect.orDie);
+    const pinStarByMessage = yield* Effect.tryPromise(() =>
+      messagePinStarInfo(db, ids, userId),
+    ).pipe(Effect.orDie);
+    const parentPreviews = yield* resolveParentPreviews(
+      db,
+      rows.map((r) => r.parentMessageId),
+    );
+    return rows.map((row) => {
+      const pinStar = pinStarByMessage.get(row.id);
+      return toApiMessage(
+        row,
+        readersByMessage.get(row.id) ?? [],
+        row.attachmentId !== null
+          ? (attachmentsByRow.get(row.attachmentId) ?? null)
+          : null,
+        reactionsByMessage.get(row.id),
+        row.parentMessageId !== null
+          ? (parentPreviews.get(row.parentMessageId) ?? null)
+          : null,
+        pinStar?.pinned ?? false,
+        pinStar?.starred ?? false,
+      );
+    });
+  });
+
+// Fetches `messageIds`' rows and hydrates them into full `Message` responses,
+// preserving the given id order (the pinned/starred lists come pre-sorted
+// newest-first). A message id present in `messageIds` but since deleted simply
+// drops out of the result.
+const buildMessagesInOrder = (
+  db: DrizzleDb,
+  messageIds: ReadonlyArray<number>,
+  userId: number,
+): Effect.Effect<Message[], never, AttachmentStorage> =>
+  Effect.gen(function* () {
+    if (messageIds.length === 0) return [];
+    const rows = yield* Effect.tryPromise(() =>
+      db.select().from(messages).where(inArray(messages.id, messageIds)),
+    ).pipe(Effect.orDie);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const ordered = messageIds
+      .map((id) => byId.get(id))
+      .filter((r): r is DbMessage => r !== undefined);
+    return yield* hydrateMessages(db, ordered, userId);
+  });
+
 const getLastMessage = (
   db: DrizzleDb,
   chatId: number,
@@ -290,24 +426,7 @@ const getLastMessage = (
     ).pipe(Effect.orDie);
     const row = rows[0];
     if (!row) return null;
-    const readers = yield* Effect.tryPromise(() =>
-      db
-        .select({ userId: messageReads.userId })
-        .from(messageReads)
-        .where(eq(messageReads.messageId, row.id)),
-    ).pipe(Effect.orDie);
-    const attachment = yield* resolveAttachment(db, row.attachmentId);
-    const reactions = yield* Effect.tryPromise(() =>
-      messageReactionInfoOne(db, row.id, userId),
-    ).pipe(Effect.orDie);
-    const parentMessage = yield* resolveParentPreview(db, row.parentMessageId);
-    return toApiMessage(
-      row,
-      readers.map((r) => r.userId),
-      attachment,
-      reactions,
-      parentMessage,
-    );
+    return yield* buildMessageResponse(db, row, userId);
   });
 
 // Messages in this chat sent by someone other than `userId` that `userId`
@@ -450,11 +569,19 @@ const getLastMessagesForChats = (
         userId,
       ),
     ).pipe(Effect.orDie);
+    const pinStarByMessage = yield* Effect.tryPromise(() =>
+      messagePinStarInfo(
+        db,
+        rows.map((r) => r.id),
+        userId,
+      ),
+    ).pipe(Effect.orDie);
     const parentPreviews = yield* resolveParentPreviews(
       db,
       rows.map((r) => r.parentMessageId),
     );
     for (const row of rows) {
+      const pinStar = pinStarByMessage.get(row.id);
       byChat.set(
         row.chatId,
         toApiMessage(
@@ -467,6 +594,8 @@ const getLastMessagesForChats = (
           row.parentMessageId !== null
             ? (parentPreviews.get(row.parentMessageId) ?? null)
             : null,
+          pinStar?.pinned ?? false,
+          pinStar?.starred ?? false,
         ),
       );
     }
@@ -1611,14 +1740,18 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const reactionsByMessage = yield* Effect.tryPromise(() =>
             messageReactionInfo(db, messageIds, currentUser.id),
           ).pipe(Effect.orDie);
+          const pinStarByMessage = yield* Effect.tryPromise(() =>
+            messagePinStarInfo(db, messageIds, currentUser.id),
+          ).pipe(Effect.orDie);
           const parentPreviews = yield* resolveParentPreviews(
             db,
             rows.map((r) => r.parentMessageId),
           );
 
           return {
-            messages: rows.map((row) =>
-              toApiMessage(
+            messages: rows.map((row) => {
+              const pinStar = pinStarByMessage.get(row.id);
+              return toApiMessage(
                 row,
                 readersByMessage.get(row.id) ?? [],
                 row.attachmentId !== null
@@ -1628,8 +1761,10 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 row.parentMessageId !== null
                   ? (parentPreviews.get(row.parentMessageId) ?? null)
                   : null,
-              ),
-            ),
+                pinStar?.pinned ?? false,
+                pinStar?.starred ?? false,
+              );
+            }),
             limit,
             hasEarlier,
             hasNewer,
@@ -1882,6 +2017,9 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             db,
             row.parentMessageId,
           );
+          const pinStar = yield* Effect.tryPromise(() =>
+            messagePinStarInfoOne(db, messageId, currentUser.id),
+          ).pipe(Effect.orDie);
           const version = yield* bumpChatVersion(db, id);
           const participants = yield* getParticipants(db, id);
           yield* notifyChatUpdated(
@@ -1896,6 +2034,8 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             attachment,
             reactions,
             parentMessage,
+            pinStar.pinned,
+            pinStar.starred,
           );
         }),
       )
@@ -2023,6 +2163,158 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             );
           }
           return { reactions };
+        }),
+      )
+      .handle("listPinnedMessages", ({ path: { id } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+          const ids = yield* Effect.tryPromise(() =>
+            pinnedMessageIds(db, id),
+          ).pipe(Effect.orDie);
+          return yield* buildMessagesInOrder(db, ids, currentUser.id);
+        }),
+      )
+      .handle("pinMessage", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+          // Validates the message belongs to *this* chat (a message from
+          // another chat, or a nonexistent one, 404s here) and hands back the
+          // row reused to build the response below.
+          const row = yield* getMessageOr404(db, id, payload.messageId);
+          // Idempotent: the unique index on `messageId` turns re-pinning an
+          // already-pinned message into a no-op (no second row, no error),
+          // same convention as `addMessageReaction`.
+          const inserted = yield* Effect.tryPromise(() =>
+            db
+              .insert(pinnedMessages)
+              .values({
+                chatId: id,
+                messageId: payload.messageId,
+                pinnedBy: currentUser.id,
+              })
+              .onConflictDoNothing()
+              .returning(),
+          ).pipe(Effect.orDie);
+          if (inserted.length > 0) {
+            // Scoped to the chat's participants, not broadcast — a chat and
+            // its pins are private to them (see MessagePinEvent in
+            // Realtime.ts).
+            const participants = yield* getParticipants(db, id);
+            yield* connections.notifyUsers(
+              participants.map((p) => p.userId),
+              {
+                type: "message_pin_changed",
+                chatId: id,
+                messageId: payload.messageId,
+                pinned: true,
+              },
+            );
+          }
+          return yield* buildMessageResponse(db, row, currentUser.id, true);
+        }),
+      )
+      .handle("unpinMessage", ({ path: { id, messageId } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+          const row = yield* getMessageOr404(db, id, messageId);
+          const deleted = yield* Effect.tryPromise(() =>
+            db
+              .delete(pinnedMessages)
+              .where(
+                and(
+                  eq(pinnedMessages.chatId, id),
+                  eq(pinnedMessages.messageId, messageId),
+                ),
+              )
+              .returning(),
+          ).pipe(Effect.orDie);
+          if (deleted.length > 0) {
+            const participants = yield* getParticipants(db, id);
+            yield* connections.notifyUsers(
+              participants.map((p) => p.userId),
+              {
+                type: "message_pin_changed",
+                chatId: id,
+                messageId,
+                pinned: false,
+              },
+            );
+          }
+          return yield* buildMessageResponse(db, row, currentUser.id, false);
+        }),
+      )
+      .handle("listStarredMessages", ({ path: { id } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+          const ids = yield* Effect.tryPromise(() =>
+            starredMessageIdsInChat(db, id, currentUser.id),
+          ).pipe(Effect.orDie);
+          return yield* buildMessagesInOrder(db, ids, currentUser.id);
+        }),
+      )
+      .handle("starMessage", ({ path: { id, messageId } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+          const row = yield* getMessageOr404(db, id, messageId);
+          // Idempotent via the (userId, messageId) unique constraint. No
+          // realtime event: a star is private to `currentUser` (see
+          // pinsStars.ts), so there's nothing to broadcast.
+          yield* Effect.tryPromise(() =>
+            db
+              .insert(starredMessages)
+              .values({ userId: currentUser.id, messageId })
+              .onConflictDoNothing(),
+          ).pipe(Effect.orDie);
+          return yield* buildMessageResponse(
+            db,
+            row,
+            currentUser.id,
+            undefined,
+            true,
+          );
+        }),
+      )
+      .handle("unstarMessage", ({ path: { id, messageId } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+          const row = yield* getMessageOr404(db, id, messageId);
+          yield* Effect.tryPromise(() =>
+            db
+              .delete(starredMessages)
+              .where(
+                and(
+                  eq(starredMessages.userId, currentUser.id),
+                  eq(starredMessages.messageId, messageId),
+                ),
+              ),
+          ).pipe(Effect.orDie);
+          return yield* buildMessageResponse(
+            db,
+            row,
+            currentUser.id,
+            undefined,
+            false,
+          );
         }),
       )
       .handle("createChatInvite", ({ path: { id }, payload }) =>

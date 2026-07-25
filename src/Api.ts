@@ -765,6 +765,13 @@ export const Message = Schema.Struct({
   // reactions.ts) rather than stored, same convention as `Post.reactions`/
   // `Comment.reactions`: one entry per emoji with at least one reaction.
   reactions: Schema.Array(ReactionSummary),
+  // Pinned and starred flags (issue #223) — computed on read (see
+  // pinsStars.ts), not stored on the row. `pinned` is chat-wide: true when
+  // this message is currently pinned for every participant to see. `starred`
+  // is per-viewer: true when the requesting user has personally bookmarked it
+  // (never reflects anyone else's stars). Both default to false.
+  pinned: Schema.Boolean,
+  starred: Schema.Boolean,
 }).annotations({ identifier: "Message" });
 export type Message = typeof Message.Type;
 
@@ -893,6 +900,14 @@ export const UpdateMessageBody = Schema.Struct({
 export const MarkReadBody = Schema.Struct({
   messageId: Schema.Number,
 }).annotations({ identifier: "MarkReadBody" });
+
+// Which message to pin, for `POST /chats/:id/pins` (issue #223). Unpinning
+// takes the message id in the path (`DELETE /chats/:id/pins/:messageId`)
+// instead, so it needs no body. Validated server-side to reference a message
+// in this same chat (see ChatsHandler.ts).
+export const PinMessageBody = Schema.Struct({
+  messageId: Schema.Number,
+}).annotations({ identifier: "PinMessageBody" });
 
 export const DEFAULT_MESSAGES_LIMIT = 30;
 export const MAX_MESSAGES_LIMIT = 100;
@@ -1716,6 +1731,73 @@ const ChatsGroup = HttpApiGroup.make("chats")
       .setPath(MessageIdPath)
       .setPayload(ReactionBody)
       .addSuccess(ReactionState)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // The chat's currently-pinned messages (issue #223), newest pin first —
+    // any participant may read. Returns full `Message`s (each with `pinned`
+    // true), so the pinned panel renders exactly like the main thread.
+    HttpApiEndpoint.get("listPinnedMessages", "/chats/:id/pins")
+      .setPath(ChatIdPath)
+      .addSuccess(Schema.Array(Message))
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Pins a message chat-wide (issue #223) — idempotent (re-pinning an
+    // already-pinned message is a no-op returning the current state). Any
+    // participant may pin, mirroring reactions. Emits a `message_pin_changed`
+    // realtime event to every participant. Returns the affected message.
+    HttpApiEndpoint.post("pinMessage", "/chats/:id/pins")
+      .setPath(ChatIdPath)
+      .setPayload(PinMessageBody)
+      .addSuccess(Message)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Unpins a message (issue #223) — idempotent, and open to any participant
+    // like pinning. Emits a `message_pin_changed` event. Returns the affected
+    // message (now with `pinned` false).
+    HttpApiEndpoint.del("unpinMessage", "/chats/:id/pins/:messageId")
+      .setPath(MessageIdPath)
+      .addSuccess(Message)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // The current user's own starred messages in this chat (issue #223),
+    // newest star first — private, so this only ever returns the caller's
+    // bookmarks, never anyone else's.
+    HttpApiEndpoint.get("listStarredMessages", "/chats/:id/stars")
+      .setPath(ChatIdPath)
+      .addSuccess(Schema.Array(Message))
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Stars a message as a private bookmark (issue #223) — idempotent, never
+    // broadcast (a star is visible only to the user who created it), so no
+    // realtime event. Returns the affected message (with `starred` true).
+    HttpApiEndpoint.post("starMessage", "/chats/:id/messages/:messageId/star")
+      .setPath(MessageIdPath)
+      .addSuccess(Message)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Removes a private star (issue #223) — idempotent, no realtime event.
+    // Returns the affected message (with `starred` false).
+    HttpApiEndpoint.del("unstarMessage", "/chats/:id/messages/:messageId/star")
+      .setPath(MessageIdPath)
+      .addSuccess(Message)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })
       .middleware(Authentication),
