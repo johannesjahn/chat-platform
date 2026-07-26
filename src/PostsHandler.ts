@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { and, desc, eq, lt, notInArray } from "drizzle-orm";
+import { and, count, desc, eq, inArray, lt, notInArray } from "drizzle-orm";
 import { Effect, Metric, MetricLabel } from "effect";
 import {
   type Attachment,
@@ -17,11 +17,11 @@ import {
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
-import { Db } from "./Db.ts";
+import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { postReactionInfo, type ReactionSummary } from "./reactions.ts";
 import { RealtimeConnections } from "./Realtime.ts";
-import { posts } from "./db/schema.ts";
+import { comments, posts } from "./db/schema.ts";
 
 const NO_REACTIONS: ReactionSummary[] = [];
 
@@ -29,6 +29,7 @@ const toApiPost = (
   row: typeof posts.$inferSelect,
   reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
   attachment: Attachment | null = null,
+  commentCount = 0,
 ) => ({
   id: row.id,
   authorId: row.authorId,
@@ -38,7 +39,29 @@ const toApiPost = (
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
   reactions: [...reactions],
+  commentCount,
 });
+
+// Total comments (top-level *and* replies) per post for a batch of ids, in one
+// grouped COUNT over `comments` — mirrors `postReactionInfo`'s shape/rationale
+// (computed on read, not stored — see reactions.ts and the `commentCount`
+// comment on `Post` in Api.ts). The `comments_post_id_idx` (postId, id) index
+// keeps a page's worth cheap. Ids with no comments are simply absent from the
+// map; callers default them to 0.
+export const postCommentCounts = async (
+  db: DrizzleDb,
+  postIds: ReadonlyArray<number>,
+): Promise<Map<number, number>> => {
+  const result = new Map<number, number>();
+  if (postIds.length === 0) return result;
+  const rows = await db
+    .select({ postId: comments.postId, total: count() })
+    .from(comments)
+    .where(inArray(comments.postId, [...postIds]))
+    .groupBy(comments.postId);
+  for (const row of rows) result.set(row.postId, Number(row.total));
+  return result;
+};
 
 // Admins can edit/delete any post; everyone else only their own.
 const canModify = (
@@ -85,6 +108,9 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const reactions = yield* Effect.tryPromise(() =>
             postReactionInfo(db, [row.id], currentUser.id),
           ).pipe(Effect.orDie);
+          const commentCounts = yield* Effect.tryPromise(() =>
+            postCommentCounts(db, [row.id]),
+          ).pipe(Effect.orDie);
           const attachments = yield* resolveAttachments(db, [row.attachmentId]);
           return toApiPost(
             row,
@@ -92,6 +118,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             row.attachmentId !== null
               ? (attachments.get(row.attachmentId) ?? null)
               : null,
+            commentCounts.get(row.id) ?? 0,
           );
         }),
       )
@@ -150,6 +177,12 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               currentUser.id,
             ),
           ).pipe(Effect.orDie);
+          const commentCounts = yield* Effect.tryPromise(() =>
+            postCommentCounts(
+              db,
+              rows.map((r) => r.id),
+            ),
+          ).pipe(Effect.orDie);
           const attachments = yield* resolveAttachments(
             db,
             rows.map((r) => r.attachmentId),
@@ -162,6 +195,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 r.attachmentId !== null
                   ? (attachments.get(r.attachmentId) ?? null)
                   : null,
+                commentCounts.get(r.id) ?? 0,
               ),
             ),
             limit,
@@ -263,16 +297,25 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
-          // Editing a post's content leaves its reactions untouched — reflect
-          // the existing state in the response rather than resetting it.
+          // Editing a post's content leaves its reactions and comments
+          // untouched — reflect the existing state in the response rather than
+          // resetting it.
           const reactions = yield* Effect.tryPromise(() =>
             postReactionInfo(db, [row.id], currentUser.id),
+          ).pipe(Effect.orDie);
+          const commentCounts = yield* Effect.tryPromise(() =>
+            postCommentCounts(db, [row.id]),
           ).pipe(Effect.orDie);
           yield* connections.broadcastAll({
             type: "post_changed",
             postId: row.id,
           });
-          return toApiPost(row, reactions.get(row.id), attachment);
+          return toApiPost(
+            row,
+            reactions.get(row.id),
+            attachment,
+            commentCounts.get(row.id) ?? 0,
+          );
         }),
       )
       .handle("deletePost", ({ path: { id } }) =>

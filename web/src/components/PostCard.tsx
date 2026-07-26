@@ -15,6 +15,7 @@ import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
 import { CommentsSection, ReactionPicker } from "@/components/CommentsSection";
 import { RelativeTime } from "@/components/RelativeTime";
+import { CountUp } from "@/components/reactbits/CountUp";
 import { Spotlight } from "@/components/reactbits/Spotlight";
 import { Button } from "@/components/ui/button";
 import {
@@ -86,6 +87,11 @@ export function PostCard({
   style,
 }: PostCardProps) {
   const wasEdited = post.updatedAt !== post.createdAt;
+  // Compact engagement counts surfaced on the card so an active post reads as
+  // active without expanding it (issue #306). Both animate via `CountUp` when
+  // they change in real time (comment/reaction realtime events patch the
+  // cached post — see useRealtimeSocket).
+  const totalReactions = post.reactions.reduce((sum, r) => sum + r.count, 0);
   const isLongText =
     post.contentType === "text" && post.content.length > COLLAPSE_THRESHOLD;
   const [expanded, setExpanded] = useState(!isLongText);
@@ -241,6 +247,14 @@ export function PostCard({
             pending={reactionPending}
             onToggle={toggleReaction}
           />
+          {totalReactions > 0 && (
+            <span
+              className="text-xs tabular-nums text-muted-foreground"
+              aria-label={`${totalReactions} reaction${totalReactions === 1 ? "" : "s"} total`}
+            >
+              <CountUp value={totalReactions} />
+            </span>
+          )}
           <Button
             type="button"
             variant="ghost"
@@ -251,6 +265,12 @@ export function PostCard({
           >
             <MessageSquare className="size-4" />
             {showComments ? "Hide comments" : "Comments"}
+            {post.commentCount > 0 && (
+              <span className="tabular-nums">
+                {" · "}
+                <CountUp value={post.commentCount} />
+              </span>
+            )}
           </Button>
           {/* Only surface a content-type badge for media posts — labelling
               every plain-text post "Text" was pure noise. */}

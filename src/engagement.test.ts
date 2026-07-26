@@ -442,6 +442,69 @@ test("createComment creates a top-level comment owned by the author", () =>
     }),
   ));
 
+test("a new post starts with commentCount 0", () =>
+  run(
+    Effect.gen(function* () {
+      const { post } = yield* setupPostBy("otis");
+      expect(post.commentCount).toBe(0);
+    }),
+  ));
+
+test("commentCount counts top-level comments and replies on getPost/listPosts", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("pam");
+      const comment = yield* authed.comments.createComment({
+        path: { id: post.id },
+        payload: { content: "top-level" },
+      });
+      yield* authed.comments.createReply({
+        path: { id: comment.id },
+        payload: { content: "a reply" },
+      });
+      yield* authed.comments.createComment({
+        path: { id: post.id },
+        payload: { content: "another top-level" },
+      });
+
+      // getPost reflects all three (two top-level + one reply).
+      const fetched = yield* authed.posts.getPost({ path: { id: post.id } });
+      expect(fetched.commentCount).toBe(3);
+
+      // listPosts carries the same count on the feed card.
+      const page = yield* authed.posts.listPosts({ urlParams: {} });
+      const listed = page.posts.find((p) => p.id === post.id);
+      expect(listed?.commentCount).toBe(3);
+    }),
+  ));
+
+test("deleting a top-level comment cascades to its replies in commentCount", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("quinn");
+      const comment = yield* authed.comments.createComment({
+        path: { id: post.id },
+        payload: { content: "top-level" },
+      });
+      yield* authed.comments.createReply({
+        path: { id: comment.id },
+        payload: { content: "a reply" },
+      });
+      const withComments = yield* authed.posts.getPost({
+        path: { id: post.id },
+      });
+      expect(withComments.commentCount).toBe(2);
+
+      // Deleting the top-level comment cascades to its reply (FK in schema),
+      // so the count drops back to 0.
+      yield* authed.comments.deleteComment({ path: { id: comment.id } });
+      const afterDelete = yield* authed.posts.getPost({
+        path: { id: post.id },
+      });
+      expect(afterDelete.commentCount).toBe(0);
+    }),
+  ));
+
 test('createComment increments content_created_total{type="comment"}', () =>
   run(
     Effect.gen(function* () {

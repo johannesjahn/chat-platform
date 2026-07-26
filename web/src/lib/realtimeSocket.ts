@@ -230,6 +230,17 @@ export function useRealtimeSocket(enabled: boolean): void {
             void queryClient.invalidateQueries({
               queryKey: commentsQueryKeyRoot,
             });
+            // The post's `commentCount` (surfaced on its card — issue #306)
+            // also changes when a comment/reply is added or removed. Refetch
+            // the feed and any open post-detail query so the count updates in
+            // place (the card's `CountUp` then animates old → new), same
+            // recovery as `post_changed`.
+            void queryClient.invalidateQueries({
+              queryKey: postsFeedQueryKey,
+            });
+            void queryClient.invalidateQueries({
+              queryKey: postDetailQueryKeyPrefix,
+            });
             break;
           case "reaction_changed":
             // A post reaction goes out feed-wide, so this lands on *every*

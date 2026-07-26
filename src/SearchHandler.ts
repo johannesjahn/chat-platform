@@ -12,6 +12,7 @@ import {
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
+import { postCommentCounts } from "./PostsHandler.ts";
 import {
   commentReactionInfo,
   messageReactionInfo,
@@ -75,6 +76,7 @@ const resolveCursor = (cursor: string | undefined) =>
 const toApiPost = (
   row: typeof posts.$inferSelect,
   reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
+  commentCount = 0,
 ): Post => ({
   id: row.id,
   authorId: row.authorId,
@@ -87,6 +89,7 @@ const toApiPost = (
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
   reactions: [...reactions],
+  commentCount,
 });
 
 const toApiComment = (
@@ -255,10 +258,20 @@ export const SearchHandlerLive = HttpApiBuilder.group(
               currentUser.id,
             ),
           ).pipe(Effect.orDie);
+          const commentCounts = yield* Effect.tryPromise(() =>
+            postCommentCounts(
+              db,
+              page.map((r) => r.id),
+            ),
+          ).pipe(Effect.orDie);
 
           return {
             results: page.map((r) => ({
-              post: toApiPost(r, reactionInfo.get(r.id)),
+              post: toApiPost(
+                r,
+                reactionInfo.get(r.id),
+                commentCounts.get(r.id) ?? 0,
+              ),
               snippet: parseSnippet(r.snippet),
             })),
             limit,
