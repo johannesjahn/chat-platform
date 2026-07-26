@@ -14,7 +14,11 @@ export function HeaderSearch() {
   return (
     <form
       role="search"
-      className="relative min-w-0 flex-1 sm:max-w-xs"
+      // On narrow viewports the search drops onto its own full-width row
+      // (order-last + basis-full) so it can't get squeezed to an unusable
+      // sliver — or clipped off the edge — next to the nav links and account
+      // actions. From `sm` up it sits inline and flexes to fill the gap.
+      className="relative order-last w-full min-w-0 basis-full sm:order-none sm:w-auto sm:flex-1 sm:basis-auto sm:max-w-xs"
       onSubmit={(e) => {
         e.preventDefault();
         const q = value.trim();

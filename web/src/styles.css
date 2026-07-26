@@ -294,6 +294,19 @@
   animation: float 5s ease-in-out infinite;
 }
 
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A slowly rotating conic sheen — used behind empty-state glyphs so an
+   otherwise static "nothing here" screen still feels alive. Purely
+   decorative; always paired with `pointer-events-none`. */
+@utility animate-spin-slow {
+  animation: spin-slow 12s linear infinite;
+}
+
 /* Custom springy transitions and smooth easing curves */
 @utility ease-spring {
   transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -309,7 +322,8 @@
   .animate-typing-bounce,
   .animate-presence-ping,
   .animate-like-pop,
-  .animate-float {
+  .animate-float,
+  .animate-spin-slow {
     animation: none;
   }
 

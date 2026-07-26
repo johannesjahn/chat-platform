@@ -10,11 +10,11 @@ import {
   Paperclip,
   Pencil,
   Trash2,
-  Type,
 } from "lucide-react";
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
 import { CommentsSection, ReactionPicker } from "@/components/CommentsSection";
+import { RelativeTime } from "@/components/RelativeTime";
 import { Spotlight } from "@/components/reactbits/Spotlight";
 import { Button } from "@/components/ui/button";
 import {
@@ -158,7 +158,7 @@ export function PostCard({
           <div className="flex flex-1 flex-col leading-tight">
             <span className="font-medium">{authorLabel}</span>
             <span className="text-xs text-muted-foreground">
-              {new Date(post.createdAt).toLocaleString()}
+              <RelativeTime value={post.createdAt} />
               {wasEdited && " · edited"}
             </span>
           </div>
@@ -252,24 +252,19 @@ export function PostCard({
             <MessageSquare className="size-4" />
             {showComments ? "Hide comments" : "Comments"}
           </Button>
-          <span className="ml-auto flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
-            {post.contentType === "image_url" ? (
-              <>
-                <ImageIcon className="size-3.5" />
-                Image
-              </>
-            ) : post.contentType === "attachment" ? (
-              <>
-                <Paperclip className="size-3.5" />
-                Attachment
-              </>
-            ) : (
-              <>
-                <Type className="size-3.5" />
-                Text
-              </>
-            )}
-          </span>
+          {/* Only surface a content-type badge for media posts — labelling
+              every plain-text post "Text" was pure noise. */}
+          {post.contentType === "image_url" ? (
+            <span className="ml-auto flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
+              <ImageIcon className="size-3.5" />
+              Image
+            </span>
+          ) : post.contentType === "attachment" ? (
+            <span className="ml-auto flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
+              <Paperclip className="size-3.5" />
+              Attachment
+            </span>
+          ) : null}
         </div>
         {reactionError && (
           <p className="px-3 pb-2 text-xs text-destructive">{reactionError}</p>

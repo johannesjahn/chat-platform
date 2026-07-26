@@ -10,6 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { RelativeTime } from "@/components/RelativeTime";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { $api } from "@/lib/api";
@@ -369,7 +370,7 @@ function CommentItem({
               {authorLabel}
             </Link>
             <span className="text-xs text-muted-foreground">
-              {new Date(comment.createdAt).toLocaleString()}
+              <RelativeTime value={comment.createdAt} />
               {comment.updatedAt !== comment.createdAt && " · edited"}
             </span>
           </div>
