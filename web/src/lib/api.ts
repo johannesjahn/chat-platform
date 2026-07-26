@@ -127,6 +127,11 @@ export function logout(session: Session): void {
 // searches aren't served stale (previously-disabled) data.
 export const usersQueryKey = ["get", "/users/search"] as const;
 
+// Query key openapi-react-query generates for the current user's block/mute
+// list (`$api.useQuery("get", "/users/me/blocks")`) — invalidated after any
+// block/mute/unblock so the settings card and profile controls refresh.
+export const blocksQueryKey = ["get", "/users/me/blocks"] as const;
+
 // Below this, a search isn't narrow enough to be worth sending for a regular
 // user (mirrors `MIN_USER_SEARCH_QUERY_LENGTH` in src/Api.ts) — keeps queries
 // and payloads bounded independent of the user base's size (see issue #48).
@@ -150,3 +155,5 @@ export const MAX_STATUS_EMOJI_LENGTH = 8;
 export type PublicUser = components["schemas"]["User"];
 export type Session = components["schemas"]["LoginResponse"];
 export type Credentials = components["schemas"]["LoginBody"];
+export type BlockedUser = components["schemas"]["BlockedUser"];
+export type BlockType = components["schemas"]["BlockType"];

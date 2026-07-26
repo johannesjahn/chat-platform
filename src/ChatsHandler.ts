@@ -42,6 +42,7 @@ import {
 } from "./attachments.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
+import { directBlockExists, recipientsMutingSender } from "./blocks.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { messageReactionInfo, messageReactionInfoOne } from "./reactions.ts";
@@ -1779,8 +1780,40 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           const connections = yield* RealtimeConnections;
           const storage = yield* AttachmentStorage;
-          yield* getChatOr404(db, id);
+          const chatRow = yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
+
+          // In a direct chat, a *block* by either party (not a mere mute)
+          // stops messaging in both directions (issue #219). Checked against
+          // the other participant only — group chats aren't gated, and a
+          // block never applies to yourself.
+          if (chatRow.type === "direct") {
+            const others = yield* Effect.tryPromise(() =>
+              db
+                .select({ userId: chatParticipants.userId })
+                .from(chatParticipants)
+                .where(
+                  and(
+                    eq(chatParticipants.chatId, id),
+                    ne(chatParticipants.userId, currentUser.id),
+                  ),
+                )
+                .limit(1),
+            ).pipe(Effect.orDie);
+            const otherId = others[0]?.userId;
+            if (otherId !== undefined) {
+              const blocked = yield* Effect.tryPromise(() =>
+                directBlockExists(db, currentUser.id, otherId),
+              ).pipe(Effect.orDie);
+              if (blocked)
+                return yield* Effect.fail(
+                  new Forbidden({
+                    message:
+                      "You can't send messages in this chat because of a block",
+                  }),
+                );
+            }
+          }
 
           let attachment: Attachment | null = null;
           if (payload.attachmentId !== undefined) {
@@ -1857,11 +1890,21 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
 
           const version = yield* getChatVersion(db, id);
           const participants = yield* getParticipants(db, id);
+          // Suppress the realtime chat notification for any participant who has
+          // muted or blocked the sender (issue #219: "mute their chat
+          // notifications"). The message is still stored and appears when they
+          // next open the chat — only the push nudge is withheld. The sender
+          // can't mute themselves (self-block is rejected), so they stay in the
+          // notify set exactly as before.
+          const recipientIds = participants.map((p) => p.userId);
+          const muting = yield* Effect.tryPromise(() =>
+            recipientsMutingSender(db, currentUser.id, recipientIds),
+          ).pipe(Effect.orDie);
           yield* notifyChatUpdated(
             connections,
             id,
             version,
-            participants.map((p) => p.userId),
+            recipientIds.filter((userId) => !muting.has(userId)),
           );
           return toApiMessage(row, [], attachment, NO_REACTIONS, parentMessage);
         }),

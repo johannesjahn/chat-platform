@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { and, eq, ilike, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, sql } from "drizzle-orm";
 import { Context, Effect, FiberRef, Metric, MetricLabel } from "effect";
 import { currentLogUser } from "./RedactedLogger.ts";
 import {
@@ -8,6 +8,7 @@ import {
   ChatApi,
   Forbidden,
   InvalidAvatarUpload,
+  InvalidBlockRequest,
   InvalidCredentials,
   InvalidUserSearchRequest,
   MAX_AVATAR_UPLOAD_SIZE_BYTES,
@@ -31,7 +32,7 @@ import { PubSub } from "./PubSub.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { clientIp } from "./ClientIp.ts";
 import { RateLimiter } from "./RateLimiter.ts";
-import { refreshTokens, users } from "./db/schema.ts";
+import { refreshTokens, userBlocks, users } from "./db/schema.ts";
 
 // Sensible defaults for auth-endpoint rate limiting (see issue #25). Login is
 // capped both per source IP and per targeted account, so a single attacker
@@ -197,6 +198,24 @@ const toPublicUser = (row: UserRow) => ({
   role: row.role,
   ...effectiveStatus(row),
 });
+
+// The `users` columns every "return a public User" query selects, folded into
+// the API shape by `toPublicUser`. Named so the block/mute handlers below can
+// select the same set off a join against `users` without re-listing it (the
+// older handlers above still inline it, matching their original style).
+const publicUserColumns = {
+  id: users.id,
+  username: users.username,
+  displayName: users.displayName,
+  avatarUrl: users.avatarUrl,
+  avatarSmallKey: users.avatarSmallKey,
+  avatarMediumKey: users.avatarMediumKey,
+  avatarLargeKey: users.avatarLargeKey,
+  role: users.role,
+  statusText: users.statusText,
+  statusEmoji: users.statusEmoji,
+  statusExpiresAt: users.statusExpiresAt,
+} as const;
 
 // Auth funnel counter (issue #196) — labeled only by `event`
 // ("signup"/"login"/"refresh") and `outcome` ("success"/"failure"), never by
@@ -1171,6 +1190,109 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             statusExpiresAt: publicUser.statusExpiresAt,
           });
           return publicUser;
+        }),
+      )
+      .handle("listBlocks", () =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select({
+                ...publicUserColumns,
+                blockType: userBlocks.type,
+                blockedAt: userBlocks.createdAt,
+              })
+              .from(userBlocks)
+              .innerJoin(users, eq(users.id, userBlocks.blockedId))
+              // Newest relationship first — the order the settings card lists
+              // them in. `id` (not `createdAt`) so re-issuing block↔mute on an
+              // existing pair, which keeps the original row, doesn't reorder.
+              .orderBy(desc(userBlocks.id))
+              .where(eq(userBlocks.blockerId, currentUser.id)),
+          ).pipe(Effect.orDie);
+          return rows.map(({ blockType, blockedAt, ...userRow }) => ({
+            user: toPublicUser(userRow),
+            type: blockType,
+            createdAt: blockedAt.getTime(),
+          }));
+        }),
+      )
+      .handle("setBlock", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+
+          if (id === currentUser.id)
+            return yield* Effect.fail(
+              new InvalidBlockRequest({
+                message: "You can't block or mute yourself",
+              }),
+            );
+
+          // The target must exist — otherwise the FK would reject the insert
+          // as a die; surface a clean 404 instead.
+          const targetRows = yield* Effect.tryPromise(() =>
+            db
+              .select(publicUserColumns)
+              .from(users)
+              .where(eq(users.id, id))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          const target = targetRows[0];
+          if (!target)
+            return yield* Effect.fail(
+              new NotFound({ message: `User ${id} not found` }),
+            );
+
+          // Upsert on the (blocker, blocked) unique constraint: a first block/
+          // mute inserts, and re-issuing the other action on the same target
+          // updates the existing row's `type` in place (keeping its original
+          // `createdAt`) rather than stacking a second relationship.
+          const inserted = yield* Effect.tryPromise(() =>
+            db
+              .insert(userBlocks)
+              .values({
+                blockerId: currentUser.id,
+                blockedId: id,
+                type: payload.type,
+              })
+              .onConflictDoUpdate({
+                target: [userBlocks.blockerId, userBlocks.blockedId],
+                set: { type: payload.type },
+              })
+              .returning({
+                type: userBlocks.type,
+                createdAt: userBlocks.createdAt,
+              }),
+          ).pipe(Effect.orDie);
+          const row = inserted[0];
+          if (!row)
+            return yield* Effect.die(new Error("UPSERT returned no rows"));
+
+          return {
+            user: toPublicUser(target),
+            type: row.type,
+            createdAt: row.createdAt.getTime(),
+          };
+        }),
+      )
+      .handle("removeBlock", ({ path: { id } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          // Idempotent — deleting a non-existent relationship is a no-op that
+          // still succeeds, so unblocking/unmuting never 404s.
+          yield* Effect.tryPromise(() =>
+            db
+              .delete(userBlocks)
+              .where(
+                and(
+                  eq(userBlocks.blockerId, currentUser.id),
+                  eq(userBlocks.blockedId, id),
+                ),
+              ),
+          ).pipe(Effect.orDie);
         }),
       ),
 );

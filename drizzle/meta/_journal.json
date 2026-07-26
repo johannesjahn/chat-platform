@@ -148,6 +148,13 @@
       "when": 1784974456599,
       "tag": "0020_flowery_luke_cage",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785016937395,
+      "tag": "0021_omniscient_thor",
+      "breakpoints": true
     }
   ]
 }

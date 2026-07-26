@@ -594,3 +594,57 @@ export const chatInvites = pgTable(
 
 export type DbChatInvite = typeof chatInvites.$inferSelect;
 export type NewDbChatInvite = typeof chatInvites.$inferInsert;
+
+// Per-user privacy controls (issue #219) — one row per (blocker, blocked)
+// pair recording whether the target is fully *blocked* or merely *muted*:
+//   - "block" is the stronger action: it hides the target's posts from the
+//     blocker's feed, suppresses their chat notifications, *and* prevents
+//     either party from sending a message in a direct chat between them (the
+//     block is symmetric for messaging — see `directBlockExists` in
+//     src/blocks.ts and `createMessage` in ChatsHandler.ts).
+//   - "mute" is the softer action: it likewise hides the target's posts and
+//     suppresses their chat notifications for the muter, but never blocks
+//     messaging — a muted user can still DM you, you just aren't pinged.
+// A given pair is either blocked *or* muted, never both at once — the unique
+// constraint below means re-issuing the other action on the same target
+// upgrades/downgrades the existing row rather than stacking a second one (see
+// `setBlock` in UsersHandler.ts). Both FKs cascade: deleting either account
+// takes the relationship rows it's party to (in either direction) with it. A
+// row is only ever created by the blocker themselves, so there's no
+// notion/audit of "who muted whom" beyond the two ids here.
+export const userBlocks = pgTable(
+  "user_blocks",
+  {
+    id: serial("id").primaryKey(),
+    blockerId: integer("blocker_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    blockedId: integer("blocked_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type", { enum: ["block", "mute"] }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    // At most one relationship per direction. Backed by a composite
+    // (blockerId, blockedId) btree whose leading `blockerId` also serves the
+    // "list everyone I've blocked/muted" and "have I blocked/muted user X"
+    // lookups in blocks.ts.
+    unique().on(table.blockerId, table.blockedId),
+    // The reverse-direction lookups — "who has blocked me" / "does a block
+    // exist in *either* direction between this pair" (the direct-message
+    // gate) — and the cascade delete when the *blocked* account is removed
+    // both key off `blockedId`, which the composite index above (blockerId
+    // first) can't answer, so it gets its own index.
+    index("user_blocks_blocked_id_idx").on(table.blockedId),
+    // A user can't block or mute themselves — enforced in the API layer too
+    // (see `setBlock` in UsersHandler.ts), but pinned down here so a bad row
+    // can never exist regardless of how it's written.
+    check("user_blocks_no_self", sql`${table.blockerId} <> ${table.blockedId}`),
+  ],
+);
+
+export type DbUserBlock = typeof userBlocks.$inferSelect;
+export type NewDbUserBlock = typeof userBlocks.$inferInsert;
