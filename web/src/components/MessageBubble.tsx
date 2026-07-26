@@ -1,4 +1,10 @@
-import { type CSSProperties, useState } from "react";
+import {
+  type CSSProperties,
+  type TouchEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
@@ -222,6 +228,78 @@ export function MessageBubble({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Touch equivalent of the desktop hover-reveal (issue #309). The per-message
+  // action group (react/pin/star/reply/edit/delete) is otherwise only shown on
+  // `group-hover`, which touch devices never produce — so on phones/tablets it
+  // was completely unreachable. A long press on the bubble reveals the same
+  // group, mirroring the long-press-to-react gesture of most mobile messaging
+  // apps; desktop hover behaviour is left untouched.
+  const [touchRevealed, setTouchRevealed] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  // Set once the long press actually fires, so the follow-up `contextmenu`
+  // event (which mobile browsers emit on a long press) can be suppressed
+  // without also swallowing a genuine desktop right-click.
+  const longPressFired = useRef(false);
+
+  const clearLongPress = () => {
+    if (longPressTimer.current !== null) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  // Cancel any pending timer if the bubble unmounts mid-press.
+  useEffect(() => clearLongPress, []);
+
+  // While the touch-revealed group is showing, dismiss it when the next tap
+  // lands outside this message row (the reaction popover itself portals to
+  // document.body, so picking an emoji counts as "outside" and collapses the
+  // group too — which is the desired outcome once a reaction is chosen).
+  useEffect(() => {
+    if (!touchRevealed) return;
+    const dismiss = (event: Event) => {
+      const target = event.target as Node;
+      if (rowRef.current && !rowRef.current.contains(target)) {
+        setTouchRevealed(false);
+      }
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [touchRevealed]);
+
+  const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {
+    if (isEditing) return;
+    const touch = e.touches[0];
+    if (!touch) return;
+    touchStart.current = { x: touch.clientX, y: touch.clientY };
+    longPressFired.current = false;
+    clearLongPress();
+    longPressTimer.current = setTimeout(() => {
+      longPressFired.current = true;
+      longPressTimer.current = null;
+      setTouchRevealed(true);
+      // A short haptic cue on trigger where supported (unsupported on e.g.
+      // iOS Safari, hence the capability check rather than optional-call).
+      if (typeof navigator.vibrate === "function") navigator.vibrate(10);
+    }, 450);
+  };
+
+  const handleTouchMove = (e: TouchEvent<HTMLDivElement>) => {
+    const start = touchStart.current;
+    const touch = e.touches[0];
+    if (!start || !touch) return;
+    // A finger that travels more than a few pixels is a scroll, not a press —
+    // cancel so the picker never pops up mid-scroll.
+    if (
+      Math.abs(touch.clientX - start.x) > 10 ||
+      Math.abs(touch.clientY - start.y) > 10
+    ) {
+      clearLongPress();
+    }
+  };
+
   const trimmedDraft = draft.trim();
   const canSave =
     trimmedDraft.length > 0 &&
@@ -299,8 +377,19 @@ export function MessageBubble({
     </>
   );
 
+  // Shared visibility classes for both action groups (own + incoming). Hidden
+  // and revealed on `group-hover` for pointer devices as before; when a long
+  // press has revealed it on touch, the visible state is applied outright.
+  const actionGroupClassName = cn(
+    "flex shrink-0 items-center gap-0.5 transition-all duration-300 ease-smooth",
+    touchRevealed
+      ? "opacity-100 translate-x-0 scale-100"
+      : "opacity-0 translate-x-2 scale-95 group-hover:opacity-100 group-hover:translate-x-0 group-hover:scale-100",
+  );
+
   return (
     <div
+      ref={rowRef}
       data-message-id={message.id}
       style={style}
       className={cn(
@@ -327,7 +416,7 @@ export function MessageBubble({
       )}
 
       {isOwn && !isEditing && (
-        <div className="flex shrink-0 items-center gap-0.5 opacity-0 translate-x-2 scale-95 transition-all duration-300 ease-smooth group-hover:opacity-100 group-hover:translate-x-0 group-hover:scale-100">
+        <div className={actionGroupClassName}>
           <ReactionAddButton
             reactions={message.reactions}
             pending={reactionPending}
@@ -384,6 +473,15 @@ export function MessageBubble({
       )}
 
       <div
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={clearLongPress}
+        onTouchCancel={clearLongPress}
+        onContextMenu={(e) => {
+          // Suppress the browser's own long-press context menu on touch, but
+          // leave desktop right-click alone.
+          if (longPressFired.current) e.preventDefault();
+        }}
         className={cn(
           "flex max-w-[75%] flex-col gap-1",
           isOwn ? "items-end" : "items-start",
@@ -586,8 +684,9 @@ export function MessageBubble({
         {/* The reaction pills sit below the bubble, but only once there's an
             actual reaction to show — otherwise nothing renders here at all, so
             the parent's `gap-1` doesn't reserve empty space under every
-            message. Adding a reaction is done from the hover-only button beside
-            the bubble instead (see the action groups on either side). */}
+            message. Adding a reaction is done from the button beside the bubble
+            instead — revealed on hover for pointer devices, or via a long press
+            on touch (issue #309); see the action groups on either side. */}
         {!isEditing && hasReactions && (
           <div className="flex flex-wrap items-center gap-1">
             <ReactionList
@@ -610,7 +709,7 @@ export function MessageBubble({
       </div>
 
       {!isOwn && !isEditing && (
-        <div className="flex shrink-0 items-center gap-0.5 opacity-0 translate-x-2 scale-95 transition-all duration-300 ease-smooth group-hover:opacity-100 group-hover:translate-x-0 group-hover:scale-100">
+        <div className={actionGroupClassName}>
           <ReactionAddButton
             reactions={message.reactions}
             pending={reactionPending}
