@@ -50,20 +50,20 @@ type PostCardProps = {
 // lengths, not a skeleton-to-content pop.
 export function PostCardSkeleton() {
   return (
-    <Card className="w-full max-w-xl overflow-hidden py-0">
-      <CardHeader className="flex flex-row items-center gap-3 border-b border-border py-4">
+    <Card className="w-full max-w-xl gap-0 overflow-hidden py-0">
+      <CardHeader className="flex flex-row items-center gap-3 pt-4 pb-2">
         <Skeleton className="size-9 shrink-0 rounded-full" />
         <div className="flex flex-1 flex-col gap-2">
           <Skeleton className="h-3.5 w-28" />
           <Skeleton className="h-3 w-20" />
         </div>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2.5 px-6 py-6">
+      <CardContent className="flex flex-col gap-2.5 px-6 pt-2 pb-4">
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-4 w-full" />
         <Skeleton className="h-4 w-3/4" />
       </CardContent>
-      <CardFooter className="border-t border-border py-3">
+      <CardFooter className="border-t border-border/60 py-3">
         <Skeleton className="h-3 w-20" />
       </CardFooter>
     </Card>
@@ -138,12 +138,15 @@ export function PostCard({
         );
       }}
       className={cn(
-        "group w-full max-w-xl overflow-hidden py-0 transition-all duration-400 ease-smooth hover:-translate-y-1 hover:border-primary/35 hover:shadow-xl hover:shadow-primary/8",
+        "group w-full max-w-xl gap-0 overflow-hidden py-0 transition-all duration-400 ease-smooth hover:-translate-y-1 hover:border-primary/35 hover:shadow-xl hover:shadow-primary/8",
         "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-500",
       )}
     >
       <Spotlight color="oklch(0.62 0.19 277 / 0.16)" size={360} />
-      <CardHeader className="flex flex-row items-center gap-3 border-b border-border py-4">
+      {/* Compact vertical rhythm: no header divider (the avatar already anchors
+          the header) and trimmed content padding keep a short post dense, while
+          a lighter footer divider still fences off the reaction controls. */}
+      <CardHeader className="flex flex-row items-center gap-3 pt-4 pb-2">
         <Link
           to="/users/$id"
           params={{ id: String(authorId) }}
@@ -197,11 +200,11 @@ export function PostCard({
             className="aspect-4/5 w-full bg-muted object-cover"
           />
         ) : post.contentType === "attachment" && post.attachment ? (
-          <div className="px-6 py-6">
+          <div className="px-6 pt-2 pb-4">
             <AttachmentPreview attachment={post.attachment} />
           </div>
         ) : (
-          <div className="px-6 py-6">
+          <div className="px-6 pt-2 pb-4">
             <p
               className={
                 "whitespace-pre-wrap break-words text-base leading-relaxed" +
@@ -234,7 +237,7 @@ export function PostCard({
         )}
       </CardContent>
 
-      <CardFooter className="flex-col items-stretch gap-0 border-t border-border p-0">
+      <CardFooter className="flex-col items-stretch gap-0 border-t border-border/60 p-0">
         <div className="flex items-center gap-1 px-3 py-2">
           <ReactionPicker
             reactions={post.reactions}
