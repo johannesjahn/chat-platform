@@ -985,6 +985,7 @@ export interface components {
             createdAt: number;
             updatedAt: number;
             reactions: components["schemas"]["ReactionSummary"][];
+            commentCount: number;
         };
         /** @enum {string} */
         PostContentType: "text" | "image_url" | "attachment";
@@ -2320,6 +2321,7 @@ export interface operations {
                         createdAt: number;
                         updatedAt: number;
                         reactions: components["schemas"]["ReactionSummary"][];
+                        commentCount: number;
                     };
                 };
             };

@@ -540,6 +540,12 @@ export const Post = Schema.Struct({
   // reaction from, so the feed can render reaction pills (with the current
   // user's own reactions highlighted) without a second request per post.
   reactions: Schema.Array(ReactionSummary),
+  // Total comments (top-level comments *and* replies) on this post, computed
+  // on read alongside `reactions` (see PostsHandler.ts) rather than stored, so
+  // the feed can surface a "Comments · N" count on each card without having to
+  // open the thread (issue #306). Additive/backward-compatible: a client that
+  // predates this field simply ignores it.
+  commentCount: Schema.Number,
 }).annotations({ identifier: "Post" });
 export type Post = typeof Post.Type;
 

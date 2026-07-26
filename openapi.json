@@ -1443,7 +1443,8 @@
                     "attachment",
                     "createdAt",
                     "updatedAt",
-                    "reactions"
+                    "reactions",
+                    "commentCount"
                   ],
                   "properties": {
                     "id": {
@@ -1479,6 +1480,9 @@
                       "items": {
                         "$ref": "#/components/schemas/ReactionSummary"
                       }
+                    },
+                    "commentCount": {
+                      "type": "number"
                     }
                   },
                   "additionalProperties": false
@@ -6368,7 +6372,8 @@
           "attachment",
           "createdAt",
           "updatedAt",
-          "reactions"
+          "reactions",
+          "commentCount"
         ],
         "properties": {
           "id": {
@@ -6404,6 +6409,9 @@
             "items": {
               "$ref": "#/components/schemas/ReactionSummary"
             }
+          },
+          "commentCount": {
+            "type": "number"
           }
         },
         "additionalProperties": false
