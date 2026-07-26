@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Link2, Loader2, MessagesSquare, PlusCircle } from "lucide-react";
 import { ChatListItem, ChatListItemSkeleton } from "@/components/ChatListItem";
+import { EmptyState } from "@/components/EmptyState";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
@@ -97,9 +98,24 @@ function ChatsListPage() {
           device yet.
         </p>
       ) : chats.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No conversations yet — start one with another user.
-        </p>
+        <EmptyState
+          icon={MessagesSquare}
+          title="No conversations yet"
+          description="Start a direct message or spin up a group with people you know."
+        >
+          <Button asChild>
+            <Link to="/chats/new">
+              <PlusCircle className="size-4" />
+              New chat
+            </Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link to="/chats/join">
+              <Link2 className="size-4" />
+              Join via invite
+            </Link>
+          </Button>
+        </EmptyState>
       ) : (
         <ul role="list" className="flex w-full flex-col gap-2">
           {chats.map((chat, i) => (

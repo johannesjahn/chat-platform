@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Loader2, PlusCircle } from "lucide-react";
+import { Loader2, PlusCircle, Sparkles } from "lucide-react";
+import { EmptyState } from "@/components/EmptyState";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PendingPostCard } from "@/components/PendingPostCard";
 import { PostCard, PostCardSkeleton } from "@/components/PostCard";
@@ -144,9 +145,18 @@ function PostsFeedPage() {
           device yet.
         </p>
       ) : posts.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No posts yet — be the first to share something.
-        </p>
+        <EmptyState
+          icon={Sparkles}
+          title="No posts yet"
+          description="Be the first to share something with the community."
+        >
+          <Button asChild>
+            <Link to="/posts/new">
+              <PlusCircle className="size-4" />
+              Create a post
+            </Link>
+          </Button>
+        </EmptyState>
       ) : (
         <ul role="list" className="flex w-full flex-col items-center gap-6">
           {posts.map((post, i) => (

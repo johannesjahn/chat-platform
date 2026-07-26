@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Search, Users } from "lucide-react";
+import { Search, UserSearch, Users } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { DeleteUserButton } from "@/components/DeleteUserButton";
+import { EmptyState } from "@/components/EmptyState";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { CountUp } from "@/components/reactbits/CountUp";
 import { GradientText } from "@/components/reactbits/GradientText";
@@ -114,7 +115,11 @@ function UsersPage() {
           </CardContent>
         </Card>
       ) : !users || users.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No matching users.</p>
+        <EmptyState
+          icon={UserSearch}
+          title="No matching users"
+          description="Try a different name or check the spelling."
+        />
       ) : (
         <Card className="w-full motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
           <CardHeader>
