@@ -191,6 +191,46 @@ test("a user can redeem a group invite through the join page and via a direct in
   await contextC.close();
 });
 
+test("messages are grouped under a sticky day separator (issue #307)", async ({
+  browser,
+  injectApiUrl,
+}) => {
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  await registerViaUi(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const { username: usernameB } = await registerViaUi(pageB);
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Direct message" }).click();
+  await pageA.fill("#user-search", usernameB);
+  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+
+  await pageA.fill("textarea", "First message of the day");
+  await pageA.keyboard.press("Enter");
+  await expect(pageA.getByText("First message of the day")).toBeVisible();
+
+  // A single separator labelled "Today" is inserted ahead of the first
+  // message — all of today's messages share one day, so there's exactly one.
+  const separators = pageA.getByTestId("date-separator");
+  await expect(separators).toHaveCount(1);
+  await expect(separators.first()).toHaveText("Today");
+
+  // Sending another message the same day doesn't add a second separator.
+  await pageA.fill("textarea", "Second message, same day");
+  await pageA.keyboard.press("Enter");
+  await expect(pageA.getByText("Second message, same day")).toBeVisible();
+  await expect(separators).toHaveCount(1);
+
+  await contextA.close();
+  await contextB.close();
+});
+
 test("long messages are collapsed behind a Show more toggle", async ({
   browser,
   injectApiUrl,

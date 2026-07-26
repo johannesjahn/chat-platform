@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { onlineManager, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Loader2, Settings2, Users } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { ChatComposer, type ReplyTarget } from "@/components/ChatComposer";
+import { DateSeparator } from "@/components/DateSeparator";
 import { GroupManagementDialog } from "@/components/GroupManagementDialog";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -22,6 +23,7 @@ import {
   chatDetailQueryKey,
   chatDisplayName,
   chatsListQueryKey,
+  localDayKey,
   useChatDetail,
   useChatMessages,
 } from "@/lib/chats";
@@ -470,40 +472,55 @@ function ChatView({ id }: { id: string }) {
                 const sender = chat.participants.find(
                   (p) => p.userId === message.senderId,
                 );
+                // Insert a day separator before the first message and before
+                // any message that starts a new local calendar day (issue
+                // #307). Messages arrive oldest-first, so comparing against the
+                // previous entry is enough.
+                const prev = messages[i - 1];
+                const showDaySeparator =
+                  prev == null ||
+                  localDayKey(prev.createdAt) !==
+                    localDayKey(message.createdAt);
                 return (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    isOwn={isOwn}
-                    isRead={message.readByUserIds.length > 0}
-                    canModify={isOwn || session.user.role === "admin"}
-                    canDeleteOthers={!isOwn && canManage}
-                    onEdit={(content) => handleEditMessage(message.id, content)}
-                    onDelete={() => handleDeleteMessage(message.id)}
-                    onReply={() =>
-                      setReplyingTo({
-                        id: message.id,
-                        senderName: sender ? userLabel(sender) : "Someone",
-                        contentType: message.contentType,
-                        content: message.content,
-                      })
-                    }
-                    senderLabel={
-                      chat.type === "group" && sender
-                        ? userLabel(sender)
-                        : undefined
-                    }
-                    senderAvatar={
-                      chat.type === "group" && sender && !isOwn
-                        ? {
-                            name: userAvatarName(sender),
-                            avatarUrl: sender.avatarUrl,
-                            avatarVariants: sender.avatarVariants,
-                          }
-                        : undefined
-                    }
-                    style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}
-                  />
+                  <Fragment key={message.id}>
+                    {showDaySeparator && (
+                      <DateSeparator ms={message.createdAt} />
+                    )}
+                    <MessageBubble
+                      message={message}
+                      isOwn={isOwn}
+                      isRead={message.readByUserIds.length > 0}
+                      canModify={isOwn || session.user.role === "admin"}
+                      canDeleteOthers={!isOwn && canManage}
+                      onEdit={(content) =>
+                        handleEditMessage(message.id, content)
+                      }
+                      onDelete={() => handleDeleteMessage(message.id)}
+                      onReply={() =>
+                        setReplyingTo({
+                          id: message.id,
+                          senderName: sender ? userLabel(sender) : "Someone",
+                          contentType: message.contentType,
+                          content: message.content,
+                        })
+                      }
+                      senderLabel={
+                        chat.type === "group" && sender
+                          ? userLabel(sender)
+                          : undefined
+                      }
+                      senderAvatar={
+                        chat.type === "group" && sender && !isOwn
+                          ? {
+                              name: userAvatarName(sender),
+                              avatarUrl: sender.avatarUrl,
+                              avatarVariants: sender.avatarVariants,
+                            }
+                          : undefined
+                      }
+                      style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}
+                    />
+                  </Fragment>
                 );
               })
             )}

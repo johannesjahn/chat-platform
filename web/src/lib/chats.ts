@@ -94,6 +94,42 @@ export function formatChatTimestamp(ms: number): string {
     : date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+// A stable per-local-day key ("2026-6-26") used to detect when two consecutive
+// messages fall on different calendar days, so a date separator can be
+// inserted between them (issue #307). Built from local date parts rather than
+// the UTC-based ISO string, so the boundary lines up with the user's own
+// wall-clock midnight.
+export function localDayKey(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+// Centered date-separator label: "Today"/"Yesterday" for the two most recent
+// local days, otherwise a weekday + short date ("Mon, Jul 21"), with the year
+// appended once the message falls outside the current year so an old
+// conversation never reads ambiguously. `now` is injectable so tests (and any
+// shared clock) stay deterministic.
+export function formatDaySeparator(
+  ms: number,
+  now: number = Date.now(),
+): string {
+  const date = new Date(ms);
+  const todayKey = localDayKey(now);
+  if (localDayKey(ms) === todayKey) return "Today";
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (localDayKey(ms) === localDayKey(yesterday.getTime())) return "Yesterday";
+
+  const sameYear = date.getFullYear() === new Date(now).getFullYear();
+  return date.toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+}
+
 // Only sums whichever pages have been fetched so far — for a user with more
 // chats than fit in one page who hasn't opened `/chats` (and so never called
 // `fetchNextPage`), this undercounts against chats past the first page,
