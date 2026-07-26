@@ -54,6 +54,101 @@ test("reacting to a chat message from the hover button adds a pill below the bub
   await contextB.close();
 });
 
+test("long-pressing a chat message on touch opens the reaction picker (issue #309)", async ({
+  browser,
+  injectApiUrl,
+}) => {
+  // A touch-capable context: no hover state exists, so the desktop hover-reveal
+  // of the action group can't fire — the long-press path is the only way in.
+  const contextA = await browser.newContext({ hasTouch: true });
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  await registerViaUi(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const { username: usernameB } = await registerViaUi(pageB);
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Direct message" }).click();
+  await pageA.fill("#user-search", usernameB);
+  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+
+  await pageA.fill("textarea", "Long-press to react on mobile");
+  await pageA.keyboard.press("Enter");
+  const bubble = pageA
+    .locator("[data-message-id]")
+    .filter({ hasText: "Long-press to react on mobile" });
+  await expect(bubble).toBeVisible();
+
+  // Without a hover, the action group holding the "Add a reaction" trigger
+  // stays fully transparent (opacity-0) — invisible and unusable to a real
+  // touch user. (Playwright would still click through a transparent element,
+  // so opacity is what's asserted here, not `toBeVisible`.)
+  const addButton = bubble.getByRole("button", { name: "Add a reaction" });
+  const actionGroup = bubble.locator("div", {
+    has: pageA.getByRole("button", { name: "Add a reaction" }),
+  });
+  await expect(actionGroup).toHaveCSS("opacity", "0");
+
+  // Emulate a stationary long press: dispatch a real touchstart on the bubble,
+  // hold past the ~450ms threshold without moving, then release — exactly what
+  // the component's onTouchStart/Move/End handlers listen for. Dispatched from
+  // within the bubble so the event bubbles up to the handler on the content
+  // column, and with no touchmove in between so the "moved → it's a scroll"
+  // guard never cancels it.
+  const target = bubble.getByText("Long-press to react on mobile");
+  await target.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    const touch = new Touch({
+      identifier: 1,
+      target: el,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    });
+    el.dispatchEvent(
+      new TouchEvent("touchstart", {
+        bubbles: true,
+        cancelable: true,
+        touches: [touch],
+        targetTouches: [touch],
+        changedTouches: [touch],
+      }),
+    );
+  });
+
+  // Wait for the press to actually reveal the group (opacity animates to 1)
+  // before lifting the finger — polling on the outcome rather than a fixed
+  // hold avoids a race where a busy main thread delays the ~450ms timer past a
+  // hard-coded wait, and the touchend then cancels it.
+  await expect(actionGroup).toHaveCSS("opacity", "1");
+  await target.evaluate((el) => {
+    el.dispatchEvent(
+      new TouchEvent("touchend", {
+        bubbles: true,
+        cancelable: true,
+        touches: [],
+        targetTouches: [],
+        changedTouches: [],
+      }),
+    );
+  });
+
+  // The group is revealed and stays put after release; open the picker and
+  // react.
+  await addButton.click();
+  await pageA.getByRole("button", { name: "React with 👍" }).click();
+
+  const pill = bubble.getByRole("button", { name: "Remove 👍 reaction" });
+  await expect(pill).toBeVisible();
+  await expect(pill).toHaveText("👍1");
+
+  await contextA.close();
+  await contextB.close();
+});
+
 test("a group chat shows the sender's avatar beside their message", async ({
   browser,
   injectApiUrl,
