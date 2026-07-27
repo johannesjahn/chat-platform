@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
+import { Lightbox } from "@/components/Lightbox";
 import { CommentsSection, ReactionPicker } from "@/components/CommentsSection";
 import { RelativeTime } from "@/components/RelativeTime";
 import { CountUp } from "@/components/reactbits/CountUp";
@@ -96,6 +97,7 @@ export function PostCard({
     post.contentType === "text" && post.content.length > COLLAPSE_THRESHOLD;
   const [expanded, setExpanded] = useState(!isLongText);
   const [showComments, setShowComments] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const queryClient = useQueryClient();
   const addReaction = $api.useMutation("post", "/posts/{id}/reactions");
@@ -199,12 +201,19 @@ export function PostCard({
 
       <CardContent className="px-0">
         {post.contentType === "image_url" ? (
-          <img
-            src={post.content}
-            alt=""
-            loading="lazy"
-            className="aspect-4/5 w-full bg-muted object-cover"
-          />
+          <button
+            type="button"
+            onClick={() => setLightboxOpen(true)}
+            aria-label="View image full-size"
+            className="block w-full cursor-zoom-in"
+          >
+            <img
+              src={post.content}
+              alt=""
+              loading="lazy"
+              className="aspect-4/5 w-full bg-muted object-cover"
+            />
+          </button>
         ) : post.contentType === "attachment" && post.attachment ? (
           <div className="px-6 pt-2 pb-4">
             <AttachmentPreview attachment={post.attachment} />
@@ -294,6 +303,13 @@ export function PostCard({
         )}
       </CardFooter>
       {showComments && <CommentsSection postId={post.id} />}
+      {lightboxOpen && post.contentType === "image_url" && (
+        <Lightbox
+          src={post.content}
+          alt=""
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
     </Card>
   );
 }
