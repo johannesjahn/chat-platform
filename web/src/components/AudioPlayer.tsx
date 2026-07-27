@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Pause, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -89,6 +96,43 @@ export function AudioPlayer({ src, className }: AudioPlayerProps) {
     setCurrentTime(audio.currentTime);
   }
 
+  // Keyboard-activated clicks (Enter/Space on the focused button) arrive with
+  // no pointer coordinates — clientX is 0, which seekToClientX would read as
+  // "seek to the very start". Ignore those (detail === 0) and let onKeyDown
+  // drive seeking for keyboard users instead.
+  function seekFromClick(event: MouseEvent) {
+    if (event.detail === 0) return;
+    seekToClientX(event.clientX);
+  }
+
+  function seekBy(deltaSeconds: number) {
+    const audio = audioRef.current;
+    if (!audio || !duration) return;
+    const next = Math.min(
+      duration,
+      Math.max(0, audio.currentTime + deltaSeconds),
+    );
+    audio.currentTime = next;
+    setCurrentTime(next);
+  }
+
+  function onBarsKeyDown(event: KeyboardEvent) {
+    if (!duration) return;
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      seekBy(5);
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      seekBy(-5);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      seekBy(-duration);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      seekBy(duration);
+    }
+  }
+
   const progress = duration > 0 ? currentTime / duration : 0;
   const timeLabel = formatTime(
     currentTime > 0 || playing ? currentTime : duration,
@@ -118,8 +162,14 @@ export function AudioPlayer({ src, className }: AudioPlayerProps) {
       <button
         ref={barsRef}
         type="button"
+        role="slider"
         aria-label="Seek"
-        onClick={(e) => seekToClientX(e.clientX)}
+        aria-valuemin={0}
+        aria-valuemax={Math.floor(duration)}
+        aria-valuenow={Math.floor(currentTime)}
+        aria-valuetext={`${formatTime(currentTime)} of ${formatTime(duration)}`}
+        onClick={seekFromClick}
+        onKeyDown={onBarsKeyDown}
         className="flex h-8 min-w-0 flex-1 cursor-pointer items-end gap-px"
       >
         {heights.map((h, i) => {

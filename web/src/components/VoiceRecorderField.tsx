@@ -100,7 +100,13 @@ export function VoiceRecorderField({
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      recorderRef.current?.stop();
+      // Only an actively recording recorder can be stopped — calling stop()
+      // on one that's already inactive (the common case here: a clip was
+      // recorded, then the composer unmounts on navigation) throws
+      // InvalidStateError, which would surface as an uncaught error in this
+      // cleanup.
+      if (recorderRef.current?.state !== "inactive")
+        recorderRef.current?.stop();
       streamRef.current?.getTracks().forEach((track) => track.stop());
       uploadRef.current?.abort();
     };
