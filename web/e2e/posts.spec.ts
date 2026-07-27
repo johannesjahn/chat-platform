@@ -18,13 +18,28 @@ test("creating a post shows it in the feed, and infinite scroll loads more posts
 
   // Seed 7 more posts directly against the API — 8 total is enough to
   // exercise two infinite-scroll batches (5 up front, 3 more on scroll).
+  //
+  // Each seeded post is deliberately tall (several short lines, still well
+  // under PostCard's 500-char collapse threshold so it renders in full).
+  // The feed's IntersectionObserver eagerly prefetches the next batch while
+  // the sentinel is within 400px of the viewport (see web/src/routes/
+  // index.tsx), so if the first 5 cards didn't overflow the viewport the
+  // sentinel would be visible on load and batch 2 would auto-load before we
+  // could observe the 5-post state — making `toHaveCount(5)` racily flaky.
+  // Tall cards push the sentinel out of the prefetch zone, so the second
+  // batch only loads on the explicit scroll below, which is the whole point
+  // of this test.
   const session = await page.evaluate(() =>
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
   );
   for (let i = 0; i < 7; i++) {
+    const content = Array.from(
+      { length: 8 },
+      (_, line) => `Seeded post ${i} line ${line}`,
+    ).join("\n");
     const response = await request.post(`${apiUrl}/posts`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: { contentType: "text", content: `Seeded post ${i}` },
+      data: { contentType: "text", content },
     });
     expect(response.ok()).toBe(true);
   }
