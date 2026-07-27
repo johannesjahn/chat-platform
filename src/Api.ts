@@ -409,6 +409,13 @@ export const ALLOWED_ATTACHMENT_MIME_TYPES = [
   "audio/mpeg",
   "audio/ogg",
   "audio/wav",
+  // Voice messages recorded in-browser via MediaRecorder (see
+  // web/src/components/VoiceRecorderField.tsx): Chrome/Firefox default to
+  // audio/webm;codecs=opus, Safari to audio/mp4 (AAC). Both decode fine
+  // through the same ffmpeg-based processAudio() pipeline as any other
+  // uploaded audio file.
+  "audio/webm",
+  "audio/mp4",
 ] as const;
 
 // A generous ceiling for chat/post media while still bounding worst-case

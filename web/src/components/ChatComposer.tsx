@@ -2,6 +2,7 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   ImageIcon,
   Loader2,
+  Mic,
   Paperclip,
   Reply,
   SendHorizontal,
@@ -9,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { AttachmentUploadField } from "@/components/AttachmentUploadField";
+import { VoiceRecorderField } from "@/components/VoiceRecorderField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -58,13 +60,26 @@ function replyPreviewText(target: ReplyTarget): string {
   return target.content;
 }
 
+// UI-level mode the composer is in — a superset of the backend's
+// `MessageContentType`. "voice" has no backend counterpart: a voice message
+// is sent as an ordinary `attachment`-type message (see submit() below), it
+// just gets there via VoiceRecorderField's record-and-upload flow instead
+// of AttachmentUploadField's pick-a-file flow.
+type ComposerMode = MessageContentType | "voice";
+
+// Both "attachment" and "voice" send as an uploaded-attachment message —
+// they share the same `attachment` state and the same send gating below.
+function usesAttachment(mode: ComposerMode): mode is "attachment" | "voice" {
+  return mode === "attachment" || mode === "voice";
+}
+
 export function ChatComposer({
   chatId,
   onSend,
   replyingTo,
   onCancelReply,
 }: ChatComposerProps) {
-  const [contentType, setContentType] = useState<MessageContentType>("text");
+  const [contentType, setContentType] = useState<ComposerMode>("text");
   const [content, setContent] = useState("");
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [pending, setPending] = useState(false);
@@ -100,10 +115,9 @@ export function ChatComposer({
   // message locally instead of failing (see lib/offlineQueue.ts). An
   // attachment message can't be queued the same way (it needs a completed
   // upload, which needs a live connection), so it requires being online.
-  const canSend =
-    contentType === "attachment"
-      ? attachment !== null && !pending && isOnline
-      : trimmed.length > 0 && !overLimit && !invalidImageUrl && !pending;
+  const canSend = usesAttachment(contentType)
+    ? attachment !== null && !pending && isOnline
+    : trimmed.length > 0 && !overLimit && !invalidImageUrl && !pending;
 
   function notifyTyping() {
     const now = Date.now();
@@ -125,9 +139,9 @@ export function ChatComposer({
       // its id through as `parentMessageId` so the send records the link.
       const parentMessageId = replyingTo?.id;
       await onSend(
-        contentType === "attachment"
+        usesAttachment(contentType)
           ? {
-              contentType,
+              contentType: "attachment",
               content: attachment!.filename,
               attachmentId: attachment!.id,
               parentMessageId,
@@ -208,6 +222,16 @@ export function ChatComposer({
           >
             <Paperclip className="size-4" />
           </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant={contentType === "voice" ? "secondary" : "ghost"}
+            aria-label="Voice message"
+            aria-pressed={contentType === "voice"}
+            onClick={() => setContentType("voice")}
+          >
+            <Mic className="size-4" />
+          </Button>
         </div>
 
         {contentType === "text" ? (
@@ -235,8 +259,16 @@ export function ChatComposer({
             placeholder="https://picsum.photos/id/1/600/800"
             aria-invalid={invalidImageUrl}
           />
-        ) : (
+        ) : contentType === "attachment" ? (
           <AttachmentUploadField
+            attachment={attachment}
+            onUploaded={setAttachment}
+            onClear={() => setAttachment(null)}
+            disabled={pending}
+            className="flex-1"
+          />
+        ) : (
+          <VoiceRecorderField
             attachment={attachment}
             onUploaded={setAttachment}
             onClear={() => setAttachment(null)}
@@ -273,7 +305,7 @@ export function ChatComposer({
           picsum.photos, imgur.com, unsplash.com).
         </span>
       )}
-      {!isOnline && contentType === "attachment" ? (
+      {!isOnline && usesAttachment(contentType) ? (
         <span className="self-end text-xs text-muted-foreground">
           You&apos;re offline — file attachments can&apos;t be queued and need a
           live connection to send.
