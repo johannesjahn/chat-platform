@@ -148,7 +148,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
       <head>
         <HeadContent />
       </head>
-      <body>
+      <body className="flex min-h-[100dvh] flex-col">
         {children}
         <Scripts />
       </body>
