@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { FileText } from "lucide-react";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { BlurhashImage } from "@/components/BlurhashImage";
+import { Lightbox } from "@/components/Lightbox";
 import {
   attachmentKind,
   formatBytes,
@@ -24,16 +26,7 @@ export function AttachmentPreview({
   const kind = attachmentKind(attachment.mimeType);
 
   if (kind === "image") {
-    return (
-      <BlurhashImage
-        src={attachment.url}
-        alt={attachment.filename}
-        width={attachment.width}
-        height={attachment.height}
-        blurhash={attachment.blurhash}
-        className={cn("max-h-72 w-full rounded-lg", className)}
-      />
-    );
+    return <ImageAttachment attachment={attachment} className={className} />;
   }
 
   if (kind === "video") {
@@ -90,5 +83,38 @@ export function AttachmentPreview({
         {formatBytes(attachment.size)}
       </span>
     </a>
+  );
+}
+
+// Image attachments open full-size in a lightbox on click (issue #320). Kept
+// as its own component so `AttachmentPreview` itself stays a plain switch and
+// only image attachments carry the open/close state.
+function ImageAttachment({ attachment, className }: AttachmentPreviewProps) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label={`View ${attachment.filename} full-size`}
+        className="block w-full cursor-zoom-in"
+      >
+        <BlurhashImage
+          src={attachment.url}
+          alt={attachment.filename}
+          width={attachment.width}
+          height={attachment.height}
+          blurhash={attachment.blurhash}
+          className={cn("max-h-72 w-full rounded-lg", className)}
+        />
+      </button>
+      {open && (
+        <Lightbox
+          src={attachment.url}
+          alt={attachment.filename}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
   );
 }

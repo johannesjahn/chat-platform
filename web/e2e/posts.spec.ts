@@ -184,3 +184,42 @@ test("long posts are collapsed behind a Show more toggle", async ({
   await card.getByRole("button", { name: "Show less" }).click();
   await expect(showMore).toBeVisible();
 });
+
+test("clicking a feed image post opens it full-size in a lightbox", async ({
+  page,
+  request,
+  apiUrl,
+}) => {
+  const { username } = await registerViaUi(page);
+
+  // Seed an image post directly against the API — the point here is the
+  // feed's lightbox behavior, not the "new post" upload flow. The host is on
+  // the backend's image-URL allowlist (see ALLOWED_IMAGE_HOST_DOMAINS); the
+  // image itself never has to load for the card's click target to exist.
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  const response = await request.post(`${apiUrl}/posts`, {
+    headers: { Authorization: `Bearer ${session.accessToken}` },
+    data: {
+      contentType: "image_url",
+      content: "https://picsum.photos/seed/lightbox/600/800",
+    },
+  });
+  expect(response.ok()).toBe(true);
+
+  await page.goto("/");
+  const card = page.getByRole("article", { name: `Post by @${username}` });
+  await expect(card).toBeVisible();
+
+  // No lightbox until the image is clicked.
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  await card.getByRole("button", { name: "View image full-size" }).click();
+  const lightbox = page.getByRole("dialog", { name: "Image" });
+  await expect(lightbox).toBeVisible();
+
+  // Esc closes it again.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});

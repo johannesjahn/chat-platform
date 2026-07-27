@@ -24,6 +24,7 @@ import {
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
 import { ReactionAddButton, ReactionList } from "@/components/CommentsSection";
+import { Lightbox } from "@/components/Lightbox";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { $api } from "@/lib/api";
@@ -235,6 +236,7 @@ export function MessageBubble({
   // group, mirroring the long-press-to-react gesture of most mobile messaging
   // apps; desktop hover behaviour is left untouched.
   const [touchRevealed, setTouchRevealed] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
@@ -597,12 +599,19 @@ export function MessageBubble({
               </div>
             </div>
           ) : message.contentType === "image_url" ? (
-            <img
-              src={message.content}
-              alt=""
-              loading="lazy"
-              className="max-h-72 w-72 max-w-full rounded-lg bg-muted object-cover"
-            />
+            <button
+              type="button"
+              onClick={() => setLightboxOpen(true)}
+              aria-label="View image full-size"
+              className="block cursor-zoom-in"
+            >
+              <img
+                src={message.content}
+                alt=""
+                loading="lazy"
+                className="max-h-72 w-72 max-w-full rounded-lg bg-muted object-cover"
+              />
+            </button>
           ) : message.contentType === "attachment" && message.attachment ? (
             <AttachmentPreview
               attachment={message.attachment}
@@ -748,6 +757,13 @@ export function MessageBubble({
             </Button>
           )}
         </div>
+      )}
+      {lightboxOpen && message.contentType === "image_url" && (
+        <Lightbox
+          src={message.content}
+          alt=""
+          onClose={() => setLightboxOpen(false)}
+        />
       )}
     </div>
   );
