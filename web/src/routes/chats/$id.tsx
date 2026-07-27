@@ -232,13 +232,13 @@ function ChatView({ id }: { id: string }) {
 
   if (chatLoading) {
     return (
-      <main className="mx-auto w-full max-w-2xl px-4 py-10">
-        <Card>
-          <CardHeader className="flex flex-row items-center gap-3">
+      <main className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col sm:px-4 sm:py-6">
+        <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-none border-x-0 py-0 sm:rounded-xl sm:border-x">
+          <CardHeader className="flex shrink-0 flex-row items-center gap-3 border-b border-border py-3">
             <Skeleton className="size-9 rounded-full" />
             <Skeleton className="h-4 w-32" />
           </CardHeader>
-          <CardContent className="flex h-96 flex-col justify-end gap-3">
+          <CardContent className="flex min-h-0 flex-1 flex-col justify-end gap-3 px-4 py-4">
             <Skeleton className="h-10 w-2/3 self-start rounded-2xl" />
             <Skeleton className="h-10 w-1/2 self-end rounded-2xl" />
             <Skeleton className="h-10 w-3/5 self-start rounded-2xl" />
@@ -358,9 +358,9 @@ function ChatView({ id }: { id: string }) {
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-10">
-      <Card className="overflow-hidden py-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
-        <CardHeader className="flex flex-row items-center gap-3 border-b border-border py-3">
+    <main className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col sm:px-4 sm:py-6">
+      <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-none border-x-0 py-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 sm:rounded-xl sm:border-x">
+        <CardHeader className="flex shrink-0 flex-row items-center gap-3 border-b border-border py-3">
           <Button
             asChild
             size="icon"
@@ -444,12 +444,12 @@ function ChatView({ id }: { id: string }) {
           enabled={!!session}
           onJump={jumpToMessage}
         />
-        <CardContent className="px-0">
+        <CardContent className="min-h-0 flex-1 px-0">
           <div
             ref={scrollRef}
             onScroll={handleScroll}
             data-testid="chat-scroll"
-            className="flex h-[60vh] flex-col gap-2 overflow-y-auto px-4 py-4"
+            className="flex h-full flex-col gap-2 overflow-y-auto px-4 py-4"
           >
             {loadingEarlier && (
               <div className="flex justify-center py-1">
