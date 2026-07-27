@@ -1,4 +1,5 @@
 import { FileText } from "lucide-react";
+import { AudioPlayer } from "@/components/AudioPlayer";
 import { BlurhashImage } from "@/components/BlurhashImage";
 import {
   attachmentKind,
@@ -48,11 +49,7 @@ export function AttachmentPreview({
 
   if (kind === "audio") {
     return (
-      <audio
-        src={attachment.url}
-        controls
-        className={cn("w-full", className)}
-      />
+      <AudioPlayer src={attachment.url} className={cn("w-full", className)} />
     );
   }
 

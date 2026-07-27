@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
   MAX_ATTACHMENT_SIZE_BYTES,
+  attachmentKind,
   formatBytes,
   isAllowedAttachmentFile,
   uploadAttachment,
@@ -86,6 +87,31 @@ export function AttachmentUploadField({
   }
 
   if (attachment) {
+    // AudioPlayer's pill fills its row edge to edge (no empty corner to
+    // float a button over, unlike image/video/pdf previews below), so an
+    // audio attachment gets the remove control beside it instead of
+    // overlaid on top.
+    if (attachmentKind(attachment.mimeType) === "audio") {
+      return (
+        <div className={cn("flex items-center gap-2", className)}>
+          <AttachmentPreview
+            attachment={attachment}
+            className="min-w-0 flex-1"
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="secondary"
+            aria-label="Remove attachment"
+            disabled={disabled}
+            onClick={onClear}
+            className="size-8 shrink-0 shadow"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+      );
+    }
     return (
       <div className={cn("relative", className)}>
         <AttachmentPreview attachment={attachment} />

@@ -23,6 +23,10 @@ export const ALLOWED_ATTACHMENT_MIME_TYPES = [
   "audio/mpeg",
   "audio/ogg",
   "audio/wav",
+  // Recorded voice messages (VoiceRecorderField.tsx) — Chrome/Firefox's
+  // MediaRecorder defaults to audio/webm;codecs=opus, Safari to audio/mp4.
+  "audio/webm",
+  "audio/mp4",
 ] as const;
 
 export const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024;

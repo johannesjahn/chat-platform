@@ -307,6 +307,24 @@
   animation: spin-slow 12s linear infinite;
 }
 
+@keyframes waveform-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.55);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* Per-bar idle pulse for AudioPlayer's waveform while a clip is playing —
+   each bar staggers its own `animation-delay` (see AudioPlayer.tsx) so the
+   row reads as a lively equalizer rather than bars blinking in unison. */
+@utility animate-waveform-bounce {
+  animation: waveform-bounce 0.9s ease-in-out infinite;
+  transform-origin: bottom;
+}
+
 /* Custom springy transitions and smooth easing curves */
 @utility ease-spring {
   transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -323,7 +341,8 @@
   .animate-presence-ping,
   .animate-like-pop,
   .animate-float,
-  .animate-spin-slow {
+  .animate-spin-slow,
+  .animate-waveform-bounce {
     animation: none;
   }
 
