@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { and, desc, eq, ilike, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 import { Context, Effect, FiberRef, Metric, MetricLabel } from "effect";
 import { currentLogUser } from "./RedactedLogger.ts";
 import {
@@ -10,8 +10,10 @@ import {
   InvalidAvatarUpload,
   InvalidBlockRequest,
   InvalidCredentials,
+  InvalidUsernameLookupRequest,
   InvalidUserSearchRequest,
   MAX_AVATAR_UPLOAD_SIZE_BYTES,
+  MAX_USERNAME_LOOKUP_COUNT,
   MIN_USER_SEARCH_QUERY_LENGTH,
   NotFound,
   TooManyRequests,
@@ -360,6 +362,44 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               .orderBy(users.username)
               .limit(USER_SEARCH_RESULTS_LIMIT),
           ).pipe(Effect.orDie);
+          return rows.map(toPublicUser);
+        }),
+      )
+      .handle("lookupUsersByUsername", ({ urlParams: { usernames } }) =>
+        Effect.gen(function* () {
+          // The parameter is one comma-separated batch (see
+          // `UsernameLookupQuery`); blanks and duplicates are dropped
+          // before the cap is applied, so a sloppily-joined list ("a,,a")
+          // costs a caller nothing.
+          const names = [
+            ...new Set(
+              usernames
+                .split(",")
+                .map((name) => name.trim().toLowerCase())
+                .filter((name) => name.length > 0),
+            ),
+          ];
+          if (names.length > MAX_USERNAME_LOOKUP_COUNT)
+            return yield* Effect.fail(
+              new InvalidUsernameLookupRequest({
+                message: `usernames must name at most ${MAX_USERNAME_LOOKUP_COUNT} users`,
+              }),
+            );
+          if (names.length === 0) return [];
+
+          const db = yield* Db;
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select(publicUserColumns)
+              .from(users)
+              // `lower(username)` is exactly the expression the unique
+              // index is built on (see db/schema.ts), so this stays an
+              // index lookup rather than a scan.
+              .where(inArray(sql`lower(${users.username})`, names))
+              .orderBy(users.username),
+          ).pipe(Effect.orDie);
+          // Names with no account are simply missing from the result — the
+          // client renders those mentions as plain text.
           return rows.map(toPublicUser);
         }),
       )

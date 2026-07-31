@@ -1020,6 +1020,35 @@ export class InvalidUserSearchRequest extends Schema.TaggedError<InvalidUserSear
   { message: Schema.String },
 ) {}
 
+// How many usernames one `GET /users/by-username` call may resolve (issue
+// #318). Comfortably more distinct `@mentions` than a single post, comment
+// or message realistically carries, while keeping the `IN (…)` list — and
+// the response — bounded no matter what a client asks for.
+export const MAX_USERNAME_LOOKUP_COUNT = 32;
+
+// Cap on the raw comma-separated parameter: `MAX_USERNAME_LOOKUP_COUNT`
+// maximum-length usernames plus the commas between them.
+export const MAX_USERNAME_LOOKUP_LENGTH =
+  MAX_USERNAME_LOOKUP_COUNT * (MAX_USERNAME_LENGTH + 1);
+
+// Comma-separated rather than a repeated query parameter so the whole batch
+// stays a single scalar value — one query key on the client, one string to
+// bound here. Left un-`identifier`-annotated for the same reason as
+// `UserSearchQuery` above (see CLAUDE.md).
+export const UsernameLookupQuery = Schema.Struct({
+  usernames: Schema.Trim.pipe(Schema.maxLength(MAX_USERNAME_LOOKUP_LENGTH)),
+});
+
+// Raised by `lookupUsersByUsername` when a caller asks for more than
+// `MAX_USERNAME_LOOKUP_COUNT` usernames at once. Names that don't resolve
+// are *not* an error — they're simply absent from the response (see the
+// handler), so an `@mention` of someone who doesn't exist renders as plain
+// text rather than failing the whole lookup.
+export class InvalidUsernameLookupRequest extends Schema.TaggedError<InvalidUsernameLookupRequest>()(
+  "InvalidUsernameLookupRequest",
+  { message: Schema.String },
+) {}
+
 // Mime types `POST /users/me/avatar` accepts (issue #269) — narrower than
 // `ALLOWED_ATTACHMENT_MIME_TYPES`: no GIF (animated avatars are explicitly
 // out of scope for the initial cut) and no video/audio.
@@ -1064,6 +1093,21 @@ const UsersGroup = HttpApiGroup.make("users")
       .setUrlParams(UserSearchQuery)
       .addSuccess(Schema.Array(User))
       .addError(InvalidUserSearchRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Resolves a batch of `@username` mentions to the users they refer to
+    // (issue #318), so the client can link each one to its profile without
+    // abusing `searchUsers` (an ILIKE scan, and off-limits below
+    // `MIN_USER_SEARCH_QUERY_LENGTH` characters for non-admins — which a
+    // short username would trip). Matching is case-insensitive, mirroring
+    // the case-insensitive uniqueness of `username` itself (issue #175).
+    // Registered ahead of `getUser` so `/users/by-username` isn't first
+    // matched against `/users/:id`.
+    HttpApiEndpoint.get("lookupUsersByUsername", "/users/by-username")
+      .setUrlParams(UsernameLookupQuery)
+      .addSuccess(Schema.Array(User))
+      .addError(InvalidUsernameLookupRequest, { status: 400 })
       .middleware(Authentication),
   )
   .add(

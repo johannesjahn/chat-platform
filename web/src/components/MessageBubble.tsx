@@ -25,8 +25,9 @@ import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
 import { ReactionAddButton, ReactionList } from "@/components/CommentsSection";
 import { Lightbox } from "@/components/Lightbox";
+import { MentionText } from "@/components/MentionText";
+import { MentionTextarea } from "@/components/MentionTextarea";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { $api } from "@/lib/api";
 import { attachmentKind } from "@/lib/attachments";
 import {
@@ -545,10 +546,10 @@ export function MessageBubble({
 
           {isEditing ? (
             <div className="flex flex-col gap-1.5">
-              <Textarea
+              <MentionTextarea
                 autoFocus
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onValueChange={setDraft}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -625,7 +626,15 @@ export function MessageBubble({
                   !expanded && "line-clamp-4",
                 )}
               >
-                {message.content}
+                <MentionText
+                  text={message.content}
+                  // The primary-tinted link colour is invisible on an own
+                  // message's primary-filled bubble — underline it against
+                  // the bubble's own foreground colour there instead.
+                  className={
+                    isOwn ? "text-primary-foreground underline" : undefined
+                  }
+                />
               </p>
               {isLongText && (
                 <Button

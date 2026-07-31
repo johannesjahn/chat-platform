@@ -10,9 +10,10 @@ import {
   Trash2,
 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { MentionText } from "@/components/MentionText";
+import { MentionTextarea } from "@/components/MentionTextarea";
 import { RelativeTime } from "@/components/RelativeTime";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import {
@@ -76,10 +77,10 @@ function CommentComposer({
         }
       }}
     >
-      <Textarea
+      <MentionTextarea
         value={value}
         autoFocus={autoFocus}
-        onChange={(e) => setValue(e.target.value)}
+        onValueChange={setValue}
         placeholder={placeholder}
         rows={2}
         aria-invalid={overLimit}
@@ -393,7 +394,7 @@ function CommentItem({
             </div>
           ) : (
             <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-              {comment.content}
+              <MentionText text={comment.content} />
             </p>
           )}
         </div>
