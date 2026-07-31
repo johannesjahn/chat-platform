@@ -1,6 +1,7 @@
 import { type ReactNode, useState } from "react";
 import { ImageIcon, Loader2, Paperclip, Type } from "lucide-react";
 import { AttachmentUploadField } from "@/components/AttachmentUploadField";
+import { MentionTextarea } from "@/components/MentionTextarea";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,7 +14,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
 import type { Attachment } from "@/lib/attachments";
 import { errorMessage } from "@/lib/errors";
 import { isAllowedImageUrl } from "@/lib/imageHosts";
@@ -205,10 +205,10 @@ export function PostForm({
                   {contentType === "text" ? "Text" : "Image URL"}
                 </Label>
                 {contentType === "text" ? (
-                  <Textarea
+                  <MentionTextarea
                     id="content"
                     value={content}
-                    onChange={(e) => setContent(e.target.value)}
+                    onValueChange={setContent}
                     placeholder="What's on your mind?"
                     rows={6}
                     required

@@ -10,10 +10,10 @@ import {
   X,
 } from "lucide-react";
 import { AttachmentUploadField } from "@/components/AttachmentUploadField";
+import { MentionTextarea } from "@/components/MentionTextarea";
 import { VoiceRecorderField } from "@/components/VoiceRecorderField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { $api } from "@/lib/api";
 import type { Attachment } from "@/lib/attachments";
 import { isAllowedImageUrl } from "@/lib/imageHosts";
@@ -235,15 +235,18 @@ export function ChatComposer({
         </div>
 
         {contentType === "text" ? (
-          <Textarea
+          <MentionTextarea
             ref={textareaRef}
             value={content}
-            onChange={(e) => handleContentChange(e.target.value)}
+            onValueChange={handleContentChange}
             onKeyDown={handleKeyDown}
             placeholder="Write a message… (Enter to send, Shift+Enter for a new line)"
             rows={1}
             aria-invalid={overLimit}
-            className="min-h-9 max-h-40 flex-1 resize-none py-2 transition-[height] duration-150 ease-smooth overflow-y-auto"
+            // `flex-1` moves to the wrapper the mention popup is positioned
+            // against; the textarea itself fills it.
+            containerClassName="flex-1"
+            className="min-h-9 max-h-40 w-full resize-none py-2 transition-[height] duration-150 ease-smooth overflow-y-auto"
           />
         ) : contentType === "image_url" ? (
           <Input

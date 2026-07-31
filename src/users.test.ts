@@ -16,6 +16,8 @@ import {
   MAX_STATUS_TEXT_LENGTH,
   MAX_USER_SEARCH_QUERY_LENGTH,
   MAX_USERNAME_LENGTH,
+  MAX_USERNAME_LOOKUP_COUNT,
+  MAX_USERNAME_LOOKUP_LENGTH,
   MIN_PASSWORD_LENGTH,
 } from "./Api.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
@@ -403,6 +405,125 @@ test("searchUsers returns no results for a query that matches nobody", () =>
         urlParams: { q: "zzzzz" },
       });
       expect(results).toEqual([]);
+    }),
+  ));
+
+test("lookupUsersByUsername rejects an unauthenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const result = yield* c.users
+        .lookupUsersByUsername({ urlParams: { usernames: "alice" } })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
+    }),
+  ));
+
+test("lookupUsersByUsername resolves a batch of names case-insensitively, skipping the ones that don't exist", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "Mira", password: "pw-mira123" },
+      });
+      yield* c.users.register({
+        payload: { username: "quinn", password: "pw-quinn123" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "quinn", password: "pw-quinn123" },
+      });
+
+      const authed = yield* makeAuthedClient(accessToken);
+      const results = yield* authed.users.lookupUsersByUsername({
+        // "mira" differs in case from the stored "Mira"; "nobody" has no
+        // account at all and is simply absent from the response.
+        urlParams: { usernames: "mira,nobody,QUINN" },
+      });
+      expect(results.map((u) => u.username)).toEqual(["Mira", "quinn"]);
+      expect(results.every((u) => !("passwordHash" in u))).toBe(true);
+    }),
+  ));
+
+test("lookupUsersByUsername ignores blank and duplicate names", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "rowan", password: "pw-rowan123" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "rowan", password: "pw-rowan123" },
+      });
+
+      const authed = yield* makeAuthedClient(accessToken);
+      const results = yield* authed.users.lookupUsersByUsername({
+        urlParams: { usernames: "rowan , ,rowan," },
+      });
+      expect(results.map((u) => u.username)).toEqual(["rowan"]);
+
+      // An entirely empty batch is a no-op rather than an error, so a
+      // caller needn't special-case content with no mentions in it.
+      const empty = yield* authed.users.lookupUsersByUsername({
+        urlParams: { usernames: "" },
+      });
+      expect(empty).toEqual([]);
+    }),
+  ));
+
+test("lookupUsersByUsername rejects a batch naming more than the maximum number of users", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "sasha", password: "pw-sasha123" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "sasha", password: "pw-sasha123" },
+      });
+
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.users
+        .lookupUsersByUsername({
+          urlParams: {
+            usernames: Array.from(
+              { length: MAX_USERNAME_LOOKUP_COUNT + 1 },
+              (_, i) => `u${i}`,
+            ).join(","),
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidUsernameLookupRequest",
+        );
+      }
+    }),
+  ));
+
+test("lookupUsersByUsername rejects a parameter longer than the maximum length", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "tobias", password: "pw-tobias123" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "tobias", password: "pw-tobias123" },
+      });
+
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.users
+        .lookupUsersByUsername({
+          urlParams: {
+            usernames: "t".repeat(MAX_USERNAME_LOOKUP_LENGTH + 1),
+          },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
     }),
   ));
 

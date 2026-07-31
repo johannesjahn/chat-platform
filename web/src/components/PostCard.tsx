@@ -14,6 +14,7 @@ import {
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
 import { Lightbox } from "@/components/Lightbox";
+import { MentionText } from "@/components/MentionText";
 import { CommentsSection, ReactionPicker } from "@/components/CommentsSection";
 import { RelativeTime } from "@/components/RelativeTime";
 import { CountUp } from "@/components/reactbits/CountUp";
@@ -226,7 +227,7 @@ export function PostCard({
                 (!expanded ? " line-clamp-6" : "")
               }
             >
-              {post.content}
+              <MentionText text={post.content} />
             </p>
             {isLongText && (
               <Button

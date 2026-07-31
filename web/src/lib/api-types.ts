@@ -20,6 +20,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users/by-username": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["users.lookupUsersByUsername"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users/{id}": {
         parameters: {
             query?: never;
@@ -828,6 +844,11 @@ export interface components {
             /** @enum {string} */
             _tag: "Unauthorized";
         };
+        InvalidUsernameLookupRequest: {
+            message: string;
+            /** @enum {string} */
+            _tag: "InvalidUsernameLookupRequest";
+        };
         /** @description a string to be decoded into a number */
         NumberFromString: string;
         NotFound: {
@@ -1325,6 +1346,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidUserSearchRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+        };
+    };
+    "users.lookupUsersByUsername": {
+        parameters: {
+            query: {
+                /** @description a string that will be trimmed */
+                usernames: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"][];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidUsernameLookupRequest"];
                 };
             };
             /** @description Unauthorized */
