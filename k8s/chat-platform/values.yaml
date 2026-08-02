@@ -28,10 +28,17 @@ backend:
     type: ClusterIP
     port: 80
 
+  # Requests are what the scheduler packs a node with, so they're kept at a
+  # realistic steady-state figure rather than a token floor — a limit set far
+  # above the request lets the node accept more pods than it can actually
+  # feed, which is how this cluster ended up with memory limits totalling
+  # ~140% of node RAM against requests of ~42%. Limit stays at ~2x the
+  # request for burst headroom. See ../observability/README.md's "Resource
+  # footprint" for the whole-node budget.
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 256Mi
     limits:
       cpu: 500m
       memory: 512Mi
@@ -149,10 +156,11 @@ postgres:
     # Empty uses the cluster's default StorageClass.
     storageClassName: ""
 
+  # See backend.resources above for the request/limit sizing rationale.
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 512Mi
     limits:
       cpu: 1000m
       memory: 1Gi
@@ -175,10 +183,11 @@ redis:
     size: 1Gi
     storageClassName: ""
 
+  # See backend.resources above for the request/limit sizing rationale.
   resources:
     requests:
       cpu: 50m
-      memory: 64Mi
+      memory: 128Mi
     limits:
       cpu: 250m
       memory: 256Mi
@@ -239,10 +248,11 @@ minio:
     size: 10Gi
     storageClassName: ""
 
+  # See backend.resources above for the request/limit sizing rationale.
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 256Mi
     limits:
       cpu: 500m
       memory: 512Mi

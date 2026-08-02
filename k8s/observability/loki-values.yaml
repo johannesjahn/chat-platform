@@ -41,6 +41,15 @@ loki:
 
 sidecar:
   disableX509StrictVerification: true
+  # The rules sidecar container ships with no resources of its own —
+  # unbounded in the loki pod. It only watches ConfigMaps.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
 deploymentMode: SingleBinary
 
 singleBinary:
@@ -52,10 +61,36 @@ singleBinary:
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 512Mi
     limits:
       cpu: 500m
       memory: 1Gi
+
+# The chart deploys two memcached StatefulSets by default, sized for a
+# multi-node Loki cluster: `chunks-cache` asks for **9830Mi** of memory
+# (`-m 8192` plus the chart's 1.2x headroom factor) and `results-cache` for
+# another **1229Mi** — as *requests*, not just limits. On a single ~8Gi node
+# that is more than the whole machine, so chunks-cache can never be
+# scheduled (kubelet rejects it with an `OutOfmemory` pod status) and
+# results-cache alone eats ~15% of the node to cache queries nobody is
+# running. Both are optional for SingleBinary mode — Loki falls back to its
+# in-process caches — so they stay off here, same "overkill for a
+# microk8s-sized cluster" reasoning as SingleBinary over
+# SimpleScalable/Distributed above. The singleBinary memory request above is
+# raised to compensate, since those in-process caches now live in this pod.
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+
+# The canary writes synthetic log lines and asserts they come back, as a
+# DaemonSet with no resource requests/limits of its own — useful signal, but
+# not worth an unbudgeted pod per node here (nothing alerts on it; see #121).
+# NOTE: this is a top-level key in chart 7.x. It used to live under
+# `monitoring.lokiCanary`, which is why the block further down set it there
+# and it kept running anyway.
+lokiCanary:
+  enabled: false
 
 # Everything below is only relevant to the SimpleScalable/Distributed
 # deployment modes — explicitly zeroed out rather than left running
@@ -73,16 +108,15 @@ gateway:
   enabled: false
 
 # Not part of this pass (see #121) — no ServiceMonitor/PrometheusRule CRDs
-# installed, and no separate self-monitoring/canary components to run
-# alongside the vm-stack already deployed for metrics.
+# installed, and no separate self-monitoring components to run alongside the
+# vm-stack already deployed for metrics. (The canary is disabled via the
+# top-level `lokiCanary` key above; chart 7.x also dropped the
+# `serviceMonitor`/`selfMonitoring` keys this block used to set, so only the
+# two below remain — both already default to false, kept explicit.)
 monitoring:
-  serviceMonitor:
+  dashboards:
     enabled: false
-  selfMonitoring:
-    enabled: false
-    grafanaAgent:
-      installOperator: false
-  lokiCanary:
+  rules:
     enabled: false
 
 test:
