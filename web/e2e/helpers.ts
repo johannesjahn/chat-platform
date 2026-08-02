@@ -79,6 +79,43 @@ export function randomUsername(): string {
   return `u_${randomBytes(9).toString("base64url")}`;
 }
 
+declare global {
+  interface Window {
+    // Installed by `fakeOnScreenKeyboard` below.
+    __shrinkVisualViewport: (height: number | null) => void;
+  }
+}
+
+// Stands in for an on-screen keyboard, which no browser automation can
+// actually raise. A real one shrinks only the *visual* viewport on iOS Safari
+// (and on Android Chrome's `resizes-visual` default) while the layout
+// viewport — and so `100dvh` — stays at full height; Playwright's
+// `setViewportSize` moves both together, so the divergence is faked here by
+// overriding what `visualViewport.height` reports and firing the `resize` the
+// browser would have. Call before navigating, then drive it from the test with
+// `page.evaluate(() => window.__shrinkVisualViewport(400))` and `null` to put
+// the keyboard away again.
+export async function fakeOnScreenKeyboard(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const viewport = window.visualViewport!;
+    const real = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(viewport),
+      "height",
+    )!;
+    let override: number | null = null;
+    Object.defineProperty(viewport, "height", {
+      configurable: true,
+      get: () => override ?? real.get!.call(viewport),
+    });
+    Object.defineProperty(window, "__shrinkVisualViewport", {
+      value: (height: number | null) => {
+        override = height;
+        viewport.dispatchEvent(new Event("resize"));
+      },
+    });
+  });
+}
+
 // Registers a new user through the UI (which auto-logs them in) and returns
 // the credentials, so callers can act as this user or log back in as them
 // from a different browser context.

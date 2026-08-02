@@ -40,6 +40,7 @@ import { useIsOnline } from "@/lib/presence";
 import { isStatusVisible, useUserStatus } from "@/lib/status";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
 import { userAvatarName, userLabel } from "@/lib/users";
+import { useImmersiveShell } from "@/lib/viewport";
 
 export const Route = createFileRoute("/chats/$id")({
   component: ChatViewPage,
@@ -49,6 +50,17 @@ export const Route = createFileRoute("/chats/$id")({
 // fractional scroll heights (sub-pixel layout, zoom) mean an exact
 // `scrollHeight - scrollTop === clientHeight` comparison almost never lands.
 const BOTTOM_EPSILON_PX = 24;
+
+// The conversation's own header, shared with the loading skeleton so the two
+// are the same height and opening a chat doesn't shift the thread.
+//
+// It owns `env(safe-area-inset-top)` below `sm`, where the immersive shell
+// hides the site nav (see styles.css) and this becomes the topmost chrome on
+// screen — `viewport-fit=cover` lets the page run under the status bar, so
+// something has to put a background there or the clock sits on the messages.
+// Above `sm` the nav is back and owns the inset again, hence `sm:pt-3`.
+const CHAT_HEADER_CLASS =
+  "flex shrink-0 flex-row items-center gap-3 border-b border-border pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-3";
 
 function ChatViewPage() {
   const { id } = Route.useParams();
@@ -103,6 +115,14 @@ function ChatView({ id }: { id: string }) {
     "delete",
     "/chats/{id}/messages/{messageId}",
   );
+
+  // Take over the whole screen for as long as there's a conversation (or the
+  // skeleton standing in for one) to show: the page stops scrolling and, on a
+  // phone, the site nav gives its space to the thread. See
+  // `useImmersiveShell`. Deliberately *not* on for the logged-out and
+  // can't-load branches below — those are ordinary pages, and hiding the nav
+  // would leave them with no way out.
+  useImmersiveShell(!!session && (chatLoading || chat != null));
 
   const [managingGroup, setManagingGroup] = useState(false);
   // The message a reply is currently being composed against (issue #217), or
@@ -295,7 +315,7 @@ function ChatView({ id }: { id: string }) {
     return (
       <main className="mx-auto flex min-h-0 w-full max-w-2xl grow basis-0 flex-col sm:px-4 sm:py-6">
         <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-none border-x-0 py-0 sm:rounded-xl sm:border-x">
-          <CardHeader className="flex shrink-0 flex-row items-center gap-3 border-b border-border py-3">
+          <CardHeader className={CHAT_HEADER_CLASS}>
             <Skeleton className="size-9 rounded-full" />
             <Skeleton className="h-4 w-32" />
           </CardHeader>
@@ -433,7 +453,7 @@ function ChatView({ id }: { id: string }) {
     // what issue #321's fill-the-screen layout was after all along.
     <main className="mx-auto flex min-h-0 w-full max-w-2xl grow basis-0 flex-col sm:px-4 sm:py-6">
       <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-none border-x-0 py-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 sm:rounded-xl sm:border-x">
-        <CardHeader className="flex shrink-0 flex-row items-center gap-3 border-b border-border py-3">
+        <CardHeader className={CHAT_HEADER_CLASS}>
           <Button
             asChild
             size="icon"
