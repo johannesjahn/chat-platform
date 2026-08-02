@@ -708,3 +708,79 @@ test("a client that missed a chat_updated push while its socket was down catches
   await contextA.close();
   await contextB.close();
 });
+
+test("a long conversation fits the viewport and opens scrolled to the newest message", async ({
+  page,
+  request,
+  apiUrl,
+  browser,
+  injectApiUrl,
+}) => {
+  test.setTimeout(90_000);
+
+  await registerViaUi(page);
+
+  const otherContext = await browser.newContext();
+  await injectApiUrl(otherContext);
+  const otherPage = await otherContext.newPage();
+  const { username: otherUsername } = await registerViaUi(otherPage);
+  await otherContext.close();
+
+  await page.goto("/chats/new");
+  await page.getByRole("button", { name: "Direct message" }).click();
+  await page.fill("#user-search", otherUsername);
+  await page.getByRole("button", { name: `@${otherUsername}` }).click();
+  await expect(page).toHaveURL(/\/chats\/\d+/);
+  const chatId = page.url().split("/").pop();
+
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  // Comfortably more than fits on one screen, so the thread has to scroll.
+  for (let i = 0; i < 30; i++) {
+    const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      data: {
+        contentType: "text",
+        content: `Seeded message ${i} — long enough to wrap onto more than one line in the bubble.`,
+      },
+    });
+    expect(response.ok()).toBe(true);
+  }
+
+  await page.reload();
+  await expect(page.getByText("Seeded message 29")).toBeVisible();
+  // The composer's auto-size and the message-in animations settle a beat
+  // after the thread first paints — the assertions below are about where
+  // things end up once they have.
+  await page.waitForTimeout(1_000);
+
+  // The whole conversation lives inside the viewport: the page itself must
+  // not scroll, or the composer ends up below the fold and the thread has to
+  // be chased with the *window* scrollbar — the fill-the-screen layout issue
+  // #321 asked for, which `flex-1` alone silently didn't deliver.
+  const pageScrollable = await page.evaluate(
+    () =>
+      document.documentElement.scrollHeight >
+      document.documentElement.clientHeight + 1,
+  );
+  expect(pageScrollable).toBe(false);
+
+  // ...and the thread's own scroll container is what scrolls, parked at the
+  // bottom so the newest message is the one on screen.
+  const scrollState = await page.getByTestId("chat-scroll").evaluate((el) => ({
+    scrollable: el.scrollHeight > el.clientHeight,
+    distanceFromBottom: Math.round(
+      el.scrollHeight - el.scrollTop - el.clientHeight,
+    ),
+  }));
+  expect(scrollState.scrollable).toBe(true);
+  expect(scrollState.distanceFromBottom).toBeLessThanOrEqual(24);
+
+  // The newest bubble is genuinely on screen, not just scrolled-to in theory.
+  const viewportHeight = page.viewportSize()!.height;
+  const newest = await page.getByText("Seeded message 29").boundingBox();
+  expect(newest).not.toBeNull();
+  expect(newest!.y).toBeGreaterThanOrEqual(0);
+  expect(newest!.y + newest!.height).toBeLessThanOrEqual(viewportHeight);
+});

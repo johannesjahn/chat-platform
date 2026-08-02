@@ -45,6 +45,11 @@ export const Route = createFileRoute("/chats/$id")({
   component: ChatViewPage,
 });
 
+// How close to the bottom of the thread still counts as "at the bottom" —
+// fractional scroll heights (sub-pixel layout, zoom) mean an exact
+// `scrollHeight - scrollTop === clientHeight` comparison almost never lands.
+const BOTTOM_EPSILON_PX = 24;
+
 function ChatViewPage() {
   const { id } = Route.useParams();
   // Keyed by `id` so every hook (including the message pagination window in
@@ -105,13 +110,33 @@ function ChatView({ id }: { id: string }) {
   const [replyingTo, setReplyingTo] = useState<ReplyTarget | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const lastMessageIdRef = useRef<number | null>(null);
   const prevScrollHeightRef = useRef<number | null>(null);
   const initializedRef = useRef(false);
+  // Whether the thread should stay stuck to its bottom edge. Starts true so a
+  // chat that hasn't been scrolled yet keeps following the newest message
+  // while it's still settling (see the ResizeObserver below).
+  const atBottomRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
+
+  function scrollToBottom(behavior: ScrollBehavior) {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    atBottomRef.current = true;
+    lastScrollTopRef.current = el.scrollTop;
+  }
 
   const messages = messagesData?.messages ?? [];
   const pendingMessages = useQueuedMessages(chatId);
+
+  const myUserId = session?.user.id;
+  // The conversation's own markup (and with it `scrollRef`/`contentRef`) only
+  // mounts once the chat has loaded — the effects below key off this so they
+  // re-run against the real elements rather than the loading skeleton's nulls.
+  const chatReady = chat != null;
 
   const newestMessage = messages[messages.length - 1];
   const newestMessageId = newestMessage?.id;
@@ -120,26 +145,47 @@ function ChatView({ id }: { id: string }) {
 
   // Auto-scroll to the bottom on first load and whenever the newest message
   // changes — a real new message, not just an earlier page loading in.
-  useEffect(() => {
+  // `useLayoutEffect`, so the opening jump lands before the browser paints:
+  // with `useEffect` the thread was visible at the top for a frame first.
+  // A later message only pulls the view down when the user is already at the
+  // bottom (or sent it themselves) — otherwise someone reading back through
+  // the history would get yanked away from what they're reading.
+  useLayoutEffect(() => {
     if (newestMessageId == null) return;
-    if (lastMessageIdRef.current !== newestMessageId) {
-      lastMessageIdRef.current = newestMessageId;
-      scrollRef.current?.scrollTo({
-        top: scrollRef.current.scrollHeight,
-        behavior: initializedRef.current ? "smooth" : "auto",
-      });
-      initializedRef.current = true;
+    if (lastMessageIdRef.current === newestMessageId) return;
+    lastMessageIdRef.current = newestMessageId;
+    const isInitial = !initializedRef.current;
+    initializedRef.current = true;
+    if (isInitial) {
+      scrollToBottom("auto");
+    } else if (atBottomRef.current || newestMessageSenderId === myUserId) {
+      scrollToBottom("smooth");
     }
-  }, [newestMessageId]);
+  }, [newestMessageId, newestMessageSenderId, myUserId]);
+
+  // Content that grows *after* it was first laid out — an image finishing its
+  // load, the composer expanding to a second line, the pinned bar opening —
+  // pushes the newest message back out of view again. Re-pin to the bottom
+  // whenever the thread or its viewport is resized while the user is already
+  // there, so "opens scrolled to the bottom" survives those late reflows.
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    const content = contentRef.current;
+    if (!scroller || !content) return;
+    const observer = new ResizeObserver(() => {
+      if (!atBottomRef.current) return;
+      scroller.scrollTop = scroller.scrollHeight;
+    });
+    observer.observe(scroller);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [chatReady]);
 
   // A message just queued offline appends below the loaded history the same
   // way a real new message would — scroll down to reveal it.
   useEffect(() => {
     if (pendingMessages.length === 0) return;
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
+    scrollToBottom("smooth");
   }, [pendingMessages.length]);
 
   // A newly-arrived message means its sender is done typing — clear their
@@ -170,9 +216,24 @@ function ChatView({ id }: { id: string }) {
   // once they're prepended (see the effect above). The spinner clears when
   // the triggering fetch settles, even on failure.
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    // Re-evaluated on every scroll (ahead of the guards below) so the
+    // auto-scroll and resize handlers know whether to keep following the
+    // newest message. Landing at the bottom re-arms it; only scrolling *up*
+    // releases it. Deliberately not "released whenever we're not at the
+    // bottom": a scroll event is dispatched a frame after the scroll itself,
+    // so a jump-to-bottom that raced content still growing underneath it
+    // reports a stale gap — and treating that as "the user scrolled away"
+    // used to switch the pinning off before it had ever taken effect.
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom <= BOTTOM_EPSILON_PX) {
+      atBottomRef.current = true;
+    } else if (el.scrollTop < lastScrollTopRef.current) {
+      atBottomRef.current = false;
+    }
+    lastScrollTopRef.current = el.scrollTop;
     if (!initializedRef.current || loadingEarlier) return;
     if (!messagesData?.hasEarlier) return;
-    const el = e.currentTarget;
     if (el.scrollTop > 120) return;
     prevScrollHeightRef.current = el.scrollHeight;
     setLoadingEarlier(true);
@@ -232,7 +293,7 @@ function ChatView({ id }: { id: string }) {
 
   if (chatLoading) {
     return (
-      <main className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col sm:px-4 sm:py-6">
+      <main className="mx-auto flex min-h-0 w-full max-w-2xl grow basis-0 flex-col sm:px-4 sm:py-6">
         <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-none border-x-0 py-0 sm:rounded-xl sm:border-x">
           <CardHeader className="flex shrink-0 flex-row items-center gap-3 border-b border-border py-3">
             <Skeleton className="size-9 rounded-full" />
@@ -358,7 +419,19 @@ function ChatView({ id }: { id: string }) {
   }
 
   return (
-    <main className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col sm:px-4 sm:py-6">
+    // `grow basis-0`, not `flex-1`: the root layout's <body> is
+    // `min-h-[100dvh]` (a *min*-height, so its height stays indefinite), and
+    // a percentage `flex-basis` — which is what `flex-1`'s `flex: 1 1 0%`
+    // uses — can't resolve against an indefinite container, so the spec makes
+    // it fall back to the item's content size. That let this <main> grow to
+    // the full height of the message thread instead of the viewport: the
+    // conversation's own scroll container was never shorter than its content,
+    // so nothing scrolled inside the chat and the *page* scrolled instead,
+    // opening every chat parked at the oldest loaded message. A definite
+    // `flex-basis: 0px` resolves fine, so the min-height clamp gives this the
+    // leftover viewport height and the thread scrolls within it — which is
+    // what issue #321's fill-the-screen layout was after all along.
+    <main className="mx-auto flex min-h-0 w-full max-w-2xl grow basis-0 flex-col sm:px-4 sm:py-6">
       <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-none border-x-0 py-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 sm:rounded-xl sm:border-x">
         <CardHeader className="flex shrink-0 flex-row items-center gap-3 border-b border-border py-3">
           <Button
@@ -445,112 +518,122 @@ function ChatView({ id }: { id: string }) {
           onJump={jumpToMessage}
         />
         <CardContent className="min-h-0 flex-1 px-0">
+          {/* Two elements, not one: the outer div is the fixed-height viewport
+              that scrolls, the inner one is the thread whose height changes as
+              content loads. The ResizeObserver above watches both — a single
+              element can't report its own content growing. `overscroll-contain`
+              keeps a flick past either end from chaining out to the page. */}
           <div
             ref={scrollRef}
             onScroll={handleScroll}
             data-testid="chat-scroll"
-            className="flex h-full flex-col gap-2 overflow-y-auto px-4 py-4"
+            className="h-full overflow-y-auto overscroll-contain"
           >
-            {loadingEarlier && (
-              <div className="flex justify-center py-1">
-                <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              </div>
-            )}
-
-            {messagesLoading ? (
-              <div className="flex flex-1 flex-col justify-end gap-3">
-                <Skeleton className="h-10 w-2/3 self-start rounded-2xl" />
-                <Skeleton className="h-10 w-1/2 self-end rounded-2xl" />
-              </div>
-            ) : messages.length === 0 && pendingMessages.length === 0 ? (
-              <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                No messages yet — say hi 👋
-              </p>
-            ) : (
-              messages.map((message, i) => {
-                const isOwn = message.senderId === session.user.id;
-                const sender = chat.participants.find(
-                  (p) => p.userId === message.senderId,
-                );
-                // Insert a day separator before the first message and before
-                // any message that starts a new local calendar day (issue
-                // #307). Messages arrive oldest-first, so comparing against the
-                // previous entry is enough.
-                const prev = messages[i - 1];
-                const showDaySeparator =
-                  prev == null ||
-                  localDayKey(prev.createdAt) !==
-                    localDayKey(message.createdAt);
-                return (
-                  <Fragment key={message.id}>
-                    {showDaySeparator && (
-                      <DateSeparator ms={message.createdAt} />
-                    )}
-                    <MessageBubble
-                      message={message}
-                      isOwn={isOwn}
-                      isRead={message.readByUserIds.length > 0}
-                      canModify={isOwn || session.user.role === "admin"}
-                      canDeleteOthers={!isOwn && canManage}
-                      onEdit={(content) =>
-                        handleEditMessage(message.id, content)
-                      }
-                      onDelete={() => handleDeleteMessage(message.id)}
-                      onReply={() =>
-                        setReplyingTo({
-                          id: message.id,
-                          senderName: sender ? userLabel(sender) : "Someone",
-                          contentType: message.contentType,
-                          content: message.content,
-                        })
-                      }
-                      senderLabel={
-                        chat.type === "group" && sender
-                          ? userLabel(sender)
-                          : undefined
-                      }
-                      senderAvatar={
-                        chat.type === "group" && sender && !isOwn
-                          ? {
-                              name: userAvatarName(sender),
-                              avatarUrl: sender.avatarUrl,
-                              avatarVariants: sender.avatarVariants,
-                            }
-                          : undefined
-                      }
-                      style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}
-                    />
-                  </Fragment>
-                );
-              })
-            )}
-
-            {!messagesLoading &&
-              pendingMessages.map((item) => (
-                <PendingMessageBubble
-                  key={item.clientId}
-                  item={item}
-                  onRetry={() => {
-                    retryQueuedItem(item.clientId);
-                    void replayQueue(queryClient);
-                  }}
-                  onDismiss={() => dismissQueuedItem(item.clientId)}
-                />
-              ))}
-
-            {typingUsers.length > 0 && (
-              <div className="flex w-full justify-start motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2 motion-safe:duration-300">
-                <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-border bg-card px-3.5 py-2.5 text-muted-foreground shadow-sm">
-                  <TypingDots />
-                  {chat.type === "group" && (
-                    <span className="text-xs">
-                      {typingUsers.map((t) => userLabel(t)).join(", ")}{" "}
-                      {typingUsers.length === 1 ? "is" : "are"} typing…
-                    </span>
-                  )}
+            <div
+              ref={contentRef}
+              className="flex min-h-full flex-col gap-2 px-4 py-4"
+            >
+              {loadingEarlier && (
+                <div className="flex justify-center py-1">
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
                 </div>
-              </div>
-            )}
+              )}
+
+              {messagesLoading ? (
+                <div className="flex flex-1 flex-col justify-end gap-3">
+                  <Skeleton className="h-10 w-2/3 self-start rounded-2xl" />
+                  <Skeleton className="h-10 w-1/2 self-end rounded-2xl" />
+                </div>
+              ) : messages.length === 0 && pendingMessages.length === 0 ? (
+                <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                  No messages yet — say hi 👋
+                </p>
+              ) : (
+                messages.map((message, i) => {
+                  const isOwn = message.senderId === session.user.id;
+                  const sender = chat.participants.find(
+                    (p) => p.userId === message.senderId,
+                  );
+                  // Insert a day separator before the first message and before
+                  // any message that starts a new local calendar day (issue
+                  // #307). Messages arrive oldest-first, so comparing against the
+                  // previous entry is enough.
+                  const prev = messages[i - 1];
+                  const showDaySeparator =
+                    prev == null ||
+                    localDayKey(prev.createdAt) !==
+                      localDayKey(message.createdAt);
+                  return (
+                    <Fragment key={message.id}>
+                      {showDaySeparator && (
+                        <DateSeparator ms={message.createdAt} />
+                      )}
+                      <MessageBubble
+                        message={message}
+                        isOwn={isOwn}
+                        isRead={message.readByUserIds.length > 0}
+                        canModify={isOwn || session.user.role === "admin"}
+                        canDeleteOthers={!isOwn && canManage}
+                        onEdit={(content) =>
+                          handleEditMessage(message.id, content)
+                        }
+                        onDelete={() => handleDeleteMessage(message.id)}
+                        onReply={() =>
+                          setReplyingTo({
+                            id: message.id,
+                            senderName: sender ? userLabel(sender) : "Someone",
+                            contentType: message.contentType,
+                            content: message.content,
+                          })
+                        }
+                        senderLabel={
+                          chat.type === "group" && sender
+                            ? userLabel(sender)
+                            : undefined
+                        }
+                        senderAvatar={
+                          chat.type === "group" && sender && !isOwn
+                            ? {
+                                name: userAvatarName(sender),
+                                avatarUrl: sender.avatarUrl,
+                                avatarVariants: sender.avatarVariants,
+                              }
+                            : undefined
+                        }
+                        style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}
+                      />
+                    </Fragment>
+                  );
+                })
+              )}
+
+              {!messagesLoading &&
+                pendingMessages.map((item) => (
+                  <PendingMessageBubble
+                    key={item.clientId}
+                    item={item}
+                    onRetry={() => {
+                      retryQueuedItem(item.clientId);
+                      void replayQueue(queryClient);
+                    }}
+                    onDismiss={() => dismissQueuedItem(item.clientId)}
+                  />
+                ))}
+
+              {typingUsers.length > 0 && (
+                <div className="flex w-full justify-start motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2 motion-safe:duration-300">
+                  <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-border bg-card px-3.5 py-2.5 text-muted-foreground shadow-sm">
+                    <TypingDots />
+                    {chat.type === "group" && (
+                      <span className="text-xs">
+                        {typingUsers.map((t) => userLabel(t)).join(", ")}{" "}
+                        {typingUsers.length === 1 ? "is" : "are"} typing…
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </CardContent>
 
