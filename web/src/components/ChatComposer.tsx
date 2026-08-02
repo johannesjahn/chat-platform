@@ -31,6 +31,11 @@ import {
 // firing a request on every keystroke.
 const TYPING_THROTTLE_MS = 2_500;
 
+// Ceiling the auto-growing textarea stops at and starts scrolling instead —
+// matches the `max-h-40` on the element itself, which is what actually clamps
+// it visually; this keeps the measured height from overshooting that.
+const MAX_TEXTAREA_HEIGHT_PX = 160;
+
 // The message the composer is quoting a reply to (issue #217) — just what the
 // reply banner needs to render; the id is threaded through to the send as
 // `parentMessageId`.
@@ -89,12 +94,23 @@ export function ChatComposer({
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // Grow the textarea to fit what's been typed, up to MAX_TEXTAREA_HEIGHT_PX.
   useEffect(() => {
     if (contentType !== "text") return;
     const textarea = textareaRef.current;
     if (!textarea) return;
+    // An *empty* textarea still reports its wrapped placeholder's height in
+    // `scrollHeight`, so measuring here sized the box to the hint text rather
+    // than to the message: the composer sat two lines tall on desktop and
+    // ~86px (five lines) tall on a 390px-wide phone before a single character
+    // was typed. Clearing the inline height hands sizing back to the CSS
+    // floor (`rows={1}` + `min-h-9`) until there's something real to measure.
+    if (content === "") {
+      textarea.style.height = "";
+      return;
+    }
     textarea.style.height = "auto";
-    const newHeight = Math.min(textarea.scrollHeight, 160);
+    const newHeight = Math.min(textarea.scrollHeight, MAX_TEXTAREA_HEIGHT_PX);
     textarea.style.height = `${newHeight}px`;
   }, [content, contentType]);
 
@@ -247,7 +263,20 @@ export function ChatComposer({
             value={content}
             onValueChange={handleContentChange}
             onKeyDown={handleKeyDown}
-            placeholder="Write a message… (Enter to send, Shift+Enter for a new line)"
+            // Four mode buttons and the send button leave the textarea about
+            // 150px on a 390px-wide phone, which "Write a message…" wraps in
+            // — and a one-row textarea just clips the second line, so it read
+            // as "Write a ". This fits on one line at that width.
+            placeholder="Message…"
+            // The send/newline hint used to live in the placeholder, where a
+            // narrow viewport clipped it to about "Write a mess…" anyway —
+            // and it describes a physical keyboard, so it's desktop-only
+            // advice to begin with. Keeping it as the accessible name
+            // preserves exactly what a screen reader announced before (a
+            // placeholder names an otherwise-unlabelled field), and `title`
+            // surfaces it on hover where the keys actually exist.
+            aria-label="Write a message (Enter to send, Shift+Enter for a new line)"
+            title="Enter to send, Shift+Enter for a new line"
             rows={1}
             aria-invalid={overLimit}
             // `flex-1` moves to the wrapper the mention popup is positioned

@@ -793,6 +793,63 @@ test("a long conversation fits the viewport and opens scrolled to the newest mes
   expect(newest!.y + newest!.height).toBeLessThanOrEqual(viewportHeight);
 });
 
+test("the empty composer is one line tall and only grows once there's something to grow for", async ({
+  page,
+  browser,
+  injectApiUrl,
+}) => {
+  await registerViaUi(page);
+
+  const otherContext = await browser.newContext();
+  await injectApiUrl(otherContext);
+  const otherPage = await otherContext.newPage();
+  const { username: otherUsername } = await registerViaUi(otherPage);
+  await otherContext.close();
+
+  await page.goto("/chats/new");
+  await page.getByRole("button", { name: "Direct message" }).click();
+  await page.fill("#user-search", otherUsername);
+  await page.getByRole("button", { name: `@${otherUsername}` }).click();
+  await expect(page).toHaveURL(/\/chats\/\d+/);
+
+  // A narrow phone viewport, where the textarea is only ~150px wide and the
+  // placeholder used to wrap over several lines.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByText("No messages yet")).toBeVisible();
+  await page.waitForTimeout(500);
+
+  const composer = page.locator("textarea");
+  const height = () =>
+    composer.evaluate((el) => Math.round(el.getBoundingClientRect().height));
+
+  // An empty textarea reports its wrapped *placeholder* in `scrollHeight`, so
+  // auto-sizing off that measurement used to open the composer ~136px tall —
+  // five lines of hint text — before anything had been typed.
+  const empty = await height();
+  expect(empty).toBeLessThan(56);
+
+  // Typing still grows it...
+  await page.fill("textarea", "one\ntwo\nthree\nfour");
+  await expect.poll(height).toBeGreaterThan(empty);
+
+  // ...up to the max-h-40 ceiling, after which the textarea scrolls instead.
+  await page.fill(
+    "textarea",
+    Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"),
+  );
+  await expect.poll(height).toBe(160);
+
+  // ...and clearing it collapses back to a single line.
+  await page.fill("textarea", "");
+  await expect.poll(height).toBe(empty);
+
+  // The keyboard hint moved out of the placeholder, but the field keeps the
+  // same accessible name it had when the placeholder was providing one.
+  await expect(composer).toHaveAccessibleName(
+    "Write a message (Enter to send, Shift+Enter for a new line)",
+  );
+});
+
 test("the chat fits the *visual* viewport, not the layout viewport the keyboard lies about", async ({
   page,
   browser,
