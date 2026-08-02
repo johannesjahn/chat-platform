@@ -182,7 +182,14 @@ export function ChatComposer({
   }
 
   return (
-    <div className="flex flex-col gap-1.5 border-t border-border bg-card/70 px-4 py-3 backdrop-blur">
+    // `pb-[calc(...)]` rather than `py-3`: with `viewport-fit=cover` the page
+    // extends under the home indicator on a Home Screen install, and the
+    // composer is the bottom-most thing in the layout — without the inset it
+    // sits under the indicator, and since it's translucent
+    // (`bg-card/70 backdrop-blur`) the messages it covers show *through* it
+    // rather than being cleanly clipped. Resolves to `0.75rem` where `env()`
+    // is 0, i.e. everywhere but a notched iOS device.
+    <div className="flex flex-col gap-1.5 border-t border-border bg-card/70 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur">
       {replyingTo && (
         <div className="flex items-center gap-2 rounded-md border-l-2 border-primary bg-muted/60 py-1.5 pl-2 pr-1 text-xs motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:duration-200">
           <Reply className="size-3.5 shrink-0 text-primary" />

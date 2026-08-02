@@ -2,6 +2,14 @@ import type { WebSocketRoute } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { registerViaUi } from "./helpers";
 
+declare global {
+  interface Window {
+    // Installed by the visual-viewport test at the bottom of this file to
+    // stand in for an on-screen keyboard; see the comment there.
+    __shrinkVisualViewport: (height: number | null) => void;
+  }
+}
+
 test("starting a direct chat, sending a message, and seeing it marked read", async ({
   browser,
   injectApiUrl,
@@ -840,4 +848,97 @@ test("the empty composer is one line tall and only grows once there's something 
   await expect(composer).toHaveAccessibleName(
     "Write a message (Enter to send, Shift+Enter for a new line)",
   );
+});
+
+test("the chat fits the *visual* viewport, not the layout viewport the keyboard lies about", async ({
+  page,
+  browser,
+  injectApiUrl,
+}) => {
+  // A phone-shaped screen, where the composer being pushed off the bottom is
+  // the difference between a usable chat and an unusable one.
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  // Stand in for the on-screen keyboard. A real one shrinks only the *visual*
+  // viewport on iOS Safari (and on Android Chrome's `resizes-visual` default)
+  // while the layout viewport — and so `100dvh` — stays at full height; there
+  // is no way to make Playwright's Chromium do that, and `setViewportSize`
+  // moves both together, so the divergence is faked here by overriding what
+  // `visualViewport.height` reports and firing the `resize` the browser would.
+  await page.addInitScript(() => {
+    const viewport = window.visualViewport!;
+    const real = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(viewport),
+      "height",
+    )!;
+    let override: number | null = null;
+    Object.defineProperty(viewport, "height", {
+      configurable: true,
+      get: () => override ?? real.get!.call(viewport),
+    });
+    Object.defineProperty(window, "__shrinkVisualViewport", {
+      value: (height: number | null) => {
+        override = height;
+        viewport.dispatchEvent(new Event("resize"));
+      },
+    });
+  });
+
+  await registerViaUi(page);
+
+  const otherContext = await browser.newContext();
+  await injectApiUrl(otherContext);
+  const otherPage = await otherContext.newPage();
+  const { username: otherUsername } = await registerViaUi(otherPage);
+  await otherContext.close();
+
+  await page.goto("/chats/new");
+  await page.getByRole("button", { name: "Direct message" }).click();
+  await page.fill("#user-search", otherUsername);
+  await page.getByRole("button", { name: `@${otherUsername}` }).click();
+  await expect(page).toHaveURL(/\/chats\/\d+/);
+  await expect(page.getByText("No messages yet")).toBeVisible();
+
+  const appHeight = () =>
+    page.evaluate(() =>
+      Math.round(
+        parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue(
+            "--app-height",
+          ),
+        ),
+      ),
+    );
+  const composerBottom = async () => {
+    const box = await page.locator("textarea").boundingBox();
+    expect(box).not.toBeNull();
+    return box!.y + box!.height;
+  };
+
+  // Unobstructed, `--app-height` is just the viewport height...
+  await expect.poll(appHeight).toBe(844);
+
+  // ...and with the "keyboard" up it follows the visual viewport down, even
+  // though the layout viewport (and `100dvh` with it) hasn't moved. This is
+  // the whole bug: the layout used to stay 844px tall, putting its bottom
+  // 344px behind the keyboard with no page scroll to chase it (#342 made the
+  // page deliberately unscrollable), so the composer and the newest messages
+  // were simply unreachable.
+  await page.evaluate(() => window.__shrinkVisualViewport(500));
+  await expect.poll(appHeight).toBe(500);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.clientHeight, // the layout viewport, unchanged
+    ),
+  ).toBe(844);
+
+  // The composer is the bottom-most thing in the layout, so it's the proof:
+  // it has to sit inside the 500px that are actually visible.
+  await expect.poll(composerBottom).toBeLessThanOrEqual(500);
+
+  // And it comes back when the keyboard closes.
+  await page.evaluate(() => window.__shrinkVisualViewport(null));
+  await expect.poll(appHeight).toBe(844);
+  await expect.poll(composerBottom).toBeLessThanOrEqual(844);
+  expect(await composerBottom()).toBeGreaterThan(500);
 });

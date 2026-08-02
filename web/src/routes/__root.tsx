@@ -22,13 +22,31 @@ import { OfflineQueueSync } from "../lib/offlineQueue";
 import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
 import { userLabel } from "../lib/users";
+import { useAppHeight } from "../lib/viewport";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      {
+        name: "viewport",
+        // `viewport-fit=cover` — `apple-mobile-web-app-capable` +
+        // `black-translucent` below ask iOS to draw a Home Screen install
+        // under the status bar and home indicator, but since iOS 11 the page
+        // only actually extends into those areas with this set. It's what
+        // makes `env(safe-area-inset-*)` report anything, so the nav and the
+        // composer can inset themselves (they do) instead of the composer
+        // sitting under the home indicator with the newest messages behind it.
+        //
+        // `interactive-widget=resizes-content` — tells Android Chrome to
+        // shrink the *layout* viewport when the on-screen keyboard opens
+        // rather than only the visual one (its `resizes-visual` default), so
+        // `dvh` is simply correct there and matches what `useAppHeight`
+        // measures. iOS ignores the key; `useAppHeight` is what covers it.
+        content:
+          "width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content",
+      },
       { title: "Chat Platform" },
       { name: "theme-color", content: "#0b0d13" },
       { name: "mobile-web-app-capable", content: "yes" },
@@ -73,7 +91,11 @@ function Nav() {
   const unreadCount = useTotalUnreadCount(!!session);
 
   return (
-    <nav className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-card/70 px-4 py-3 backdrop-blur sm:px-5">
+    // `pt-[calc(...)]` rather than `py-3`: `viewport-fit=cover` lets the page
+    // run under the status bar and the notch, so the nav owns that inset —
+    // its background then fills the area instead of the bar overlapping the
+    // links. Resolves to plain `0.75rem` everywhere `env()` is 0.
+    <nav className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-card/70 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur sm:px-5">
       <div className="flex flex-wrap items-center gap-2 sm:gap-4">
         <Link
           to="/"
@@ -143,12 +165,23 @@ function Nav() {
 }
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
+  useAppHeight();
   return (
     <html lang="en" className="dark">
       <head>
         <HeadContent />
       </head>
-      <body className="flex min-h-[100dvh] flex-col">
+      {/* `--app-height` is the visual viewport — what's actually on screen
+          once the keyboard and the dynamic toolbar have had their say — with
+          `100dvh` left as the fallback for browsers without the API. See
+          lib/viewport.ts for why `100dvh` alone isn't it on a phone.
+
+          The horizontal safe-area insets live here rather than on each piece
+          of chrome because `viewport-fit=cover` only exposes them in
+          landscape on a notched device, where one padding on the scroll root
+          is enough; the vertical ones are on the nav and the composer
+          instead, so their backgrounds still run edge to edge in portrait. */}
+      <body className="flex min-h-[var(--app-height,100dvh)] flex-col pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
         {children}
         <Scripts />
       </body>
