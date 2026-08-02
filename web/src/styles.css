@@ -155,11 +155,33 @@
    phone it always does — the safe-area insets, a dynamic toolbar caught
    mid-transition, the composer growing a line. What you get then is the whole
    app sliding under the sticky nav with the newest messages tucked behind the
-   composer. Pinned to `--app-height` (what `visualViewport` says is genuinely
-   on screen — see lib/viewport.ts) with the overflow hidden, there is simply
-   nothing to scroll but the thread itself. */
-html[data-app-shell="immersive"],
+   composer. `--app-height` is what `visualViewport` says is genuinely on
+   screen (see lib/viewport.ts).
+
+   `position: fixed` on <body>, and not merely `overflow: hidden`, is what
+   actually stops the page moving on a phone. Overflow set on the root
+   *propagates to the viewport*, and iOS treats a hidden viewport as advice
+   rather than law: a touch drag still scrolls the document, toolbars collapse,
+   and the whole app slides under the status bar — exactly the drag that keeps
+   getting reported. Taking <body> out of flow leaves the document with no
+   in-flow content at all, so there is nothing to scroll no matter what the
+   overflow says, and the thread inside stays the only scroller. */
+html[data-app-shell="immersive"] {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 html[data-app-shell="immersive"] body {
+  position: fixed;
+  /* Not `top: 0`: iOS pans the *visual* viewport over the layout viewport when
+     it wants a focused field on screen, and a fixed element is anchored to the
+     layout one — so the app would sit partly above the visible band with no
+     way to scroll it back. `--app-offset-top` is how far it has been panned,
+     which is exactly the correction. Zero everywhere else. */
+  top: var(--app-offset-top, 0px);
+  left: 0;
+  right: 0;
   height: var(--app-height, 100dvh);
   min-height: 0;
   overflow: hidden;
