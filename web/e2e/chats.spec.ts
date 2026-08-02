@@ -954,7 +954,9 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
   }
 
   await page.reload();
-  await expect(page.getByText("Seeded message 11")).toBeVisible();
+  await expect(
+    page.getByText("Seeded message 11", { exact: true }),
+  ).toBeVisible();
   // The composer's auto-size and the message-in animations settle a beat after
   // the thread first paints.
   await page.waitForTimeout(1_000);
@@ -1022,7 +1024,9 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
     expect(box).not.toBeNull();
     return box!.y;
   };
-  const newest = await page.getByText("Seeded message 11").boundingBox();
+  const newest = await page
+    .getByText("Seeded message 11", { exact: true })
+    .boundingBox();
   expect(newest).not.toBeNull();
   expect(newest!.y).toBeGreaterThanOrEqual(0);
   expect(newest!.y + newest!.height).toBeLessThanOrEqual(await composerTop());
@@ -1031,6 +1035,29 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
   // The build-version tag stays out of the corner the composer now occupies.
   const versionTag = page.locator("[data-version-tag]");
   await expect(versionTag).toBeHidden();
+
+  // iOS doesn't just shrink the visual viewport for a keyboard, it pans it
+  // down the layout viewport to clear the focused field — and the app is
+  // pinned to the layout viewport (`position: fixed`, the only lock WebKit
+  // respects), so without correcting for the pan its top would sit above the
+  // band the user can see, unscrollable.
+  // Asserting the mechanism, unusually, because the failure it prevents can't
+  // be reproduced here: Chromium honours `overflow: hidden` on the viewport,
+  // iOS treats it as a suggestion and drags the page anyway. Taking <body> out
+  // of flow is what leaves the document with nothing to scroll on a phone, so
+  // it's worth failing loudly if a refactor puts it back in flow.
+  expect(
+    await page.evaluate(() => getComputedStyle(document.body).position),
+  ).toBe("fixed");
+
+  const appBox = async () => {
+    const box = await page.locator("body").boundingBox();
+    expect(box).not.toBeNull();
+    return { top: Math.round(box!.y), height: Math.round(box!.height) };
+  };
+  expect(await appBox()).toEqual({ top: 0, height: 400 });
+  await page.evaluate(() => window.__shrinkVisualViewport(400, 60));
+  await expect.poll(appBox).toEqual({ top: 60, height: 400 });
 
   await page.evaluate(() => window.__shrinkVisualViewport(null));
 

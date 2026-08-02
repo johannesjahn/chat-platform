@@ -82,35 +82,45 @@ export function randomUsername(): string {
 declare global {
   interface Window {
     // Installed by `fakeOnScreenKeyboard` below.
-    __shrinkVisualViewport: (height: number | null) => void;
+    __shrinkVisualViewport: (height: number | null, offsetTop?: number) => void;
   }
 }
 
 // Stands in for an on-screen keyboard, which no browser automation can
 // actually raise. A real one shrinks only the *visual* viewport on iOS Safari
 // (and on Android Chrome's `resizes-visual` default) while the layout
-// viewport — and so `100dvh` — stays at full height; Playwright's
-// `setViewportSize` moves both together, so the divergence is faked here by
-// overriding what `visualViewport.height` reports and firing the `resize` the
-// browser would have. Call before navigating, then drive it from the test with
-// `page.evaluate(() => window.__shrinkVisualViewport(400))` and `null` to put
-// the keyboard away again.
+// viewport — and so `100dvh` — stays at full height, and iOS pans that visual
+// viewport down the layout one (`offsetTop`) to keep the focused field clear.
+// Playwright's `setViewportSize` moves both together and never pans, so the
+// divergence is faked here by overriding what `visualViewport` reports and
+// firing the events the browser would have. Call before navigating, then drive
+// it from the test with `page.evaluate(() => window.__shrinkVisualViewport(400))`
+// — optionally with a pan, `(400, 60)` — and `null` to put the keyboard away.
 export async function fakeOnScreenKeyboard(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const viewport = window.visualViewport!;
-    const real = Object.getOwnPropertyDescriptor(
-      Object.getPrototypeOf(viewport),
-      "height",
+    const prototype = Object.getPrototypeOf(viewport);
+    const realHeight = Object.getOwnPropertyDescriptor(prototype, "height")!;
+    const realOffsetTop = Object.getOwnPropertyDescriptor(
+      prototype,
+      "offsetTop",
     )!;
-    let override: number | null = null;
+    let height: number | null = null;
+    let offsetTop = 0;
     Object.defineProperty(viewport, "height", {
       configurable: true,
-      get: () => override ?? real.get!.call(viewport),
+      get: () => height ?? realHeight.get!.call(viewport),
+    });
+    Object.defineProperty(viewport, "offsetTop", {
+      configurable: true,
+      get: () => offsetTop || realOffsetTop.get!.call(viewport),
     });
     Object.defineProperty(window, "__shrinkVisualViewport", {
-      value: (height: number | null) => {
-        override = height;
+      value: (nextHeight: number | null, nextOffsetTop = 0) => {
+        height = nextHeight;
+        offsetTop = nextOffsetTop;
         viewport.dispatchEvent(new Event("resize"));
+        viewport.dispatchEvent(new Event("scroll"));
       },
     });
   });

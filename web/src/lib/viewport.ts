@@ -7,8 +7,8 @@ import { useEffect } from "react";
 const MAX_TRACKED_SCALE = 1.01;
 
 /**
- * Publishes the genuinely-visible viewport height as the `--app-height`
- * custom property on `<html>`.
+ * Publishes the genuinely-visible viewport as the `--app-height` and
+ * `--app-offset-top` custom properties on `<html>`.
  *
  * `100dvh` is supposed to be this number and isn't, on exactly the devices
  * that matter most here:
@@ -30,6 +30,13 @@ const MAX_TRACKED_SCALE = 1.01;
  * actually on screen, keyboard and toolbar included, so consumers should
  * prefer it and keep `100dvh` only as the fallback for browsers without the
  * API: `min-h-[var(--app-height,100dvh)]`.
+ *
+ * `--app-offset-top` is the other half of the same story: iOS doesn't only
+ * shrink the visual viewport, it *pans* it over the layout viewport to keep a
+ * focused field clear of the keyboard. Anything anchored to the layout
+ * viewport — a `position: fixed` element, which is how the immersive shell
+ * pins the app — then sits that far above the band the user can actually see.
+ * The offset is what puts it back.
  */
 export function useAppHeight() {
   useEffect(() => {
@@ -48,6 +55,7 @@ export function useAppHeight() {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         root.style.setProperty("--app-height", `${viewport.height}px`);
+        root.style.setProperty("--app-offset-top", `${viewport.offsetTop}px`);
       });
     };
 
@@ -84,7 +92,10 @@ const SHELL_ATTRIBUTE = "data-app-shell";
  *   toolbar mid-transition, a composer grown to two lines — the page becomes
  *   scrollable and the whole app slides under the sticky nav, which is
  *   exactly the drift visible on a real device. Immersive pins the height
- *   *exactly* to what's on screen, so there is nothing to scroll.
+ *   *exactly* to what's on screen and takes `<body>` out of flow with
+ *   `position: fixed`, so the document has nothing left to scroll at all —
+ *   `overflow: hidden` alone doesn't get there, since iOS still drags a
+ *   viewport that says it's hidden.
  * - **The site nav can't eat the space.** It's ~145px on a phone (three
  *   wrapped rows), more once `env(safe-area-inset-top)` is added. That's
  *   affordable at full height and ruinous when the on-screen keyboard has
