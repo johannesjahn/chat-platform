@@ -95,7 +95,15 @@ function Nav() {
     // run under the status bar and the notch, so the nav owns that inset —
     // its background then fills the area instead of the bar overlapping the
     // links. Resolves to plain `0.75rem` everywhere `env()` is 0.
-    <nav className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-card/70 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur sm:px-5">
+    // `data-app-nav` is what the immersive shell hides on phone widths while
+    // a conversation is open (see the rules in styles.css, switched on by
+    // `useImmersiveShell`) — the chat has its own header and back button, and
+    // these three wrapped rows are the space the thread needs once the
+    // on-screen keyboard is up.
+    <nav
+      data-app-nav
+      className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-card/70 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur sm:px-5"
+    >
       <div className="flex flex-wrap items-center gap-2 sm:gap-4">
         <Link
           to="/"

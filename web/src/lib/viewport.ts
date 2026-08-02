@@ -63,3 +63,42 @@ export function useAppHeight() {
     };
   }, []);
 }
+
+// Attribute (on `<html>`) the immersive rules in styles.css hang off. Kept
+// here so the hook and the stylesheet can't drift apart silently.
+const SHELL_ATTRIBUTE = "data-app-shell";
+
+/**
+ * Switches the document into the "immersive" app shell for as long as
+ * `active` is true — see the `[data-app-shell="immersive"]` rules in
+ * styles.css for what that actually changes.
+ *
+ * The conversation view is the one screen that is an *app*, not a document:
+ * a fixed header, a thread that scrolls inside itself, and a composer pinned
+ * to the bottom edge. Two things have to be true for that to survive a phone,
+ * and neither is true of the ordinary layout:
+ *
+ * - **The page itself must not scroll.** `<body>` is otherwise
+ *   `min-h-[var(--app-height,…)]`, a *minimum*: the moment the layout comes
+ *   out a few pixels taller than the visible viewport — a safe-area inset, a
+ *   toolbar mid-transition, a composer grown to two lines — the page becomes
+ *   scrollable and the whole app slides under the sticky nav, which is
+ *   exactly the drift visible on a real device. Immersive pins the height
+ *   *exactly* to what's on screen, so there is nothing to scroll.
+ * - **The site nav can't eat the space.** It's ~145px on a phone (three
+ *   wrapped rows), more once `env(safe-area-inset-top)` is added. That's
+ *   affordable at full height and ruinous when the on-screen keyboard has
+ *   left ~400px: header, pinned bar and composer alone fill it, collapsing
+ *   the thread to nothing — no messages visible at all while typing. So on
+ *   phone widths the conversation hides it and keeps its own header (with
+ *   its back button) as the only chrome, the way every native messenger
+ *   does.
+ */
+export function useImmersiveShell(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    const root = document.documentElement;
+    root.setAttribute(SHELL_ATTRIBUTE, "immersive");
+    return () => root.removeAttribute(SHELL_ATTRIBUTE);
+  }, [active]);
+}

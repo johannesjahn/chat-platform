@@ -146,6 +146,47 @@
   }
 }
 
+/* The immersive app shell, switched on by `useImmersiveShell` (lib/viewport.ts)
+   while a conversation is on screen. Deliberately unlayered so it outranks the
+   `min-h-*` utility on <body> without an `!important`.
+
+   `height`, not `min-height`: a minimum leaves the page scrollable the moment
+   the layout resolves a few pixels taller than the visible viewport, and on a
+   phone it always does — the safe-area insets, a dynamic toolbar caught
+   mid-transition, the composer growing a line. What you get then is the whole
+   app sliding under the sticky nav with the newest messages tucked behind the
+   composer. Pinned to `--app-height` (what `visualViewport` says is genuinely
+   on screen — see lib/viewport.ts) with the overflow hidden, there is simply
+   nothing to scroll but the thread itself. */
+html[data-app-shell="immersive"],
+html[data-app-shell="immersive"] body {
+  height: var(--app-height, 100dvh);
+  min-height: 0;
+  overflow: hidden;
+  /* No rubber-banding the (now unscrollable) page around the thread. */
+  overscroll-behavior: none;
+}
+
+/* Below `sm`, the conversation is the whole screen and its own header — back
+   button included — is the only chrome it needs. Reclaiming the site nav's
+   three wrapped rows is what keeps the thread readable once the on-screen
+   keyboard has taken half the viewport; without it the header, pinned bar and
+   composer fill everything that's left. The chat header picks up
+   `env(safe-area-inset-top)` at the same breakpoint, so the status bar still
+   has a background to sit on. */
+@media (width < 40rem) {
+  html[data-app-shell="immersive"] [data-app-nav] {
+    display: none;
+  }
+
+  /* Same reasoning for the build-version tag: on a phone the conversation
+     reaches every corner, so a tag pinned to the bottom-right one lands on
+     the send button instead of the empty margin it has everywhere else. */
+  html[data-app-shell="immersive"] [data-version-tag] {
+    display: none;
+  }
+}
+
 @keyframes aurora-drift {
   0% {
     transform: translate3d(-4%, -2%, 0) scale(1);

@@ -1,14 +1,6 @@
 import type { WebSocketRoute } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { registerViaUi } from "./helpers";
-
-declare global {
-  interface Window {
-    // Installed by the visual-viewport test at the bottom of this file to
-    // stand in for an on-screen keyboard; see the comment there.
-    __shrinkVisualViewport: (height: number | null) => void;
-  }
-}
+import { fakeOnScreenKeyboard, registerViaUi } from "./helpers";
 
 test("starting a direct chat, sending a message, and seeing it marked read", async ({
   browser,
@@ -859,30 +851,7 @@ test("the chat fits the *visual* viewport, not the layout viewport the keyboard 
   // the difference between a usable chat and an unusable one.
   await page.setViewportSize({ width: 390, height: 844 });
 
-  // Stand in for the on-screen keyboard. A real one shrinks only the *visual*
-  // viewport on iOS Safari (and on Android Chrome's `resizes-visual` default)
-  // while the layout viewport — and so `100dvh` — stays at full height; there
-  // is no way to make Playwright's Chromium do that, and `setViewportSize`
-  // moves both together, so the divergence is faked here by overriding what
-  // `visualViewport.height` reports and firing the `resize` the browser would.
-  await page.addInitScript(() => {
-    const viewport = window.visualViewport!;
-    const real = Object.getOwnPropertyDescriptor(
-      Object.getPrototypeOf(viewport),
-      "height",
-    )!;
-    let override: number | null = null;
-    Object.defineProperty(viewport, "height", {
-      configurable: true,
-      get: () => override ?? real.get!.call(viewport),
-    });
-    Object.defineProperty(window, "__shrinkVisualViewport", {
-      value: (height: number | null) => {
-        override = height;
-        viewport.dispatchEvent(new Event("resize"));
-      },
-    });
-  });
+  await fakeOnScreenKeyboard(page);
 
   await registerViaUi(page);
 
@@ -941,4 +910,153 @@ test("the chat fits the *visual* viewport, not the layout viewport the keyboard 
   await expect.poll(appHeight).toBe(844);
   await expect.poll(composerBottom).toBeLessThanOrEqual(844);
   expect(await composerBottom()).toBeGreaterThan(500);
+});
+
+test("the on-screen keyboard leaves the thread readable instead of collapsing it to nothing", async ({
+  page,
+  request,
+  apiUrl,
+  browser,
+  injectApiUrl,
+}) => {
+  test.setTimeout(90_000);
+
+  // A phone, where every row of chrome is a row of messages you don't get.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await fakeOnScreenKeyboard(page);
+
+  await registerViaUi(page);
+
+  const otherContext = await browser.newContext();
+  await injectApiUrl(otherContext);
+  const otherPage = await otherContext.newPage();
+  const { username: otherUsername } = await registerViaUi(otherPage);
+  await otherContext.close();
+
+  await page.goto("/chats/new");
+  await page.getByRole("button", { name: "Direct message" }).click();
+  await page.fill("#user-search", otherUsername);
+  await page.getByRole("button", { name: `@${otherUsername}` }).click();
+  await expect(page).toHaveURL(/\/chats\/\d+/);
+  const chatId = page.url().split("/").pop();
+
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  // Enough that the thread has to scroll, so "parked at the bottom" means
+  // something.
+  for (let i = 0; i < 12; i++) {
+    const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      data: { contentType: "text", content: `Seeded message ${i}` },
+    });
+    expect(response.ok()).toBe(true);
+  }
+
+  await page.reload();
+  await expect(page.getByText("Seeded message 11")).toBeVisible();
+  // The composer's auto-size and the message-in animations settle a beat after
+  // the thread first paints.
+  await page.waitForTimeout(1_000);
+
+  const nav = page.locator("nav");
+  // On a phone the conversation is the whole screen: the site nav's three
+  // wrapped rows (~145px, more once the status-bar inset is added) hand their
+  // space to the thread, and the chat's own header — back button included — is
+  // the only chrome left.
+  await expect(nav).toBeHidden();
+
+  const thread = page.getByTestId("chat-scroll");
+  const threadState = () =>
+    thread.evaluate((el) => ({
+      height: Math.round(el.clientHeight),
+      distanceFromBottom: Math.round(
+        el.scrollHeight - el.scrollTop - el.clientHeight,
+      ),
+    }));
+  const pageScrollable = () =>
+    page.evaluate(
+      () =>
+        document.documentElement.scrollHeight >
+        document.documentElement.clientHeight + 1,
+    );
+
+  expect((await threadState()).height).toBeGreaterThan(600);
+  expect(await pageScrollable()).toBe(false);
+
+  // Up comes the keyboard, taking a bit more than half the screen with it.
+  // Waiting for `--app-height` to catch up first matters: the resize handler
+  // coalesces into a rAF (see lib/viewport.ts), so measuring straight after
+  // this call would still see the un-shrunk layout and pass for the wrong
+  // reason.
+  await page.evaluate(() => window.__shrinkVisualViewport(400));
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Math.round(
+          parseFloat(
+            getComputedStyle(document.documentElement).getPropertyValue(
+              "--app-height",
+            ),
+          ),
+        ),
+      ),
+    )
+    .toBe(400);
+
+  // The thread keeps a real, readable slice of what's left rather than being
+  // squeezed to a sliver by the chrome above it: with the site nav still in
+  // the layout, the header and composer alone accounted for nearly all of the
+  // 400px — add a pinned-messages bar and typing meant looking at no messages
+  // at all.
+  const shrunk = await threadState();
+  expect(shrunk.height).toBeGreaterThan(200);
+  // ...and it's still parked at the newest message, not left mid-history by
+  // the resize.
+  expect(shrunk.distanceFromBottom).toBeLessThanOrEqual(24);
+
+  // Everything that matters is inside the 400px that are actually visible —
+  // and the page still can't be scrolled to reach anything that isn't.
+  const composerTop = async () => {
+    const box = await page.locator("textarea").boundingBox();
+    expect(box).not.toBeNull();
+    return box!.y;
+  };
+  const newest = await page.getByText("Seeded message 11").boundingBox();
+  expect(newest).not.toBeNull();
+  expect(newest!.y).toBeGreaterThanOrEqual(0);
+  expect(newest!.y + newest!.height).toBeLessThanOrEqual(await composerTop());
+  expect(await pageScrollable()).toBe(false);
+
+  // The build-version tag stays out of the corner the composer now occupies.
+  const versionTag = page.locator("[data-version-tag]");
+  await expect(versionTag).toBeHidden();
+
+  await page.evaluate(() => window.__shrinkVisualViewport(null));
+
+  // The nav is back as soon as there's room for it...
+  await page.setViewportSize({ width: 1024, height: 844 });
+  await expect(nav).toBeVisible();
+
+  // ...and leaving the conversation hands the page back its ordinary
+  // scrolling document behaviour rather than leaving it locked.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("link", { name: "Back to chats" }).click();
+  await expect(page).toHaveURL(/\/chats$/);
+  await expect(nav).toBeVisible();
+  await expect(page.locator("html")).not.toHaveAttribute("data-app-shell");
+
+  // Back on an ordinary page the tag is visible again — and it rides the
+  // *visible* bottom edge, not the layout viewport's. Fixed positioning
+  // resolves against the latter, which the keyboard doesn't shrink, so the
+  // `bottom`-anchored version of this used to leave the tag floating in the
+  // middle of the screen whenever a keyboard was up (see VersionFooter).
+  await expect(versionTag).toBeVisible();
+  await page.evaluate(() => window.__shrinkVisualViewport(400));
+  await expect
+    .poll(async () => {
+      const box = await versionTag.boundingBox();
+      return box == null ? null : Math.round(box.y + box.height);
+    })
+    .toBeLessThanOrEqual(400);
 });
