@@ -17,6 +17,7 @@ spec:
   # ever mounting the same ReadWriteOnce PVC at once during a rollout
   # (mirrors redis-deployment.yaml).
   replicas: 1
+  revisionHistoryLimit: 3
   strategy:
     type: Recreate
   selector:

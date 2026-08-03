@@ -9,6 +9,7 @@ metadata:
 spec:
   serviceName: {{ $fullname }}-postgres
   replicas: 1
+  revisionHistoryLimit: 3
   selector:
     matchLabels:
       {{- include "chat-platform.selectorLabels" (dict "Release" .Release "Chart" .Chart "component" "postgres") | nindent 6 }}

@@ -8,6 +8,7 @@ metadata:
     app.kubernetes.io/component: backend
 spec:
   replicas: {{ .Values.backend.replicaCount }}
+  revisionHistoryLimit: 3
   selector:
     matchLabels:
       {{- include "chat-platform.selectorLabels" (dict "Release" .Release "Chart" .Chart "component" "backend") | nindent 6 }}

@@ -10,6 +10,7 @@ spec:
   # A single replica writing to its own volume — Recreate avoids two pods
   # ever mounting the same ReadWriteOnce PVC at once during a rollout.
   replicas: 1
+  revisionHistoryLimit: 3
   strategy:
     type: Recreate
   selector:
