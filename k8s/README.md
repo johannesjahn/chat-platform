@@ -71,6 +71,14 @@ for the full set, with comments):
 false` if your cluster's setup differs.
 - `postgres.persistence.*` / `redis.persistence.*` / `minio.persistence.*` —
   size and `storageClassName` (empty uses the cluster default).
+- `backend.resources` / `postgres.resources` / `redis.resources` /
+  `minio.resources` — memory requests are kept at a realistic steady-state
+  figure (~half of each limit) rather than a token floor, since requests are
+  what the scheduler packs a node with: a limit far above the request lets a
+  node accept more pods than it can actually feed. This chart's workloads sum
+  to ~1.4Gi of memory requests and ~2.8Gi of limits; see
+  [`observability/README.md`](observability/README.md#resource-footprint) for
+  the whole-node picture including the observability stack.
 - `minio.enabled` — set to `false` to skip deploying MinIO entirely and
   point the backend at a real cloud bucket instead via `backend.s3.endpoint`
   / `backend.s3.bucketName` / `backend.s3.region` /

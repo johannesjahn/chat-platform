@@ -62,6 +62,18 @@ alloy:
       cpu: 200m
       memory: 256Mi
 
+# The sidecar that reloads Alloy when the ConfigMap above changes. The chart
+# gives it requests but no limits — capped here so every container in this
+# stack has one.
+configReloader:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+
 # No ServiceMonitor/PrometheusRule CRDs installed for this pass (see #121) —
 # same reasoning as loki-values.yaml's monitoring block.
 serviceMonitor:

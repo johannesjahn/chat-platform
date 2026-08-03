@@ -49,6 +49,43 @@ on; the `victoria-metrics-k8s-stack` chart's own bundled alerting rule
 bundle (`defaultRules.enabled`) is off in favor of the smaller, explicit
 rule set below — see [Dashboards](#dashboards) and [Alerting](#alerting).
 
+### Resource footprint
+
+Every container here sets memory requests **and** limits, and the totals are
+meant to be checked against the node they land on, not just eyeballed
+per-pod. Two upstream defaults made that go wrong before and are explicitly
+overridden:
+
+- **Loki's memcached caches** (`chunksCache` / `resultsCache`) are sized for
+  a multi-node Loki cluster: `chunks-cache` _requests_ 9830Mi and
+  `results-cache` 1229Mi. On a single ~8Gi node `chunks-cache` can never be
+  scheduled at all — kubelet rejects the pod with an `OutOfmemory` status —
+  and `results-cache` reserves ~15% of the node to cache queries nobody
+  runs. Both are off (`loki-values.yaml`); SingleBinary Loki falls back to
+  its in-process caches.
+- **Unbounded containers.** `kube-state-metrics`, the VM operator, Grafana's
+  sidecars/`initChownData`, Loki's rules sidecar, and Alloy's config-reloader
+  all ship with no limits (some with no requests either, so the scheduler
+  treats them as free). All are given modest requests/limits here.
+
+Rendered totals for this stack plus `../chat-platform/`, on a single node:
+~2.9Gi of memory requests and ~6.3Gi of limits, i.e. ~79% of an 8Gi node
+committed at worst case, leaving headroom for kubelet, system pods, and
+ArgoCD. Requests sit at roughly half of each limit rather than a token
+floor — a limit set far above the request is what lets a node accept more
+pods than it can actually feed.
+
+Worth re-checking after a chart version bump, since new subcharts arrive with
+upstream's defaults:
+
+```bash
+# what a render would ask for (catches it before it reaches the cluster)
+helmfile template | grep -B20 'memory:' | grep -E 'name:|memory:'
+
+# what the live node actually has committed
+kubectl describe node <node> | sed -n '/Allocated resources/,/Events/p'
+```
+
 ## Installing
 
 Requires the [`helmfile`](https://helmfile.readthedocs.io/) CLI (which

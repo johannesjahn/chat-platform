@@ -43,6 +43,16 @@ vmagent:
 
 kube-state-metrics:
   enabled: true
+  # The subchart ships no resources at all by default — an unbounded pod
+  # that the scheduler treats as free. Sized for a cluster this small
+  # (memory scales with object count).
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
 
 prometheus-node-exporter:
   enabled: true
@@ -299,6 +309,15 @@ victoria-metrics-operator:
     certManager:
       enabled: true
 
+  # Unbounded by default, same as kube-state-metrics above.
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 192Mi
+
 grafana:
   enabled: true
   rbac:
@@ -323,6 +342,16 @@ grafana:
 
   sidecar:
     skipTlsVerify: true
+    # The dashboard/datasource sidecars ship with no resources of their own —
+    # two more unbounded containers in the Grafana pod. They only watch
+    # ConfigMaps, so this is plenty.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
     datasources:
       enabled: true
     dashboards:
@@ -363,6 +392,16 @@ grafana:
     limits:
       cpu: 200m
       memory: 256Mi
+
+  # One-shot initContainer that chowns the PVC above — unbounded by default.
+  initChownData:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 100m
+        memory: 32Mi
 
   ingress:
     enabled: true
