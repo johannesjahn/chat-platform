@@ -252,7 +252,7 @@ jobs:
       # the v1.7.1 release) and makes `tar -xz` fail on the HTML error page.
       - name: Install helmfile
         env:
-          HELMFILE_VERSION: v1.7.2
+          HELMFILE_VERSION: v1.7.3
         run: |
           curl -sSL "https://github.com/helmfile/helmfile/releases/download/${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION#v}_linux_amd64.tar.gz" \
             | tar -xz helmfile
