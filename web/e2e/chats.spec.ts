@@ -623,10 +623,28 @@ test("reopening an already-visited chat still paginates instead of loading its w
   // leftover cached page for a "re-anchor after MESSAGES_MAX_LIMIT" and
   // re-fetched with limit=100 instead of the intended 10-message first page,
   // dumping the whole (short) history in at once.
+  //
+  // `waitForResponse` (rather than just `getByText(...).toBeVisible()`) is
+  // what actually gates the `messagesLimits` assertion below: Playwright
+  // delivers `request`/`response` CDP events over a separate channel from
+  // the one driving the page's own DOM/accessibility tree, so nothing
+  // guarantees the `request` listener above has already run by the time a
+  // `toBeVisible()` poll (which only watches the DOM) resolves — on a loaded
+  // CI runner the two can reorder, and `messagesLimits` gets read while
+  // still empty even though the request already fired. Awaiting the
+  // response for this exact endpoint forces the corresponding `request`
+  // event (which Playwright always dispatches before the `response` event
+  // for the same exchange) to have already run first.
+  const messagesResponse = page.waitForResponse(
+    (res) =>
+      new URL(res.url()).pathname === `/chats/${chatId}/messages` &&
+      res.request().method() === "GET",
+  );
   await page
     .getByRole("link", { name: new RegExp(`@${otherUsername}`) })
     .click();
   await expect(page).toHaveURL(`/chats/${chatId}`);
+  await messagesResponse;
   await expect(page.getByText("Seeded message 14")).toBeVisible();
 
   expect(messagesLimits).toEqual(["10"]);
