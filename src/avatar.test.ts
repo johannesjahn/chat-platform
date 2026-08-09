@@ -480,9 +480,7 @@ test("uploadChatAvatar rejects uploading to a direct chat", () =>
         ),
       );
       expect(result.status).toBe(400);
-      expect((result.body as { _tag: string })._tag).toBe(
-        "InvalidChatRequest",
-      );
+      expect((result.body as { _tag: string })._tag).toBe("InvalidChatRequest");
     }),
   ));
 
