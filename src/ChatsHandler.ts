@@ -16,12 +16,16 @@ import {
 } from "drizzle-orm";
 import { Context, Effect, Metric, MetricLabel } from "effect";
 import {
+  ALLOWED_AVATAR_MIME_TYPES,
   type Attachment,
+  AvatarTooLarge,
   ChatApi,
   DEFAULT_CHATS_LIMIT,
   DEFAULT_MESSAGES_LIMIT,
   Forbidden,
+  InvalidAvatarUpload,
   InvalidChatRequest,
+  MAX_AVATAR_UPLOAD_SIZE_BYTES,
   MAX_GROUP_PARTICIPANTS,
   MAX_INVITES_PER_CHAT,
   NotFound,
@@ -42,8 +46,10 @@ import {
 } from "./attachments.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
+import { avatarStorageKey, generateAvatarToken } from "./avatars.ts";
 import { directBlockExists, recipientsMutingSender } from "./blocks.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
+import { processAvatar } from "./ImageProcessing.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { messageReactionInfo, messageReactionInfoOne } from "./reactions.ts";
 import {
@@ -52,8 +58,14 @@ import {
   pinnedMessageIds,
   starredMessageIdsInChat,
 } from "./pinsStars.ts";
+import { RateLimiter } from "./RateLimiter.ts";
 import { RealtimeConnections } from "./Realtime.ts";
-import { effectiveStatus, toAvatarVariants } from "./UsersHandler.ts";
+import {
+  deleteAvatarObjects,
+  effectiveStatus,
+  enforceRateLimit,
+  toAvatarVariants,
+} from "./UsersHandler.ts";
 import {
   chatInvites,
   chatParticipants,
@@ -68,6 +80,12 @@ import {
   type DbChatInvite,
   type DbMessage,
 } from "./db/schema.ts";
+
+// Mirrors AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT/AVATAR_UPLOAD_WINDOW_SECONDS
+// in UsersHandler.ts — same rationale (real image-decoding/resizing work, a
+// rare deliberate action) applies to a group's avatar.
+const CHAT_AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT = 10;
+const CHAT_AVATAR_UPLOAD_WINDOW_SECONDS = 60 * 60;
 
 const toApiChatInvite = (row: DbChatInvite): ChatInvite => ({
   id: row.id,
@@ -897,6 +915,7 @@ const buildChat = (
       participants: [...resolvedParticipants],
       lastMessage,
       unreadCount,
+      avatarVariants: toAvatarVariants(row),
     };
   });
 
@@ -978,6 +997,9 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 createdAt: chats.createdAt,
                 updatedAt: chats.updatedAt,
                 version: chats.version,
+                avatarSmallKey: chats.avatarSmallKey,
+                avatarMediumKey: chats.avatarMediumKey,
+                avatarLargeKey: chats.avatarLargeKey,
               })
               .from(chats)
               .innerJoin(
@@ -1027,6 +1049,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               participants: participantsByChat.get(row.id) ?? [],
               lastMessage: lastMessageByChat.get(row.id) ?? null,
               unreadCount: unreadByChat.get(row.id) ?? 0,
+              avatarVariants: toAvatarVariants(row),
             })),
             limit,
             nextCursor,
@@ -1257,6 +1280,184 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             version,
             participants.map((p) => p.userId),
           );
+          return yield* buildChat(
+            db,
+            { ...row, version },
+            currentUser.id,
+            participants,
+          );
+        }),
+      )
+      .handle("uploadChatAvatar", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const limiter = yield* RateLimiter;
+          const storage = yield* AttachmentStorage;
+          const existing = yield* getChatOr404(db, id);
+          if (existing.type !== "group")
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "Only group chats can have an avatar",
+              }),
+            );
+          yield* requireChatManager(db, currentUser, existing);
+
+          // Bucketed by the uploading account rather than the chat, mirroring
+          // `uploadAvatar` in UsersHandler.ts — a caller who manages several
+          // groups shares one budget across all of them instead of getting a
+          // fresh one per chat.
+          yield* enforceRateLimit(
+            limiter,
+            `chat-avatar-upload:account:${currentUser.id}`,
+            CHAT_AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT,
+            CHAT_AVATAR_UPLOAD_WINDOW_SECONDS,
+          );
+
+          if (
+            !(ALLOWED_AVATAR_MIME_TYPES as ReadonlyArray<string>).includes(
+              payload.file.contentType,
+            )
+          )
+            return yield* Effect.fail(
+              new InvalidAvatarUpload({
+                message: `Unsupported file type: ${payload.file.contentType}`,
+              }),
+            );
+
+          const bunFile = Bun.file(payload.file.path);
+          if (bunFile.size > MAX_AVATAR_UPLOAD_SIZE_BYTES)
+            return yield* Effect.fail(
+              new AvatarTooLarge({
+                message: `File exceeds the maximum size of ${MAX_AVATAR_UPLOAD_SIZE_BYTES} bytes`,
+              }),
+            );
+
+          const processed = yield* Effect.tryPromise({
+            try: async () =>
+              processAvatar(await bunFile.bytes(), {
+                x: payload.x,
+                y: payload.y,
+                size: payload.size,
+              }),
+            catch: (err) =>
+              new InvalidAvatarUpload({
+                message:
+                  err instanceof Error ? err.message : "Invalid avatar image",
+              }),
+          });
+
+          // Mint a fresh token per variant and push the processed bytes to
+          // object storage before touching the row — same ordering rationale
+          // as `uploadAvatar` in UsersHandler.ts (a failed upload leaves at
+          // most a few orphaned objects rather than a row pointing at bytes
+          // that never landed).
+          const smallToken = generateAvatarToken();
+          const mediumToken = generateAvatarToken();
+          const largeToken = generateAvatarToken();
+          yield* Effect.all(
+            [
+              storage.upload(
+                avatarStorageKey(smallToken),
+                processed.small,
+                processed.contentType,
+              ),
+              storage.upload(
+                avatarStorageKey(mediumToken),
+                processed.medium,
+                processed.contentType,
+              ),
+              storage.upload(
+                avatarStorageKey(largeToken),
+                processed.large,
+                processed.contentType,
+              ),
+            ],
+            { concurrency: "unbounded" },
+          ).pipe(Effect.orDie);
+
+          const updated = yield* Effect.tryPromise(() =>
+            db
+              .update(chats)
+              .set({
+                avatarSmallKey: smallToken,
+                avatarMediumKey: mediumToken,
+                avatarLargeKey: largeToken,
+              })
+              .where(eq(chats.id, id))
+              .returning(),
+          ).pipe(Effect.orDie);
+          const row = updated[0];
+          if (!row)
+            return yield* Effect.die(new Error("UPDATE returned no rows"));
+          const version = yield* bumpChatVersion(db, id);
+          const participants = yield* getParticipants(db, id);
+          yield* notifyChatUpdated(
+            connections,
+            id,
+            version,
+            participants.map((p) => p.userId),
+          );
+
+          yield* deleteAvatarObjects(storage, [
+            existing.avatarSmallKey,
+            existing.avatarMediumKey,
+            existing.avatarLargeKey,
+          ]);
+
+          return yield* buildChat(
+            db,
+            { ...row, version },
+            currentUser.id,
+            participants,
+          );
+        }),
+      )
+      .handle("deleteChatAvatar", ({ path: { id } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const storage = yield* AttachmentStorage;
+          const existing = yield* getChatOr404(db, id);
+          if (existing.type !== "group")
+            return yield* Effect.fail(
+              new InvalidChatRequest({
+                message: "Only group chats can have an avatar",
+              }),
+            );
+          yield* requireChatManager(db, currentUser, existing);
+
+          const updated = yield* Effect.tryPromise(() =>
+            db
+              .update(chats)
+              .set({
+                avatarSmallKey: null,
+                avatarMediumKey: null,
+                avatarLargeKey: null,
+              })
+              .where(eq(chats.id, id))
+              .returning(),
+          ).pipe(Effect.orDie);
+          const row = updated[0];
+          if (!row)
+            return yield* Effect.die(new Error("UPDATE returned no rows"));
+          const version = yield* bumpChatVersion(db, id);
+          const participants = yield* getParticipants(db, id);
+          yield* notifyChatUpdated(
+            connections,
+            id,
+            version,
+            participants.map((p) => p.userId),
+          );
+
+          yield* deleteAvatarObjects(storage, [
+            existing.avatarSmallKey,
+            existing.avatarMediumKey,
+            existing.avatarLargeKey,
+          ]);
+
           return yield* buildChat(
             db,
             { ...row, version },

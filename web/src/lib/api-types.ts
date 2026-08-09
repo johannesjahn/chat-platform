@@ -404,6 +404,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chats/{id}/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["chats.uploadChatAvatar"];
+        delete: operations["chats.deleteChatAvatar"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chats/{id}/participants": {
         parameters: {
             query?: never;
@@ -1111,6 +1127,7 @@ export interface components {
             participants: components["schemas"]["ChatParticipant"][];
             lastMessage: components["schemas"]["Message"] | null;
             unreadCount: number;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
         };
         /** @enum {string} */
         ChatType: "direct" | "group";
@@ -3347,6 +3364,7 @@ export interface operations {
                         participants: components["schemas"]["ChatParticipant"][];
                         lastMessage: components["schemas"]["Message"] | null;
                         unreadCount: number;
+                        avatarVariants: components["schemas"]["AvatarVariants"] | null;
                     };
                 };
             };
@@ -3366,6 +3384,156 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
+                };
+            };
+        };
+    };
+    "chats.uploadChatAvatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * itemsCount(1)
+                     * @description an array of exactly 1 item(s)
+                     */
+                    file: components["schemas"]["PersistedFile"][];
+                    /** @description a string to be decoded into a number */
+                    x: string;
+                    /** @description a string to be decoded into a number */
+                    y: string;
+                    /** @description a string to be decoded into a number */
+                    size: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Chat */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Chat"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"] | components["schemas"]["InvalidAvatarUpload"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Forbidden"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
+                };
+            };
+            /** @description AvatarTooLarge */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AvatarTooLarge"];
+                };
+            };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequests"];
+                };
+            };
+        };
+    };
+    "chats.deleteChatAvatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Chat */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Chat"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Forbidden"];
                 };
             };
             /** @description NotFound */

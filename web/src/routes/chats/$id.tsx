@@ -506,9 +506,17 @@ function ChatView({ id }: { id: string }) {
               onClick={() => setManagingGroup(true)}
               className="group/hdr flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-accent/50"
             >
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground transition-transform motion-safe:group-hover/hdr:scale-105">
-                <Users className="size-4" />
-              </div>
+              {chat.avatarVariants ? (
+                <Avatar
+                  name={name}
+                  avatarVariants={chat.avatarVariants}
+                  className="shrink-0 transition-transform motion-safe:group-hover/hdr:scale-105"
+                />
+              ) : (
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground transition-transform motion-safe:group-hover/hdr:scale-105">
+                  <Users className="size-4" />
+                </div>
+              )}
               <div className="flex min-w-0 flex-1 flex-col leading-tight">
                 <span className="truncate font-semibold">{name}</span>
                 <span className="truncate text-xs text-muted-foreground">

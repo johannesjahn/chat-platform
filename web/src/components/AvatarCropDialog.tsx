@@ -2,12 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/errors";
-import {
-  MIN_AVATAR_SOURCE_PX,
-  uploadAvatar,
-  type AvatarCropRegion,
-  type User,
-} from "@/lib/avatar";
+import { MIN_AVATAR_SOURCE_PX, type AvatarCropRegion } from "@/lib/avatar";
 
 type NaturalSize = { width: number; height: number };
 type Offset = { x: number; y: number };
@@ -46,10 +41,17 @@ const clampOffset = (
   };
 };
 
-type AvatarCropDialogProps = {
+type AvatarCropDialogProps<T> = {
   file: File;
   onClose: () => void;
-  onUploaded: (user: User) => void;
+  // Posts the cropped file to whichever endpoint owns this avatar — the
+  // current user's (`uploadAvatar` in lib/avatar.ts) or a group chat's
+  // (`uploadChatAvatar`) — and resolves with the updated resource. Injected
+  // rather than hardcoded so this dialog stays a single shared crop UI for
+  // both (issue #269's original single-purpose version only ever posted to
+  // `/users/me/avatar`).
+  upload: (file: File, crop: AvatarCropRegion) => Promise<T>;
+  onUploaded: (result: T) => void;
 };
 
 // A minimal, dependency-free square-crop UI (issue #269): drag to pan, a
@@ -57,14 +59,15 @@ type AvatarCropDialogProps = {
 // user pick exactly which square region of an uploaded photo is kept,
 // rather than an arbitrary auto-center-crop — the crop rectangle (in the
 // original image's pixel coordinates) is computed from the pan/zoom state
-// only when confirmed, then sent to `POST /users/me/avatar` alongside the
-// original file; the actual cropping/resizing happens server-side
-// (ImageProcessing.ts), so nothing is drawn to a canvas here.
-export function AvatarCropDialog({
+// only when confirmed, then handed to `upload` alongside the original file;
+// the actual cropping/resizing happens server-side (ImageProcessing.ts), so
+// nothing is drawn to a canvas here.
+export function AvatarCropDialog<T>({
   file,
   onClose,
+  upload,
   onUploaded,
-}: AvatarCropDialogProps) {
+}: AvatarCropDialogProps<T>) {
   // `URL.createObjectURL` is a real side effect (it registers a blob with
   // the document) that has to be paired with exactly one `revokeObjectURL`
   // — it can't live in render (including a `useMemo` factory, which React
@@ -179,7 +182,7 @@ export function AvatarCropDialog({
         y: clamp(Math.round(-offset.y / scale), 0, natural.height - size),
         size,
       };
-      const updated = await uploadAvatar(file, crop);
+      const updated = await upload(file, crop);
       onUploaded(updated);
     } catch (err) {
       setError(errorMessage(err));

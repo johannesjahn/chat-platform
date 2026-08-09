@@ -372,6 +372,204 @@ test("the avatar proxy route 404s for an unknown token", () =>
     }),
   ));
 
+// Drives `POST /chats/:id/avatar` with a real multipart/form-data body —
+// mirrors `uploadAvatarFile` above, just against the group-chat endpoint.
+const uploadChatAvatarFile = async (
+  handler: (request: Request) => Promise<Response>,
+  token: string | null,
+  chatId: number,
+  file: { filename: string; contentType: string; data: Uint8Array },
+  crop: { x: number; y: number; size: number },
+): Promise<UploadResult> => {
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([file.data], { type: file.contentType }),
+    file.filename,
+  );
+  form.append("x", String(crop.x));
+  form.append("y", String(crop.y));
+  form.append("size", String(crop.size));
+  const response = await handler(
+    new Request(`http://localhost/chats/${chatId}/avatar`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: form,
+    }),
+  );
+  const body = await response.json().catch(() => null);
+  return { status: response.status, body };
+};
+
+test("uploadChatAvatar rejects an unauthenticated request", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "groupavatarer1",
+        "pw-testpass",
+      );
+      const other = yield* registerAndLogin("groupavatarer1b", "pw-testpass");
+      const authed = yield* makeAuthedClient(accessToken);
+      const chat = yield* authed.chats.createGroupChat({
+        payload: { title: "Group 1", participantIds: [other.user.id] },
+      });
+
+      const png = yield* Effect.promise(() =>
+        makePng(MIN_AVATAR_SOURCE_PX, MIN_AVATAR_SOURCE_PX),
+      );
+      const result = yield* Effect.promise(() =>
+        uploadChatAvatarFile(
+          handler,
+          null,
+          chat.id,
+          { filename: "avatar.png", contentType: "image/png", data: png },
+          { x: 0, y: 0, size: MIN_AVATAR_SOURCE_PX },
+        ),
+      );
+      expect(result.status).toBe(401);
+    }),
+  ));
+
+test("uploadChatAvatar is forbidden for a member who isn't the owner or an admin", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const owner = yield* registerAndLogin("groupavatarer2", "pw-testpass");
+      const member = yield* registerAndLogin("groupavatarer3", "pw-testpass");
+      const ownerClient = yield* makeAuthedClient(owner.accessToken);
+      const chat = yield* ownerClient.chats.createGroupChat({
+        payload: { title: "Group 2", participantIds: [member.user.id] },
+      });
+
+      const png = yield* Effect.promise(() =>
+        makePng(MIN_AVATAR_SOURCE_PX, MIN_AVATAR_SOURCE_PX),
+      );
+      const result = yield* Effect.promise(() =>
+        uploadChatAvatarFile(
+          handler,
+          member.accessToken,
+          chat.id,
+          { filename: "avatar.png", contentType: "image/png", data: png },
+          { x: 0, y: 0, size: MIN_AVATAR_SOURCE_PX },
+        ),
+      );
+      expect(result.status).toBe(403);
+      expect((result.body as { _tag: string })._tag).toBe("Forbidden");
+    }),
+  ));
+
+test("uploadChatAvatar rejects uploading to a direct chat", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("groupavatarer4", "pw-testpass");
+      const bob = yield* registerAndLogin("groupavatarer5", "pw-testpass");
+      const aliceClient = yield* makeAuthedClient(alice.accessToken);
+      const chat = yield* aliceClient.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+
+      const png = yield* Effect.promise(() =>
+        makePng(MIN_AVATAR_SOURCE_PX, MIN_AVATAR_SOURCE_PX),
+      );
+      const result = yield* Effect.promise(() =>
+        uploadChatAvatarFile(
+          handler,
+          alice.accessToken,
+          chat.id,
+          { filename: "avatar.png", contentType: "image/png", data: png },
+          { x: 0, y: 0, size: MIN_AVATAR_SOURCE_PX },
+        ),
+      );
+      expect(result.status).toBe(400);
+      expect((result.body as { _tag: string })._tag).toBe("InvalidChatRequest");
+    }),
+  ));
+
+test("uploadChatAvatar stores 3 fixed-size variants and is reflected by getChat and listChats", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const owner = yield* registerAndLogin("groupavatarer6", "pw-testpass");
+      const other = yield* registerAndLogin("groupavatarer6b", "pw-testpass");
+      const authed = yield* makeAuthedClient(owner.accessToken);
+      const chat = yield* authed.chats.createGroupChat({
+        payload: { title: "Group 6", participantIds: [other.user.id] },
+      });
+      expect(chat.avatarVariants).toBeNull();
+
+      const size = 400;
+      const png = yield* Effect.promise(() => makePng(size, size));
+      const result = yield* Effect.promise(() =>
+        uploadChatAvatarFile(
+          handler,
+          owner.accessToken,
+          chat.id,
+          { filename: "avatar.png", contentType: "image/png", data: png },
+          { x: 0, y: 0, size },
+        ),
+      );
+      expect(result.status).toBe(200);
+
+      const body = result.body as {
+        avatarVariants: { small: string; medium: string; large: string } | null;
+      };
+      expect(body.avatarVariants).not.toBeNull();
+      for (const src of Object.values(body.avatarVariants!)) {
+        expect(src).toMatch(/^\/avatars\/[0-9a-f-]+$/);
+      }
+      expect(new Set(Object.values(body.avatarVariants!)).size).toBe(3);
+
+      const smallResponse = yield* Effect.promise(() =>
+        handler(new Request(`http://localhost${body.avatarVariants!.small}`)),
+      );
+      expect(smallResponse.status).toBe(200);
+      expect(smallResponse.headers.get("content-type")).toBe("image/webp");
+
+      const fetched = yield* authed.chats.getChat({ path: { id: chat.id } });
+      expect(fetched.avatarVariants).toEqual(body.avatarVariants);
+
+      const listed = yield* authed.chats.listChats({ urlParams: {} });
+      const listedChat = listed.chats.find((c) => c.id === chat.id);
+      expect(listedChat?.avatarVariants).toEqual(body.avatarVariants);
+    }),
+  ));
+
+test("deleteChatAvatar clears an uploaded group avatar and is forbidden for a plain member", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const owner = yield* registerAndLogin("groupavatarer7", "pw-testpass");
+      const member = yield* registerAndLogin("groupavatarer8", "pw-testpass");
+      const ownerClient = yield* makeAuthedClient(owner.accessToken);
+      const memberClient = yield* makeAuthedClient(member.accessToken);
+      const chat = yield* ownerClient.chats.createGroupChat({
+        payload: { title: "Group 7", participantIds: [member.user.id] },
+      });
+
+      const size = MIN_AVATAR_SOURCE_PX;
+      const png = yield* Effect.promise(() => makePng(size, size));
+      yield* Effect.promise(() =>
+        uploadChatAvatarFile(
+          handler,
+          owner.accessToken,
+          chat.id,
+          { filename: "avatar.png", contentType: "image/png", data: png },
+          { x: 0, y: 0, size },
+        ),
+      );
+
+      const forbidden = yield* memberClient.chats
+        .deleteChatAvatar({ path: { id: chat.id } })
+        .pipe(Effect.either);
+      expect(forbidden._tag).toBe("Left");
+      if (forbidden._tag === "Left") {
+        expect((forbidden.left as { _tag: string })._tag).toBe("Forbidden");
+      }
+
+      const cleared = yield* ownerClient.chats.deleteChatAvatar({
+        path: { id: chat.id },
+      });
+      expect(cleared.avatarVariants).toBeNull();
+    }),
+  ));
+
 test("updateProfile clears an uploaded avatar back to an external avatarUrl", () =>
   run(({ handler }) =>
     Effect.gen(function* () {

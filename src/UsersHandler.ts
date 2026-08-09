@@ -90,7 +90,9 @@ const escapeLikePattern = (value: string): string =>
 // rejection, `rate_limit_rejections_total` is labeled only by the bucket
 // *kind* (the part of `key` before its first ":", e.g. "login"/"register") —
 // never by the IP/account/user id the rest of `key` encodes.
-const enforceRateLimit = (
+// Exported — shared with ChatsHandler.ts's group-avatar upload, which needs
+// the same per-account bucketing/rejection-metric behavior.
+export const enforceRateLimit = (
   limiter: Context.Tag.Service<typeof RateLimiter>,
   key: string,
   limit: number,
@@ -156,8 +158,10 @@ export const toAvatarVariants = (row: {
 // stopped pointing at them (a re-upload, a clear via updateProfile, or account
 // deletion). Best-effort — an orphaned object is a harmless storage leak, not
 // a correctness problem, so a delete failure must never fail the user-facing
-// write. `null` tokens (no prior uploaded avatar) are skipped.
-const deleteAvatarObjects = (
+// write. `null` tokens (no prior uploaded avatar) are skipped. Exported —
+// shared with ChatsHandler.ts's group-avatar upload/clear, which sweeps a
+// chat's old avatar objects the same way.
+export const deleteAvatarObjects = (
   storage: Context.Tag.Service<typeof AttachmentStorage>,
   tokens: ReadonlyArray<string | null>,
 ): Effect.Effect<void> =>

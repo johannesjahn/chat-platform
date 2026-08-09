@@ -261,6 +261,19 @@ export const chats = pgTable("chats", {
   // observe jumps by more than one) instead of only being able to guess from
   // a dropped/delayed socket message (issue #55).
   version: integer("version").notNull().default(1),
+  // Uploaded-and-cropped group avatar (only set for `type: "group"` chats),
+  // stored and served exactly like an uploaded user avatar (issue #269/#289)
+  // — see the comment on `users.avatarSmall` above for the full rationale.
+  // Each column holds a short random token: both the object's storage key
+  // suffix (`avatars/<token>`, src/avatars.ts) and the path segment of the
+  // long-cache proxy URL returned to clients (`GET /avatars/:token`, see
+  // src/AvatarRoute.ts). Unlike `users`, there's no external-URL alternative
+  // (no `avatarUrl` column) or legacy base64 columns to carry — this table
+  // goes straight to the current object-storage pattern since it's a new
+  // column, not a migration of pre-existing data.
+  avatarSmallKey: text("avatar_small_key"),
+  avatarMediumKey: text("avatar_medium_key"),
+  avatarLargeKey: text("avatar_large_key"),
 });
 
 export type DbChat = typeof chats.$inferSelect;

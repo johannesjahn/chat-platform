@@ -31,6 +31,7 @@ import { formatBytes } from "@/lib/attachments";
 import {
   MAX_AVATAR_UPLOAD_SIZE_BYTES,
   isAllowedAvatarFile,
+  uploadAvatar,
 } from "@/lib/avatar";
 
 export const Route = createFileRoute("/settings")({
@@ -394,6 +395,7 @@ function EditProfileCard() {
           <AvatarCropDialog
             file={cropFile}
             onClose={() => setCropFile(null)}
+            upload={uploadAvatar}
             onUploaded={async (updated) => {
               setCropFile(null);
               setAvatarUrl(updated.avatarUrl ?? "");
