@@ -84,9 +84,17 @@ export function ChatListItem({
         </Link>
       ) : (
         <div className="relative shrink-0">
-          <div className="flex size-11 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
-            <Users className="size-4.5" />
-          </div>
+          {chat.avatarVariants ? (
+            <Avatar
+              name={name}
+              avatarVariants={chat.avatarVariants}
+              size="lg"
+            />
+          ) : (
+            <div className="flex size-11 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
+              <Users className="size-4.5" />
+            </div>
+          )}
         </div>
       )}
 

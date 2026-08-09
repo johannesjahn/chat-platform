@@ -2966,7 +2966,8 @@
                     "version",
                     "participants",
                     "lastMessage",
-                    "unreadCount"
+                    "unreadCount",
+                    "avatarVariants"
                   ],
                   "properties": {
                     "id": {
@@ -3022,6 +3023,16 @@
                     },
                     "unreadCount": {
                       "type": "number"
+                    },
+                    "avatarVariants": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/AvatarVariants"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "additionalProperties": false
@@ -3076,6 +3087,232 @@
             }
           },
           "required": true
+        }
+      }
+    },
+    "/chats/{id}/avatar": {
+      "post": {
+        "tags": [
+          "chats"
+        ],
+        "operationId": "chats.uploadChatAvatar",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chat",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Chat"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidChatRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidAvatarUpload"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "AvatarTooLarge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvatarTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "TooManyRequests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyRequests"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file",
+                  "x",
+                  "y",
+                  "size"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/PersistedFile"
+                    },
+                    "description": "an array of exactly 1 item(s)",
+                    "title": "itemsCount(1)",
+                    "minItems": 1,
+                    "maxItems": 1
+                  },
+                  "x": {
+                    "type": "string",
+                    "description": "a string to be decoded into a number"
+                  },
+                  "y": {
+                    "type": "string",
+                    "description": "a string to be decoded into a number"
+                  },
+                  "size": {
+                    "type": "string",
+                    "description": "a string to be decoded into a number"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        }
+      },
+      "delete": {
+        "tags": [
+          "chats"
+        ],
+        "operationId": "chats.deleteChatAvatar",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chat",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Chat"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidChatRequest"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -6893,7 +7130,8 @@
           "version",
           "participants",
           "lastMessage",
-          "unreadCount"
+          "unreadCount",
+          "avatarVariants"
         ],
         "properties": {
           "id": {
@@ -6949,6 +7187,16 @@
           },
           "unreadCount": {
             "type": "number"
+          },
+          "avatarVariants": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvatarVariants"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false

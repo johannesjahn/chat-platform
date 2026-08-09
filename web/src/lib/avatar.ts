@@ -3,6 +3,7 @@ import { getSession } from "./auth";
 import type { components } from "./api-types";
 
 export type User = components["schemas"]["User"];
+export type Chat = components["schemas"]["Chat"];
 
 // Mirrors ALLOWED_AVATAR_MIME_TYPES/MAX_AVATAR_UPLOAD_SIZE_BYTES in
 // src/Api.ts and MIN_AVATAR_SOURCE_PX in src/ImageProcessing.ts — kept in
@@ -36,16 +37,20 @@ export type AvatarCropRegion = {
   size: number;
 };
 
-// Posts a real `multipart/form-data` body to `POST /users/me/avatar` (the
-// crop rectangle as plain form fields alongside the file) — mirrors
-// `uploadAttachment` in lib/attachments.ts, minus the upload-progress
-// plumbing that needs XMLHttpRequest: avatars are capped at
-// MAX_AVATAR_UPLOAD_SIZE_BYTES (far smaller than an attachment) and
-// resolve quickly enough that a progress bar isn't worth the complexity.
-export async function uploadAvatar(
+// Posts a real `multipart/form-data` body (the crop rectangle as plain form
+// fields alongside the file) to `path` — mirrors `uploadAttachment` in
+// lib/attachments.ts, minus the upload-progress plumbing that needs
+// XMLHttpRequest: avatars are capped at MAX_AVATAR_UPLOAD_SIZE_BYTES (far
+// smaller than an attachment) and resolve quickly enough that a progress bar
+// isn't worth the complexity. Shared by `uploadAvatar` (a user's own avatar,
+// `/users/me/avatar`) and `uploadChatAvatar` (a group chat's, `/chats/:id/
+// avatar`) — same request shape, same response-handling, different target
+// and resource type.
+async function postAvatarMultipart<T>(
+  path: string,
   file: File,
   crop: AvatarCropRegion,
-): Promise<User> {
+): Promise<T> {
   const form = new FormData();
   form.append("file", file, file.name);
   form.append("x", String(crop.x));
@@ -53,7 +58,7 @@ export async function uploadAvatar(
   form.append("size", String(crop.size));
 
   const session = getSession();
-  const response = await fetch(`${API_URL}/users/me/avatar`, {
+  const response = await fetch(`${API_URL}${path}`, {
     method: "POST",
     headers: session
       ? { Authorization: `Bearer ${session.accessToken}` }
@@ -73,5 +78,20 @@ export async function uploadAvatar(
       `Upload failed (${response.status})`;
     throw new AvatarUploadError(message, response.status);
   }
-  return body as User;
+  return body as T;
+}
+
+export function uploadAvatar(
+  file: File,
+  crop: AvatarCropRegion,
+): Promise<User> {
+  return postAvatarMultipart<User>("/users/me/avatar", file, crop);
+}
+
+export function uploadChatAvatar(
+  chatId: number,
+  file: File,
+  crop: AvatarCropRegion,
+): Promise<Chat> {
+  return postAvatarMultipart<Chat>(`/chats/${chatId}/avatar`, file, crop);
 }

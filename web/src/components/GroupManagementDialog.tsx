@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import {
   Check,
   Copy,
   Crown,
+  ImageUp,
   Link2,
   Loader2,
   LogOut,
@@ -19,11 +20,18 @@ import {
   X,
 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { AvatarCropDialog } from "@/components/AvatarCropDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserStatusBadge } from "@/components/UserStatusBadge";
+import { formatBytes } from "@/lib/attachments";
 import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import type { Session } from "@/lib/api";
+import {
+  isAllowedAvatarFile,
+  MAX_AVATAR_UPLOAD_SIZE_BYTES,
+  uploadChatAvatar,
+} from "@/lib/avatar";
 import {
   MAX_GROUP_PARTICIPANTS,
   chatDetailQueryKey,
@@ -115,6 +123,7 @@ function GroupManagementBody({
   const router = useRouter();
 
   const updateChat = $api.useMutation("put", "/chats/{id}");
+  const deleteChatAvatar = $api.useMutation("delete", "/chats/{id}/avatar");
   const addParticipants = $api.useMutation("post", "/chats/{id}/participants");
   const removeParticipant = $api.useMutation(
     "delete",
@@ -147,6 +156,8 @@ function GroupManagementBody({
   const [selectedToAdd, setSelectedToAdd] = useState<number[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [copiedInviteId, setCopiedInviteId] = useState<number | null>(null);
+  const [avatarCropFile, setAvatarCropFile] = useState<File | null>(null);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
   // Captured once on open so the render stays pure — good enough for showing
   // whether an invite has lapsed; it refreshes each time the dialog reopens.
   const [now] = useState(() => Date.now());
@@ -195,6 +206,19 @@ function GroupManagementBody({
       await invalidateChat();
       await queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
       setRenaming(false);
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }
+
+  async function handleRemoveAvatar() {
+    setActionError(null);
+    try {
+      await deleteChatAvatar.mutateAsync({
+        params: { path: { id: String(chatId) } },
+      });
+      await invalidateChat();
+      await queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -335,9 +359,18 @@ function GroupManagementBody({
     <>
       {/* Header — big group identity, participant count, close. */}
       <div className="flex items-center gap-3 border-b border-border bg-gradient-to-b from-accent/40 to-transparent px-5 py-5">
-        <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/15 text-primary ring-1 ring-inset ring-primary/20">
-          <Users className="size-7" />
-        </div>
+        {chat.avatarVariants ? (
+          <Avatar
+            name={title}
+            avatarVariants={chat.avatarVariants}
+            size="xl"
+            className="size-14"
+          />
+        ) : (
+          <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/15 text-primary ring-1 ring-inset ring-primary/20">
+            <Users className="size-7" />
+          </div>
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-lg font-semibold leading-tight">
             {title}
@@ -364,9 +397,98 @@ function GroupManagementBody({
           </p>
         )}
 
-        {/* Group name */}
+        {avatarCropFile && (
+          <AvatarCropDialog
+            file={avatarCropFile}
+            onClose={() => setAvatarCropFile(null)}
+            upload={(file, crop) => uploadChatAvatar(chatId, file, crop)}
+            onUploaded={async () => {
+              setAvatarCropFile(null);
+              await invalidateChat();
+              await queryClient.invalidateQueries({
+                queryKey: chatsListQueryKey,
+              });
+            }}
+          />
+        )}
+
+        {/* Group avatar */}
         <Section
           index={0}
+          icon={<ImageUp className="size-4" />}
+          title="Group avatar"
+          description={
+            canManage
+              ? "Shown wherever this group appears — the chat list, headers, and mentions."
+              : "Shown wherever this group appears."
+          }
+        >
+          <div className="flex items-center gap-4">
+            <Avatar
+              name={title}
+              avatarVariants={chat.avatarVariants}
+              size="xl"
+            />
+            {canManage && (
+              <div className="flex flex-1 flex-col gap-2">
+                <input
+                  ref={avatarFileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!file) return;
+                    setActionError(null);
+                    if (!isAllowedAvatarFile(file)) {
+                      setActionError(
+                        "Avatars must be a JPEG, PNG, or WebP image.",
+                      );
+                      return;
+                    }
+                    if (file.size > MAX_AVATAR_UPLOAD_SIZE_BYTES) {
+                      setActionError(
+                        `File exceeds the ${formatBytes(MAX_AVATAR_UPLOAD_SIZE_BYTES)} limit`,
+                      );
+                      return;
+                    }
+                    setAvatarCropFile(file);
+                  }}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-start"
+                    onClick={() => avatarFileInputRef.current?.click()}
+                  >
+                    <ImageUp className="size-4" />
+                    Upload photo
+                  </Button>
+                  {chat.avatarVariants && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="self-start text-destructive hover:text-destructive"
+                      disabled={deleteChatAvatar.isPending}
+                      onClick={() => void handleRemoveAvatar()}
+                    >
+                      <Trash2 className="size-4" />
+                      Remove
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </Section>
+
+        {/* Group name */}
+        <Section
+          index={1}
           icon={<Pencil className="size-4" />}
           title="Group name"
           description="This is what everyone sees at the top of the conversation."
@@ -428,7 +550,7 @@ function GroupManagementBody({
 
         {/* Members */}
         <Section
-          index={1}
+          index={2}
           icon={<Users className="size-4" />}
           title={`Members · ${chat.participants.length}`}
           description={
@@ -570,7 +692,7 @@ function GroupManagementBody({
         {/* Invite links */}
         {canManage && (
           <Section
-            index={2}
+            index={3}
             icon={<Link2 className="size-4" />}
             title="Invite links"
             description="Anyone with an active link can join this chat — revoke a link to cut off access."
@@ -656,7 +778,7 @@ function GroupManagementBody({
 
         {/* Danger zone */}
         <Section
-          index={3}
+          index={4}
           icon={<LogOut className="size-4" />}
           title="Leave or delete"
           description="Leaving removes you from the chat. Deleting removes it for everyone."

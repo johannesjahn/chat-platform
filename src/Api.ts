@@ -841,6 +841,14 @@ export const Chat = Schema.Struct({
   // Messages in this chat sent by someone else that the current user hasn't
   // read yet — computed relative to whoever is making the request.
   unreadCount: Schema.Number,
+  // Uploaded-and-cropped group avatar, set via `POST /chats/:id/avatar` and
+  // cleared via `DELETE /chats/:id/avatar` — always null for a direct chat
+  // (the UI renders the other participant's own avatar instead, same as
+  // `title`). Same nested shape as `User.avatarVariants`/
+  // `ChatParticipant.avatarVariants` (see `AvatarVariants` above), but unlike
+  // those there's no `avatarUrl` counterpart here: a group avatar only ever
+  // comes from an upload, not a linked external image.
+  avatarVariants: Schema.NullOr(AvatarVariants),
 }).annotations({ identifier: "Chat" });
 export type Chat = typeof Chat.Type;
 
@@ -1668,6 +1676,35 @@ const ChatsGroup = HttpApiGroup.make("chats")
     HttpApiEndpoint.put("updateChat", "/chats/:id")
       .setPath(ChatIdPath)
       .setPayload(UpdateChatBody)
+      .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Uploads and stores a square-cropped group avatar (mirrors
+    // `POST /users/me/avatar`) — the owner or an admin. Overwrites any
+    // existing group avatar; the old variants are swept from object storage
+    // once the row is repointed (see ChatsHandler.ts).
+    HttpApiEndpoint.post("uploadChatAvatar", "/chats/:id/avatar")
+      .setPath(ChatIdPath)
+      .setPayload(UploadAvatarBody)
+      .addSuccess(Chat)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidChatRequest, { status: 400 })
+      .addError(InvalidAvatarUpload, { status: 400 })
+      .addError(AvatarTooLarge, { status: 413 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Clears a group chat's avatar back to unset (initials fallback) — the
+    // owner or an admin. Counterpart to `uploadChatAvatar`; a no-op (still
+    // succeeds) if the chat has no uploaded avatar.
+    HttpApiEndpoint.del("deleteChatAvatar", "/chats/:id/avatar")
+      .setPath(ChatIdPath)
       .addSuccess(Chat)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })
