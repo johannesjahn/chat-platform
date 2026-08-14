@@ -58,9 +58,7 @@ test("a user's own profile shows 'Your posts' with no Message button", async ({
   expect(seeded.ok()).toBe(true);
 
   await page.goto(`/users/${session.user.id}`);
-  await expect(
-    page.getByRole("heading", { name: "Your posts" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your posts" })).toBeVisible();
   await expect(page.getByText("My own post")).toBeVisible();
   await expect(page.getByRole("button", { name: "Message" })).toHaveCount(0);
 });
