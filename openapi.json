@@ -270,6 +270,96 @@
         }
       }
     },
+    "/users/{id}/posts": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users.listUserPosts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "a string to be decoded into a number"
+            },
+            "required": false,
+            "description": "a string to be decoded into a number"
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "UserPostsPage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserPostsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidPostsRequest"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/users/register": {
       "post": {
         "tags": [
@@ -6249,6 +6339,202 @@
         },
         "additionalProperties": false
       },
+      "UserPostsPage": {
+        "type": "object",
+        "required": [
+          "posts",
+          "limit",
+          "nextCursor",
+          "totalCount"
+        ],
+        "properties": {
+          "posts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Post"
+            }
+          },
+          "limit": {
+            "type": "number"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "totalCount": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Post": {
+        "type": "object",
+        "required": [
+          "id",
+          "authorId",
+          "contentType",
+          "content",
+          "attachment",
+          "createdAt",
+          "updatedAt",
+          "reactions",
+          "commentCount"
+        ],
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "authorId": {
+            "type": "number"
+          },
+          "contentType": {
+            "$ref": "#/components/schemas/PostContentType"
+          },
+          "content": {
+            "type": "string"
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Attachment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReactionSummary"
+            }
+          },
+          "commentCount": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PostContentType": {
+        "type": "string",
+        "enum": [
+          "text",
+          "image_url",
+          "attachment"
+        ]
+      },
+      "Attachment": {
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "mimeType",
+          "size",
+          "url",
+          "width",
+          "height",
+          "blurhash"
+        ],
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "url": {
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blurhash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReactionSummary": {
+        "type": "object",
+        "required": [
+          "emoji",
+          "count",
+          "reactedByMe"
+        ],
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          },
+          "reactedByMe": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "InvalidPostsRequest": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "InvalidPostsRequest"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "RegisterBody": {
         "type": "object",
         "required": [
@@ -6685,149 +6971,6 @@
         },
         "additionalProperties": false
       },
-      "Post": {
-        "type": "object",
-        "required": [
-          "id",
-          "authorId",
-          "contentType",
-          "content",
-          "attachment",
-          "createdAt",
-          "updatedAt",
-          "reactions",
-          "commentCount"
-        ],
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "authorId": {
-            "type": "number"
-          },
-          "contentType": {
-            "$ref": "#/components/schemas/PostContentType"
-          },
-          "content": {
-            "type": "string"
-          },
-          "attachment": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Attachment"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "createdAt": {
-            "type": "number"
-          },
-          "updatedAt": {
-            "type": "number"
-          },
-          "reactions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ReactionSummary"
-            }
-          },
-          "commentCount": {
-            "type": "number"
-          }
-        },
-        "additionalProperties": false
-      },
-      "PostContentType": {
-        "type": "string",
-        "enum": [
-          "text",
-          "image_url",
-          "attachment"
-        ]
-      },
-      "Attachment": {
-        "type": "object",
-        "required": [
-          "id",
-          "filename",
-          "mimeType",
-          "size",
-          "url",
-          "width",
-          "height",
-          "blurhash"
-        ],
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "filename": {
-            "type": "string"
-          },
-          "mimeType": {
-            "type": "string"
-          },
-          "size": {
-            "type": "number"
-          },
-          "url": {
-            "type": "string"
-          },
-          "width": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "height": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "blurhash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "additionalProperties": false
-      },
-      "ReactionSummary": {
-        "type": "object",
-        "required": [
-          "emoji",
-          "count",
-          "reactedByMe"
-        ],
-        "properties": {
-          "emoji": {
-            "type": "string"
-          },
-          "count": {
-            "type": "number"
-          },
-          "reactedByMe": {
-            "type": "boolean"
-          }
-        },
-        "additionalProperties": false
-      },
       "PostsPage": {
         "type": "object",
         "required": [
@@ -6853,25 +6996,6 @@
               {
                 "type": "null"
               }
-            ]
-          }
-        },
-        "additionalProperties": false
-      },
-      "InvalidPostsRequest": {
-        "type": "object",
-        "required": [
-          "message",
-          "_tag"
-        ],
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "_tag": {
-            "type": "string",
-            "enum": [
-              "InvalidPostsRequest"
             ]
           }
         },

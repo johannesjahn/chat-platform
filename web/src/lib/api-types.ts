@@ -52,6 +52,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users/{id}/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["users.listUserPosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users/register": {
         parameters: {
             query?: never;
@@ -872,6 +888,45 @@ export interface components {
             /** @enum {string} */
             _tag: "NotFound";
         };
+        UserPostsPage: {
+            posts: components["schemas"]["Post"][];
+            limit: number;
+            nextCursor: string | null;
+            totalCount: number;
+        };
+        Post: {
+            id: number;
+            authorId: number;
+            contentType: components["schemas"]["PostContentType"];
+            content: string;
+            attachment: components["schemas"]["Attachment"] | null;
+            createdAt: number;
+            updatedAt: number;
+            reactions: components["schemas"]["ReactionSummary"][];
+            commentCount: number;
+        };
+        /** @enum {string} */
+        PostContentType: "text" | "image_url" | "attachment";
+        Attachment: {
+            id: number;
+            filename: string;
+            mimeType: string;
+            size: number;
+            url: string;
+            width: number | null;
+            height: number | null;
+            blurhash: string | null;
+        };
+        ReactionSummary: {
+            emoji: string;
+            count: number;
+            reactedByMe: boolean;
+        };
+        InvalidPostsRequest: {
+            message: string;
+            /** @enum {string} */
+            _tag: "InvalidPostsRequest";
+        };
         RegisterBody: {
             /**
              * maxLength(32)
@@ -1013,43 +1068,10 @@ export interface components {
             /** @enum {string} */
             _tag: "InvalidBlockRequest";
         };
-        Post: {
-            id: number;
-            authorId: number;
-            contentType: components["schemas"]["PostContentType"];
-            content: string;
-            attachment: components["schemas"]["Attachment"] | null;
-            createdAt: number;
-            updatedAt: number;
-            reactions: components["schemas"]["ReactionSummary"][];
-            commentCount: number;
-        };
-        /** @enum {string} */
-        PostContentType: "text" | "image_url" | "attachment";
-        Attachment: {
-            id: number;
-            filename: string;
-            mimeType: string;
-            size: number;
-            url: string;
-            width: number | null;
-            height: number | null;
-            blurhash: string | null;
-        };
-        ReactionSummary: {
-            emoji: string;
-            count: number;
-            reactedByMe: boolean;
-        };
         PostsPage: {
             posts: components["schemas"]["Post"][];
             limit: number;
             nextCursor: string | null;
-        };
-        InvalidPostsRequest: {
-            message: string;
-            /** @enum {string} */
-            _tag: "InvalidPostsRequest";
         };
         CreatePostBody: {
             contentType: components["schemas"]["PostContentType"];
@@ -1509,6 +1531,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Forbidden"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
+                };
+            };
+        };
+    };
+    "users.listUserPosts": {
+        parameters: {
+            query?: {
+                cursor?: string;
+                /** @description a string to be decoded into a number */
+                limit?: string;
+            };
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UserPostsPage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPostsPage"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidPostsRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
                 };
             };
             /** @description NotFound */

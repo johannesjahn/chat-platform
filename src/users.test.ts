@@ -581,6 +581,159 @@ test("getUser returns 404 for a missing id", () =>
     }),
   ));
 
+test("listUserPosts rejects an unauthenticated request", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const created = yield* c.users.register({
+        payload: { username: "erin", password: "pw-erin1" },
+      });
+      const result = yield* c.users
+        .listUserPosts({ path: { id: created.id }, urlParams: {} })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+      }
+    }),
+  ));
+
+test("listUserPosts returns 404 for a missing id", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "frank", password: "pw-frank1" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "frank", password: "pw-frank1" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.users
+        .listUserPosts({ path: { id: 9999 }, urlParams: {} })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("listUserPosts returns only the target user's posts, newest-first, with a total count", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const author = yield* c.users.register({
+        payload: { username: "grace", password: "pw-grace1" },
+      });
+      const { accessToken: authorToken } = yield* c.users.login({
+        payload: { username: "grace", password: "pw-grace1" },
+      });
+      const authorClient = yield* makeAuthedClient(authorToken);
+
+      yield* c.users.register({
+        payload: { username: "henry", password: "pw-henry1" },
+      });
+      const { accessToken: otherToken } = yield* c.users.login({
+        payload: { username: "henry", password: "pw-henry1" },
+      });
+      const otherClient = yield* makeAuthedClient(otherToken);
+      yield* otherClient.posts.createPost({
+        payload: { contentType: "text", content: "not grace's post" },
+      });
+
+      const created = [];
+      for (let i = 0; i < 3; i++) {
+        created.push(
+          yield* authorClient.posts.createPost({
+            payload: { contentType: "text", content: `grace post ${i}` },
+          }),
+        );
+      }
+      const newestFirst = [...created].reverse();
+
+      const result = yield* otherClient.users.listUserPosts({
+        path: { id: author.id },
+        urlParams: {},
+      });
+      expect(result.totalCount).toBe(3);
+      expect(result.nextCursor).toBeNull();
+      expect(result.posts.map((p) => p.id)).toEqual(
+        newestFirst.map((p) => p.id),
+      );
+      expect(result.posts.every((p) => p.authorId === author.id)).toBe(true);
+    }),
+  ));
+
+test("listUserPosts paginates newest-first with a keyset cursor", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const author = yield* c.users.register({
+        payload: { username: "iris", password: "pw-iris01" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "iris", password: "pw-iris01" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      const created = [];
+      for (let i = 0; i < 3; i++) {
+        created.push(
+          yield* authed.posts.createPost({
+            payload: { contentType: "text", content: `post ${i}` },
+          }),
+        );
+      }
+      const newestFirst = [...created].reverse();
+
+      const firstPage = yield* authed.users.listUserPosts({
+        path: { id: author.id },
+        urlParams: { limit: 2 },
+      });
+      expect(firstPage.totalCount).toBe(3);
+      expect(firstPage.nextCursor).not.toBeNull();
+      expect(firstPage.posts.map((p) => p.id)).toEqual(
+        newestFirst.slice(0, 2).map((p) => p.id),
+      );
+
+      const secondPage = yield* authed.users.listUserPosts({
+        path: { id: author.id },
+        urlParams: { limit: 2, cursor: firstPage.nextCursor! },
+      });
+      expect(secondPage.totalCount).toBe(3);
+      expect(secondPage.nextCursor).toBeNull();
+      expect(secondPage.posts.map((p) => p.id)).toEqual(
+        newestFirst.slice(2, 3).map((p) => p.id),
+      );
+    }),
+  ));
+
+test("listUserPosts rejects a malformed cursor", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const author = yield* c.users.register({
+        payload: { username: "jack", password: "pw-jack01" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "jack", password: "pw-jack01" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.users
+        .listUserPosts({
+          path: { id: author.id },
+          urlParams: { cursor: "not-a-real-cursor" },
+        })
+        .pipe(Effect.either);
+      expect(result._tag).toBe("Left");
+      if (result._tag === "Left") {
+        expect((result.left as { _tag: string })._tag).toBe(
+          "InvalidPostsRequest",
+        );
+      }
+    }),
+  ));
+
 test('register is rate-limited per IP, incrementing rate_limit_rejections_total{limiter="register"}', () =>
   run(
     Effect.gen(function* () {
