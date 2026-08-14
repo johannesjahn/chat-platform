@@ -10,7 +10,7 @@ test("a profile page shows the user's recent posts and post count, and Message s
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  const { username: usernameA } = await registerViaUi(pageA);
+  await registerViaUi(pageA);
 
   const sessionA = await pageA.evaluate(() =>
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
