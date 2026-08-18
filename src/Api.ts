@@ -628,6 +628,20 @@ export const PostsPage = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.String),
 }).annotations({ identifier: "PostsPage" });
 
+// Response for `GET /users/:id/posts` (issue #316: the profile page shows a
+// recent-activity feed instead of being a dead end). Same shape/pagination as
+// `PostsPage`, plus `totalCount` — this endpoint is always scoped to one
+// author, so a `COUNT(*) WHERE author_id = :id` (backed by
+// `posts_author_id_idx`) is cheap in a way a full-feed count isn't (see
+// `PostsPage`'s comment), and it powers the "N posts" stat on the profile
+// header.
+export const UserPostsPage = Schema.Struct({
+  posts: Schema.Array(Post),
+  limit: Schema.Number,
+  nextCursor: Schema.NullOr(Schema.String),
+  totalCount: Schema.Number,
+}).annotations({ identifier: "UserPostsPage" });
+
 // Shorter than a post's cap — comments are conversational, not long-form.
 export const MAX_COMMENT_CONTENT_LENGTH = 2_000;
 
@@ -1123,6 +1137,18 @@ const UsersGroup = HttpApiGroup.make("users")
       .setPath(Schema.Struct({ id: Schema.NumberFromString }))
       .addSuccess(User)
       .addError(NotFound, { status: 404 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Recent posts by this user, newest-first (issue #316) — the data
+    // backing the profile page's activity feed. Same keyset pagination as
+    // `listPosts`, but pre-filtered to one author instead of the whole feed.
+    HttpApiEndpoint.get("listUserPosts", "/users/:id/posts")
+      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
+      .setUrlParams(PostsPageQuery)
+      .addSuccess(UserPostsPage)
+      .addError(NotFound, { status: 404 })
+      .addError(InvalidPostsRequest, { status: 400 })
       .middleware(Authentication),
   )
   .add(

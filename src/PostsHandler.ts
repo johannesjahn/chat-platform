@@ -25,7 +25,7 @@ import { comments, posts } from "./db/schema.ts";
 
 const NO_REACTIONS: ReactionSummary[] = [];
 
-const toApiPost = (
+export const toApiPost = (
   row: typeof posts.$inferSelect,
   reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
   attachment: Attachment | null = null,
@@ -72,11 +72,13 @@ const canModify = (
 // Keyset cursor for `listPosts` over its `id desc` sort — see
 // `PostsPageQuery` in Api.ts for why this is a cursor rather than an offset.
 // Posts are never reordered by edits, so the last row's id alone is enough
-// (no tie-breaker column needed, unlike `listChats`'s cursor).
-const encodePostsCursor = (id: number): string =>
+// (no tie-breaker column needed, unlike `listChats`'s cursor). Exported —
+// `listUserPosts` in UsersHandler.ts shares the same cursor format since it
+// sorts posts the same way, just pre-filtered to one author.
+export const encodePostsCursor = (id: number): string =>
   Buffer.from(String(id)).toString("base64url");
 
-const decodePostsCursor = (cursor: string): number | null => {
+export const decodePostsCursor = (cursor: string): number | null => {
   const id = Number(Buffer.from(cursor, "base64url").toString());
   return Number.isInteger(id) ? id : null;
 };

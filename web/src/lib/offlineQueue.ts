@@ -11,7 +11,7 @@ import {
 import type { MessageContentType } from "./chats";
 import { errorMessage } from "./errors";
 import { useOnlineStatus } from "./online";
-import { postsFeedQueryKey } from "./posts";
+import { postsFeedQueryKey, userPostsQueryKeyPrefix } from "./posts";
 import type { PostContentType } from "./posts";
 
 // Client-side queue for write mutations attempted while offline (issue
@@ -346,6 +346,7 @@ async function drainQueue(queryClient: QueryClient): Promise<void> {
       }
       writeQueue(readQueue().filter((item) => item.clientId !== next.clientId));
       void queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
+      void queryClient.invalidateQueries({ queryKey: userPostsQueryKeyPrefix });
     }
   }
 }

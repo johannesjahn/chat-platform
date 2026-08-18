@@ -1,15 +1,27 @@
 import { HttpApiBuilder } from "@effect/platform";
-import { and, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  lt,
+  sql,
+} from "drizzle-orm";
 import { Context, Effect, FiberRef, Metric, MetricLabel } from "effect";
 import { currentLogUser } from "./RedactedLogger.ts";
 import {
   ALLOWED_AVATAR_MIME_TYPES,
   AvatarTooLarge,
   ChatApi,
+  DEFAULT_POSTS_LIMIT,
   Forbidden,
   InvalidAvatarUpload,
   InvalidBlockRequest,
   InvalidCredentials,
+  InvalidPostsRequest,
   InvalidUsernameLookupRequest,
   InvalidUserSearchRequest,
   MAX_AVATAR_UPLOAD_SIZE_BYTES,
@@ -19,6 +31,7 @@ import {
   TooManyRequests,
   UsernameTaken,
 } from "./Api.ts";
+import { resolveAttachments } from "./attachments.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser, TokenVersionCache } from "./Auth.ts";
 import {
@@ -30,11 +43,18 @@ import { Db, type DrizzleDb } from "./Db.ts";
 import { processAvatar } from "./ImageProcessing.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
 import { authEventsTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
+import {
+  decodePostsCursor,
+  encodePostsCursor,
+  postCommentCounts,
+  toApiPost,
+} from "./PostsHandler.ts";
 import { PubSub } from "./PubSub.ts";
+import { postReactionInfo } from "./reactions.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { clientIp } from "./ClientIp.ts";
 import { RateLimiter } from "./RateLimiter.ts";
-import { refreshTokens, userBlocks, users } from "./db/schema.ts";
+import { refreshTokens, userBlocks, users, posts } from "./db/schema.ts";
 
 // Sensible defaults for auth-endpoint rate limiting (see issue #25). Login is
 // capped both per source IP and per targeted account, so a single attacker
@@ -434,6 +454,98 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               new NotFound({ message: `User ${id} not found` }),
             );
           return toPublicUser(rows[0]);
+        }),
+      )
+      .handle("listUserPosts", ({ path: { id }, urlParams }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const limit = urlParams.limit ?? DEFAULT_POSTS_LIMIT;
+
+          const targetRows = yield* Effect.tryPromise(() =>
+            db
+              .select({ id: users.id })
+              .from(users)
+              .where(eq(users.id, id))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          if (!targetRows[0])
+            return yield* Effect.fail(
+              new NotFound({ message: `User ${id} not found` }),
+            );
+
+          let after: number | null = null;
+          if (urlParams.cursor !== undefined) {
+            after = decodePostsCursor(urlParams.cursor);
+            if (after === null)
+              return yield* Effect.fail(
+                new InvalidPostsRequest({ message: "Invalid cursor" }),
+              );
+          }
+
+          // Same "fetch one row past `limit`" trick as `listPosts` to derive
+          // `nextCursor` without a separate query (issue #51's rationale) —
+          // `totalCount` below is the one place this endpoint does pay for a
+          // dedicated `COUNT(*)`, since it's scoped to a single author and
+          // backed by `posts_author_id_idx` rather than scanning all posts.
+          const fetched = yield* Effect.tryPromise(() =>
+            db
+              .select()
+              .from(posts)
+              .where(
+                and(
+                  eq(posts.authorId, id),
+                  after !== null ? lt(posts.id, after) : undefined,
+                ),
+              )
+              .orderBy(desc(posts.id))
+              .limit(limit + 1),
+          ).pipe(Effect.orDie);
+          const hasMore = fetched.length > limit;
+          const rows = fetched.slice(0, limit);
+          const lastRow = rows[rows.length - 1];
+          const nextCursor =
+            hasMore && lastRow ? encodePostsCursor(lastRow.id) : null;
+
+          const reactionInfo = yield* Effect.tryPromise(() =>
+            postReactionInfo(
+              db,
+              rows.map((r) => r.id),
+              currentUser.id,
+            ),
+          ).pipe(Effect.orDie);
+          const commentCounts = yield* Effect.tryPromise(() =>
+            postCommentCounts(
+              db,
+              rows.map((r) => r.id),
+            ),
+          ).pipe(Effect.orDie);
+          const attachments = yield* resolveAttachments(
+            db,
+            rows.map((r) => r.attachmentId),
+          );
+          const totalRows = yield* Effect.tryPromise(() =>
+            db
+              .select({ total: count() })
+              .from(posts)
+              .where(eq(posts.authorId, id)),
+          ).pipe(Effect.orDie);
+
+          return {
+            posts: rows.map((r) =>
+              toApiPost(
+                r,
+                reactionInfo.get(r.id),
+                r.attachmentId !== null
+                  ? (attachments.get(r.attachmentId) ?? null)
+                  : null,
+                commentCounts.get(r.id) ?? 0,
+              ),
+            ),
+            limit,
+            nextCursor,
+            totalCount: Number(totalRows[0]?.total ?? 0),
+          };
         }),
       )
       .handle("register", ({ payload }) =>
