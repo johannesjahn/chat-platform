@@ -1,6 +1,6 @@
 {
   "name": "chat-platform",
-  "version": "0.23.6",
+  "version": "0.24.0",
   "module": "src/main.ts",
   "type": "module",
   "private": true,
