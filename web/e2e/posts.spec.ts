@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { registerViaUi } from "./helpers";
+import { makeSolidPng, registerViaUi } from "./helpers";
 
 test("creating a post shows it in the feed, and infinite scroll loads more posts in batches of 5 then 3", async ({
   page,
@@ -221,5 +221,98 @@ test("clicking a feed image post opens it full-size in a lightbox", async ({
 
   // Esc closes it again.
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("the full-screen viewer zooms and pans an image past its on-page size", async ({
+  page,
+  request,
+  apiUrl,
+}) => {
+  await registerViaUi(page);
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  const headers = { Authorization: `Bearer ${session.accessToken}` };
+
+  // An attachment post (rather than an image-URL one) so the image is served
+  // by the test backend and actually decodes in the browser — the viewer's
+  // zoom math is driven by the image's natural size, so it needs a real one.
+  // Tall and narrow: at fit scale it's letterboxed, and one zoom step makes
+  // it overflow vertically, which is what gives the pan something to do.
+  const upload = await request.post(`${apiUrl}/attachments`, {
+    headers,
+    multipart: {
+      file: {
+        name: "tall.png",
+        mimeType: "image/png",
+        buffer: makeSolidPng(400, 1200, [90, 130, 220]),
+      },
+    },
+  });
+  expect(upload.ok()).toBe(true);
+  const attachment = await upload.json();
+  const post = await request.post(`${apiUrl}/posts`, {
+    headers,
+    data: {
+      contentType: "attachment",
+      // The composer sends the filename as the post's content for
+      // attachment posts (see ChatComposer/PostForm) — mirrored here.
+      content: attachment.filename,
+      attachmentId: attachment.id,
+    },
+  });
+  expect(post.ok()).toBe(true);
+
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "View tall.png full-size" })
+    .first()
+    .click();
+
+  const viewer = page.getByRole("dialog", { name: "tall.png" });
+  const image = viewer.getByRole("img", { name: "tall.png" });
+  await expect(image).toBeVisible();
+
+  const viewport = page.viewportSize()!;
+  const box = async () => (await image.boundingBox())!;
+  const roundedHeight = async () => Math.round((await box()).height);
+
+  // It opens fit to the *screen* — a 400x1200 image in a 1280x720 viewport
+  // is letterboxed to exactly the viewport height (and 400px wide in the
+  // feed card it came from, so this is already several times bigger).
+  await expect.poll(roundedHeight).toBe(viewport.height);
+  const fit = await box();
+
+  // Zooming in makes it genuinely bigger than the fitted view...
+  await viewer.getByRole("button", { name: "Zoom in" }).click();
+  await expect
+    .poll(async () => (await box()).width)
+    .toBeGreaterThan(fit.width * 1.3);
+  const zoomed = await box();
+
+  // ...and now that it overflows the viewport, the wheel scrolls it, which
+  // the old fit-only viewer couldn't do at all.
+  await page.mouse.move(viewport.width / 2, viewport.height / 2);
+  await page.mouse.wheel(0, 250);
+  await expect
+    .poll(async () => Math.round((await box()).y))
+    .toBeLessThan(Math.round(zoomed.y));
+
+  // "0" resets to the fitted view, where zooming out is a no-op again.
+  const zoomOut = viewer.getByRole("button", { name: "Zoom out" });
+  await expect(zoomOut).toBeEnabled();
+  await page.keyboard.press("0");
+  await expect.poll(roundedHeight).toBe(viewport.height);
+  await expect(zoomOut).toBeDisabled();
+
+  // Finally, a drag down from the fitted view throws the viewer away —
+  // the mobile-style dismissal, which works with a mouse too.
+  await page.mouse.move(viewport.width / 2, viewport.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(viewport.width / 2, viewport.height / 2 + 260, {
+    steps: 10,
+  });
+  await page.mouse.up();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
