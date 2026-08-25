@@ -9,6 +9,7 @@ import {
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { LogOut, MessagesSquare, Settings, Users } from "lucide-react";
 import type { ReactNode } from "react";
+import { BrandLogo } from "@/components/BrandLogo";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { HeaderSearch } from "@/components/HeaderSearch";
@@ -109,8 +110,14 @@ function Nav() {
           to="/"
           className="group relative flex items-center gap-2 font-semibold tracking-tight text-foreground"
         >
-          <MessagesSquare className="size-5 text-primary transition-transform duration-300 ease-out group-hover:scale-105 group-hover:rotate-3" />
-          <GradientText>Chat Platform</GradientText>
+          <BrandLogo />
+          {/* The entrance lives on this wrapper, not on GradientText itself:
+              GradientText already owns its element's `animation` (the gradient
+              drift), and a second shorthand on the same element would simply
+              replace it. */}
+          <span className="inline-block motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2 motion-safe:duration-700">
+            <GradientText>Chat Platform</GradientText>
+          </span>
           <span className="pointer-events-none absolute -bottom-1 left-7 h-px w-0 bg-primary transition-all duration-300 ease-out group-hover:w-[calc(100%-1.75rem)]" />
         </Link>
         <Button asChild variant="ghost" size="sm" className="relative">
