@@ -1,5 +1,6 @@
 import { type CSSProperties } from "react";
 
+import { useLogoPress } from "@/lib/logoPress";
 import { cn } from "@/lib/utils";
 
 // Three typing dots inside the bubble. The index drives both staggers (the
@@ -23,12 +24,16 @@ export type BrandLogoProps = {
  * three dots pop in behind it, one at a time, as if a message were being typed
  * — the app's whole premise in about a second. Afterwards it settles into a
  * slow ambient glow, and reacts to hover (tilt + a quick dot bounce) when it
- * sits inside a `group`, e.g. the nav's brand link.
+ * sits inside a `group`, e.g. the nav's brand link. Clicking that link pops
+ * the mark — the same `logo-press` the nav icons share, so every mark in the
+ * bar answers a press the same way.
  *
  * Every moving part is a `prefers-reduced-motion`-aware utility, so with motion
  * reduced this renders as the plain static mark.
  */
 export function BrandLogo({ className }: BrandLogoProps) {
+  const { ref, pressed, endPress } = useLogoPress<SVGSVGElement>();
+
   return (
     <span
       className={cn(
@@ -44,10 +49,15 @@ export function BrandLogo({ className }: BrandLogoProps) {
         className="animate-logo-glow pointer-events-none absolute -inset-1 -z-10 rounded-full bg-primary/40 blur-md transition-opacity duration-300 ease-out group-hover:opacity-80"
       />
       <svg
+        ref={ref}
         aria-hidden
         viewBox="0 0 32 32"
         fill="none"
-        className="size-full text-primary transition-transform duration-300 ease-out group-hover:-rotate-6 group-hover:scale-110"
+        onAnimationEnd={endPress}
+        className={cn(
+          "size-full text-primary transition-transform duration-300 ease-out group-hover:-rotate-6 group-hover:scale-110",
+          pressed && "animate-logo-press",
+        )}
       >
         <path
           className="animate-logo-draw"

@@ -10,6 +10,7 @@ import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client
 import { LogOut, MessagesSquare, Settings, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "@/components/BrandLogo";
+import { NavIcon } from "@/components/NavIcon";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { HeaderSearch } from "@/components/HeaderSearch";
@@ -121,8 +122,8 @@ function Nav() {
           <span className="pointer-events-none absolute -bottom-1 left-7 h-px w-0 bg-primary transition-all duration-300 ease-out group-hover:w-[calc(100%-1.75rem)]" />
         </Link>
         <Button asChild variant="ghost" size="sm" className="relative">
-          <Link to="/chats">
-            <MessagesSquare className="size-4" />
+          <Link to="/chats" className="group/nav-icon">
+            <NavIcon icon={MessagesSquare} />
             Chats
             {unreadCount > 0 && (
               <span className="absolute -right-1.5 -top-1.5 flex size-4.5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:duration-300">
@@ -132,8 +133,8 @@ function Nav() {
           </Link>
         </Button>
         <Button asChild variant="ghost" size="sm">
-          <Link to="/users">
-            <Users className="size-4" />
+          <Link to="/users" className="group/nav-icon">
+            <NavIcon icon={Users} />
             Users
           </Link>
         </Button>
@@ -149,19 +150,20 @@ function Nav() {
             {userLabel(session.user)}
           </Link>
           <Button asChild variant="ghost" size="icon" aria-label="Settings">
-            <Link to="/settings">
-              <Settings className="size-4" />
+            <Link to="/settings" className="group/nav-icon">
+              <NavIcon icon={Settings} />
             </Link>
           </Button>
           <Button
             variant="ghost"
             size="sm"
+            className="group/nav-icon"
             onClick={() => {
               logout(session);
               router.invalidate();
             }}
           >
-            <LogOut className="size-4" />
+            <NavIcon icon={LogOut} />
             Log out
           </Button>
         </div>
