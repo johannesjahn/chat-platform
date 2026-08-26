@@ -1105,3 +1105,89 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
     })
     .toBeLessThanOrEqual(400);
 });
+
+test("clicking a reply's quoted snippet jumps the thread to the message it answers", async ({
+  page,
+  request,
+  apiUrl,
+  browser,
+  injectApiUrl,
+}) => {
+  await registerViaUi(page);
+
+  // B only has to exist for A to start a direct chat with them — the whole
+  // flow under test happens in A's window.
+  const otherContext = await browser.newContext();
+  await injectApiUrl(otherContext);
+  const otherPage = await otherContext.newPage();
+  const { username: otherUsername } = await registerViaUi(otherPage);
+  await otherContext.close();
+
+  await page.goto("/chats/new");
+  await page.getByRole("button", { name: "Direct message" }).click();
+  await page.fill("#user-search", otherUsername);
+  await page.getByRole("button", { name: `@${otherUsername}` }).click();
+  await expect(page).toHaveURL(/\/chats\/\d+/);
+  const chatId = page.url().split("/").pop();
+
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  // Seeding over HTTP rather than through the composer: this test needs more
+  // than a page of history, and a dozen round trips through the UI is a dozen
+  // chances to be slow for no extra coverage.
+  const post = async (body: Record<string, unknown>) => {
+    const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      data: body,
+    });
+    expect(response.ok()).toBe(true);
+    return (await response.json()) as { id: number };
+  };
+
+  // Seed from *outside* the conversation: the query cache is persisted to
+  // localStorage (see lib/query.ts), so a page that watched these messages
+  // arrive would still have every one of them in hand after a reload — and
+  // this test needs a chat opened cold, holding only its newest page.
+  await page.goto("/chats");
+
+  const anchorText = "Which of these two dates works better for you?";
+  const anchor = await post({ contentType: "text", content: anchorText });
+  // Enough conversation between the anchor and its reply that the anchor
+  // falls outside the 10-message page the chat opens with.
+  for (let i = 1; i <= 11; i++) {
+    await post({ contentType: "text", content: `Filler message ${i}` });
+  }
+  const replyText = "The second one, definitely";
+  await post({
+    contentType: "text",
+    content: replyText,
+    parentMessageId: anchor.id,
+  });
+
+  await page.goto(`/chats/${chatId}`);
+  const replyBubble = page
+    .locator("[data-message-id]")
+    .filter({ hasText: replyText });
+  await expect(replyBubble).toBeVisible();
+
+  const anchorBubble = page.locator(`[data-message-id="${anchor.id}"]`);
+  const quote = replyBubble.getByRole("button", {
+    name: /^Go to the message from/,
+  });
+
+  // The message being answered is older than everything the chat loaded, so
+  // the click has to page earlier history back in before it has anything to
+  // scroll to.
+  await expect(anchorBubble).toHaveCount(0);
+  await quote.click();
+  await expect(anchorBubble).toBeInViewport();
+
+  // And once it *is* loaded, a jump from the bottom of the thread is a plain
+  // scroll — no further fetching.
+  const thread = page.getByTestId("chat-scroll");
+  await thread.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+  await expect(anchorBubble).not.toBeInViewport();
+  await quote.click();
+  await expect(anchorBubble).toBeInViewport();
+});

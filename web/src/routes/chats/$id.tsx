@@ -51,6 +51,30 @@ export const Route = createFileRoute("/chats/$id")({
 // `scrollHeight - scrollTop === clientHeight` comparison almost never lands.
 const BOTTOM_EPSILON_PX = 24;
 
+// How many pages of older history `jumpToMessage` will pull in while hunting
+// for a message that isn't in the loaded window yet (a pinned message, or the
+// message a reply is quoting). Generous enough to reach well back through a
+// conversation, bounded so a jump can never turn into an unbounded scrape of
+// the whole history.
+const JUMP_MAX_EARLIER_PAGES = 20;
+
+// How long a jump's smooth scroll is given to travel and settle before the
+// thread goes back to reading its own scroll position normally. Comfortably
+// longer than a smooth scroll across a screenful or two, short enough that it
+// can't be mistaken for a scroll the reader did themselves.
+const JUMP_SETTLE_MS = 1200;
+
+// Resolves once the browser has painted, i.e. after React has committed any
+// state update that landed in this tick. Two frames because the first can be
+// scheduled ahead of React's own render for an update that came from outside
+// an event handler (a resolved fetch), which would have us look for the newly
+// loaded rows before they exist.
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
 // The conversation's own header, shared with the loading skeleton so the two
 // are the same height and opening a chat doesn't shift the thread.
 //
@@ -140,6 +164,21 @@ function ChatView({ id }: { id: string }) {
   const atBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
+  // Set while `jumpToMessage` is paging backwards looking for its target, so
+  // a second click (or a click during the hunt) doesn't start a rival loop.
+  const jumpingRef = useRef(false);
+  // Set while a jump's smooth scroll is still travelling, and cleared once it
+  // has had time to land — see `jumpToMessage` for what it holds off.
+  const jumpScrollingRef = useRef(false);
+  const jumpSettleTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (jumpSettleTimerRef.current !== null) {
+        window.clearTimeout(jumpSettleTimerRef.current);
+      }
+    },
+    [],
+  );
 
   function scrollToBottom(behavior: ScrollBehavior) {
     const el = scrollRef.current;
@@ -245,11 +284,18 @@ function ChatView({ id }: { id: string }) {
     // so a jump-to-bottom that raced content still growing underneath it
     // reports a stale gap — and treating that as "the user scrolled away"
     // used to switch the pinning off before it had ever taken effect.
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceFromBottom <= BOTTOM_EPSILON_PX) {
-      atBottomRef.current = true;
-    } else if (el.scrollTop < lastScrollTopRef.current) {
-      atBottomRef.current = false;
+    //
+    // A jump's own smooth scroll is exempt: it usually sets off from the
+    // bottom edge, so its first few events would re-arm the pinning it just
+    // released and the view would be dragged back down (see `jumpToMessage`).
+    if (!jumpScrollingRef.current) {
+      const distanceFromBottom =
+        el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distanceFromBottom <= BOTTOM_EPSILON_PX) {
+        atBottomRef.current = true;
+      } else if (el.scrollTop < lastScrollTopRef.current) {
+        atBottomRef.current = false;
+      }
     }
     lastScrollTopRef.current = el.scrollTop;
     if (!initializedRef.current || loadingEarlier) return;
@@ -260,20 +306,64 @@ function ChatView({ id }: { id: string }) {
     void loadEarlier().finally(() => setLoadingEarlier(false));
   }
 
-  // Scroll the thread to a pinned message when its row in the pinned bar is
-  // clicked, and briefly highlight it. Only works while the message is within
-  // the loaded window — a pin can point at a message far up the history that
-  // hasn't been paged in — so a miss is a no-op rather than an error.
-  function jumpToMessage(messageId: number) {
-    const el = scrollRef.current?.querySelector<HTMLElement>(
-      `[data-message-id="${messageId}"]`,
-    );
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.add("bg-primary/10", "rounded-2xl");
-    window.setTimeout(() => {
-      el.classList.remove("bg-primary/10", "rounded-2xl");
-    }, 1500);
+  // Scroll the thread to a given message and briefly highlight it — used both
+  // by the pinned bar's rows and by the quoted snippet on a reply ("what was
+  // this answering?"). The target often isn't in the loaded window: a pin, or
+  // a reply to something said much earlier, can point far up a history that
+  // hasn't been paged in yet, so older pages are pulled in a page at a time
+  // until it turns up (or the history runs out / the budget below is spent,
+  // where it gives up quietly rather than erroring).
+  async function jumpToMessage(messageId: number) {
+    // Scrolls to the message if it's rendered, reporting whether it was.
+    const scrollToTarget = () => {
+      const el = scrollRef.current?.querySelector<HTMLElement>(
+        `[data-message-id="${messageId}"]`,
+      );
+      if (!el) return false;
+      // Landing anywhere but the bottom means the thread must stop following
+      // the newest message, or the ResizeObserver above would yank the view
+      // straight back down again — the messages that just paged in animate
+      // as they mount, which is more than enough to trigger it. The flag
+      // below holds that release in place until the smooth scroll has
+      // actually travelled; see `handleScroll`.
+      atBottomRef.current = false;
+      jumpScrollingRef.current = true;
+      if (jumpSettleTimerRef.current !== null) {
+        window.clearTimeout(jumpSettleTimerRef.current);
+      }
+      jumpSettleTimerRef.current = window.setTimeout(() => {
+        jumpSettleTimerRef.current = null;
+        jumpScrollingRef.current = false;
+      }, JUMP_SETTLE_MS);
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("bg-primary/10", "rounded-2xl");
+      window.setTimeout(() => {
+        el.classList.remove("bg-primary/10", "rounded-2xl");
+      }, 1500);
+      return true;
+    };
+
+    if (scrollToTarget()) return;
+    // Already hunting (or the scroll handler is mid-page-load) — don't stack
+    // a second run of overlapping `loadEarlier` fetches on top.
+    if (jumpingRef.current || loadingEarlier) return;
+    jumpingRef.current = true;
+    // Reuses the infinite-scroll spinner, which doubles as the guard that
+    // keeps `handleScroll` from firing its own page load underneath this one.
+    setLoadingEarlier(true);
+    try {
+      for (let i = 0; i < JUMP_MAX_EARLIER_PAGES; i++) {
+        const result = await loadEarlier();
+        // The refetch resolving only means the cache holds the older page —
+        // React still has to commit it before the row exists in the DOM.
+        await nextPaint();
+        if (scrollToTarget()) return;
+        if (!result.data?.hasEarlier) return;
+      }
+    } finally {
+      jumpingRef.current = false;
+      setLoadingEarlier(false);
+    }
   }
 
   // Mark everything up to the newest loaded message as read once we know
@@ -543,7 +633,7 @@ function ChatView({ id }: { id: string }) {
           chatId={chatId}
           participants={chat.participants}
           enabled={!!session}
-          onJump={jumpToMessage}
+          onJump={(messageId) => void jumpToMessage(messageId)}
         />
         <CardContent className="min-h-0 flex-1 px-0">
           {/* Two elements, not one: the outer div is the fixed-height viewport
@@ -587,6 +677,9 @@ function ChatView({ id }: { id: string }) {
                   // #307). Messages arrive oldest-first, so comparing against the
                   // previous entry is enough.
                   const prev = messages[i - 1];
+                  // Null for a normal message, and also once the quoted
+                  // message has been deleted — nothing to jump to either way.
+                  const parentId = message.parentMessage?.id;
                   const showDaySeparator =
                     prev == null ||
                     localDayKey(prev.createdAt) !==
@@ -613,6 +706,11 @@ function ChatView({ id }: { id: string }) {
                             contentType: message.contentType,
                             content: message.content,
                           })
+                        }
+                        onJumpToParent={
+                          parentId == null
+                            ? undefined
+                            : () => void jumpToMessage(parentId)
                         }
                         senderLabel={
                           chat.type === "group" && sender

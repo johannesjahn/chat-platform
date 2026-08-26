@@ -67,6 +67,13 @@ type MessageBubbleProps = {
   // Start composing a reply that quotes this message (issue #217). Omitted
   // where replying isn't offered (e.g. a message that's mid-edit).
   onReply?: () => void;
+  // Jump the thread to the message this one is replying to. Only meaningful
+  // when `message.parentMessage` is set — when provided, the quoted snippet
+  // above the body becomes a button that scrolls to (and highlights) the
+  // message being answered, the usual messaging-app gesture for "what was
+  // this replying to?". Omitted where there's nothing to scroll (e.g. the
+  // quoted parent rendered outside the thread).
+  onJumpToParent?: () => void;
   style?: CSSProperties;
 };
 
@@ -93,6 +100,7 @@ export function MessageBubble({
   onEdit,
   onDelete,
   onReply,
+  onJumpToParent,
   style,
 }: MessageBubbleProps) {
   const queryClient = useQueryClient();
@@ -380,6 +388,62 @@ export function MessageBubble({
     </>
   );
 
+  // Quoted parent (issue #217) — the message this one replies to, shown as a
+  // compact snippet above the body. A left accent bar and muted background
+  // set it apart from the reply's own content; it's tinted to sit on
+  // whichever bubble background it's on (own vs incoming). Null once the
+  // quoted message has been deleted server-side (the FK is set-null), so it
+  // simply doesn't render.
+  //
+  // With `onJumpToParent` wired up the whole snippet is a button that scrolls
+  // the thread back to the message being quoted; without it (no thread to
+  // scroll) it stays a plain, non-interactive block.
+  const parent = message.parentMessage;
+  const quoteClassName = cn(
+    "mb-0.5 flex flex-col gap-0.5 rounded-md border-l-2 py-1 pl-2 pr-2 text-xs",
+    isOwn
+      ? "border-primary-foreground/50 bg-primary-foreground/10"
+      : "border-primary/50 bg-muted",
+  );
+  const quoteBody = parent && (
+    <>
+      <span
+        className={cn(
+          "font-semibold",
+          isOwn ? "text-primary-foreground/90" : "text-primary",
+        )}
+      >
+        {parent.senderName}
+      </span>
+      <span
+        className={cn(
+          "line-clamp-2 break-words",
+          isOwn ? "text-primary-foreground/80" : "text-muted-foreground",
+        )}
+      >
+        {parentPreviewText(parent)}
+      </span>
+    </>
+  );
+  const quotedParent = !parent ? null : onJumpToParent ? (
+    <button
+      type="button"
+      onClick={onJumpToParent}
+      aria-label={`Go to the message from ${parent.senderName} this replies to`}
+      className={cn(
+        quoteClassName,
+        "cursor-pointer text-left transition-colors",
+        isOwn
+          ? "hover:bg-primary-foreground/20"
+          : "hover:bg-muted-foreground/15",
+      )}
+    >
+      {quoteBody}
+    </button>
+  ) : (
+    <div className={quoteClassName}>{quoteBody}</div>
+  );
+
   // Shared visibility classes for both action groups (own + incoming). Hidden
   // and revealed on `group-hover` for pointer devices as before; when a long
   // press has revealed it on touch, the visible state is applied outright.
@@ -508,41 +572,7 @@ export function MessageBubble({
             </Link>
           )}
 
-          {/* Quoted parent (issue #217) — the message this one replies to,
-              shown as a compact snippet above the body. A left accent bar and
-              muted background set it apart from the reply's own content; it's
-              tinted to sit on whichever bubble background it's on (own vs
-              incoming). Null once the quoted message has been deleted
-              server-side (the FK is set-null), so it simply doesn't render. */}
-          {message.parentMessage && (
-            <div
-              className={cn(
-                "mb-0.5 flex flex-col gap-0.5 rounded-md border-l-2 py-1 pl-2 pr-2 text-xs",
-                isOwn
-                  ? "border-primary-foreground/50 bg-primary-foreground/10"
-                  : "border-primary/50 bg-muted",
-              )}
-            >
-              <span
-                className={cn(
-                  "font-semibold",
-                  isOwn ? "text-primary-foreground/90" : "text-primary",
-                )}
-              >
-                {message.parentMessage.senderName}
-              </span>
-              <span
-                className={cn(
-                  "line-clamp-2 break-words",
-                  isOwn
-                    ? "text-primary-foreground/80"
-                    : "text-muted-foreground",
-                )}
-              >
-                {parentPreviewText(message.parentMessage)}
-              </span>
-            </div>
-          )}
+          {quotedParent}
 
           {isEditing ? (
             <div className="flex flex-col gap-1.5">
