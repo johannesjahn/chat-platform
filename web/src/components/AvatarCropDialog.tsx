@@ -199,10 +199,10 @@ export function AvatarCropDialog<T>({
       aria-label="Crop avatar"
     >
       <div
-        className="absolute inset-0 bg-background/70 backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+        className="absolute inset-0 bg-background/70 backdrop-blur-sm motion-safe:animate-backdrop-blur-in"
         onClick={onClose}
       />
-      <div className="relative flex w-full max-w-sm flex-col gap-4 rounded-3xl border border-border bg-card p-5 shadow-2xl ease-spring motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-300">
+      <div className="relative flex w-full max-w-sm flex-col gap-4 rounded-3xl border border-border bg-card p-5 shadow-2xl motion-safe:animate-dialog-in">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Crop your avatar</h2>
           <Button

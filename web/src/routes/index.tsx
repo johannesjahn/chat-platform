@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Loader2, PlusCircle, Sparkles } from "lucide-react";
@@ -175,7 +175,10 @@ function PostsFeedPage() {
                 }
                 onDelete={() => handleDelete(post.id)}
                 isDeleting={deletingId === post.id}
-                style={{ animationDelay: `${Math.min(i, 6) * 60}ms` }}
+                // The row's place in the cascade; `stagger-in` turns it
+                // into the delay (see styles.css), capped so a long page
+                // doesn't animate its tail in half a second late.
+                style={{ "--stagger-index": Math.min(i, 6) } as CSSProperties}
               />
             </li>
           ))}

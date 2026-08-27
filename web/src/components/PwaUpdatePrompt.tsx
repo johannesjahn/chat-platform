@@ -10,8 +10,10 @@ export function PwaUpdatePrompt() {
   if (!needRefresh) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-300">
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-lg">
+    <div className="fixed inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-4">
+      {/* The same spring the offline banner drops in on, mirrored: this one
+          rises off the bottom edge and settles. */}
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-lg motion-safe:animate-banner-rise">
         <span className="text-sm text-foreground">
           A new version is available.
         </span>

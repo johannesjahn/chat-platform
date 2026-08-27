@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { type CSSProperties, useEffect, useRef } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Link2, Loader2, MessagesSquare, PlusCircle } from "lucide-react";
 import { ChatListItem, ChatListItemSkeleton } from "@/components/ChatListItem";
@@ -123,7 +123,7 @@ function ChatsListPage() {
               <ChatListItem
                 chat={chat}
                 currentUserId={session.user.id}
-                style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
+                style={{ "--stagger-index": Math.min(i, 8) } as CSSProperties}
               />
             </li>
           ))}

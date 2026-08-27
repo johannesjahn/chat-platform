@@ -92,10 +92,13 @@ export function GroupManagementDialog({
       aria-label="Group settings"
     >
       <div
-        className="absolute inset-0 bg-background/70 backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+        className="absolute inset-0 bg-background/70 backdrop-blur-sm motion-safe:animate-backdrop-blur-in"
         onClick={onClose}
       />
-      <div className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-border bg-card shadow-2xl ease-spring motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:slide-in-from-bottom-4 motion-safe:duration-300 sm:rounded-3xl">
+      {/* The panel springs up out of a blur while the backdrop above ramps
+          its own blur on — the two together read as the page receding rather
+          than a card being pasted over it. */}
+      <div className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-border bg-card shadow-2xl motion-safe:animate-dialog-in sm:rounded-3xl">
         <GroupManagementBody
           chat={chat}
           currentUser={currentUser}

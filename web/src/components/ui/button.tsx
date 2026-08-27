@@ -3,16 +3,23 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
+import { withRipple } from "@/lib/ripple";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all duration-200 ease-out disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px] motion-safe:hover:scale-[1.015] motion-safe:active:scale-[0.985]",
+  // `relative` is what the press ripple positions itself against — its host
+  // span is `inset-0` inside whatever element this ends up on (see
+  // lib/ripple.ts). The clipping lives on that host rather than here, so a
+  // badge deliberately hanging outside a button still escapes.
+  "relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all duration-200 ease-out disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px] motion-safe:hover:scale-[1.015] motion-safe:active:scale-[0.985]",
   {
     variants: {
       variant: {
         default:
           "btn-shine bg-primary text-primary-foreground shadow-sm shadow-primary/20 hover:bg-primary/90 hover:shadow-md hover:shadow-primary/30",
         destructive:
-          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 focus-visible:ring-destructive/40",
+          // The glyph inside a destructive button shimmies on hover — a
+          // last "this one deletes things" beat before it's pressed.
+          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 focus-visible:ring-destructive/40 motion-safe:[&_svg]:hover:animate-wiggle",
         outline:
           "border border-input bg-transparent shadow-sm hover:bg-accent hover:text-accent-foreground",
         secondary:
@@ -39,6 +46,7 @@ function Button({
   variant,
   size,
   asChild = false,
+  onPointerDown,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & { asChild?: boolean }) {
@@ -47,6 +55,10 @@ function Button({
     <Comp
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      // Every control in the app gets the press ripple from one place here.
+      // `withRipple` keeps a caller's own handler running first, and the
+      // effect is skipped outright under `prefers-reduced-motion`.
+      onPointerDown={withRipple(onPointerDown)}
       {...props}
     />
   );

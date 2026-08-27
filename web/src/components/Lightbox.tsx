@@ -649,7 +649,7 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
     >
       <div
         ref={backdropRef}
-        className="absolute inset-0 bg-background/92 backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"
+        className="absolute inset-0 bg-background/92 backdrop-blur-md motion-safe:animate-backdrop-blur-in"
         onClick={onBackdropClick}
       />
 
@@ -696,7 +696,9 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
         }
       />
 
-      <div className="absolute top-3 right-3 z-10 flex items-center gap-1 rounded-full bg-background/70 p-1 shadow-lg ring-1 ring-border/50 backdrop-blur-sm sm:top-4 sm:right-4">
+      {/* The floating controls spring open with the overlay rather than being
+          there already — see `animate-pop-open`. */}
+      <div className="absolute top-3 right-3 z-10 flex items-center gap-1 rounded-full bg-background/70 p-1 shadow-lg ring-1 ring-border/50 backdrop-blur-sm motion-safe:animate-pop-open sm:top-4 sm:right-4">
         <Button
           type="button"
           variant="ghost"

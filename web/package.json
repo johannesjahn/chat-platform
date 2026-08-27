@@ -1,6 +1,6 @@
 {
   "name": "chat-platform-web",
-  "version": "0.26.3",
+  "version": "0.26.4",
   "private": true,
   "type": "module",
   "scripts": {

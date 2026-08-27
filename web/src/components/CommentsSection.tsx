@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -123,7 +123,11 @@ export function ReactionList({
     <>
       {active.map((reaction) => (
         <Button
-          key={reaction.emoji}
+          // Keyed on whether it's yours as well as on the emoji, so toggling
+          // a reaction remounts the pill and its entrance animations run
+          // again — CSS only replays an animation whose element (or class) is
+          // genuinely new.
+          key={`${reaction.emoji}:${reaction.reactedByMe}`}
           type="button"
           variant="ghost"
           size="sm"
@@ -135,9 +139,22 @@ export function ReactionList({
             "h-8 gap-1 rounded-full px-2 text-muted-foreground",
             reaction.reactedByMe &&
               "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary",
+            // A ring thrown off the pill the instant the reaction becomes
+            // yours. It's an `::after` on the pill rather than an element, so
+            // it can't disturb the row's layout, and the `key` above is what
+            // replays it: React remounts the button when `reactedByMe` flips,
+            // which restarts both this and the emoji's kick.
+            reaction.reactedByMe &&
+              "motion-safe:after:absolute motion-safe:after:inset-0 motion-safe:after:rounded-full motion-safe:after:border motion-safe:after:border-primary/60 motion-safe:after:content-[''] motion-safe:after:pointer-events-none motion-safe:after:animate-reaction-burst",
           )}
         >
-          <span>{reaction.emoji}</span>
+          <span
+            className={cn(
+              reaction.reactedByMe && "motion-safe:animate-emoji-pop",
+            )}
+          >
+            {reaction.emoji}
+          </span>
           <span className="tabular-nums">{reaction.count}</span>
         </Button>
       ))}
@@ -230,16 +247,20 @@ export function ReactionAddButton({
           <div
             ref={popoverRef}
             style={{ top: pickerPos.top, left: pickerPos.left }}
-            className="fixed z-50 flex gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-md"
+            className="fixed z-50 flex gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-md motion-safe:animate-pop-open"
           >
-            {REACTION_EMOJIS.map((emoji) => (
+            {REACTION_EMOJIS.map((emoji, i) => (
               <button
                 key={emoji}
                 type="button"
                 disabled={pending}
                 aria-label={`React with ${emoji}`}
+                // The emoji cascade in left to right behind the popover's own
+                // spring — `stagger-in` turns the index into the delay, the
+                // same cadence the feed and the chat list step at.
+                style={{ "--stagger-index": i } as CSSProperties}
                 className={cn(
-                  "flex size-8 items-center justify-center rounded-md text-lg transition-colors hover:bg-muted",
+                  "flex size-8 items-center justify-center rounded-md text-lg transition-transform duration-200 ease-spring hover:scale-125 hover:bg-muted motion-safe:animate-pop-open motion-safe:stagger-in",
                   reactionOf(reactions, emoji).reactedByMe && "bg-primary/10",
                 )}
                 onClick={() => {

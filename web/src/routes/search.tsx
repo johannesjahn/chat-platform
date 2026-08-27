@@ -113,8 +113,20 @@ function SearchPage() {
                 variant={tab === t.id ? "default" : "ghost"}
                 size="sm"
                 onClick={() => setTab(t.id)}
+                className="relative"
               >
                 {t.label}
+                {/* The active marker grows out of its own centre when the tab
+                    is picked, so switching filters animates instead of the
+                    underline teleporting between tabs. Keyed on the tab id so
+                    it remounts — and replays — on each switch. */}
+                {tab === t.id && (
+                  <span
+                    key={t.id}
+                    aria-hidden
+                    className="pointer-events-none absolute inset-x-2 -bottom-0.5 h-0.5 rounded-full bg-primary-foreground/70 motion-safe:animate-underline-grow"
+                  />
+                )}
               </Button>
             ))}
           </div>

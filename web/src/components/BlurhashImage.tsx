@@ -89,6 +89,11 @@ function BlurhashImageInner({
         className={cn(
           "absolute inset-0 h-full w-full object-cover transition-opacity duration-300",
           loaded ? "opacity-100" : "opacity-0",
+          // The real pixels resolve *out of* the blur they're replacing
+          // rather than fading in over it as a second, already-sharp layer —
+          // it's the same gesture the placeholder was standing in for, so the
+          // hand-off stops being a visible swap. See `animate-blur-in`.
+          loaded && "motion-safe:animate-blur-in",
         )}
       />
     </div>

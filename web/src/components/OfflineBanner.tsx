@@ -13,7 +13,7 @@ export function OfflineBanner() {
   return (
     <div
       role="status"
-      className="flex items-center justify-center gap-2 bg-amber-500/15 px-4 py-1.5 text-xs font-medium text-amber-600 dark:text-amber-400"
+      className="flex items-center justify-center gap-2 bg-amber-500/15 px-4 py-1.5 text-xs font-medium text-amber-600 motion-safe:animate-banner-drop dark:text-amber-400"
     >
       <WifiOff className="size-3.5" />
       You&apos;re offline — showing previously loaded content.
