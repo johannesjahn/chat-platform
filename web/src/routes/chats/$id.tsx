@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { onlineManager, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Loader2, Settings2, Users } from "lucide-react";
@@ -22,6 +29,7 @@ import {
   appendSentMessage,
   chatDetailQueryKey,
   chatDisplayName,
+  chatViewTransitionNames,
   chatsListQueryKey,
   localDayKey,
   useChatDetail,
@@ -57,6 +65,13 @@ const BOTTOM_EPSILON_PX = 24;
 // conversation, bounded so a jump can never turn into an unbounded scrape of
 // the whole history.
 const JUMP_MAX_EARLIER_PAGES = 20;
+
+// The one-shot highlight `jumpToMessage` drops on the message it lands on
+// (see `animate-jump-flash`), and how long it's left there — two runs of the
+// 0.9s pulse, which is also roughly how long the static tint the
+// reduced-motion build paints instead should hold for.
+const JUMP_FLASH_CLASS = "animate-jump-flash";
+const JUMP_FLASH_MS = 1800;
 
 // How long a jump's smooth scroll is given to travel and settle before the
 // thread goes back to reading its own scroll position normally. Comfortably
@@ -336,10 +351,21 @@ function ChatView({ id }: { id: string }) {
         jumpScrollingRef.current = false;
       }, JUMP_SETTLE_MS);
       el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.classList.add("bg-primary/10", "rounded-2xl");
+      // A double pulse rather than the flat background tint this used to
+      // hold for a second and a half: on a long smooth scroll that tint had
+      // usually already been removed by the time the view arrived, so the
+      // message you jumped to looked like every other one. The animation
+      // restarts cleanly on a repeat jump to the same message (dropping the
+      // class and re-adding it a frame later is what replays it) and needs
+      // no timer to undo itself. See `animate-jump-flash` in styles.css.
+      el.classList.remove(JUMP_FLASH_CLASS);
+      requestAnimationFrame(() => el.classList.add(JUMP_FLASH_CLASS));
+      // A timer rather than `animationend`, because with motion reduced the
+      // class paints a plain static tint and no animation runs at all — there
+      // would be no event to clean up after, and the tint would never leave.
       window.setTimeout(() => {
-        el.classList.remove("bg-primary/10", "rounded-2xl");
-      }, 1500);
+        el.classList.remove(JUMP_FLASH_CLASS);
+      }, JUMP_FLASH_MS);
       return true;
     };
 
@@ -456,6 +482,10 @@ function ChatView({ id }: { id: string }) {
   }
 
   const name = chatDisplayName(chat, session.user.id);
+  // Shared with the chat list's row for this chat, so opening a conversation
+  // morphs its avatar and title into the header instead of the two screens
+  // simply cross-fading (see chatViewTransitionNames / router.tsx).
+  const transitionNames = chatViewTransitionNames(chatId);
   const myRole = chat.participants.find(
     (p) => p.userId === session.user.id,
   )?.role;
@@ -562,10 +592,29 @@ function ChatView({ id }: { id: string }) {
               className="flex min-w-0 flex-1 items-center gap-3"
             >
               <div className="relative shrink-0">
+                {/* A gradient halo turning slowly behind an avatar whose
+                    owner is online — the same "live" language as the
+                    presence dot, at a size you notice without looking for
+                    it. Purely decorative and sized off the avatar, so it
+                    never affects layout. */}
+                {otherParticipantOnline && (
+                  <span
+                    aria-hidden
+                    className="pointer-events-none absolute -inset-0.5 rounded-full opacity-70 blur-[1px] motion-safe:animate-avatar-ring"
+                    style={{
+                      background:
+                        "conic-gradient(from 0deg, oklch(0.72 0.16 150 / 0.9), oklch(0.62 0.19 277 / 0.5), transparent 60%, oklch(0.72 0.16 150 / 0.9))",
+                    }}
+                  />
+                )}
                 <Avatar
                   name={name}
                   avatarUrl={otherParticipant?.avatarUrl}
                   avatarVariants={otherParticipant?.avatarVariants}
+                  // The other half of the shared-element view transition out
+                  // of the chat list — the row's avatar travels here rather
+                  // than the two screens cross-fading past each other.
+                  style={{ viewTransitionName: transitionNames.avatar }}
                 />
                 <PresenceDot
                   online={otherParticipantOnline}
@@ -573,7 +622,12 @@ function ChatView({ id }: { id: string }) {
                 />
               </div>
               <div className="flex min-w-0 flex-1 flex-col leading-tight">
-                <span className="truncate font-semibold">{name}</span>
+                <span
+                  className="truncate font-semibold"
+                  style={{ viewTransitionName: transitionNames.title }}
+                >
+                  {name}
+                </span>
                 <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
                   <span className="shrink-0">
                     {otherParticipantOnline ? "Online" : "Direct message"}
@@ -601,14 +655,23 @@ function ChatView({ id }: { id: string }) {
                   name={name}
                   avatarVariants={chat.avatarVariants}
                   className="shrink-0 transition-transform motion-safe:group-hover/hdr:scale-105"
+                  style={{ viewTransitionName: transitionNames.avatar }}
                 />
               ) : (
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground transition-transform motion-safe:group-hover/hdr:scale-105">
+                <div
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground transition-transform motion-safe:group-hover/hdr:scale-105"
+                  style={{ viewTransitionName: transitionNames.avatar }}
+                >
                   <Users className="size-4" />
                 </div>
               )}
               <div className="flex min-w-0 flex-1 flex-col leading-tight">
-                <span className="truncate font-semibold">{name}</span>
+                <span
+                  className="truncate font-semibold"
+                  style={{ viewTransitionName: transitionNames.title }}
+                >
+                  {name}
+                </span>
                 <span className="truncate text-xs text-muted-foreground">
                   {chat.participants.length} participant
                   {chat.participants.length === 1 ? "" : "s"} · Tap to manage
@@ -726,7 +789,9 @@ function ChatView({ id }: { id: string }) {
                               }
                             : undefined
                         }
-                        style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}
+                        style={
+                          { "--stagger-index": Math.min(i, 6) } as CSSProperties
+                        }
                       />
                     </Fragment>
                   );

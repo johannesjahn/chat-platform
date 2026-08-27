@@ -42,6 +42,8 @@ export function AuthForm({
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Counts submissions so the error panel can be re-keyed per attempt.
+  const [attempt, setAttempt] = useState(0);
 
   const tooShort =
     minPasswordLength !== undefined &&
@@ -66,7 +68,14 @@ export function AuthForm({
         </CardHeader>
         <CardContent>
           {error && (
-            <p className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p
+              // Re-keyed on the attempt counter rather than on the message, so
+              // a second failure with the *same* text is still visibly a new
+              // rejection instead of an unchanged screen.
+              key={attempt}
+              role="alert"
+              className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive motion-safe:animate-shake"
+            >
               {error}
             </p>
           )}
@@ -76,6 +85,7 @@ export function AuthForm({
             onSubmit={async (event) => {
               event.preventDefault();
               setError(null);
+              setAttempt((prev) => prev + 1);
               setPending(true);
               try {
                 await onSubmit({ username, password });

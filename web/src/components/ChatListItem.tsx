@@ -5,7 +5,12 @@ import { Avatar } from "@/components/Avatar";
 import { PresenceDot } from "@/components/PresenceDot";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserStatusBadge } from "@/components/UserStatusBadge";
-import { chatDisplayName, formatChatTimestamp, type Chat } from "@/lib/chats";
+import {
+  chatDisplayName,
+  chatViewTransitionNames,
+  formatChatTimestamp,
+  type Chat,
+} from "@/lib/chats";
 import { useIsOnline } from "@/lib/presence";
 import { useUserStatus } from "@/lib/status";
 import { userAvatarName } from "@/lib/users";
@@ -43,6 +48,7 @@ export function ChatListItem({
   style,
 }: ChatListItemProps) {
   const name = chatDisplayName(chat, currentUserId);
+  const transitionNames = chatViewTransitionNames(chat.id);
   const hasUnread = chat.unreadCount > 0;
   const lastMessage = chat.lastMessage;
   const isOwnLastMessage = lastMessage?.senderId === currentUserId;
@@ -61,7 +67,11 @@ export function ChatListItem({
       style={style}
       className={cn(
         "group flex items-center gap-3 rounded-lg border border-border bg-background/40 px-3 py-3 transition-[transform,border-color,background-color] duration-400 ease-out hover:-translate-y-px hover:border-primary/40 hover:bg-background/70",
-        "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500",
+        "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 stagger-in",
+        // A conic sheen creeping around the border of a row that's waiting on
+        // you — the "this one is live" cue, without adding a second badge
+        // next to the count that's already there.
+        hasUnread && "motion-safe:animate-border-glow",
       )}
     >
       {chat.type === "direct" && otherParticipant ? (
@@ -76,6 +86,12 @@ export function ChatListItem({
             avatarUrl={otherParticipant.avatarUrl}
             avatarVariants={otherParticipant.avatarVariants}
             size="lg"
+            // Half of the shared-element view transition into the
+            // conversation: the header of /chats/$id names its avatar
+            // identically (see `chatViewTransitionNames`), so the browser
+            // morphs this one into that one across the navigation instead of
+            // cross-fading the two screens over each other.
+            style={{ viewTransitionName: transitionNames.avatar }}
           />
           <PresenceDot
             online={otherParticipantOnline}
@@ -89,9 +105,13 @@ export function ChatListItem({
               name={name}
               avatarVariants={chat.avatarVariants}
               size="lg"
+              style={{ viewTransitionName: transitionNames.avatar }}
             />
           ) : (
-            <div className="flex size-11 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground">
+            <div
+              className="flex size-11 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground"
+              style={{ viewTransitionName: transitionNames.avatar }}
+            >
               <Users className="size-4.5" />
             </div>
           )}
@@ -104,7 +124,12 @@ export function ChatListItem({
         className="flex min-w-0 flex-1 flex-col"
       >
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate font-medium">{name}</span>
+          <span
+            className="truncate font-medium"
+            style={{ viewTransitionName: transitionNames.title }}
+          >
+            {name}
+          </span>
           {lastMessage && (
             <span className="shrink-0 text-xs text-muted-foreground">
               {formatChatTimestamp(lastMessage.createdAt)}
@@ -135,7 +160,7 @@ export function ChatListItem({
           {hasUnread && (
             <span
               data-testid="unread-badge"
-              className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:duration-300"
+              className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground motion-safe:animate-badge-pop"
             >
               {chat.unreadCount > 99 ? "99+" : chat.unreadCount}
             </span>

@@ -88,6 +88,10 @@ export function ChatComposer({
   const [content, setContent] = useState("");
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [pending, setPending] = useState(false);
+  // Set for the length of the send button's one-shot "plane takes off"
+  // animation and cleared by its own `animationend` — a class that never
+  // leaves the element can't be replayed on the next send.
+  const [flying, setFlying] = useState(false);
   const lastTypingSentAtRef = useRef(0);
   const sendTyping = $api.useMutation("post", "/chats/{id}/typing");
   const isOnline = useOnlineStatus();
@@ -149,6 +153,11 @@ export function ChatComposer({
 
   async function submit() {
     if (!canSend) return;
+    // Arm the send button's take-off. The plane is swapped for a spinner
+    // while the request is in flight, so this plays the moment the button
+    // comes back — which is exactly when there's a sent message to celebrate,
+    // and is immediate for a send that never had to wait (a queued one).
+    setFlying(true);
     setPending(true);
     try {
       // A reply quotes the message the parent passed as `replyingTo` — thread
@@ -334,7 +343,16 @@ export function ChatComposer({
           {pending ? (
             <Loader2 className="size-4 animate-spin" />
           ) : (
-            <SendHorizontal className="size-4 transition-transform duration-300 ease-spring group-hover/send:translate-x-0.5 group-hover/send:-translate-y-0.25 group-hover/send:scale-105" />
+            <SendHorizontal
+              // The plane flies up and out on send, and the next one drops in
+              // from the lower left (see `animate-send-off`). `flying` is
+              // cleared on `animationEnd` so every later send replays it.
+              onAnimationEnd={() => setFlying(false)}
+              className={cn(
+                "size-4 transition-transform duration-300 ease-spring group-hover/send:translate-x-0.5 group-hover/send:-translate-y-0.25 group-hover/send:scale-105",
+                flying && "motion-safe:animate-send-off",
+              )}
+            />
           )}
         </Button>
       </div>

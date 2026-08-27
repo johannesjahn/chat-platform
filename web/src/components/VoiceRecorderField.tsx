@@ -249,7 +249,7 @@ export function VoiceRecorderField({
         </div>
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
           <div
-            className="h-full rounded-full bg-primary transition-[width] duration-150"
+            className="h-full rounded-full bg-primary transition-[width] duration-150 motion-safe:animate-progress-stripes"
             style={{ width: `${Math.round(progress * 100)}%` }}
           />
         </div>
@@ -261,7 +261,9 @@ export function VoiceRecorderField({
     return (
       <div
         className={cn(
-          "flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2",
+          // A slow red breath around the whole row, so an open microphone is
+          // obvious at a glance rather than only through the 10px dot below.
+          "flex items-center gap-2 rounded-lg border border-destructive/40 bg-muted/40 px-3 py-2 motion-safe:animate-record-pulse",
           className,
         )}
       >

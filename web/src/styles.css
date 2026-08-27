@@ -507,6 +507,665 @@ html[data-app-shell="immersive"] body {
   transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* ───────────────────────────────────────────────────────────────────────────
+   View transitions
+   ───────────────────────────────────────────────────────────────────────────
+   The router opts every navigation into `document.startViewTransition` (see
+   `defaultViewTransition` in router.tsx), so the browser snapshots the old
+   page, swaps the DOM, and cross-fades the two. Everything below only styles
+   that transition — with the API unsupported the navigation is simply
+   instant, exactly as it was before.
+
+   The default UA cross-fade is a plain opacity swap; these keyframes add the
+   short lift/settle that makes a route change read as one page giving way to
+   the next rather than two images dissolving. The old snapshot leaves faster
+   than the new one arrives (200ms out, 320ms in) so the incoming page is
+   never waiting behind a ghost of the outgoing one. */
+@keyframes page-leave {
+  to {
+    opacity: 0;
+    transform: translateY(-0.5rem) scale(0.995);
+    filter: blur(2px);
+  }
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem) scale(0.99);
+    filter: blur(3px);
+  }
+}
+
+::view-transition-old(root) {
+  animation: page-leave 0.2s cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+::view-transition-new(root) {
+  animation: page-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Every *named* element (see `view-transition-name` below and the
+   `viewTransitionName` styles set in ChatListItem / chats/$id.tsx) morphs
+   between its two positions on the same spring the rest of the app uses, so a
+   shared avatar travelling from the chat list into the conversation header
+   matches the feel of a hover lift or a bubble landing. */
+::view-transition-group(*) {
+  animation-duration: 0.32s;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* The nav is the one piece of chrome common to every route. Naming it takes
+   it out of the root snapshot so it stays put during the swap instead of
+   fading out and back in under the incoming page. */
+[data-app-nav] {
+  view-transition-name: app-nav;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Interaction feedback
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@keyframes ripple {
+  from {
+    transform: scale(0);
+    opacity: 0.35;
+  }
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+/* Material-style press ripple. `useRipple` (lib/ripple.ts) appends the two
+   spans below to the pressed control rather than rendering them as React
+   children — `Button` forwards `asChild` through a Slot, which accepts
+   exactly one child, so an extra element in JSX would break every
+   `<Button asChild>` call site.
+
+   The host is what clips the circle to the control's rounded box.
+   `overflow: hidden` lives here and never on the button itself, so a badge
+   deliberately hanging outside the button (the nav's unread count) still
+   escapes. */
+@utility ripple-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+@utility ripple-wave {
+  position: absolute;
+  border-radius: 9999px;
+  background-color: currentColor;
+  transform: scale(0);
+  animation: ripple 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes wiggle {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-7deg);
+  }
+  75% {
+    transform: rotate(7deg);
+  }
+}
+
+/* A short "are you sure?" shimmy for the glyph inside a destructive control,
+   played on hover so the button reads as consequential before it's pressed. */
+@utility animate-wiggle {
+  animation: wiggle 0.4s ease-in-out;
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15%,
+  55% {
+    transform: translateX(-5px);
+  }
+  35%,
+  75% {
+    transform: translateX(5px);
+  }
+  90% {
+    transform: translateX(-2px);
+  }
+}
+
+/* The universal "that didn't work" gesture, used on a form's error panel so a
+   second failed submit with the *same* message is still visibly a new
+   rejection rather than an unchanged screen. */
+@utility animate-shake {
+  animation: shake 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+@keyframes send-off {
+  0% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+  55% {
+    transform: translate(6px, -6px) rotate(12deg) scale(0.85);
+    opacity: 0;
+  }
+  56% {
+    transform: translate(-8px, 8px) rotate(-8deg) scale(0.8);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(0, 0) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
+/* The paper plane actually flies: it launches up and to the right, vanishes,
+   and the next one drops back in from the lower left. Played once per send
+   (see ChatComposer), which makes a message that was accepted instantly feel
+   as deliberate as one that had to wait for the network. */
+@utility animate-send-off {
+  animation: send-off 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Reactions and counters
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@keyframes reaction-burst {
+  from {
+    transform: scale(0.4);
+    opacity: 0.55;
+  }
+  to {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+/* An expanding ring thrown off a reaction pill the moment it becomes yours.
+   Rendered as a sibling `::after` on the pill so it doesn't disturb layout,
+   and re-triggered by remounting (see ReactionList's key). */
+@utility animate-reaction-burst {
+  animation: reaction-burst 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes emoji-pop {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  40% {
+    transform: scale(1.45) rotate(-12deg);
+  }
+  70% {
+    transform: scale(0.92) rotate(6deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+/* The emoji itself kicks as the ring above leaves it — the two together are
+   what make adding a reaction feel like landing a stamp. */
+@utility animate-emoji-pop {
+  display: inline-block;
+  animation: emoji-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes count-tick {
+  0% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-0.15em) scale(1.12);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+/* A one-line nudge each time an animated counter's target changes, so a count
+   rolling from 4 to 5 registers even at the small type sizes these sit at.
+   Runs alongside `CountUp`'s number roll rather than replacing it. */
+@utility animate-count-tick {
+  display: inline-block;
+  animation: count-tick 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes badge-pop {
+  0% {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Unread badges land with an overshoot rather than fading in — a count that
+   just changed should be the thing your eye goes to. */
+@utility animate-badge-pop {
+  animation: badge-pop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Conversation
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translate(var(--bubble-from-x, 0), 0.5rem) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+/* A message doesn't just fade in, it grows out of the corner it belongs to:
+   `--bubble-from-x` carries the horizontal offset (positive for your own
+   messages on the right, negative for incoming ones) and `transform-origin`
+   pins the scale to the tail of the bubble, so the whole row unfolds from the
+   side it was sent from. */
+@utility animate-bubble-in {
+  animation: bubble-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes jump-flash {
+  0% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary), transparent 100%);
+  }
+  25% {
+    background-color: color-mix(in oklch, var(--primary), transparent 82%);
+    box-shadow: 0 0 0 6px color-mix(in oklch, var(--primary), transparent 88%);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary), transparent 100%);
+  }
+}
+
+/* The landing marker for a jump — following a reply's quote, or a row in the
+   pinned bar. The old highlight was a background class held for a second and a
+   half, which on a long smooth scroll had usually finished lighting up before
+   the view arrived. This pulses twice instead, so the target is still calling
+   attention to itself when you get there and needs no cleanup afterwards. */
+@utility animate-jump-flash {
+  border-radius: var(--radius-lg);
+  animation: jump-flash 0.9s cubic-bezier(0.22, 1, 0.36, 1) 2;
+}
+
+@keyframes check-draw {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* Wipes a read receipt in from the left the moment a message flips to "read".
+   A clip wipe rather than a stroke draw so it works on any icon: lucide's
+   paths carry no `pathLength`, which a dash-offset draw would need. */
+@utility animate-check-draw {
+  animation: check-draw 0.35s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+@keyframes record-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--destructive), transparent 75%);
+  }
+  50% {
+    box-shadow: 0 0 0 5px
+      color-mix(in oklch, var(--destructive), transparent 100%);
+  }
+}
+
+/* A slow red breath around the whole "recording…" row, so an open microphone
+   is unmistakable from across the room and not just a 10px blinking dot. */
+@utility animate-record-pulse {
+  animation: record-pulse 1.6s ease-in-out infinite;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Surfaces, panels and banners
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@keyframes banner-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(0.15rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Status banners drop in from above the fold with a small settle at the
+   bottom — they appear without being asked for (losing the network, a new
+   build), so the motion has to say "something changed" before the copy is
+   read. */
+@utility animate-banner-drop {
+  animation: banner-drop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes banner-rise {
+  from {
+    opacity: 0;
+    transform: translateY(150%);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-0.15rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The mirror of `banner-drop` for anything anchored to the bottom edge — it
+   rises into place and settles on the same spring, so a prompt at the foot of
+   the screen and a banner at the top read as one family. */
+@utility animate-banner-rise {
+  animation: banner-rise 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(1.25rem) scale(0.92);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+/* Modal entrance: springs up to size out of a blur instead of the flat
+   zoom-95 the dialogs used, which reads as the panel resolving into focus
+   above the backdrop that's blurring behind it at the same time. */
+@utility animate-dialog-in {
+  animation: dialog-in 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes backdrop-blur-in {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+  }
+}
+
+/* The other half of the entrance above — the backdrop ramps its blur up
+   rather than appearing already frosted, so the page behind visibly recedes. */
+@utility animate-backdrop-blur-in {
+  animation: backdrop-blur-in 0.28s ease-out;
+}
+
+@keyframes collapse-in {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+}
+
+/* Height-animates a disclosure open without anyone having to measure it: the
+   element is a one-row grid whose track goes from `0fr` to `1fr` (its content
+   height), which — unlike `height: auto` — is a genuinely interpolable pair.
+   The child must be `min-h-0 overflow-hidden` or it refuses to be squeezed. */
+@utility animate-collapse-in {
+  display: grid;
+  animation: collapse-in 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes blur-in {
+  from {
+    opacity: 0;
+    filter: blur(12px);
+    transform: scale(1.04);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1);
+  }
+}
+
+/* Media resolves out of a blur as it decodes, which hands the blurhash
+   placeholder over to the real pixels instead of swapping one for the other on
+   a frame boundary. */
+@utility animate-blur-in {
+  animation: blur-in 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes pop-open {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* The small-surface entrance: a popover or a floating control cluster springs
+   open from its own centre rather than fading in at full size. Combines with
+   `stagger-in` to cascade a row of items (the emoji picker does exactly
+   that). */
+@utility animate-pop-open {
+  animation: pop-open 0.24s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* A hover lift with real depth: the card tips very slightly toward the
+   viewer (`rotateX`) as it rises, which a flat `translateY` can't suggest.
+   It drives the `transform` property only — Tailwind's `translate`/`scale`/
+   `rotate` utilities are separate properties in v4, so a card that already
+   carries a `hover:-translate-y-*` composes with this rather than fighting
+   it. Timing comes from the element's own `transition-*` utilities (`Card`
+   already transitions everything), which keeps one duration governing the
+   lift, the border and the shadow together. */
+@utility card-lift {
+  transform: perspective(900px) rotateX(0deg);
+
+  &:hover {
+    transform: perspective(900px) translateY(-3px) rotateX(2.5deg);
+  }
+}
+
+@keyframes border-glow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A conic sheen that sweeps around an element's border, marking it as live
+   without adding another badge. Applied to a chat row with unread messages:
+   the ring is a rotating conic gradient masked to the border box, so the
+   content inside is untouched. */
+@utility animate-border-glow {
+  position: relative;
+  isolation: isolate;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      color-mix(in oklch, var(--primary), transparent 35%) 40deg,
+      transparent 110deg,
+      transparent 360deg
+    );
+    animation: border-glow 4s linear infinite;
+    pointer-events: none;
+  }
+}
+
+@keyframes avatar-ring {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A slowly turning gradient ring around an avatar, the "there's something
+   happening here" halo social apps put on a live story. Sits behind the
+   avatar and never resizes it. */
+@utility animate-avatar-ring {
+  animation: avatar-ring 6s linear infinite;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Progress, drop targets and navigation affordances
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@keyframes progress-stripes {
+  to {
+    background-position: -2rem 0;
+  }
+}
+
+/* Barber-pole stripes travelling along an upload bar. The bar's width still
+   reports genuine progress; the stripes only say the transfer is *moving*,
+   which is the part a stalled connection otherwise hides. */
+@utility animate-progress-stripes {
+  background-image: linear-gradient(
+    115deg,
+    color-mix(in oklch, white 22%, transparent) 25%,
+    transparent 25%,
+    transparent 50%,
+    color-mix(in oklch, white 22%, transparent) 50%,
+    color-mix(in oklch, white 22%, transparent) 75%,
+    transparent 75%
+  );
+  background-size: 2rem 2rem;
+  animation: progress-stripes 0.9s linear infinite;
+}
+
+@keyframes marching-ants {
+  to {
+    background-position:
+      2rem 0,
+      -2rem 100%,
+      0 -2rem,
+      100% 2rem;
+  }
+}
+
+/* The dashed outline of a drop zone crawls while a file is over it — the
+   classic "let go here" signal. Four gradients (one per edge) stand in for a
+   `border-style: dashed` that can't be animated. */
+@utility animate-marching-ants {
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      var(--primary) 0 8px,
+      transparent 8px 16px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      var(--primary) 0 8px,
+      transparent 8px 16px
+    ),
+    repeating-linear-gradient(0deg, var(--primary) 0 8px, transparent 8px 16px),
+    repeating-linear-gradient(0deg, var(--primary) 0 8px, transparent 8px 16px);
+  background-size:
+    100% 2px,
+    100% 2px,
+    2px 100%,
+    2px 100%;
+  background-position:
+    0 0,
+    0 100%,
+    0 0,
+    100% 0;
+  background-repeat: no-repeat;
+  animation: marching-ants 0.7s linear infinite;
+}
+
+@keyframes underline-grow {
+  from {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+/* The active tab's underline grows out of its centre when the tab is picked,
+   so switching filters animates rather than teleporting the marker. */
+@utility animate-underline-grow {
+  transform-origin: center;
+  animation: underline-grow 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* A hover underline that sweeps in from the left instead of appearing whole.
+   Deliberately a transition, not a keyframe, so it retracts the same way when
+   the pointer leaves. */
+@utility link-sweep {
+  position: relative;
+
+  &::after {
+    content: "";
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    height: 1px;
+    width: 100%;
+    transform: scaleX(0);
+    transform-origin: left;
+    background-color: currentColor;
+    transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  &:hover::after,
+  &:focus-visible::after {
+    transform: scaleX(1);
+  }
+}
+
+/* Shared stagger for a list that animates its rows in. Callers set
+   `--stagger-index` per row (see the feed, the chat list and the thread)
+   instead of hand-computing an `animationDelay` at each call site, so every
+   list steps at the same cadence. */
+@utility stagger-in {
+  animation-delay: calc(var(--stagger-index, 0) * 55ms);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skeleton-shimmer,
   .animate-gradient-shift,
@@ -520,8 +1179,89 @@ html[data-app-shell="immersive"] body {
   .animate-logo-dot,
   .animate-logo-dot-bounce,
   .animate-logo-glow,
-  .animate-logo-press {
+  .animate-logo-press,
+  .ripple-wave,
+  .animate-wiggle,
+  .animate-shake,
+  .animate-send-off,
+  .animate-reaction-burst,
+  .animate-emoji-pop,
+  .animate-count-tick,
+  .animate-badge-pop,
+  .animate-bubble-in,
+  .animate-jump-flash,
+  .animate-check-draw,
+  .animate-record-pulse,
+  .animate-banner-drop,
+  .animate-banner-rise,
+  .animate-dialog-in,
+  .animate-backdrop-blur-in,
+  .animate-collapse-in,
+  .animate-blur-in,
+  .animate-pop-open,
+  .animate-border-glow::before,
+  .animate-avatar-ring,
+  .animate-progress-stripes,
+  .animate-marching-ants,
+  .animate-underline-grow {
     animation: none;
+  }
+
+  /* The jump highlight is applied from script (see `jumpToMessage`), so
+     unlike everything else here it isn't behind a `motion-safe:` variant and
+     still needs to mark the message it landed on. A flat tint does that
+     without any motion; the caller's timer takes it off again. */
+  .animate-jump-flash {
+    background-color: color-mix(in oklch, var(--primary), transparent 85%);
+  }
+
+  /* Cancelling an animation that was carrying an element *into* view has to
+     leave it visible, not stuck on the first keyframe — `both`/`forwards`
+     fills would otherwise hold the entrance state forever. */
+  .animate-bubble-in,
+  .animate-collapse-in,
+  .animate-blur-in,
+  .animate-pop-open,
+  .animate-dialog-in,
+  .animate-backdrop-blur-in,
+  .animate-underline-grow {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+
+  .animate-collapse-in {
+    grid-template-rows: 1fr;
+  }
+
+  /* A ripple with its animation cancelled would sit on the control as a
+     permanent dot, since it's only ever removed on `animationend`. */
+  .ripple-wave {
+    display: none;
+  }
+
+  /* Motion is the whole mechanism here, so with it off the effect goes with
+     it rather than freezing mid-sweep. */
+  .card-lift,
+  .card-lift:hover {
+    transform: none;
+  }
+
+  .link-sweep::after {
+    display: none;
+  }
+
+  .stagger-in {
+    animation-delay: 0ms;
+  }
+
+  /* View transitions: keep the DOM swap, drop the cross-fade and the
+     element morphs. `!important` is what it takes to outrank the animation
+     the UA installs on these pseudo-elements. */
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
   }
 
   /* The dash offset only reaches 0 by animating, so cancelling `logo-draw`

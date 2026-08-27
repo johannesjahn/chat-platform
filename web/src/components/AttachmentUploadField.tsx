@@ -154,7 +154,9 @@ export function AttachmentUploadField({
         </div>
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
           <div
-            className="h-full rounded-full bg-primary transition-[width] duration-150"
+            // The width is genuine progress; the stripes travelling across it
+            // are what distinguish "slow" from "stalled" while it sits still.
+            className="h-full rounded-full bg-primary transition-[width] duration-150 motion-safe:animate-progress-stripes"
             style={{ width: `${Math.round(progress * 100)}%` }}
           />
         </div>
@@ -180,10 +182,21 @@ export function AttachmentUploadField({
         }}
         className={cn(
           "flex w-full flex-col items-center gap-1.5 rounded-lg border-2 border-dashed border-border px-4 py-6 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:bg-muted/40",
-          dragOver && "border-primary bg-primary/5",
+          // With a file over the target the dashes start crawling — the
+          // classic "let go here" cue. The painted border goes transparent
+          // for the duration so the marching gradients aren't drawn on top of
+          // a static dashed one.
+          dragOver &&
+            "border-transparent bg-primary/5 motion-safe:animate-marching-ants",
+          dragOver && "motion-reduce:border-primary",
         )}
       >
-        <Paperclip className="size-5" />
+        <Paperclip
+          className={cn(
+            "size-5 transition-transform duration-300 ease-spring",
+            dragOver && "-translate-y-0.5 scale-125 text-primary",
+          )}
+        />
         <span>Drag & drop a file, or click to browse</span>
         <span className="text-xs">
           Images, video, or audio — up to{" "}

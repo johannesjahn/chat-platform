@@ -147,8 +147,12 @@ export function PostCard({
         );
       }}
       className={cn(
-        "group w-full max-w-xl gap-0 overflow-hidden py-0 transition-all duration-400 ease-smooth hover:-translate-y-1 hover:border-primary/35 hover:shadow-xl hover:shadow-primary/8",
-        "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-500",
+        // `card-lift` tips the card a couple of degrees toward the viewer as
+        // it rises — it drives `transform`, while the lift below is Tailwind's
+        // separate `translate` property, so the two compose into one gesture
+        // instead of overwriting each other.
+        "group w-full max-w-xl gap-0 overflow-hidden py-0 transition-all duration-400 ease-smooth card-lift hover:-translate-y-1 hover:border-primary/35 hover:shadow-xl hover:shadow-primary/8",
+        "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-500 stagger-in",
       )}
     >
       <Spotlight color="oklch(0.62 0.19 277 / 0.16)" size={360} />
@@ -303,7 +307,16 @@ export function PostCard({
           <p className="px-3 pb-2 text-xs text-destructive">{reactionError}</p>
         )}
       </CardFooter>
-      {showComments && <CommentsSection postId={post.id} />}
+      {/* Height-animates open instead of snapping the whole thread into the
+          card — the grid track goes 0fr → 1fr, which actually interpolates
+          where `height: auto` doesn't. See `animate-collapse-in`. */}
+      {showComments && (
+        <div className="motion-safe:animate-collapse-in">
+          <div className="min-h-0 overflow-hidden">
+            <CommentsSection postId={post.id} />
+          </div>
+        </div>
+      )}
       {lightboxOpen && post.contentType === "image_url" && (
         <Lightbox
           src={post.content}

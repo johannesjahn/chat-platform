@@ -126,7 +126,12 @@ function Nav() {
             <NavIcon icon={MessagesSquare} />
             Chats
             {unreadCount > 0 && (
-              <span className="absolute -right-1.5 -top-1.5 flex size-4.5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:duration-300">
+              <span
+                // Re-keyed on the count so the pop replays every time a new
+                // message arrives, not only the first time the badge appears.
+                key={unreadCount}
+                className="absolute -right-1.5 -top-1.5 flex size-4.5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground motion-safe:animate-badge-pop"
+              >
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>
             )}
@@ -145,7 +150,10 @@ function Nav() {
           <Link
             to="/users/$id"
             params={{ id: String(session.user.id) }}
-            className="text-sm text-muted-foreground hover:text-foreground hover:underline"
+            // `link-sweep` draws the underline in from the left rather than
+            // switching it on whole, and retracts it the same way — see
+            // styles.css.
+            className="link-sweep text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             {userLabel(session.user)}
           </Link>

@@ -458,12 +458,25 @@ export function MessageBubble({
     <div
       ref={rowRef}
       data-message-id={message.id}
-      style={style}
+      // `--bubble-from-x` is the side the row unfolds from: a message you
+      // sent grows out of the right edge, one you received out of the left
+      // (see `animate-bubble-in` in styles.css). The row keeps whatever
+      // `style` its caller passed — the thread's stagger index — by merging
+      // rather than replacing it.
+      style={
+        {
+          ...style,
+          "--bubble-from-x": isOwn ? "1.25rem" : "-1.25rem",
+        } as CSSProperties
+      }
       className={cn(
-        "group flex w-full items-center gap-1.5 motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-500 ease-spring",
+        "group flex w-full items-center gap-1.5 motion-safe:animate-bubble-in stagger-in",
+        // The origin pins the scale to the corner the bubble's tail is on, so
+        // the row unfolds from that side instead of shrinking toward its own
+        // centre and drifting sideways on the way in.
         isOwn
-          ? "justify-end motion-safe:slide-in-from-right-4"
-          : "justify-start motion-safe:slide-in-from-left-4",
+          ? "justify-end origin-bottom-right"
+          : "justify-start origin-bottom-left",
       )}
     >
       {!isOwn && senderAvatar && (
@@ -722,9 +735,17 @@ export function MessageBubble({
             </span>
             {isOwn &&
               (isRead ? (
-                <CheckCheck className="size-3.5" />
+                // Wipes in from the left the moment the second tick arrives,
+                // so "they've read it" is something you see happen rather
+                // than a glyph that was quietly swapped underneath you. Keyed
+                // on the state so React remounts it and the animation
+                // actually replays. See `animate-check-draw`.
+                <CheckCheck
+                  key="read"
+                  className="size-3.5 motion-safe:animate-check-draw"
+                />
               ) : (
-                <Check className="size-3.5" />
+                <Check key="sent" className="size-3.5" />
               ))}
           </div>
         </div>

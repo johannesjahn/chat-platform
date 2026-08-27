@@ -80,6 +80,28 @@ export function chatDisplayName(chat: Chat, currentUserId: number): string {
   return other ? userLabel(other) : "Direct chat";
 }
 
+/**
+ * The `view-transition-name`s a chat's avatar and title share between the
+ * chat list and the conversation screen, so navigating between the two morphs
+ * the row's avatar into the header's rather than cross-fading both screens
+ * (see `defaultViewTransition` in router.tsx).
+ *
+ * The chat id keys the pair, which is what keeps every name unique within a
+ * single snapshot — a duplicate name makes the browser abandon the whole
+ * transition, and the chat list renders many rows at once. Names are CSS
+ * `<custom-ident>`s, so they can't start with a digit; the prefixes here
+ * cover that.
+ */
+export function chatViewTransitionNames(chatId: number): {
+  avatar: string;
+  title: string;
+} {
+  return {
+    avatar: `chat-avatar-${chatId}`,
+    title: `chat-title-${chatId}`,
+  };
+}
+
 // Today shows a time, anything older shows a short date — the usual chat-app
 // convention (WhatsApp/Telegram both do this) so the list stays scannable.
 export function formatChatTimestamp(ms: number): string {

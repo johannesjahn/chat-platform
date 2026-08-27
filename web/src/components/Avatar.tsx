@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 import { API_URL } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -30,6 +31,14 @@ type AvatarProps = {
   avatarVariants?: AvatarVariants | null;
   size?: AvatarSize;
   className?: string;
+  /**
+   * Inline styles for the rendered avatar. Every branch below forwards this,
+   * which is what lets a caller name the avatar for a view transition
+   * (`viewTransitionName`) without having to know whether it ended up as an
+   * uploaded image, a remote URL, or the initials fallback — see
+   * `chatViewTransitionNames` in lib/chats.ts.
+   */
+  style?: CSSProperties;
 };
 
 // The backend validates `avatarUrl` against an https:// + host allowlist at
@@ -72,6 +81,7 @@ export function Avatar({
   avatarVariants,
   size = "md",
   className,
+  style,
 }: AvatarProps) {
   // Uploaded avatars (issue #269) take priority over `avatarUrl` — the two
   // are mutually exclusive server-side (see UsersHandler.ts), but preferring
@@ -86,6 +96,7 @@ export function Avatar({
       <img
         src={resolveVariantSrc(variantSrc)}
         alt=""
+        style={style}
         className={cn(
           "shrink-0 rounded-full object-cover",
           AVATAR_SIZES[size],
@@ -100,6 +111,7 @@ export function Avatar({
       <img
         src={avatarUrl}
         alt=""
+        style={style}
         className={cn(
           "shrink-0 rounded-full object-cover",
           AVATAR_SIZES[size],
@@ -111,6 +123,7 @@ export function Avatar({
 
   return (
     <div
+      style={style}
       className={cn(
         "flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 to-primary/10 font-semibold text-primary ring-1 ring-inset ring-primary/20",
         AVATAR_SIZES[size],
