@@ -1,4 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
+import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
 import { drizzle as drizzleBunSql } from "drizzle-orm/bun-sql";
@@ -16,6 +17,14 @@ import * as schema from "./db/schema.ts";
 export type DrizzleDb = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 export class Db extends Context.Tag("Db")<Db, DrizzleDb>() {}
+
+// PGlite ships contrib extensions as separate WASM bundles that have to be
+// registered when the instance is created — `CREATE EXTENSION pg_trgm` in
+// migration 0023 fails on an instance that wasn't told about it. A real
+// Postgres (DATABASE_URL) needs nothing here: the extension is trusted, so
+// the migration creates it on its own. Mirrored in src/testDb.ts.
+export const createPglite = () =>
+  PGlite.create(process.env.DB_PATH, { extensions: { pg_trgm } });
 
 // `DATABASE_URL`, when set (e.g. by docker-compose, pointing at a real
 // Postgres container), connects over the wire via Bun's native `Bun.sql`
@@ -36,7 +45,7 @@ export const DbLive = Layer.effect(
       const db = drizzleBunSql(process.env.DATABASE_URL, { schema });
       return db;
     }
-    const client = await PGlite.create(process.env.DB_PATH);
+    const client = await createPglite();
     const db = drizzlePglite({ client, schema });
     await migratePglite(db, { migrationsFolder: "./drizzle" });
     return db;
@@ -51,7 +60,7 @@ export const runMigrations = async (): Promise<void> => {
     const db = drizzleBunSql(process.env.DATABASE_URL, { schema });
     await migrateBunSql(db, { migrationsFolder: "./drizzle" });
   } else {
-    const client = await PGlite.create(process.env.DB_PATH);
+    const client = await createPglite();
     const db = drizzlePglite({ client, schema });
     await migratePglite(db, { migrationsFolder: "./drizzle" });
     await client.close();

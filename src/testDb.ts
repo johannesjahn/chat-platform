@@ -3,11 +3,14 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { getTableConfig } from "drizzle-orm/pg-core";
-import type { DrizzleDb } from "./Db.ts";
+import { createPglite, type DrizzleDb } from "./Db.ts";
 import * as schema from "./db/schema.ts";
 
 const createTestDb = async () => {
-  const db = drizzle({ schema });
+  // `{ extensions: { pg_trgm } }` for the same reason as src/Db.ts: the
+  // trigram indexes migration 0023 creates need the contrib bundle loaded
+  // into this PGlite instance.
+  const db = drizzle({ client: await createPglite(), schema });
   await migrate(db, { migrationsFolder: "./drizzle" });
   return db;
 };

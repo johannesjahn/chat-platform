@@ -708,6 +708,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["search.searchAll"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/search/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["search.searchUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/search/posts": {
         parameters: {
             query?: never;
@@ -1287,23 +1319,35 @@ export interface components {
             useCount: number;
             revokedAt: number | null;
         };
-        PostSearchPage: {
-            results: components["schemas"]["PostSearchResult"][];
+        SearchAllPage: {
+            users: components["schemas"]["UserSearchPage"];
+            posts: components["schemas"]["PostSearchPage"];
+            comments: components["schemas"]["CommentSearchPage"];
+            messages: components["schemas"]["MessageSearchPage"];
+        };
+        UserSearchPage: {
+            results: components["schemas"]["UserSearchResult"][];
             limit: number;
             nextCursor: string | null;
         };
-        PostSearchResult: {
-            post: components["schemas"]["Post"];
+        UserSearchResult: {
+            user: components["schemas"]["User"];
             snippet: components["schemas"]["SearchSnippetSegment"][];
         };
         SearchSnippetSegment: {
             text: string;
             match: boolean;
         };
-        InvalidSearchRequest: {
-            message: string;
-            /** @enum {string} */
-            _tag: "InvalidSearchRequest";
+        PostSearchPage: {
+            results: components["schemas"]["PostSearchResult"][];
+            limit: number;
+            nextCursor: string | null;
+        };
+        PostSearchResult: {
+            id: number;
+            author: components["schemas"]["User"];
+            createdAt: number;
+            snippet: components["schemas"]["SearchSnippetSegment"][];
         };
         CommentSearchPage: {
             results: components["schemas"]["CommentSearchResult"][];
@@ -1311,7 +1355,11 @@ export interface components {
             nextCursor: string | null;
         };
         CommentSearchResult: {
-            comment: components["schemas"]["Comment"];
+            id: number;
+            postId: number;
+            parentCommentId: number | null;
+            author: components["schemas"]["User"];
+            createdAt: number;
             snippet: components["schemas"]["SearchSnippetSegment"][];
         };
         MessageSearchPage: {
@@ -1321,7 +1369,10 @@ export interface components {
             nextCursor: string | null;
         };
         MessageSearchResult: {
-            message: components["schemas"]["Message"];
+            id: number;
+            chatId: number;
+            sender: components["schemas"]["User"];
+            createdAt: number;
             snippet: components["schemas"]["SearchSnippetSegment"][];
         };
         MessageSearchChat: {
@@ -1329,6 +1380,11 @@ export interface components {
             type: components["schemas"]["ChatType"];
             title: string | null;
             participants: components["schemas"]["ChatParticipant"][];
+        };
+        InvalidSearchRequest: {
+            message: string;
+            /** @enum {string} */
+            _tag: "InvalidSearchRequest";
         };
         UnsupportedAttachmentType: {
             message: string;
@@ -5014,6 +5070,93 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotFound"];
+                };
+            };
+        };
+    };
+    "search.searchAll": {
+        parameters: {
+            query: {
+                /** @description a string that will be trimmed */
+                q: string;
+                /** @description a string to be decoded into a number */
+                limit?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SearchAllPage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchAllPage"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidSearchRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+        };
+    };
+    "search.searchUsers": {
+        parameters: {
+            query: {
+                /** @description a string that will be trimmed */
+                q: string;
+                cursor?: string;
+                /** @description a string to be decoded into a number */
+                limit?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UserSearchPage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSearchPage"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidSearchRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
                 };
             };
         };

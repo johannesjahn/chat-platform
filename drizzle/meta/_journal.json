@@ -162,6 +162,13 @@
       "when": 1786264569144,
       "tag": "0022_dry_omega_red",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1786350969144,
+      "tag": "0023_smiling_typhoid_mary",
+      "breakpoints": true
     }
   ]
 }

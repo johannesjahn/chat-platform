@@ -8,6 +8,7 @@ import {
   inArray,
   isNull,
   lt,
+  or,
   sql,
 } from "drizzle-orm";
 import { Context, Effect, FiberRef, Metric, MetricLabel } from "effect";
@@ -54,6 +55,7 @@ import { postReactionInfo } from "./reactions.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { clientIp } from "./ClientIp.ts";
 import { RateLimiter } from "./RateLimiter.ts";
+import { containsPattern } from "./search.ts";
 import { refreshTokens, userBlocks, users, posts } from "./db/schema.ts";
 
 // Sensible defaults for auth-endpoint rate limiting (see issue #25). Login is
@@ -97,11 +99,6 @@ const DELETE_ACCOUNT_WINDOW_SECONDS = 15 * 60;
 // scripted flood tighter than the global per-IP limiter.
 const AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT = 10;
 const AVATAR_UPLOAD_WINDOW_SECONDS = 60 * 60;
-
-// Escapes LIKE/ILIKE wildcard characters in user-supplied search text so a
-// query containing "%" or "_" is matched literally instead of as a wildcard.
-const escapeLikePattern = (value: string): string =>
-  value.replace(/[\\%_]/g, (char) => `\\${char}`);
 
 // Consumes `key` from the rate limiter and fails with TooManyRequests if the
 // caller has exceeded `limit` calls within `windowSeconds`. The failure
@@ -365,7 +362,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             );
 
           const db = yield* Db;
-          const pattern = `%${escapeLikePattern(q)}%`;
+          const pattern = containsPattern(q);
           const rows = yield* Effect.tryPromise(() =>
             db
               .select({
@@ -382,7 +379,16 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 statusExpiresAt: users.statusExpiresAt,
               })
               .from(users)
-              .where(ilike(users.username, pattern))
+              // Matches a fragment of either name, not just the username —
+              // both columns carry a GIN trigram index (migration 0023), so
+              // this stays an index lookup rather than the sequential scan an
+              // unanchored ILIKE used to force.
+              .where(
+                or(
+                  ilike(users.username, pattern),
+                  ilike(users.displayName, pattern),
+                ),
+              )
               .orderBy(users.username)
               .limit(USER_SEARCH_RESULTS_LIMIT),
           ).pipe(Effect.orDie);

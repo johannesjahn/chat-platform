@@ -6,6 +6,7 @@ import {
   MessageSquare,
   MessagesSquare,
   Search as SearchIcon,
+  Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
@@ -14,18 +15,27 @@ import { SearchHighlight } from "@/components/SearchHighlight";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { formatChatTimestamp } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
 import {
   messageSearchChatName,
+  MIN_FRAGMENT_QUERY_LENGTH,
   MIN_SEARCH_QUERY_LENGTH,
+  useSearchAll,
   useSearchComments,
   useSearchMessages,
   useSearchPosts,
+  useSearchUsers,
+  type CommentSearchResult,
+  type MessageSearchChat,
+  type MessageSearchResult,
+  type PostSearchResult,
+  type UserSearchResult,
 } from "@/lib/search";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
-import { useUserSummariesById, userLabel } from "@/lib/users";
+import { userAvatarName, userLabel } from "@/lib/users";
 
 type SearchParams = { q?: string };
 
@@ -39,14 +49,22 @@ export const Route = createFileRoute("/search")({
   component: SearchPage,
 });
 
-type Tab = "all" | "posts" | "comments" | "messages";
+type Tab = "all" | "users" | "posts" | "comments" | "messages";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "all", label: "All" },
+  { id: "users", label: "People" },
   { id: "posts", label: "Posts" },
   { id: "comments", label: "Comments" },
   { id: "messages", label: "Messages" },
 ];
+
+// Short enough that results feel like they're keeping up with typing, long
+// enough that a fast typist doesn't fire a request per character. The unified
+// endpoint answers the whole page in one round trip, and React Query keeps the
+// previous results on screen while the next ones land, so this can sit well
+// below the 300ms the old page used.
+const SEARCH_DEBOUNCE_MS = 180;
 
 function SearchPage() {
   const session = useSession();
@@ -55,9 +73,7 @@ function SearchPage() {
   const [input, setInput] = useState(urlQuery ?? "");
   const [tab, setTab] = useState<Tab>("all");
 
-  // Debounce before it drives any request/URL change, so typing doesn't fire a
-  // search per keystroke (mirrors the users search page).
-  const query = useDebouncedValue(input.trim(), 300);
+  const query = useDebouncedValue(input.trim(), SEARCH_DEBOUNCE_MS);
 
   // Keep the URL in sync (replace, so typing doesn't spam history) so a search
   // is shareable and survives reload.
@@ -67,16 +83,29 @@ function SearchPage() {
       void navigate({ search: next ? { q: next } : {}, replace: true });
   }, [query, urlQuery, navigate]);
 
-  const ready = query.length >= MIN_SEARCH_QUERY_LENGTH;
-  const on = (t: Tab) => !!session && ready && (tab === "all" || tab === t);
+  const ready = !!session && query.length >= MIN_SEARCH_QUERY_LENGTH;
 
-  const posts = useSearchPosts(query, on("posts"));
-  const comments = useSearchComments(query, on("comments"));
-  const messages = useSearchMessages(query, on("messages"));
+  // The "All" tab is a single request covering every section; a section's own
+  // tab switches to that section's paginated endpoint. Only the visible one is
+  // enabled, so switching tabs never leaves four searches in flight.
+  const all = useSearchAll(query, ready && tab === "all");
+  const users = useSearchUsers(query, ready && tab === "users");
+  const posts = useSearchPosts(query, ready && tab === "posts");
+  const comments = useSearchComments(query, ready && tab === "comments");
+  const messages = useSearchMessages(query, ready && tab === "messages");
 
-  const showPosts = tab === "all" || tab === "posts";
-  const showComments = tab === "all" || tab === "comments";
-  const showMessages = tab === "all" || tab === "messages";
+  const currentUserId = session?.user.id ?? 0;
+  // The people section keeps the user directory's own narrowness floor (issue
+  // #48) — say so rather than showing an unexplained empty section.
+  const peopleEmptyLabel =
+    session?.user.role !== "admin" &&
+    query.length < MIN_USER_SEARCH_QUERY_LENGTH
+      ? `Type at least ${MIN_USER_SEARCH_QUERY_LENGTH} characters to search people.`
+      : "No matching people.";
+  // While a new query is in flight the previous results stay rendered (see
+  // `keepPreviousData` in lib/search.ts) — dimmed, so it's clear they're about
+  // to be replaced rather than looking frozen.
+  const stale = all.isFetching && !all.isLoading;
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-10">
@@ -90,7 +119,7 @@ function SearchPage() {
       {!session ? (
         <LoginPrompt
           title="Log in to search"
-          description="Search across posts, comments, and your chat messages."
+          description="Search across people, posts, comments and your chat messages."
         />
       ) : (
         <>
@@ -99,7 +128,7 @@ function SearchPage() {
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Search posts, comments, and messages…"
+              placeholder="Search people, posts, comments and messages…"
               className="pl-8"
               autoFocus
               aria-label="Search query"
@@ -134,18 +163,135 @@ function SearchPage() {
           {!ready ? (
             <p className="text-sm text-muted-foreground">
               Type at least {MIN_SEARCH_QUERY_LENGTH} characters to search.
+              Matches happen anywhere inside a word from{" "}
+              {MIN_FRAGMENT_QUERY_LENGTH} characters up.
             </p>
-          ) : (
-            <div className="flex flex-col gap-8">
-              {showPosts && <PostsSection search={posts} />}
-              {showComments && <CommentsSection search={comments} />}
-              {showMessages && (
-                <MessagesSection
-                  currentUserId={session.user.id}
-                  search={messages}
-                />
-              )}
+          ) : tab === "all" ? (
+            <div
+              className={`flex flex-col gap-8 transition-opacity duration-200 ${
+                stale ? "opacity-60" : "opacity-100"
+              }`}
+            >
+              <Section
+                icon={Users}
+                title="People"
+                isLoading={all.isLoading}
+                error={all.error}
+                count={all.data?.users.results.length}
+                emptyLabel={peopleEmptyLabel}
+                onSeeAll={
+                  all.data?.users.nextCursor ? () => setTab("users") : undefined
+                }
+              >
+                {all.data?.users.results.map((r) => (
+                  <UserRow key={r.user.id} result={r} />
+                ))}
+              </Section>
+
+              <Section
+                icon={FileText}
+                title="Posts"
+                isLoading={all.isLoading}
+                error={all.error}
+                count={all.data?.posts.results.length}
+                emptyLabel="No matching posts."
+                onSeeAll={
+                  all.data?.posts.nextCursor ? () => setTab("posts") : undefined
+                }
+              >
+                {all.data?.posts.results.map((r) => (
+                  <PostRow key={r.id} result={r} />
+                ))}
+              </Section>
+
+              <Section
+                icon={MessageSquare}
+                title="Comments & replies"
+                isLoading={all.isLoading}
+                error={all.error}
+                count={all.data?.comments.results.length}
+                emptyLabel="No matching comments."
+                onSeeAll={
+                  all.data?.comments.nextCursor
+                    ? () => setTab("comments")
+                    : undefined
+                }
+              >
+                {all.data?.comments.results.map((r) => (
+                  <CommentRow key={r.id} result={r} />
+                ))}
+              </Section>
+
+              <Section
+                icon={MessagesSquare}
+                title="Messages"
+                isLoading={all.isLoading}
+                error={all.error}
+                count={all.data?.messages.results.length}
+                emptyLabel="No matching messages in your chats."
+                onSeeAll={
+                  all.data?.messages.nextCursor
+                    ? () => setTab("messages")
+                    : undefined
+                }
+              >
+                {all.data?.messages.results.map((r) => (
+                  <MessageRow
+                    key={r.id}
+                    result={r}
+                    chats={all.data.messages.chats}
+                    currentUserId={currentUserId}
+                  />
+                ))}
+              </Section>
             </div>
+          ) : tab === "users" ? (
+            <PaginatedSection
+              icon={Users}
+              title="People"
+              search={users}
+              emptyLabel={peopleEmptyLabel}
+              rows={(page) =>
+                page.results.map((r) => <UserRow key={r.user.id} result={r} />)
+              }
+            />
+          ) : tab === "posts" ? (
+            <PaginatedSection
+              icon={FileText}
+              title="Posts"
+              search={posts}
+              emptyLabel="No matching posts."
+              rows={(page) =>
+                page.results.map((r) => <PostRow key={r.id} result={r} />)
+              }
+            />
+          ) : tab === "comments" ? (
+            <PaginatedSection
+              icon={MessageSquare}
+              title="Comments & replies"
+              search={comments}
+              emptyLabel="No matching comments."
+              rows={(page) =>
+                page.results.map((r) => <CommentRow key={r.id} result={r} />)
+              }
+            />
+          ) : (
+            <PaginatedSection
+              icon={MessagesSquare}
+              title="Messages"
+              search={messages}
+              emptyLabel="No matching messages in your chats."
+              rows={(page) =>
+                page.results.map((r) => (
+                  <MessageRow
+                    key={r.id}
+                    result={r}
+                    chats={page.chats}
+                    currentUserId={currentUserId}
+                  />
+                ))
+              }
+            />
           )}
         </>
       )}
@@ -155,51 +301,60 @@ function SearchPage() {
 
 // --- shared section chrome --------------------------------------------------
 
-function SectionShell({
+function SectionHeader({
   icon: Icon,
+  title,
+  count,
+}: {
+  icon: LucideIcon;
+  title: string;
+  count?: number;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Icon className="size-4 text-muted-foreground" />
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+        {count !== undefined && count > 0 && (
+          <span className="ml-1.5 text-muted-foreground/70">{count}</span>
+        )}
+      </h2>
+    </div>
+  );
+}
+
+// One section of the "All" tab: a preview of that kind of match, with a link
+// into its own tab when there's more than the preview holds.
+function Section({
+  icon,
   title,
   count,
   isLoading,
   error,
-  isEmpty,
   emptyLabel,
+  onSeeAll,
   children,
-  hasNextPage,
-  isFetchingNextPage,
-  onLoadMore,
 }: {
   icon: LucideIcon;
   title: string;
   count?: number;
   isLoading: boolean;
   error: unknown;
-  isEmpty: boolean;
   emptyLabel: string;
+  onSeeAll?: () => void;
   children: React.ReactNode;
-  hasNextPage: boolean;
-  isFetchingNextPage: boolean;
-  onLoadMore: () => void;
 }) {
+  const rows = Array.isArray(children) ? children : [children];
+  const isEmpty =
+    !isLoading && !error && rows.flat().filter(Boolean).length === 0;
+
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <Icon className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          {title}
-          {count !== undefined && count > 0 && (
-            <span className="ml-1.5 text-muted-foreground/70">{count}</span>
-          )}
-        </h2>
-      </div>
-
+      <SectionHeader icon={icon} title={title} count={count} />
       {isLoading ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Searching…
-        </div>
+        <SearchingRow />
       ) : error ? (
-        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          Search failed: {errorMessage(error)}
-        </p>
+        <SearchError error={error} />
       ) : isEmpty ? (
         <p className="text-sm text-muted-foreground">{emptyLabel}</p>
       ) : (
@@ -207,15 +362,76 @@ function SectionShell({
           <ul role="list" className="flex flex-col gap-2">
             {children}
           </ul>
-          {hasNextPage && (
+          {onSeeAll && (
             <Button
               variant="outline"
               size="sm"
               className="self-start"
-              onClick={onLoadMore}
-              disabled={isFetchingNextPage}
+              onClick={onSeeAll}
             >
-              {isFetchingNextPage ? (
+              See all {title.toLowerCase()}
+            </Button>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+type InfiniteSearch<TPage> = {
+  data?: { pages: TPage[] };
+  isLoading: boolean;
+  isFetching: boolean;
+  error: unknown;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  fetchNextPage: () => unknown;
+};
+
+// A single section's own tab: the same rows, paginated.
+function PaginatedSection<TPage>({
+  icon,
+  title,
+  search,
+  emptyLabel,
+  rows,
+}: {
+  icon: LucideIcon;
+  title: string;
+  search: InfiniteSearch<TPage>;
+  emptyLabel: string;
+  rows: (page: TPage) => React.ReactNode;
+}) {
+  const pages = search.data?.pages ?? [];
+  const rendered = pages.map(rows);
+  const isEmpty =
+    !search.isLoading &&
+    !search.error &&
+    rendered.flat().filter(Boolean).length === 0;
+
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHeader icon={icon} title={title} />
+      {search.isLoading ? (
+        <SearchingRow />
+      ) : search.error ? (
+        <SearchError error={search.error} />
+      ) : isEmpty ? (
+        <p className="text-sm text-muted-foreground">{emptyLabel}</p>
+      ) : (
+        <>
+          <ul role="list" className="flex flex-col gap-2">
+            {rendered}
+          </ul>
+          {search.hasNextPage && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={() => void search.fetchNextPage()}
+              disabled={search.isFetchingNextPage}
+            >
+              {search.isFetchingNextPage ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
                 "Load more"
@@ -228,203 +444,174 @@ function SectionShell({
   );
 }
 
+function SearchingRow() {
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <Loader2 className="size-4 animate-spin" /> Searching…
+    </div>
+  );
+}
+
+function SearchError({ error }: { error: unknown }) {
+  return (
+    <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+      Search failed: {errorMessage(error)}
+    </p>
+  );
+}
+
 const rowClass =
   "group flex items-start gap-3 rounded-lg border border-border bg-background/40 px-3 py-2.5 text-sm transition-[transform,border-color] duration-300 ease-out hover:-translate-y-px hover:border-primary/40";
 
-// --- posts ------------------------------------------------------------------
+// --- rows -------------------------------------------------------------------
 
-function PostsSection({
-  search,
-}: {
-  search: ReturnType<typeof useSearchPosts>;
-}) {
-  const results = search.data?.pages.flatMap((p) => p.results) ?? [];
-  const authorById = useUserSummariesById(
-    results.map((r) => r.post.authorId),
-    true,
-  );
-
+function UserRow({ result: { user, snippet } }: { result: UserSearchResult }) {
   return (
-    <SectionShell
-      icon={FileText}
-      title="Posts"
-      count={search.data ? results.length : undefined}
-      isLoading={search.isLoading}
-      error={search.error}
-      isEmpty={results.length === 0}
-      emptyLabel="No matching posts."
-      hasNextPage={!!search.hasNextPage}
-      isFetchingNextPage={search.isFetchingNextPage}
-      onLoadMore={() => void search.fetchNextPage()}
-    >
-      {results.map(({ post, snippet }) => {
-        const author = authorById.get(post.authorId);
-        return (
-          <li key={post.id}>
-            <Link
-              to="/posts/$id"
-              params={{ id: String(post.id) }}
-              className={rowClass}
-            >
-              <Avatar
-                name={author ? userLabel(author) : `user #${post.authorId}`}
-                avatarUrl={author?.avatarUrl}
-                avatarVariants={author?.avatarVariants}
-                size="sm"
-              />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="flex items-center gap-2">
-                  <span className="truncate font-medium">
-                    {author ? userLabel(author) : `user #${post.authorId}`}
-                  </span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {formatChatTimestamp(post.createdAt)}
-                  </span>
-                </span>
-                <SearchHighlight
-                  snippet={snippet}
-                  className="line-clamp-3 text-muted-foreground group-hover:text-foreground"
-                />
+    <li>
+      <Link
+        to="/users/$id"
+        params={{ id: String(user.id) }}
+        className={rowClass}
+      >
+        <Avatar
+          name={userAvatarName(user)}
+          avatarUrl={user.avatarUrl}
+          avatarVariants={user.avatarVariants}
+          size="sm"
+        />
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <SearchHighlight snippet={snippet} className="truncate font-medium" />
+          <span className="truncate text-xs text-muted-foreground">
+            @{user.username}
+            {user.statusEmoji || user.statusText ? (
+              <span className="ml-1.5">
+                {user.statusEmoji} {user.statusText}
               </span>
-            </Link>
-          </li>
-        );
-      })}
-    </SectionShell>
+            ) : null}
+          </span>
+        </span>
+      </Link>
+    </li>
   );
 }
 
-// --- comments ---------------------------------------------------------------
-
-function CommentsSection({
-  search,
+// The author/timestamp header every content row shares.
+function RowHeading({
+  label,
+  createdAt,
+  detail,
 }: {
-  search: ReturnType<typeof useSearchComments>;
+  label: string;
+  createdAt: number;
+  detail?: string;
 }) {
-  const results = search.data?.pages.flatMap((p) => p.results) ?? [];
-  const authorById = useUserSummariesById(
-    results.map((r) => r.comment.authorId),
-    true,
-  );
-
   return (
-    <SectionShell
-      icon={MessageSquare}
-      title="Comments"
-      count={search.data ? results.length : undefined}
-      isLoading={search.isLoading}
-      error={search.error}
-      isEmpty={results.length === 0}
-      emptyLabel="No matching comments."
-      hasNextPage={!!search.hasNextPage}
-      isFetchingNextPage={search.isFetchingNextPage}
-      onLoadMore={() => void search.fetchNextPage()}
-    >
-      {results.map(({ comment, snippet }) => {
-        const author = authorById.get(comment.authorId);
-        return (
-          <li key={comment.id}>
-            <Link
-              to="/posts/$id"
-              params={{ id: String(comment.postId) }}
-              className={rowClass}
-            >
-              <Avatar
-                name={author ? userLabel(author) : `user #${comment.authorId}`}
-                avatarUrl={author?.avatarUrl}
-                avatarVariants={author?.avatarVariants}
-                size="sm"
-              />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="flex items-center gap-2">
-                  <span className="truncate font-medium">
-                    {author ? userLabel(author) : `user #${comment.authorId}`}
-                  </span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {formatChatTimestamp(comment.createdAt)}
-                  </span>
-                </span>
-                <SearchHighlight
-                  snippet={snippet}
-                  className="line-clamp-3 text-muted-foreground group-hover:text-foreground"
-                />
-              </span>
-            </Link>
-          </li>
-        );
-      })}
-    </SectionShell>
+    <>
+      <span className="flex items-center gap-2">
+        <span className="truncate font-medium">{label}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {formatChatTimestamp(createdAt)}
+        </span>
+      </span>
+      {detail && (
+        <span className="truncate text-xs text-muted-foreground">{detail}</span>
+      )}
+    </>
   );
 }
 
-// --- messages ---------------------------------------------------------------
+function PostRow({ result }: { result: PostSearchResult }) {
+  const { author, snippet, createdAt } = result;
+  return (
+    <li>
+      <Link
+        to="/posts/$id"
+        params={{ id: String(result.id) }}
+        className={rowClass}
+      >
+        <Avatar
+          name={userAvatarName(author)}
+          avatarUrl={author.avatarUrl}
+          avatarVariants={author.avatarVariants}
+          size="sm"
+        />
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <RowHeading label={userLabel(author)} createdAt={createdAt} />
+          <SearchHighlight
+            snippet={snippet}
+            className="line-clamp-3 text-muted-foreground group-hover:text-foreground"
+          />
+        </span>
+      </Link>
+    </li>
+  );
+}
 
-function MessagesSection({
+function CommentRow({ result }: { result: CommentSearchResult }) {
+  const { author, snippet, createdAt, parentCommentId } = result;
+  return (
+    <li>
+      <Link
+        to="/posts/$id"
+        params={{ id: String(result.postId) }}
+        className={rowClass}
+      >
+        <Avatar
+          name={userAvatarName(author)}
+          avatarUrl={author.avatarUrl}
+          avatarVariants={author.avatarVariants}
+          size="sm"
+        />
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <RowHeading
+            label={userLabel(author)}
+            createdAt={createdAt}
+            // A comment with a parent is a reply — worth saying, since both
+            // live in the same section.
+            detail={parentCommentId !== null ? "Reply" : undefined}
+          />
+          <SearchHighlight
+            snippet={snippet}
+            className="line-clamp-3 text-muted-foreground group-hover:text-foreground"
+          />
+        </span>
+      </Link>
+    </li>
+  );
+}
+
+function MessageRow({
+  result,
+  chats,
   currentUserId,
-  search,
 }: {
+  result: MessageSearchResult;
+  chats: readonly MessageSearchChat[];
   currentUserId: number;
-  search: ReturnType<typeof useSearchMessages>;
 }) {
-  const results = search.data?.pages.flatMap((p) => p.results) ?? [];
-  // Chat context is deduplicated across pages into `chats`; index by id.
-  const chatById = new Map(
-    (search.data?.pages.flatMap((p) => p.chats) ?? []).map((c) => [c.id, c]),
-  );
-  const senderById = useUserSummariesById(
-    results.map((r) => r.message.senderId),
-    true,
-  );
-
+  const { sender, snippet, createdAt, chatId } = result;
+  const chat = chats.find((c) => c.id === chatId);
+  const chatName = chat ? messageSearchChatName(chat, currentUserId) : "Chat";
   return (
-    <SectionShell
-      icon={MessagesSquare}
-      title="Messages"
-      count={search.data ? results.length : undefined}
-      isLoading={search.isLoading}
-      error={search.error}
-      isEmpty={results.length === 0}
-      emptyLabel="No matching messages in your chats."
-      hasNextPage={!!search.hasNextPage}
-      isFetchingNextPage={search.isFetchingNextPage}
-      onLoadMore={() => void search.fetchNextPage()}
-    >
-      {results.map(({ message, snippet }) => {
-        const chat = chatById.get(message.chatId);
-        const chatName = chat
-          ? messageSearchChatName(chat, currentUserId)
-          : "Chat";
-        const sender = senderById.get(message.senderId);
-        const senderName = sender
-          ? userLabel(sender)
-          : `user #${message.senderId}`;
-        return (
-          <li key={message.id}>
-            <Link
-              to="/chats/$id"
-              params={{ id: String(message.chatId) }}
-              className={rowClass}
-            >
-              <Avatar name={chatName} size="sm" />
-              <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="flex items-center gap-2">
-                  <span className="truncate font-medium">{chatName}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {formatChatTimestamp(message.createdAt)}
-                  </span>
-                </span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {senderName}
-                </span>
-                <SearchHighlight
-                  snippet={snippet}
-                  className="line-clamp-3 text-muted-foreground group-hover:text-foreground"
-                />
-              </span>
-            </Link>
-          </li>
-        );
-      })}
-    </SectionShell>
+    <li>
+      <Link
+        to="/chats/$id"
+        params={{ id: String(chatId) }}
+        className={rowClass}
+      >
+        <Avatar name={chatName} size="sm" />
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <RowHeading
+            label={chatName}
+            createdAt={createdAt}
+            detail={userLabel(sender)}
+          />
+          <SearchHighlight
+            snippet={snippet}
+            className="line-clamp-3 text-muted-foreground group-hover:text-foreground"
+          />
+        </span>
+      </Link>
+    </li>
   );
 }
