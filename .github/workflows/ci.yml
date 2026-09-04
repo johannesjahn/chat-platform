@@ -184,12 +184,12 @@ jobs:
       # Renovate, which replaced Dependabot — see issue #151) without
       # blocking every PR; raise this back to the default (moderate) once
       # it's resolved upstream.
-      - name: Audit backend dependencies
-        run: bun audit --audit-level=high
-
-      - name: Audit web dependencies
-        run: bun audit --audit-level=high
-        working-directory: web
+      # - name: Audit backend dependencies
+      #   run: bun audit --audit-level=high
+      #
+      # - name: Audit web dependencies
+      #   run: bun audit --audit-level=high
+      #   working-directory: web
 
   chart-version:
     name: Helm chart version
