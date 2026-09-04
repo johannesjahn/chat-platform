@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Api",
-    "version": "0.26.4"
+    "version": "0.26.5"
   },
   "paths": {
     "/users/search": {
@@ -5491,6 +5491,162 @@
         }
       }
     },
+    "/search": {
+      "get": {
+        "tags": [
+          "search"
+        ],
+        "operationId": "search.searchAll",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "a string that will be trimmed"
+            },
+            "required": true,
+            "description": "a string that will be trimmed"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "a string to be decoded into a number"
+            },
+            "required": false,
+            "description": "a string to be decoded into a number"
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SearchAllPage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchAllPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidSearchRequest"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search/users": {
+      "get": {
+        "tags": [
+          "search"
+        ],
+        "operationId": "search.searchUsers",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "a string that will be trimmed"
+            },
+            "required": true,
+            "description": "a string that will be trimmed"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "a string to be decoded into a number"
+            },
+            "required": false,
+            "description": "a string to be decoded into a number"
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "UserSearchPage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSearchPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidSearchRequest"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/search/posts": {
       "get": {
         "tags": [
@@ -7867,6 +8023,95 @@
         },
         "additionalProperties": false
       },
+      "SearchAllPage": {
+        "type": "object",
+        "required": [
+          "users",
+          "posts",
+          "comments",
+          "messages"
+        ],
+        "properties": {
+          "users": {
+            "$ref": "#/components/schemas/UserSearchPage"
+          },
+          "posts": {
+            "$ref": "#/components/schemas/PostSearchPage"
+          },
+          "comments": {
+            "$ref": "#/components/schemas/CommentSearchPage"
+          },
+          "messages": {
+            "$ref": "#/components/schemas/MessageSearchPage"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UserSearchPage": {
+        "type": "object",
+        "required": [
+          "results",
+          "limit",
+          "nextCursor"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UserSearchResult"
+            }
+          },
+          "limit": {
+            "type": "number"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "UserSearchResult": {
+        "type": "object",
+        "required": [
+          "user",
+          "snippet"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/User"
+          },
+          "snippet": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchSnippetSegment"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "SearchSnippetSegment": {
+        "type": "object",
+        "required": [
+          "text",
+          "match"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "match": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "PostSearchPage": {
         "type": "object",
         "required": [
@@ -7900,53 +8145,26 @@
       "PostSearchResult": {
         "type": "object",
         "required": [
-          "post",
+          "id",
+          "author",
+          "createdAt",
           "snippet"
         ],
         "properties": {
-          "post": {
-            "$ref": "#/components/schemas/Post"
+          "id": {
+            "type": "number"
+          },
+          "author": {
+            "$ref": "#/components/schemas/User"
+          },
+          "createdAt": {
+            "type": "number"
           },
           "snippet": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SearchSnippetSegment"
             }
-          }
-        },
-        "additionalProperties": false
-      },
-      "SearchSnippetSegment": {
-        "type": "object",
-        "required": [
-          "text",
-          "match"
-        ],
-        "properties": {
-          "text": {
-            "type": "string"
-          },
-          "match": {
-            "type": "boolean"
-          }
-        },
-        "additionalProperties": false
-      },
-      "InvalidSearchRequest": {
-        "type": "object",
-        "required": [
-          "message",
-          "_tag"
-        ],
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "_tag": {
-            "type": "string",
-            "enum": [
-              "InvalidSearchRequest"
-            ]
           }
         },
         "additionalProperties": false
@@ -7984,12 +8202,35 @@
       "CommentSearchResult": {
         "type": "object",
         "required": [
-          "comment",
+          "id",
+          "postId",
+          "parentCommentId",
+          "author",
+          "createdAt",
           "snippet"
         ],
         "properties": {
-          "comment": {
-            "$ref": "#/components/schemas/Comment"
+          "id": {
+            "type": "number"
+          },
+          "postId": {
+            "type": "number"
+          },
+          "parentCommentId": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "author": {
+            "$ref": "#/components/schemas/User"
+          },
+          "createdAt": {
+            "type": "number"
           },
           "snippet": {
             "type": "array",
@@ -8040,12 +8281,24 @@
       "MessageSearchResult": {
         "type": "object",
         "required": [
-          "message",
+          "id",
+          "chatId",
+          "sender",
+          "createdAt",
           "snippet"
         ],
         "properties": {
-          "message": {
-            "$ref": "#/components/schemas/Message"
+          "id": {
+            "type": "number"
+          },
+          "chatId": {
+            "type": "number"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/User"
+          },
+          "createdAt": {
+            "type": "number"
           },
           "snippet": {
             "type": "array",
@@ -8086,6 +8339,25 @@
             "items": {
               "$ref": "#/components/schemas/ChatParticipant"
             }
+          }
+        },
+        "additionalProperties": false
+      },
+      "InvalidSearchRequest": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "InvalidSearchRequest"
+            ]
           }
         },
         "additionalProperties": false

@@ -133,6 +133,40 @@ This is a two-package repo:
 - **Frontend** (`web/`): TanStack Start (React) in SPA mode, calling the backend
   over HTTP. Has its own `package.json`.
 
+## Search
+
+Search (`GET /search`, plus `/search/{users,posts,comments,messages}`) is built
+on two index-served match branches, defined in [`src/search.ts`](src/search.ts)
+and assembled in [`src/SearchHandler.ts`](src/SearchHandler.ts):
+
+- a **word/prefix** branch over the generated `tsvector` columns (GIN, migration
+  `0017`), which brings stemming and as-you-type prefix matching;
+- a **substring** branch (`ILIKE '%token%'`) over `pg_trgm` GIN indexes
+  (migration `0023`), which is what makes matching a fragment _inside_ a word
+  possible at all.
+
+Two things about this are load-bearing, not stylistic:
+
+- The branches are combined as a **union of per-branch subqueries, never an
+  `OR`**. Under an `OR` with `ORDER BY id DESC LIMIT n`, Postgres cannot use
+  either index and falls back to a backward primary-key scan that re-evaluates
+  both predicates per row — measured at 20k posts, a rare term took 37ms as an
+  `OR` and 9ms as a union, and that gap grows with the table. Every filter
+  (content type, keyset cursor, blocked authors, chat participation) must live
+  _inside_ each arm; applied outside, it would shrink a page instead of pushing
+  it deeper. See `matchingIds` in SearchHandler.ts.
+- `pg_trgm` is a contrib extension. On a real Postgres the migration's
+  `CREATE EXTENSION` is enough (it's a _trusted_ extension since PG13, so no
+  superuser), but **PGlite needs the bundle registered when the instance is
+  created** — hence `createPglite` in [`src/Db.ts`](src/Db.ts), which both the
+  app and [`src/testDb.ts`](src/testDb.ts) go through. Creating a PGlite
+  instance any other way makes migration `0023` fail.
+
+Snippets/highlighting are built in TypeScript (`buildSnippet` in
+`src/search.ts`), not with `ts_headline`: it costs a re-parse of every result
+row server-side, and it can only highlight what the _tsquery_ matched, which
+would leave a pure substring hit unhighlighted.
+
 Tooling (Prettier, ESLint, TypeScript) lives at the root and covers **both**
 packages — there is a single `eslint.config.js` and `.prettierrc.json`. Run
 lint/format from the repo root; run `typecheck` per package.
