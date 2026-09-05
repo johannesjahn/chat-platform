@@ -11,7 +11,7 @@ concurrency:
 
 env:
   # Single source of truth for the Bun version used across all jobs.
-  BUN_VERSION: 1.4.0
+  BUN_VERSION: 1.4.2
 
 jobs:
   lint:
