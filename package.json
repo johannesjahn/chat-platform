@@ -24,17 +24,17 @@
     "loadtest:ws": "k6 run scripts/loadtest/ws-fanout.js"
   },
   "dependencies": {
-    "@effect/platform": "0.97.1",
+    "@effect/platform": "0.97.2",
     "@effect/platform-bun": "0.91.2",
     "@electric-sql/pglite": "0.5.8",
     "blurhash": "2.0.5",
     "drizzle-orm": "0.45.2",
-    "effect": "3.22.1",
+    "effect": "3.22.2",
     "sharp": "0.35.4"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@types/bun": "1.4.1",
+    "@types/bun": "1.4.2",
     "drizzle-kit": "0.31.10",
     "eslint": "10.10.0",
     "eslint-config-prettier": "10.1.8",
@@ -44,7 +44,7 @@
     "globals": "17.12.0",
     "prettier": "3.9.6",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.69.0"
+    "typescript-eslint": "8.70.0"
   },
   "overrides": {
     "brace-expansion": "5.0.9"
