@@ -42,7 +42,12 @@ export function AttachmentPreview({
 
   if (kind === "audio") {
     return (
-      <AudioPlayer src={attachment.url} className={cn("w-full", className)} />
+      <AudioPlayer
+        src={attachment.url}
+        waveform={attachment.waveform}
+        durationMs={attachment.durationMs}
+        className={cn("w-full", className)}
+      />
     );
   }
 

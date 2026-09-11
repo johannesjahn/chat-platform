@@ -386,6 +386,14 @@ export const Attachment = Schema.Struct({
   width: Schema.NullOr(Schema.Number),
   height: Schema.NullOr(Schema.Number),
   blurhash: Schema.NullOr(Schema.String),
+  // Set only for audio attachments — a precomputed amplitude level (0..100)
+  // per equal slice of the clip, and the clip's length in milliseconds,
+  // both measured server-side from the transcoded audio `url` serves (see
+  // AudioProcessing.ts). The player draws these levels as its waveform; a
+  // reader that gets `null` (a non-audio attachment, or audio uploaded
+  // before this was added) falls back to decoding the clip itself.
+  waveform: Schema.NullOr(Schema.Array(Schema.Number)),
+  durationMs: Schema.NullOr(Schema.Number),
 }).annotations({ identifier: "Attachment" });
 export type Attachment = typeof Attachment.Type;
 

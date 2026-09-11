@@ -370,24 +370,6 @@ html[data-app-shell="immersive"] body {
   animation: spin-slow 12s linear infinite;
 }
 
-@keyframes waveform-bounce {
-  0%,
-  100% {
-    transform: scaleY(0.55);
-  }
-  50% {
-    transform: scaleY(1);
-  }
-}
-
-/* Per-bar idle pulse for AudioPlayer's waveform while a clip is playing —
-   each bar staggers its own `animation-delay` (see AudioPlayer.tsx) so the
-   row reads as a lively equalizer rather than bars blinking in unison. */
-@utility animate-waveform-bounce {
-  animation: waveform-bounce 0.9s ease-in-out infinite;
-  transform-origin: bottom;
-}
-
 @keyframes logo-draw {
   from {
     stroke-dashoffset: 1;
@@ -1174,7 +1156,6 @@ html[data-app-shell="immersive"] body {
   .animate-like-pop,
   .animate-float,
   .animate-spin-slow,
-  .animate-waveform-bounce,
   .animate-logo-draw,
   .animate-logo-dot,
   .animate-logo-dot-bounce,

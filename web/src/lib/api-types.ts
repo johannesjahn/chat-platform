@@ -948,6 +948,8 @@ export interface components {
             width: number | null;
             height: number | null;
             blurhash: string | null;
+            waveform: number[] | null;
+            durationMs: number | null;
         };
         ReactionSummary: {
             emoji: string;
@@ -5327,6 +5329,8 @@ export interface operations {
                         width: number | null;
                         height: number | null;
                         blurhash: string | null;
+                        waveform: number[] | null;
+                        durationMs: number | null;
                     };
                 };
             };
