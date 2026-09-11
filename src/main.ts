@@ -3,6 +3,7 @@ import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
 import { Config, Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { ActiveUsersMetricsLive } from "./ActiveUsersMetrics.ts";
+import { AdminHandlerLive } from "./AdminHandler.ts";
 import { AttachmentCleanupLive } from "./AttachmentCleanup.ts";
 import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
 import { AttachmentStorageLive } from "./AttachmentStorage.ts";
@@ -50,6 +51,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(AttachmentsHandlerLive),
   Layer.provide(VersionHandlerLive),
   Layer.provide(RealtimeHandlerLive),
+  Layer.provide(AdminHandlerLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(TokenVersionCacheLive),
   Layer.provide(JwtLive),

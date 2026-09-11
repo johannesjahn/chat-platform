@@ -18,6 +18,7 @@ import {
   CreatePostBody,
   MAX_ATTACHMENT_SIZE_BYTES,
 } from "./Api.ts";
+import { AdminHandlerLive } from "./AdminHandler.ts";
 import {
   ATTACHMENT_QUOTA_MAX_BYTES,
   AttachmentsHandlerLive,
@@ -52,6 +53,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(SearchHandlerLive),
   Layer.provide(AttachmentsHandlerLive),
   Layer.provide(VersionHandlerLive),
+  Layer.provide(AdminHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
   Layer.provide(AuthenticationLive),

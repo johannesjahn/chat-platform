@@ -62,6 +62,20 @@ export const users = pgTable(
     statusText: text("status_text"),
     statusEmoji: text("status_emoji"),
     statusExpiresAt: timestamp("status_expires_at", { mode: "date" }),
+    // Signup time. Added for the admin dashboard (signup timeline and the
+    // "new users" activity windows) — until then nothing recorded when an
+    // account was created, and `id` ordering only gives relative order, not
+    // a date.
+    //
+    // Unlike every other `created_at` in this file this one carries a *DB*
+    // default rather than an app-side `$defaultFn`, and that's load-bearing
+    // for the expand-contract rule in CLAUDE.md: mid-rollout, replicas still
+    // running the old code insert users without this column, so the database
+    // itself has to fill it or the insert would violate NOT NULL. The same
+    // default is what backfills existing rows, which means every account
+    // that predates this migration reads as having signed up the moment it
+    // ran — signup history is only meaningful from this deploy forward.
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   },
   (table) => [
     // Case-insensitive uniqueness: `Alice` and `alice` must not both be

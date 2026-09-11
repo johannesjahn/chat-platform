@@ -167,6 +167,32 @@ Snippets/highlighting are built in TypeScript (`buildSnippet` in
 row server-side, and it can only highlight what the _tsquery_ matched, which
 would leave a pure substring hit unhighlighted.
 
+## Admin dashboard
+
+`GET /admin/stats` (admin-only, 403 otherwise) backs the operator dashboard at
+`/admin` in the frontend — [`src/AdminHandler.ts`](src/AdminHandler.ts), rendered
+by [`web/src/routes/admin.tsx`](web/src/routes/admin.tsx). It returns lifetime
+totals, per-window activity (1d/7d/30d), a zero-filled daily timeline, and live
+dependency/runtime health in one response.
+
+Two constraints on it are deliberate:
+
+- **Aggregates only — no per-user breakdown.** No "most active users" panel, no
+  per-user series. This is the same GDPR-driven scoping the `active_users` gauge
+  and the rest of the domain metrics in [`src/Metrics.ts`](src/Metrics.ts)
+  already follow; `activeUsers` is a `UNION`-then-count so the id set never
+  leaves Postgres.
+- **The `health` block is _this process's_ counters**, read off the same
+  `effect/Metric` registry `/metrics` renders. With more than one replica it
+  reflects whichever instance served the request — Prometheus/Grafana stays the
+  deployment-wide view.
+
+Migration `0025` adds `users.created_at` (there was no signup timestamp before).
+Unlike every other `created_at` it carries a **database** default rather than an
+app-side one, because mid-rollout old replicas insert users without the column —
+see the comment on it in [`src/db/schema.ts`](src/db/schema.ts). Rows predating
+the migration all read as having signed up when it ran.
+
 Tooling (Prettier, ESLint, TypeScript) lives at the root and covers **both**
 packages — there is a single `eslint.config.js` and `.prettierrc.json`. Run
 lint/format from the repo root; run `typecheck` per package.

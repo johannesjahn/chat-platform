@@ -7,7 +7,7 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
-import { LogOut, MessagesSquare, Settings, Users } from "lucide-react";
+import { Gauge, LogOut, MessagesSquare, Settings, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { NavIcon } from "@/components/NavIcon";
@@ -143,6 +143,17 @@ function Nav() {
             Users
           </Link>
         </Button>
+        {/* The dashboard route enforces this server-side too (the endpoint
+            403s a non-admin) — hiding the link just keeps a dead end out of
+            everyone else's nav. */}
+        {session?.user.role === "admin" && (
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/admin" className="group/nav-icon">
+              <NavIcon icon={Gauge} />
+              Admin
+            </Link>
+          </Button>
+        )}
       </div>
       {session && <HeaderSearch />}
       {session ? (

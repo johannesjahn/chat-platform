@@ -852,6 +852,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["admin.getAdminStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1405,6 +1421,62 @@ export interface components {
         };
         VersionResponse: {
             version: string;
+        };
+        AdminStats: {
+            generatedAt: number;
+            totals: components["schemas"]["AdminTotals"];
+            activity: components["schemas"]["AdminActivityWindow"][];
+            timeline: components["schemas"]["AdminTimelinePoint"][];
+            health: components["schemas"]["AdminRuntimeHealth"];
+        };
+        AdminTotals: {
+            users: number;
+            admins: number;
+            posts: number;
+            comments: number;
+            chats: number;
+            messages: number;
+            reactions: number;
+            attachments: number;
+            attachmentBytes: number;
+        };
+        AdminActivityWindow: {
+            window: components["schemas"]["AdminActivityWindowLabel"];
+            activeUsers: number;
+            newUsers: number;
+            newPosts: number;
+            newComments: number;
+            newMessages: number;
+            newReactions: number;
+        };
+        /** @enum {string} */
+        AdminActivityWindowLabel: "1d" | "7d" | "30d";
+        AdminTimelinePoint: {
+            date: string;
+            signups: number;
+            posts: number;
+            comments: number;
+            messages: number;
+        };
+        AdminRuntimeHealth: {
+            /** @enum {string} */
+            status: "ok" | "degraded";
+            version: string;
+            uptimeSeconds: number;
+            dependencies: components["schemas"]["AdminDependencyHealth"][];
+            websocketConnections: number;
+            requestsTotal: number;
+            serverErrorsTotal: number;
+            errorRate: number;
+            rateLimitRejectionsTotal: number;
+            dbQueryErrorsTotal: number;
+        };
+        AdminDependencyHealth: {
+            /** @enum {string} */
+            name: "database" | "pubsub";
+            reachable: boolean;
+            latencyMs: number | null;
+            backend: string;
         };
     };
     responses: never;
@@ -5493,6 +5565,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+        };
+    };
+    "admin.getAdminStats": {
+        parameters: {
+            query?: {
+                /** @description a string to be decoded into a number */
+                days?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AdminStats */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminStats"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Forbidden"];
                 };
             };
         };

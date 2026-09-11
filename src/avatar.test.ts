@@ -10,6 +10,7 @@ import { BunHttpServer } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
 import sharp from "sharp";
 import { ChatApi, MAX_AVATAR_UPLOAD_SIZE_BYTES } from "./Api.ts";
+import { AdminHandlerLive } from "./AdminHandler.ts";
 import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
 import { AttachmentStorageLive } from "./AttachmentStorage.ts";
 import { AvatarRouteLive } from "./AvatarRoute.ts";
@@ -42,6 +43,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(SearchHandlerLive),
   Layer.provide(AttachmentsHandlerLive),
   Layer.provide(VersionHandlerLive),
+  Layer.provide(AdminHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
   Layer.provide(AuthenticationLive),
