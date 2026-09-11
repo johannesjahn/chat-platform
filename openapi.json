@@ -5920,7 +5920,9 @@
                     "url",
                     "width",
                     "height",
-                    "blurhash"
+                    "blurhash",
+                    "waveform",
+                    "durationMs"
                   ],
                   "properties": {
                     "id": {
@@ -5962,6 +5964,29 @@
                       "anyOf": [
                         {
                           "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "waveform": {
+                      "anyOf": [
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "durationMs": {
+                      "anyOf": [
+                        {
+                          "type": "number"
                         },
                         {
                           "type": "null"
@@ -6601,7 +6626,9 @@
           "url",
           "width",
           "height",
-          "blurhash"
+          "blurhash",
+          "waveform",
+          "durationMs"
         ],
         "properties": {
           "id": {
@@ -6643,6 +6670,29 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waveform": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "number"
               },
               {
                 "type": "null"

@@ -3,6 +3,7 @@ import {
   check,
   index,
   integer,
+  jsonb,
   pgTable,
   serial,
   text,
@@ -135,6 +136,16 @@ export const attachments = pgTable(
     // loads (see AttachmentPreview.tsx), eliminating the pop-in a bare
     // `bg-muted` box left. Same nullability as width/height above.
     blurhash: text("blurhash"),
+    // Set only for audio attachments — a 0..100 amplitude level per equal
+    // slice of the clip (see `waveformFromPcm` in src/AudioProcessing.ts),
+    // precomputed at upload time from the transcoded audio actually stored,
+    // and the clip's length in milliseconds from the same decode. The
+    // player draws the levels directly instead of inventing a placeholder
+    // shape, and uses the duration before the browser has loaded enough of
+    // the clip to report one. Null for non-audio attachments and for audio
+    // rows uploaded before this migration.
+    waveform: jsonb("waveform").$type<number[]>(),
+    durationMs: integer("duration_ms"),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),

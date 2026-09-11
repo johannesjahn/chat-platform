@@ -322,6 +322,8 @@ test("uploadAttachment stores the file and returns metadata with a usable url", 
         width: number | null;
         height: number | null;
         blurhash: string | null;
+        waveform: number[] | null;
+        durationMs: number | null;
         url: string;
       };
       // The original filename is kept as-is even though the stored bytes
@@ -336,6 +338,10 @@ test("uploadAttachment stores the file and returns metadata with a usable url", 
       expect(attachment.height).toBe(30);
       expect(typeof attachment.blurhash).toBe("string");
       expect(attachment.blurhash?.length).toBeGreaterThan(0);
+      // Waveform/duration are the audio-only counterpart to width/height
+      // and blurhash — an image carries neither.
+      expect(attachment.waveform).toBeNull();
+      expect(attachment.durationMs).toBeNull();
       // No real S3/MinIO is configured in tests, so AttachmentStorageLive
       // falls back to the in-memory backend, which serves bytes back as a
       // `data:` URL rather than a presigned link (see AttachmentStorage.ts).
@@ -498,12 +504,31 @@ test("uploadAttachment transcodes audio to Ogg/Opus and shrinks the size", () =>
         mimeType: string;
         size: number;
         url: string;
+        waveform: number[] | null;
+        durationMs: number | null;
       };
       expect(attachment.filename).toBe("voice.wav");
       expect(attachment.mimeType).toBe("audio/ogg");
       expect(attachment.size).toBeGreaterThan(0);
       expect(attachment.size).toBeLessThan(data.length);
       expect(attachment.url.startsWith("data:audio/ogg;base64,")).toBe(true);
+      // The waveform the player draws is measured at upload time from the
+      // transcoded output, so it ships with the attachment rather than
+      // being invented client-side (see AudioProcessing.ts).
+      expect(Array.isArray(attachment.waveform)).toBe(true);
+      expect(attachment.waveform!.length).toBeGreaterThan(1);
+      for (const level of attachment.waveform!) {
+        expect(Number.isInteger(level)).toBe(true);
+        expect(level).toBeGreaterThanOrEqual(0);
+        expect(level).toBeLessThanOrEqual(100);
+      }
+      // A steady 440Hz tone is the same loudness throughout, so every bar
+      // normalizes to the top — a shape, not noise.
+      expect(attachment.waveform!.every((level) => level > 90)).toBe(true);
+      // The fixture is a 1s tone; Opus pads the encode slightly, so allow a
+      // little slack rather than asserting exactly 1000ms.
+      expect(attachment.durationMs).toBeGreaterThan(900);
+      expect(attachment.durationMs).toBeLessThan(1200);
     }),
   ));
 

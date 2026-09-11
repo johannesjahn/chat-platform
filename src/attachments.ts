@@ -22,6 +22,8 @@ export const toApiAttachment = (
   width: row.width,
   height: row.height,
   blurhash: row.blurhash,
+  waveform: row.waveform,
+  durationMs: row.durationMs,
 });
 
 // A message/post's `attachmentId` is nullable — resolves to `null` both when

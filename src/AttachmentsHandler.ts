@@ -128,13 +128,16 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
           // generated) before being stored — see ImageProcessing.ts and issue
           // #248. Videos get scaled down and transcoded to WebM — see
           // VideoProcessing.ts and issue #251. Audio gets transcoded to a
-          // capped Ogg/Opus format — see AudioProcessing.ts and issue #252.
+          // capped Ogg/Opus format, and its waveform/duration measured from
+          // that output — see AudioProcessing.ts and issue #252.
           let uploadData: BunFile | Uint8Array = bunFile;
           let uploadContentType = file.contentType;
           let size = originalSize;
           let width: number | null = null;
           let height: number | null = null;
           let blurhash: string | null = null;
+          let waveform: number[] | null = null;
+          let durationMs: number | null = null;
 
           if (file.contentType.startsWith("image/")) {
             const processed = yield* Effect.tryPromise({
@@ -175,6 +178,8 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
             uploadData = processed.data;
             uploadContentType = processed.contentType;
             size = processed.data.length;
+            waveform = processed.waveform ? [...processed.waveform] : null;
+            durationMs = processed.durationMs;
           }
 
           const storageKey = `attachments/${crypto.randomUUID()}`;
@@ -194,6 +199,8 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
                 width,
                 height,
                 blurhash,
+                waveform,
+                durationMs,
               })
               .returning(),
           ).pipe(Effect.orDie);
