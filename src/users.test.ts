@@ -21,6 +21,7 @@ import {
   MIN_PASSWORD_LENGTH,
 } from "./Api.ts";
 import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
+import { AdminHandlerLive } from "./AdminHandler.ts";
 import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
 import { AttachmentStorageLive } from "./AttachmentStorage.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
@@ -55,6 +56,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(AttachmentsHandlerLive),
   Layer.provide(AttachmentStorageLive),
   Layer.provide(VersionHandlerLive),
+  Layer.provide(AdminHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
   Layer.provide(AuthenticationLive),

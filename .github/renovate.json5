@@ -151,10 +151,14 @@
     // dropped since they're finer-grained than any two real MinIO releases
     // land apart. minio/minio and minio/mc are versioned independently
     // upstream, so this only fixes comparison for each; it doesn't group
-    // them into one PR the way the Bun/Postgres rules above do.
+    // them into one PR the way the Bun/Postgres rules above do. The names
+    // carry the `quay.io/` prefix because that's where both images are
+    // pulled from (Docker Hub no longer serves them anonymously — see the
+    // comment on the `minio` service in docker-compose.yml), and Renovate
+    // matches a Docker dependency by its full registry-qualified name.
     {
       matchDatasources: ["docker"],
-      matchPackageNames: ["minio/minio", "minio/mc"],
+      matchPackageNames: ["quay.io/minio/minio", "quay.io/minio/mc"],
       versioning: "regex:^RELEASE\\.(?<major>\\d{4})-(?<minor>\\d{2})-(?<patch>\\d{2})T(?<build>\\d{2})-(?<revision>\\d{2})-\\d{2}Z$",
     },
 

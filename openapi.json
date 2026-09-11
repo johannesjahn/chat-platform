@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Api",
-    "version": "0.26.8"
+    "version": "0.27.0"
   },
   "paths": {
     "/users/search": {
@@ -6229,6 +6229,73 @@
           }
         }
       }
+    },
+    "/admin/stats": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "admin.getAdminStats",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "a string to be decoded into a number"
+            },
+            "required": false,
+            "description": "a string to be decoded into a number"
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "AdminStats",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminStats"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forbidden"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8480,6 +8547,246 @@
           }
         },
         "additionalProperties": false
+      },
+      "AdminStats": {
+        "type": "object",
+        "required": [
+          "generatedAt",
+          "totals",
+          "activity",
+          "timeline",
+          "health"
+        ],
+        "properties": {
+          "generatedAt": {
+            "type": "number"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/AdminTotals"
+          },
+          "activity": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminActivityWindow"
+            }
+          },
+          "timeline": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminTimelinePoint"
+            }
+          },
+          "health": {
+            "$ref": "#/components/schemas/AdminRuntimeHealth"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminTotals": {
+        "type": "object",
+        "required": [
+          "users",
+          "admins",
+          "posts",
+          "comments",
+          "chats",
+          "messages",
+          "reactions",
+          "attachments",
+          "attachmentBytes"
+        ],
+        "properties": {
+          "users": {
+            "type": "number"
+          },
+          "admins": {
+            "type": "number"
+          },
+          "posts": {
+            "type": "number"
+          },
+          "comments": {
+            "type": "number"
+          },
+          "chats": {
+            "type": "number"
+          },
+          "messages": {
+            "type": "number"
+          },
+          "reactions": {
+            "type": "number"
+          },
+          "attachments": {
+            "type": "number"
+          },
+          "attachmentBytes": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminActivityWindow": {
+        "type": "object",
+        "required": [
+          "window",
+          "activeUsers",
+          "newUsers",
+          "newPosts",
+          "newComments",
+          "newMessages",
+          "newReactions"
+        ],
+        "properties": {
+          "window": {
+            "$ref": "#/components/schemas/AdminActivityWindowLabel"
+          },
+          "activeUsers": {
+            "type": "number"
+          },
+          "newUsers": {
+            "type": "number"
+          },
+          "newPosts": {
+            "type": "number"
+          },
+          "newComments": {
+            "type": "number"
+          },
+          "newMessages": {
+            "type": "number"
+          },
+          "newReactions": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminActivityWindowLabel": {
+        "type": "string",
+        "enum": [
+          "1d",
+          "7d",
+          "30d"
+        ]
+      },
+      "AdminTimelinePoint": {
+        "type": "object",
+        "required": [
+          "date",
+          "signups",
+          "posts",
+          "comments",
+          "messages"
+        ],
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "signups": {
+            "type": "number"
+          },
+          "posts": {
+            "type": "number"
+          },
+          "comments": {
+            "type": "number"
+          },
+          "messages": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminRuntimeHealth": {
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "uptimeSeconds",
+          "dependencies",
+          "websocketConnections",
+          "requestsTotal",
+          "serverErrorsTotal",
+          "errorRate",
+          "rateLimitRejectionsTotal",
+          "dbQueryErrorsTotal"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded"
+            ]
+          },
+          "version": {
+            "type": "string"
+          },
+          "uptimeSeconds": {
+            "type": "number"
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminDependencyHealth"
+            }
+          },
+          "websocketConnections": {
+            "type": "number"
+          },
+          "requestsTotal": {
+            "type": "number"
+          },
+          "serverErrorsTotal": {
+            "type": "number"
+          },
+          "errorRate": {
+            "type": "number"
+          },
+          "rateLimitRejectionsTotal": {
+            "type": "number"
+          },
+          "dbQueryErrorsTotal": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminDependencyHealth": {
+        "type": "object",
+        "required": [
+          "name",
+          "reachable",
+          "latencyMs",
+          "backend"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "database",
+              "pubsub"
+            ]
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "latencyMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "backend": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {
@@ -8514,6 +8821,9 @@
     },
     {
       "name": "realtime"
+    },
+    {
+      "name": "admin"
     }
   ]
 }

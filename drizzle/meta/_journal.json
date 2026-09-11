@@ -176,6 +176,13 @@
       "when": 1789121797025,
       "tag": "0024_overjoyed_hammerhead",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789162350135,
+      "tag": "0025_burly_terrax",
+      "breakpoints": true
     }
   ]
 }

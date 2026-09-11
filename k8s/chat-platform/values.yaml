@@ -12,7 +12,7 @@ backend:
     # Build & push the repo-root Dockerfile to a registry this cluster can
     # pull from, then point this at it (e.g. ghcr.io/<you>/chat-platform).
     repository: johannesjahn/chat-platform
-    tag: "0.26.8"
+    tag: "0.27.0"
     pullPolicy: IfNotPresent
 
   replicaCount: 2
@@ -205,14 +205,17 @@ minio:
   # parity, mirroring docker-compose.yml's `minio` service.
   enabled: true
 
+  # quay.io rather than Docker Hub — MinIO's images aren't anonymously
+  # pullable from Docker Hub any more; see the comment on the `minio`
+  # service in docker-compose.yml.
   image:
-    repository: minio/minio
+    repository: quay.io/minio/minio
     tag: "RELEASE.2025-09-07T16-13-09Z"
 
   # The `mc` CLI image, used only by the one-shot bucket-creation Job (see
   # minio-init-job.yaml) — MinIO doesn't create buckets on its own.
   mcImage:
-    repository: minio/mc
+    repository: quay.io/minio/mc
     tag: "RELEASE.2025-08-13T08-35-41Z"
 
   auth:
