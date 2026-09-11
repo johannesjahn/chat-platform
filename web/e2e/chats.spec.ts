@@ -831,6 +831,12 @@ test("the empty composer is one line tall and only grows once there's something 
   const composer = page.locator("textarea");
   const height = () =>
     composer.evaluate((el) => Math.round(el.getBoundingClientRect().height));
+  const overflowY = () =>
+    composer.evaluate((el) => getComputedStyle(el).overflowY);
+  // Whether the field has content it can't show — i.e. whether a scrollbar
+  // has anything to scroll.
+  const overflowing = () =>
+    composer.evaluate((el) => el.scrollHeight > el.clientHeight + 1);
 
   // An empty textarea reports its wrapped *placeholder* in `scrollHeight`, so
   // auto-sizing off that measurement used to open the composer ~136px tall —
@@ -838,26 +844,116 @@ test("the empty composer is one line tall and only grows once there's something 
   const empty = await height();
   expect(empty).toBeLessThan(56);
 
-  // Typing still grows it...
-  await page.fill("textarea", "one\ntwo\nthree\nfour");
-  await expect.poll(height).toBeGreaterThan(empty);
+  // A single line has nothing to scroll, so it must not carry a scrollbar:
+  // `overflow-y: auto` still reserves (and on some platforms paints) a
+  // gutter for a bar that can never move.
+  await page.fill("textarea", "a single line of message text");
+  await expect.poll(height).toBe(empty);
+  await expect.poll(overflowY).toBe("hidden");
+  expect(await overflowing()).toBe(false);
 
-  // ...up to the max-h-40 ceiling, after which the textarea scrolls instead.
+  // It grows line by line...
+  await page.fill("textarea", "one\ntwo");
+  const two = await height();
+  expect(two).toBeGreaterThan(empty);
+  await page.fill("textarea", "one\ntwo\nthree");
+  const three = await height();
+  expect(three).toBeGreaterThan(two);
+  // ...and three lines is the last height that still fits exactly.
+  await expect.poll(overflowY).toBe("hidden");
+
+  // The fourth line is where growing stops and scrolling starts.
+  await page.fill("textarea", "one\ntwo\nthree\nfour");
+  await expect.poll(height).toBe(three);
+  await expect.poll(overflowY).toBe("auto");
+  expect(await overflowing()).toBe(true);
+
+  // Twenty lines is no taller than four.
   await page.fill(
     "textarea",
     Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"),
   );
-  await expect.poll(height).toBe(160);
+  await expect.poll(height).toBe(three);
 
-  // ...and clearing it collapses back to a single line.
+  // ...and clearing it collapses back to a single line, scrollbar and all.
   await page.fill("textarea", "");
   await expect.poll(height).toBe(empty);
+  await expect.poll(overflowY).toBe("hidden");
 
   // The keyboard hint moved out of the placeholder, but the field keeps the
   // same accessible name it had when the placeholder was providing one.
   await expect(composer).toHaveAccessibleName(
     "Write a message (Enter to send, Shift+Enter for a new line)",
   );
+});
+
+test("the composer's extra send modes collapse into one attach button", async ({
+  page,
+  browser,
+  injectApiUrl,
+}) => {
+  await registerViaUi(page);
+
+  const otherContext = await browser.newContext();
+  await injectApiUrl(otherContext);
+  const otherPage = await otherContext.newPage();
+  const { username: otherUsername } = await registerViaUi(otherPage);
+  await otherContext.close();
+
+  await page.goto("/chats/new");
+  await page.getByRole("button", { name: "Direct message" }).click();
+  await page.fill("#user-search", otherUsername);
+  await page.getByRole("button", { name: `@${otherUsername}` }).click();
+  await expect(page).toHaveURL(/\/chats\/\d+/);
+  await expect(page.getByText("No messages yet")).toBeVisible();
+
+  // The row of four permanently-visible mode buttons is gone; one trigger
+  // stands in for all of them.
+  const attach = page.getByRole("button", { name: "Attach" });
+  await expect(attach).toBeVisible();
+  await expect(page.getByRole("button", { name: "Image message" })).toHaveCount(
+    0,
+  );
+
+  // Nothing typed, so the trailing action is a microphone — the arrangement
+  // every chat app has settled on. Typing turns it into send.
+  await expect(
+    page.getByRole("button", { name: "Record a voice message" }),
+  ).toBeVisible();
+  await page.fill("textarea", "something to send");
+  await expect(
+    page.getByRole("button", { name: "Send message" }),
+  ).toBeVisible();
+  await page.fill("textarea", "");
+
+  // Tap one opens the sheet; tap two on "File" opens the OS file picker
+  // itself, rather than parking the user in front of a drop zone.
+  const menu = page.getByRole("menu", { name: "Attach" });
+  await attach.click();
+  await expect(menu).toBeVisible();
+  const chooser = page.waitForEvent("filechooser");
+  await menu.getByRole("menuitem", { name: /^File/ }).click();
+  await chooser;
+  await expect(menu).toHaveCount(0);
+
+  // Escape closes the sheet without picking anything.
+  await attach.click();
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+
+  // "Photo" swaps the message field for a link field with the caret already
+  // in it, and the same trigger — now a cross — backs out of that mode.
+  await page.fill("textarea", "a half-written message");
+  await attach.click();
+  await menu.getByRole("menuitem", { name: /^Photo/ }).click();
+  const linkField = page.getByRole("textbox", { name: "Image link" });
+  await expect(linkField).toBeFocused();
+  await expect(linkField).toHaveValue("");
+  await page.getByRole("button", { name: "Cancel photo link" }).click();
+  // ...handing the half-written message back, rather than throwing away the
+  // draft the link field was borrowing its state from.
+  await expect(page.locator("textarea")).toHaveValue("a half-written message");
 });
 
 test("the chat fits the *visual* viewport, not the layout viewport the keyboard lies about", async ({

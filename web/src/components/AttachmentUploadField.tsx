@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Paperclip, X } from "lucide-react";
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,12 @@ type AttachmentUploadFieldProps = {
   // The already-uploaded attachment for this draft, if any — `null` before
   // a file is picked/dropped and after `onClear`.
   attachment: Attachment | null;
+  // A file the caller has already had the user choose — the chat composer's
+  // attach sheet opens the OS file picker itself (so a file upload stays at
+  // two taps) and hands the result straight here, instead of putting a drop
+  // zone in front of a user who has already picked their file. Uploading it
+  // is identical to a file dropped on, or picked through, this field.
+  pendingFile?: File | null;
   onUploaded: (attachment: Attachment) => void;
   onClear: () => void;
   disabled?: boolean;
@@ -31,6 +37,7 @@ type AttachmentUploadFieldProps = {
 // `attachmentId` by the time the user hits send.
 export function AttachmentUploadField({
   attachment,
+  pendingFile = null,
   onUploaded,
   onClear,
   disabled = false,
@@ -73,6 +80,17 @@ export function AttachmentUploadField({
         uploadRef.current = null;
       });
   }
+
+  // Upload a caller-supplied file once, on arrival. The ref (rather than a
+  // dependency on `startUpload`, which is a fresh closure every render) is
+  // what keeps the same file from being uploaded twice.
+  const consumedFileRef = useRef<File | null>(null);
+  useEffect(() => {
+    if (!pendingFile || consumedFileRef.current === pendingFile) return;
+    consumedFileRef.current = pendingFile;
+    startUpload(pendingFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingFile]);
 
   function handleFiles(files: FileList | null) {
     const file = files?.[0];
