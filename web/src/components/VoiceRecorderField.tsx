@@ -8,6 +8,7 @@ import {
   type AttachmentUpload,
 } from "@/lib/attachments";
 import { cn } from "@/lib/utils";
+import { canRecordVoice } from "@/lib/voice";
 
 type VoiceRecorderFieldProps = {
   // The already-uploaded voice recording for this draft, if any — mirrors
@@ -16,6 +17,14 @@ type VoiceRecorderFieldProps = {
   attachment: Attachment | null;
   onUploaded: (attachment: Attachment) => void;
   onClear: () => void;
+  // Start recording the moment the field appears. The chat composer's mic
+  // button is itself the "start recording" tap, so tapping a second target
+  // inside the field would be one tap too many.
+  autoStart?: boolean;
+  // The user backed out of recording (rather than finishing a clip), so the
+  // caller can drop the voice mode entirely instead of leaving an idle
+  // recorder in the composer.
+  onCancel?: () => void;
   disabled?: boolean;
   className?: string;
 };
@@ -66,11 +75,6 @@ function formatDuration(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-const canRecord =
-  typeof navigator !== "undefined" &&
-  !!navigator.mediaDevices?.getUserMedia &&
-  typeof MediaRecorder !== "undefined";
-
 // Tap-to-record voice message field (mirrors AttachmentUploadField's
 // immediate-upload pattern): records from the mic via MediaRecorder, then
 // uploads the resulting clip through the same `POST /attachments` endpoint
@@ -79,9 +83,12 @@ export function VoiceRecorderField({
   attachment,
   onUploaded,
   onClear,
+  autoStart = false,
+  onCancel,
   disabled = false,
   className,
 }: VoiceRecorderFieldProps) {
+  const canRecord = canRecordVoice();
   const [recording, setRecording] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -111,6 +118,17 @@ export function VoiceRecorderField({
       uploadRef.current?.abort();
     };
   }, []);
+
+  // Fires once per mount. The ref guard matters in development, where
+  // StrictMode mounts effects twice — without it the second pass would open
+  // a second microphone stream behind the first.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoStartedRef.current || !canRecord) return;
+    autoStartedRef.current = true;
+    void startRecording();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart]);
 
   function stopStream() {
     if (timerRef.current) {
@@ -194,6 +212,7 @@ export function VoiceRecorderField({
     recorderRef.current?.stop();
     stopStream();
     setRecording(false);
+    onCancel?.();
   }
 
   function cancelUpload() {
