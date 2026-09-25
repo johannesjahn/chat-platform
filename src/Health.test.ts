@@ -13,6 +13,7 @@ import { Db, type DrizzleDb } from "./Db.ts";
 import { HealthRouteLive, ReadyRouteLive } from "./Health.ts";
 import { JwtLive } from "./Jwt.ts";
 import { EngagementHandlerLive } from "./EngagementHandler.ts";
+import { GamesHandlerLive } from "./GamesHandler.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive, PubSub } from "./PubSub.ts";
@@ -42,6 +43,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(AttachmentStorageLive),
   Layer.provide(VersionHandlerLive),
   Layer.provide(AdminHandlerLive),
+  Layer.provide(GamesHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),

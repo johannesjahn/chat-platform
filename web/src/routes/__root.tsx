@@ -7,7 +7,14 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
-import { Gauge, LogOut, MessagesSquare, Settings, Users } from "lucide-react";
+import {
+  Gamepad2,
+  Gauge,
+  LogOut,
+  MessagesSquare,
+  Settings,
+  Users,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { NavIcon } from "@/components/NavIcon";
@@ -141,6 +148,12 @@ function Nav() {
           <Link to="/users" className="group/nav-icon">
             <NavIcon icon={Users} />
             Users
+          </Link>
+        </Button>
+        <Button asChild variant="ghost" size="sm">
+          <Link to="/games" className="group/nav-icon">
+            <NavIcon icon={Gamepad2} />
+            Games
           </Link>
         </Button>
         {/* The dashboard route enforces this server-side too (the endpoint

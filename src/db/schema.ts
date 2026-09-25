@@ -1,6 +1,7 @@
 import {
   type AnyPgColumn,
   check,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -686,3 +687,122 @@ export const userBlocks = pgTable(
 
 export type DbUserBlock = typeof userBlocks.$inferSelect;
 export type NewDbUserBlock = typeof userBlocks.$inferInsert;
+
+// Multiplayer games (see GamesHandler.ts). A lobby is a room a handful of
+// players gather in, race in, and can rematch in; the per-race outcome that
+// matters long-term lands in `game_results` below, which outlives the lobby.
+//
+// `status` only records what the host *did* — "waiting" (gathering players)
+// or "started" (a race was kicked off at `startsAt`). The finer-grained
+// phase clients render (countdown → racing → finished) is derived from
+// `startsAt`/`endsAt` and the players' results at read time (see
+// `lobbyPhase` in GamesHandler.ts) rather than written by a timer, so it's
+// correct on every replica without any instance having to own a lobby.
+export const gameLobbies = pgTable(
+  "game_lobbies",
+  {
+    id: serial("id").primaryKey(),
+    // The game's slug (see GameId in Api.ts). A plain text column rather than
+    // a DB enum so adding a game is a code change, not a migration.
+    game: text("game").notNull(),
+    hostId: integer("host_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: text("status", { enum: ["waiting", "started"] })
+      .notNull()
+      .default("waiting"),
+    // Bumped by every rematch, so a finish can't be credited to a previous
+    // round's race (see `finishRace`).
+    round: integer("round").notNull().default(1),
+    // The text being raced — chosen when the host starts, null while waiting
+    // so nobody can rehearse it in the lobby.
+    passage: text("passage"),
+    startsAt: timestamp("starts_at", { mode: "date" }),
+    endsAt: timestamp("ends_at", { mode: "date" }),
+    maxPlayers: integer("max_players").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    // Touched by every membership/phase change; the lobby browser hides
+    // lobbies nobody has touched in a while (abandoned tabs) and creating a
+    // lobby sweeps long-dead ones (see GamesHandler.ts).
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    // The lobby browser lists one game's lobbies, newest first.
+    index("game_lobbies_game_updated_at_idx").on(table.game, table.updatedAt),
+    // Postgres doesn't index FK columns on its own — the cascade from
+    // `users` would otherwise scan the table.
+    index("game_lobbies_host_id_idx").on(table.hostId),
+  ],
+);
+
+export type DbGameLobby = typeof gameLobbies.$inferSelect;
+
+// A player seated in a lobby, plus their outcome for the lobby's *current*
+// round (all four result columns are null until they finish, and are reset
+// by a rematch). One lobby at a time per user is enforced in the API layer
+// (joining one leaves any other), not here, so a stale seat can never block
+// a user from playing.
+export const gameLobbyPlayers = pgTable(
+  "game_lobby_players",
+  {
+    id: serial("id").primaryKey(),
+    lobbyId: integer("lobby_id")
+      .notNull()
+      .references(() => gameLobbies.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    joinedAt: timestamp("joined_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    // Server-measured time from `startsAt` to the accepted finish.
+    durationMs: integer("duration_ms"),
+    // Game-specific headline score — words per minute for the typing race.
+    score: doublePrecision("score"),
+    accuracy: doublePrecision("accuracy"),
+    place: integer("place"),
+  },
+  (table) => [
+    unique().on(table.lobbyId, table.userId),
+    index("game_lobby_players_user_id_idx").on(table.userId),
+  ],
+);
+
+export type DbGameLobbyPlayer = typeof gameLobbyPlayers.$inferSelect;
+
+// Every accepted finish, kept after its lobby is gone — the leaderboard's
+// source of truth. `lobbyId` is deliberately not a foreign key: lobbies are
+// ephemeral and deleted once empty, results are not.
+export const gameResults = pgTable(
+  "game_results",
+  {
+    id: serial("id").primaryKey(),
+    game: text("game").notNull(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    lobbyId: integer("lobby_id"),
+    round: integer("round").notNull(),
+    score: doublePrecision("score").notNull(),
+    accuracy: doublePrecision("accuracy").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    place: integer("place").notNull(),
+    // Racers seated when this result was recorded — a "win" only counts
+    // against at least one opponent (see the leaderboard query).
+    playerCount: integer("player_count").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    // The leaderboard aggregates one game's results inside a trailing window.
+    index("game_results_game_created_at_idx").on(table.game, table.createdAt),
+    index("game_results_user_id_idx").on(table.userId),
+  ],
+);
+
+export type DbGameResult = typeof gameResults.$inferSelect;

@@ -139,6 +139,40 @@ export type StatusEvent = {
   readonly statusExpiresAt: number | null;
 };
 
+// Pushed to a game lobby's room (see `notifyRoom` below — everyone currently
+// viewing that lobby, players and spectators alike) whenever its membership,
+// phase, or results change: someone joined/left, the host started a race or
+// a rematch, a player crossed the finish line. Id-only like `post_changed` —
+// clients refetch `GET /games/lobbies/:id` for the authoritative state.
+export type GameLobbyEvent = {
+  readonly type: "game_lobby_updated";
+  readonly lobbyId: number;
+};
+
+// Pushed to a game's hub room (the lobby browser) whenever any of that
+// game's lobbies is created, changes membership/phase, or disappears, so
+// the open-lobbies list stays live without polling. Scoped to the hub room
+// rather than `broadcastAll`, since only the handful of clients actually
+// looking at the lobby browser care.
+export type GameLobbiesEvent = {
+  readonly type: "game_lobbies_changed";
+  readonly game: string;
+};
+
+// A racer's live position, relayed to their lobby's room straight from the
+// socket (see `game_progress` in RealtimeSocket.ts) — never persisted, and
+// never trusted for scoring: `progress` is only what the opponents' lanes
+// render, while the result that lands on the leaderboard is recomputed
+// server-side from the finished text and the server's own clock (see
+// GamesHandler.ts). `userId` is stamped by the server from the socket's
+// authenticated identity, so a client can only ever move its own marker.
+export type GameProgressEvent = {
+  readonly type: "game_progress";
+  readonly lobbyId: number;
+  readonly userId: number;
+  readonly progress: number;
+};
+
 // Event payloads mostly carry no data beyond an id — clients refetch the
 // affected queries over the existing REST endpoints rather than trusting a
 // duplicated copy of the state pushed over the socket. Presence/typing are
@@ -153,7 +187,10 @@ export type RealtimeEvent =
   | MessagePinEvent
   | PresenceEvent
   | TypingEvent
-  | StatusEvent;
+  | StatusEvent
+  | GameLobbyEvent
+  | GameLobbiesEvent
+  | GameProgressEvent;
 
 // A connected client's outbound channel — bound to one open `/ws` socket.
 type Writer = (chunk: string) => Effect.Effect<void, unknown>;
@@ -206,8 +243,44 @@ export class RealtimeConnections extends Context.Tag("RealtimeConnections")<
     // that, live transitions arrive as `PresenceEvent`s pushed through the
     // usual broadcast path.
     readonly onlineUserIds: Effect.Effect<ReadonlyArray<number>>;
+    // Named rooms — the generalized form of the post rooms above, used by
+    // the games feature (`game-hub:<game>` for a lobby browser,
+    // `game-lobby:<id>` for one lobby; see `isValidRoomName`). Same
+    // local-membership/PubSub-delivery split as `subscribePost`/
+    // `notifyPostRoom`, and likewise swept on `unregister`.
+    readonly subscribeRoom: (
+      room: string,
+      write: Writer,
+    ) => Effect.Effect<void>;
+    readonly unsubscribeRoom: (
+      room: string,
+      write: Writer,
+    ) => Effect.Effect<void>;
+    // Whether this specific connection has joined `room` on this instance —
+    // lets RealtimeSocket.ts only relay a socket's `game_progress` into a
+    // lobby it's actually watching.
+    readonly isInRoom: (room: string, write: Writer) => Effect.Effect<boolean>;
+    readonly notifyRoom: (
+      room: string,
+      event: RealtimeEvent,
+    ) => Effect.Effect<void>;
   }
 >() {}
+
+// Room names a client may subscribe to over `/ws`. An allowlist rather than
+// "any string", so a client can't grow the room map without bound with
+// made-up names. Games are the only room users today; the game segment is a
+// lowercase slug so a new game (see GAMES in Api.ts) needs no change here.
+const ROOM_NAME_PATTERN =
+  /^(game-hub:[a-z][a-z0-9-]{0,31}|game-lobby:\d{1,10})$/;
+
+export const isValidRoomName = (room: unknown): room is string =>
+  typeof room === "string" && ROOM_NAME_PATTERN.test(room);
+
+export const gameLobbyRoom = (lobbyId: number): string =>
+  `game-lobby:${lobbyId}`;
+
+export const gameHubRoom = (game: string): string => `game-hub:${game}`;
 
 // The channel every RealtimeConnectionsLive instance publishes to and
 // subscribes on — one process-wide topic is enough since each message
@@ -224,6 +297,11 @@ type Envelope =
   | {
       readonly scope: "post";
       readonly postId: number;
+      readonly event: RealtimeEvent;
+    }
+  | {
+      readonly scope: "room";
+      readonly room: string;
       readonly event: RealtimeEvent;
     };
 
@@ -247,6 +325,9 @@ export const RealtimeConnectionsLive = Layer.effect(
     // like it stays local per-instance — cross-instance fan-out is PubSub's
     // job (see `notifyPostRoom`).
     const byPost = new Map<number, Set<Writer>>();
+    // room name -> local connection writers subscribed to it (see
+    // `subscribeRoom`). Same local-only bookkeeping as `byPost`.
+    const byRoom = new Map<string, Set<Writer>>();
 
     // A dead/broken socket write must never fail the mutation that triggered
     // it (same reasoning as notifyUsers/broadcastAll's Effect.ignore below),
@@ -291,6 +372,13 @@ export const RealtimeConnectionsLive = Layer.effect(
           const writers = byPost.get(envelope.postId);
           if (!writers) return;
           yield* writeAll(writers, payload, { postId: envelope.postId });
+          return;
+        }
+
+        if (envelope.scope === "room") {
+          const writers = byRoom.get(envelope.room);
+          if (!writers) return;
+          yield* writeAll(writers, payload, { room: envelope.room });
           return;
         }
 
@@ -366,6 +454,39 @@ export const RealtimeConnectionsLive = Layer.effect(
         if (set.size === 0) byPost.delete(postId);
       });
 
+    const notifyRoom: Context.Tag.Service<
+      typeof RealtimeConnections
+    >["notifyRoom"] = (room, event) => {
+      const envelope = { scope: "room", room, event } satisfies Envelope;
+      return pubsub
+        .publish(CHANNEL, JSON.stringify(envelope))
+        .pipe(Effect.catchAll((error) => logPublishFailure(envelope, error)));
+    };
+
+    const subscribeRoom: Context.Tag.Service<
+      typeof RealtimeConnections
+    >["subscribeRoom"] = (room, write) =>
+      Effect.sync(() => {
+        const set = byRoom.get(room) ?? new Set();
+        set.add(write);
+        byRoom.set(room, set);
+      });
+
+    const unsubscribeRoom: Context.Tag.Service<
+      typeof RealtimeConnections
+    >["unsubscribeRoom"] = (room, write) =>
+      Effect.sync(() => {
+        const set = byRoom.get(room);
+        if (!set) return;
+        set.delete(write);
+        if (set.size === 0) byRoom.delete(room);
+      });
+
+    const isInRoom: Context.Tag.Service<
+      typeof RealtimeConnections
+    >["isInRoom"] = (room, write) =>
+      Effect.sync(() => byRoom.get(room)?.has(write) ?? false);
+
     const register: Context.Tag.Service<
       typeof RealtimeConnections
     >["register"] = (userId, write) =>
@@ -412,6 +533,11 @@ export const RealtimeConnectionsLive = Layer.effect(
               byPost.delete(postId);
             }
           }
+          for (const [room, writers] of byRoom) {
+            if (writers.delete(write) && writers.size === 0) {
+              byRoom.delete(room);
+            }
+          }
           Effect.runFork(Metric.incrementBy(websocketConnectionsActive, -1));
           Effect.runFork(
             Metric.update(
@@ -455,6 +581,10 @@ export const RealtimeConnectionsLive = Layer.effect(
       unsubscribePost,
       notifyPostRoom,
       onlineUserIds,
+      subscribeRoom,
+      unsubscribeRoom,
+      isInRoom,
+      notifyRoom,
     };
   }),
 );

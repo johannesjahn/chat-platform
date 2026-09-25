@@ -6,7 +6,11 @@ import {
 import { Context, Effect, type Scope } from "effect";
 import { clientIp } from "./ClientIp.ts";
 import { RateLimiter } from "./RateLimiter.ts";
-import { RealtimeConnections } from "./Realtime.ts";
+import {
+  gameLobbyRoom,
+  isValidRoomName,
+  RealtimeConnections,
+} from "./Realtime.ts";
 import { allowedOrigins } from "./WebOrigin.ts";
 import { WsTicket } from "./WsTicket.ts";
 
@@ -40,6 +44,107 @@ const getTicket = (originalUrl: string): string | null => {
 // doesn't cover (a WebSocket upgrade isn't a CORS-checked request).
 const isAllowedOrigin = (origin: string | undefined): boolean =>
   !origin || allowedOrigins.includes(origin);
+
+// A racer's client reports its position a few times a second (see
+// web/src/lib/games/typing.ts); anything much faster than that is either a
+// bug or a flood, and every relayed frame fans out to the whole lobby room.
+// A per-connection sliding one-second budget drops the excess silently —
+// the next in-budget update carries the latest position anyway.
+const GAME_PROGRESS_MAX_PER_SECOND = 15;
+// Upper bound on a relayed `progress` — well past the longest passage (see
+// src/games/typing.ts); it only guards the relayed number's size, the lanes
+// clamp it to the passage length client-side.
+const MAX_GAME_PROGRESS = 10_000;
+
+const isInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value);
+
+// Handles one incoming frame from an authenticated `/ws` connection (`userId`,
+// writing through `write`) — see the comment where `wsHandler` below wires it
+// up. A factory per connection, since the `game_progress` budget is
+// per-connection state. Exported so the control-message handling can be
+// unit-tested without a real socket upgrade (see Realtime.test.ts).
+export const makeIncomingHandler = (
+  connections: Context.Tag.Service<typeof RealtimeConnections>,
+  userId: number,
+  write: (chunk: string) => Effect.Effect<void, unknown>,
+) => {
+  // This connection's recent `game_progress` frame timestamps, for the
+  // per-second budget above.
+  let progressWindow: number[] = [];
+
+  return (data: string | Uint8Array) =>
+    Effect.gen(function* () {
+      const text =
+        typeof data === "string" ? data : new TextDecoder().decode(data);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        return;
+      }
+      if (typeof parsed !== "object" || parsed === null) return;
+      const message = parsed as {
+        type?: unknown;
+        postId?: unknown;
+        room?: unknown;
+        lobbyId?: unknown;
+        progress?: unknown;
+      };
+
+      // Named rooms (see Realtime.ts) — the games hub and individual lobbies.
+      // Like post rooms there's no per-room authorization: a lobby is as
+      // public as the lobby browser listing it, and spectating is a feature.
+      if (
+        message.type === "subscribe_room" ||
+        message.type === "unsubscribe_room"
+      ) {
+        if (!isValidRoomName(message.room)) return;
+        if (message.type === "subscribe_room") {
+          yield* connections.subscribeRoom(message.room, write);
+        } else {
+          yield* connections.unsubscribeRoom(message.room, write);
+        }
+        return;
+      }
+
+      // A racer's live position, relayed to everyone watching the lobby.
+      // Only relayed into a lobby this socket has itself joined the room of,
+      // and stamped with the socket's authenticated `userId` — so a client
+      // can only ever move its own marker, and only where it's looking.
+      // Not persisted and never scored (see GameProgressEvent).
+      if (message.type === "game_progress") {
+        if (
+          !isInteger(message.lobbyId) ||
+          !isInteger(message.progress) ||
+          message.progress < 0 ||
+          message.progress > MAX_GAME_PROGRESS
+        ) {
+          return;
+        }
+        const now = Date.now();
+        progressWindow = progressWindow.filter((at) => now - at < 1000);
+        if (progressWindow.length >= GAME_PROGRESS_MAX_PER_SECOND) return;
+        progressWindow.push(now);
+        const room = gameLobbyRoom(message.lobbyId);
+        if (!(yield* connections.isInRoom(room, write))) return;
+        yield* connections.notifyRoom(room, {
+          type: "game_progress",
+          lobbyId: message.lobbyId,
+          userId,
+          progress: message.progress,
+        });
+        return;
+      }
+
+      if (!isInteger(message.postId)) return;
+      if (message.type === "subscribe_post_comments") {
+        yield* connections.subscribePost(message.postId, write);
+      } else if (message.type === "unsubscribe_post_comments") {
+        yield* connections.unsubscribePost(message.postId, write);
+      }
+    });
+};
 
 const wsHandler = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
@@ -99,34 +204,13 @@ const wsHandler = Effect.gen(function* () {
   // post's comment section sends `subscribe_post_comments`/
   // `unsubscribe_post_comments` to join/leave that post's realtime room (see
   // Realtime.ts), so comment/reply and per-comment-like events reach it
-  // without flooding every connected client. `runRaw` (rather than `run`)
-  // preserves text frames as strings; anything that isn't one of these two
+  // without flooding every connected client. The games feature does the same
+  // with named rooms (`subscribe_room`/`unsubscribe_room`) and additionally
+  // streams `game_progress` frames up the socket. `runRaw` (rather than
+  // `run`) preserves text frames as strings; anything that isn't one of these
   // JSON control messages is dropped. No per-post authorization: the feed is
   // public to any signed-in user, so any of them may watch any post's room.
-  const handleIncoming = (data: string | Uint8Array) =>
-    Effect.gen(function* () {
-      const text =
-        typeof data === "string" ? data : new TextDecoder().decode(data);
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        return;
-      }
-      if (typeof parsed !== "object" || parsed === null) return;
-      const message = parsed as { type?: unknown; postId?: unknown };
-      if (
-        typeof message.postId !== "number" ||
-        !Number.isInteger(message.postId)
-      ) {
-        return;
-      }
-      if (message.type === "subscribe_post_comments") {
-        yield* connections.subscribePost(message.postId, write);
-      } else if (message.type === "unsubscribe_post_comments") {
-        yield* connections.unsubscribePost(message.postId, write);
-      }
-    });
+  const handleIncoming = makeIncomingHandler(connections, userId, write);
 
   yield* socket
     .runRaw((data) => handleIncoming(data))

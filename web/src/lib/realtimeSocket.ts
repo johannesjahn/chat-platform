@@ -21,6 +21,12 @@ import {
   postsFeedQueryKey,
   userPostsQueryKeyPrefix,
 } from "./posts";
+import {
+  gameLobbiesQueryKey,
+  gameLobbyQueryKey,
+  gamesQueryKeyRoot,
+} from "./games/lobby";
+import { noteGameProgress, setGameRoomsSocket } from "./games/rooms";
 import { setRealtimeSocket } from "./postRooms";
 import { resetPresence, setUserOnline } from "./presence";
 import { mergeReactionCounts } from "./reactions";
@@ -59,6 +65,14 @@ type RealtimeSocketEvent =
       statusText: string | null;
       statusEmoji: string | null;
       statusExpiresAt: number | null;
+    }
+  | { type: "game_lobby_updated"; lobbyId: number }
+  | { type: "game_lobbies_changed"; game: string }
+  | {
+      type: "game_progress";
+      lobbyId: number;
+      userId: number;
+      progress: number;
     };
 
 // A little more than the default Bun WebSocket idle timeout — sending
@@ -132,6 +146,8 @@ export function useRealtimeSocket(enabled: boolean): void {
         // sections currently open re-join their post rooms — the previous
         // socket's server-side subscriptions died with it (see postRooms.ts).
         if (socket) setRealtimeSocket(socket);
+        // Same for any game lobby / lobby browser rooms (see games/rooms.ts).
+        if (socket) setGameRoomsSocket(socket);
         // A dropped connection can mean any number of users went
         // offline/online without this client hearing about it — start
         // presence clean and let the fresh connection's initial snapshot
@@ -156,6 +172,7 @@ export function useRealtimeSocket(enabled: boolean): void {
           queryKey: userPostsQueryKeyPrefix,
         });
         void queryClient.invalidateQueries({ queryKey: commentsQueryKeyRoot });
+        void queryClient.invalidateQueries({ queryKey: gamesQueryKeyRoot });
       };
 
       socket.onmessage = (event) => {
@@ -334,6 +351,22 @@ export function useRealtimeSocket(enabled: boolean): void {
               statusExpiresAt: parsed.statusExpiresAt,
             });
             break;
+          // Game events only arrive for rooms this client joined (see
+          // games/rooms.ts). The lobby ones are id-only — refetch; progress
+          // is transient and goes straight into its store.
+          case "game_lobby_updated":
+            void queryClient.invalidateQueries({
+              queryKey: gameLobbyQueryKey(parsed.lobbyId),
+            });
+            break;
+          case "game_lobbies_changed":
+            void queryClient.invalidateQueries({
+              queryKey: gameLobbiesQueryKey(parsed.game),
+            });
+            break;
+          case "game_progress":
+            noteGameProgress(parsed.lobbyId, parsed.userId, parsed.progress);
+            break;
         }
       };
 
@@ -352,6 +385,7 @@ export function useRealtimeSocket(enabled: boolean): void {
     return () => {
       stopped = true;
       setRealtimeSocket(null);
+      setGameRoomsSocket(null);
       if (pingTimer) clearInterval(pingTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       socket?.close();

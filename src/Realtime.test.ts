@@ -2,7 +2,14 @@ import { expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
-import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
+import {
+  gameHubRoom,
+  gameLobbyRoom,
+  isValidRoomName,
+  RealtimeConnections,
+  RealtimeConnectionsLive,
+} from "./Realtime.ts";
+import { makeIncomingHandler } from "./RealtimeSocket.ts";
 
 // RealtimeConnectionsLive now delivers through PubSub (see Realtime.ts) — the
 // in-memory implementation is the fully correct single-process one, not a
@@ -441,4 +448,145 @@ test("different RealtimeConnectionsLive instances don't share state", async () =
   );
 
   expect(alice.received).toEqual([]);
+});
+
+test("notifyRoom delivers only to connections subscribed to that room", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const watcher = recordingWriter();
+      const bystander = recordingWriter();
+      yield* connections.register(1, watcher.write);
+      yield* connections.register(2, bystander.write);
+      yield* connections.subscribeRoom(gameLobbyRoom(5), watcher.write);
+      watcher.received.length = 0;
+      bystander.received.length = 0;
+
+      yield* connections.notifyRoom(gameLobbyRoom(5), {
+        type: "game_lobby_updated",
+        lobbyId: 5,
+      });
+      yield* connections.notifyRoom(gameLobbyRoom(6), {
+        type: "game_lobby_updated",
+        lobbyId: 6,
+      });
+
+      expect(watcher.received).toEqual([
+        JSON.stringify({ type: "game_lobby_updated", lobbyId: 5 }),
+      ]);
+      expect(bystander.received).toEqual([]);
+    }),
+  );
+});
+
+test("unregister sweeps a connection out of every room it had joined", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const watcher = recordingWriter();
+      const unregister = yield* connections.register(1, watcher.write);
+      yield* connections.subscribeRoom(gameHubRoom("typing"), watcher.write);
+      expect(
+        yield* connections.isInRoom(gameHubRoom("typing"), watcher.write),
+      ).toBe(true);
+
+      unregister();
+
+      expect(
+        yield* connections.isInRoom(gameHubRoom("typing"), watcher.write),
+      ).toBe(false);
+    }),
+  );
+});
+
+test("isValidRoomName only admits the games' room shapes", () => {
+  expect(isValidRoomName("game-hub:typing")).toBe(true);
+  expect(isValidRoomName("game-lobby:42")).toBe(true);
+  expect(isValidRoomName("game-lobby:abc")).toBe(false);
+  expect(isValidRoomName("game-hub:Typing")).toBe(false);
+  expect(isValidRoomName("chat:1")).toBe(false);
+  expect(isValidRoomName(42)).toBe(false);
+});
+
+// The socket's incoming-frame handler (RealtimeSocket.ts), driven directly
+// with a recording writer standing in for the upgraded socket.
+test("game_progress is relayed to the lobby room, stamped with the sender's own id", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const racer = recordingWriter();
+      const opponent = recordingWriter();
+      yield* connections.register(1, racer.write);
+      yield* connections.register(2, opponent.write);
+      const fromRacer = makeIncomingHandler(connections, 1, racer.write);
+      const fromOpponent = makeIncomingHandler(connections, 2, opponent.write);
+
+      // Not yet watching the lobby: nothing is relayed.
+      yield* fromRacer(
+        JSON.stringify({ type: "game_progress", lobbyId: 9, progress: 3 }),
+      );
+      expect(opponent.received).not.toContainEqual(
+        expect.stringContaining("game_progress"),
+      );
+
+      for (const handler of [fromRacer, fromOpponent]) {
+        yield* handler(
+          JSON.stringify({ type: "subscribe_room", room: gameLobbyRoom(9) }),
+        );
+      }
+      racer.received.length = 0;
+      opponent.received.length = 0;
+
+      // A spoofed `userId` in the frame is ignored — the socket's own wins.
+      yield* fromRacer(
+        JSON.stringify({
+          type: "game_progress",
+          lobbyId: 9,
+          progress: 12,
+          userId: 2,
+        }),
+      );
+      const relayed = JSON.stringify({
+        type: "game_progress",
+        lobbyId: 9,
+        userId: 1,
+        progress: 12,
+      });
+      expect(opponent.received).toEqual([relayed]);
+      expect(racer.received).toEqual([relayed]);
+
+      // Malformed frames and unknown rooms are dropped.
+      yield* fromRacer(
+        JSON.stringify({ type: "game_progress", lobbyId: 9, progress: -1 }),
+      );
+      yield* fromRacer(
+        JSON.stringify({ type: "subscribe_room", room: "anything:1" }),
+      );
+      yield* fromRacer("not json");
+      expect(opponent.received).toHaveLength(1);
+    }),
+  );
+});
+
+test("game_progress frames beyond the per-second budget are dropped", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const racer = recordingWriter();
+      yield* connections.register(1, racer.write);
+      const handle = makeIncomingHandler(connections, 1, racer.write);
+      yield* handle(
+        JSON.stringify({ type: "subscribe_room", room: gameLobbyRoom(3) }),
+      );
+      racer.received.length = 0;
+
+      for (let progress = 0; progress < 40; progress++) {
+        yield* handle(
+          JSON.stringify({ type: "game_progress", lobbyId: 3, progress }),
+        );
+      }
+      expect(racer.received.length).toBeGreaterThan(0);
+      expect(racer.received.length).toBeLessThan(40);
+    }),
+  );
 });

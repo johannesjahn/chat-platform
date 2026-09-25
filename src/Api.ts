@@ -2366,6 +2366,229 @@ const AdminGroup = HttpApiGroup.make("admin").add(
     .middleware(Authentication),
 );
 
+// --- Games (see GamesHandler.ts) -------------------------------------------
+//
+// The games feature is built to hold more than one game: lobbies, seats,
+// realtime rooms, results, and the leaderboard are all keyed by a game slug,
+// and only the rules of play (for the typing race: the passage bank and how
+// a finish is scored — see src/games/typing.ts) are game-specific. Adding a
+// game means adding its slug here plus its rules module; the lobby plumbing
+// and the frontend's game-shell components (web/src/components/games) are
+// shared.
+export const GameId = Schema.Literal("typing").annotations({
+  identifier: "GameId",
+});
+export type GameId = typeof GameId.Type;
+
+// Seats per lobby. Small on purpose: every racer's lane is on screen at
+// once, and every progress frame fans out to the whole room.
+export const MAX_GAME_LOBBY_PLAYERS = 6;
+
+// The phase a lobby is in *right now*, derived at read time from what the
+// host did and the clock (see `lobbyPhase` in GamesHandler.ts):
+//  - "waiting":   gathering players; the host can start.
+//  - "countdown": started, `startsAt` still in the future — the passage is
+//                 revealed so racers can read ahead, but typing is locked.
+//  - "racing":    between `startsAt` and `endsAt`, and someone hasn't
+//                 finished yet.
+//  - "finished":  everyone finished or `endsAt` passed; the host can rematch.
+export const GameLobbyPhase = Schema.Literal(
+  "waiting",
+  "countdown",
+  "racing",
+  "finished",
+).annotations({ identifier: "GameLobbyPhase" });
+export type GameLobbyPhase = typeof GameLobbyPhase.Type;
+
+export const GameLobbyPlayer = Schema.Struct({
+  user: User,
+  joinedAt: Schema.Number,
+  // The four result fields are null until this player finishes the current
+  // round. `score` is the game's headline number — words per minute for the
+  // typing race.
+  durationMs: Schema.NullOr(Schema.Number),
+  score: Schema.NullOr(Schema.Number),
+  accuracy: Schema.NullOr(Schema.Number),
+  place: Schema.NullOr(Schema.Number),
+}).annotations({ identifier: "GameLobbyPlayer" });
+export type GameLobbyPlayer = typeof GameLobbyPlayer.Type;
+
+export const GameLobby = Schema.Struct({
+  id: Schema.Number,
+  game: GameId,
+  hostId: Schema.Number,
+  phase: GameLobbyPhase,
+  round: Schema.Number,
+  // Null while "waiting" — the text is only revealed once a race starts, so
+  // nobody can rehearse it while the lobby fills. Always null in the lobby
+  // browser listing.
+  passage: Schema.NullOr(Schema.String),
+  // Epoch ms; null while "waiting".
+  startsAt: Schema.NullOr(Schema.Number),
+  endsAt: Schema.NullOr(Schema.Number),
+  // The server's clock when this response was built, so a client can correct
+  // for its own clock skew when it renders the countdown and race timer.
+  serverNow: Schema.Number,
+  maxPlayers: Schema.Number,
+  // Seated players, in join order.
+  players: Schema.Array(GameLobbyPlayer),
+  createdAt: Schema.Number,
+}).annotations({ identifier: "GameLobby" });
+export type GameLobby = typeof GameLobby.Type;
+
+export const GameLobbyList = Schema.Struct({
+  lobbies: Schema.Array(GameLobby),
+}).annotations({ identifier: "GameLobbyList" });
+
+// A finished race's submission. The server never takes a score from the
+// client: it checks `typed` against the passage and times the finish off its
+// own clock, and only `errors` (wrong keystrokes along the way, which it
+// can't observe) is taken on trust — and it can only ever *lower* accuracy.
+export const MAX_TYPED_LENGTH = 2000;
+export const FinishRaceBody = Schema.Struct({
+  typed: Schema.String.pipe(Schema.maxLength(MAX_TYPED_LENGTH)),
+  errors: Schema.Number.pipe(Schema.int(), Schema.between(0, 100_000)),
+}).annotations({ identifier: "FinishRaceBody" });
+
+export const LeaderboardPeriod = Schema.Literal(
+  "day",
+  "week",
+  "all",
+).annotations({ identifier: "LeaderboardPeriod" });
+export type LeaderboardPeriod = typeof LeaderboardPeriod.Type;
+
+export const LeaderboardEntry = Schema.Struct({
+  rank: Schema.Number,
+  user: User,
+  bestScore: Schema.Number,
+  averageScore: Schema.Number,
+  averageAccuracy: Schema.Number,
+  races: Schema.Number,
+  // First places in races against at least one opponent.
+  wins: Schema.Number,
+}).annotations({ identifier: "LeaderboardEntry" });
+export type LeaderboardEntry = typeof LeaderboardEntry.Type;
+
+export const Leaderboard = Schema.Struct({
+  game: GameId,
+  period: LeaderboardPeriod,
+  entries: Schema.Array(LeaderboardEntry),
+  // The caller's own standing, even when it falls outside `entries` — null
+  // when they have no results in the period.
+  me: Schema.NullOr(LeaderboardEntry),
+}).annotations({ identifier: "Leaderboard" });
+export type Leaderboard = typeof Leaderboard.Type;
+
+export const LEADERBOARD_SIZE = 25;
+
+export class InvalidGameRequest extends Schema.TaggedError<InvalidGameRequest>()(
+  "InvalidGameRequest",
+  { message: Schema.String },
+) {}
+
+// Anonymous (no `identifier`) for the reason in CLAUDE.md — a named path or
+// query struct silently loses its parameters in the generated spec.
+const GamePath = Schema.Struct({ game: GameId });
+const GameLobbyIdPath = Schema.Struct({ id: Schema.NumberFromString });
+export const LeaderboardQuery = Schema.Struct({
+  period: Schema.optional(LeaderboardPeriod),
+});
+
+const GamesGroup = HttpApiGroup.make("games")
+  .add(
+    // Lobbies worth showing in the lobby browser: every lobby still
+    // gathering players or mid-race, newest first. Abandoned ones (nobody
+    // touched them in a while) are left out.
+    HttpApiEndpoint.get("listGameLobbies", "/games/:game/lobbies")
+      .setPath(GamePath)
+      .addSuccess(GameLobbyList)
+      .middleware(Authentication),
+  )
+  .add(
+    // Opens a new lobby with the caller as host and only player. Leaves any
+    // other lobby the caller was seated in first.
+    HttpApiEndpoint.post("createGameLobby", "/games/:game/lobbies")
+      .setPath(GamePath)
+      .addSuccess(GameLobby, { status: 201 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Seats the caller in the fullest open lobby that still has room, or
+    // opens a new one if there isn't any — the one-click "just let me race".
+    HttpApiEndpoint.post("quickPlay", "/games/:game/quick-play")
+      .setPath(GamePath)
+      .addSuccess(GameLobby)
+      .middleware(Authentication),
+  )
+  .add(
+    HttpApiEndpoint.get("getGameLobby", "/games/lobbies/:id")
+      .setPath(GameLobbyIdPath)
+      .addSuccess(GameLobby)
+      .addError(NotFound, { status: 404 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Idempotent for a player already seated. Only while "waiting" and not
+    // full.
+    HttpApiEndpoint.post("joinGameLobby", "/games/lobbies/:id/join")
+      .setPath(GameLobbyIdPath)
+      .addSuccess(GameLobby)
+      .addError(NotFound, { status: 404 })
+      .addError(InvalidGameRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Allowed in any phase. The last player out closes the lobby; a leaving
+    // host hands the lobby to whoever joined next.
+    HttpApiEndpoint.post("leaveGameLobby", "/games/lobbies/:id/leave")
+      .setPath(GameLobbyIdPath)
+      .addSuccess(Schema.Void)
+      .addError(NotFound, { status: 404 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Host-only, from "waiting": picks the passage and schedules the race a
+    // short countdown from now.
+    HttpApiEndpoint.post("startGameLobby", "/games/lobbies/:id/start")
+      .setPath(GameLobbyIdPath)
+      .addSuccess(GameLobby)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidGameRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Submits the caller's finished race — see FinishRaceBody for what is
+    // (and isn't) trusted. Records the result for the leaderboard.
+    HttpApiEndpoint.post("finishRace", "/games/lobbies/:id/finish")
+      .setPath(GameLobbyIdPath)
+      .setPayload(FinishRaceBody)
+      .addSuccess(GameLobby)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidGameRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Host-only, from "finished": resets the lobby to "waiting" for another
+    // round with the same players.
+    HttpApiEndpoint.post("rematchGameLobby", "/games/lobbies/:id/rematch")
+      .setPath(GameLobbyIdPath)
+      .addSuccess(GameLobby)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidGameRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Ranked by each player's best score in the period (default: all time).
+    HttpApiEndpoint.get("getLeaderboard", "/games/:game/leaderboard")
+      .setPath(GamePath)
+      .setUrlParams(LeaderboardQuery)
+      .addSuccess(Leaderboard)
+      .middleware(Authentication),
+  );
+
 export class ChatApi extends HttpApi.make("chat-platform")
   .add(UsersGroup)
   .add(PostsGroup)
@@ -2376,4 +2599,5 @@ export class ChatApi extends HttpApi.make("chat-platform")
   .add(MetaGroup)
   .add(RealtimeGroup)
   .add(AdminGroup)
+  .add(GamesGroup)
   .annotate(OpenApi.Version, packageJson.version) {}
