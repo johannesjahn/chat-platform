@@ -205,18 +205,21 @@ minio:
   # parity, mirroring docker-compose.yml's `minio` service.
   enabled: true
 
-  # quay.io rather than Docker Hub — MinIO's images aren't anonymously
-  # pullable from Docker Hub any more; see the comment on the `minio`
-  # service in docker-compose.yml.
+  # Chainguard's MinIO build — upstream's own images are no longer
+  # anonymously pullable from Docker Hub or quay.io; see the comment on the
+  # `minio` service in docker-compose.yml. Only `latest` is published, so
+  # it's pinned by digest (Renovate bumps it). Runs as non-root uid 65532
+  # (see the pod's fsGroup in minio-deployment.yaml).
   image:
-    repository: quay.io/minio/minio
-    tag: "RELEASE.2025-09-07T16-13-09Z"
+    repository: cgr.dev/chainguard/minio
+    tag: "latest@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
 
-  # The `mc` CLI image, used only by the one-shot bucket-creation Job (see
-  # minio-init-job.yaml) — MinIO doesn't create buckets on its own.
+  # The image for the one-shot bucket-creation Job (see minio-init-job.yaml)
+  # — MinIO doesn't create buckets on its own. The Chainguard image above
+  # already ships the `mc` client and a shell, so it's the same image.
   mcImage:
-    repository: quay.io/minio/mc
-    tag: "RELEASE.2025-08-13T08-35-41Z"
+    repository: cgr.dev/chainguard/minio
+    tag: "latest@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
 
   auth:
     # Secret with access-key/secret-key data keys — doubles as MinIO's own
