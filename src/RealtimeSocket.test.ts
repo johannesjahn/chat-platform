@@ -12,6 +12,7 @@ import { SearchHandlerLive } from "./SearchHandler.ts";
 import { Db } from "./Db.ts";
 import { JwtLive } from "./Jwt.ts";
 import { EngagementHandlerLive } from "./EngagementHandler.ts";
+import { GamesHandlerLive } from "./GamesHandler.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
@@ -44,6 +45,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(AttachmentStorageLive),
   Layer.provide(VersionHandlerLive),
   Layer.provide(AdminHandlerLive),
+  Layer.provide(GamesHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(InMemoryRateLimiterLive),
   Layer.provide(AuthenticationLive),

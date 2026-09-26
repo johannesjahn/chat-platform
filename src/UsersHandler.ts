@@ -212,7 +212,7 @@ export const effectiveStatus = (row: {
   };
 };
 
-const toPublicUser = (row: UserRow) => ({
+export const toPublicUser = (row: UserRow) => ({
   id: row.id,
   username: row.username,
   displayName: row.displayName,
@@ -223,10 +223,11 @@ const toPublicUser = (row: UserRow) => ({
 });
 
 // The `users` columns every "return a public User" query selects, folded into
-// the API shape by `toPublicUser`. Named so the block/mute handlers below can
-// select the same set off a join against `users` without re-listing it (the
-// older handlers above still inline it, matching their original style).
-const publicUserColumns = {
+// the API shape by `toPublicUser`. Named so the block/mute handlers below (and
+// GamesHandler.ts) can select the same set off a join against `users` without
+// re-listing it (the older handlers above still inline it, matching their
+// original style).
+export const publicUserColumns = {
   id: users.id,
   username: users.username,
   displayName: users.displayName,

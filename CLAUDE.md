@@ -193,6 +193,46 @@ app-side one, because mid-rollout old replicas insert users without the column �
 see the comment on it in [`src/db/schema.ts`](src/db/schema.ts). Rows predating
 the migration all read as having signed up when it ran.
 
+## Games (arcade)
+
+Multiplayer games live under `/games` in the frontend, backed by the `games`
+group in [`src/Api.ts`](src/Api.ts) and
+[`src/GamesHandler.ts`](src/GamesHandler.ts). The first game is a typing race;
+everything else is shared plumbing keyed by a game slug (`GameId`):
+
+- **Lobbies are rows, phases are derived.** `game_lobbies`/`game_lobby_players`
+  (migration `0026`) record only what players _did_ (host started at
+  `startsAt`, a player finished in `durationMs`). The phase clients render —
+  waiting → countdown → racing → finished — is computed from the clock at read
+  time (`lobbyPhase`), never written by a timer, so it's correct on every
+  replica with no instance owning a lobby.
+- **Scores are server-side only.** A finish submits the typed text plus a
+  wrong-keystroke count; the server checks the text against the passage, times
+  it off its own clock, and rejects anything faster than `MAX_PLAUSIBLE_WPM`.
+  Accepted finishes land in `game_results` (which outlives its lobby — no FK)
+  and feed `GET /games/:game/leaderboard`.
+- **Live updates use named realtime rooms** (`subscribeRoom`/`notifyRoom` in
+  [`src/Realtime.ts`](src/Realtime.ts), `subscribe_room` over `/ws`):
+  `game-hub:<game>` for the lobby browser, `game-lobby:<id>` for one lobby.
+  Lobby changes are id-only `game_lobby_updated`/`game_lobbies_changed`
+  events (clients refetch). Racer positions stream the other way: the client
+  sends `game_progress` frames up the socket and the server relays them to the
+  lobby room stamped with the socket's own user id — never persisted, never
+  scored, rate-limited per connection (see `makeIncomingHandler` in
+  [`src/RealtimeSocket.ts`](src/RealtimeSocket.ts)).
+
+**Adding a game:** add its slug to `GameId` (Api.ts); add a `GameRules`
+module next to [`src/games/typing.ts`](src/games/typing.ts) and register it in
+`GAME_RULES` ([`src/games/rules.ts`](src/games/rules.ts)); add its entry to
+`GAMES` in [`web/src/lib/games/registry.ts`](web/src/lib/games/registry.ts)
+(name, copy, icon, and a two-color theme); and register its play area in
+`PLAY_AREAS` in `web/src/routes/games/$game/$lobbyId.tsx`. The lobby browser,
+waiting room, countdown, results podium, and leaderboard come for free from
+the shared kit in [`web/src/components/games/`](web/src/components/games/),
+which reads the game's colors from the `--game-from`/`--game-to`/`--game-glow`
+custom properties (see the "Games design system" block in
+`web/src/styles.css`) instead of hard-coding them.
+
 Tooling (Prettier, ESLint, TypeScript) lives at the root and covers **both**
 packages — there is a single `eslint.config.js` and `.prettierrc.json`. Run
 lint/format from the repo root; run `typecheck` per package.

@@ -1148,6 +1148,295 @@ html[data-app-shell="immersive"] body {
   animation-delay: calc(var(--stagger-index, 0) * 55ms);
 }
 
+/* ───────────────────────────────────────────────────────────────────────────
+   Games design system
+
+   Everything a game page draws — hub cards, headers, lanes, the countdown,
+   the podium, leaderboard medals — reads three custom properties instead of
+   fixed colors: `--game-from`/`--game-to` (the game's signature gradient) and
+   `--game-glow` (the soft light its surfaces cast). A game page sets them
+   once on its root from the game registry (see `gameThemeStyle` in
+   lib/games/registry.ts), so a new game restyles the whole kit by picking two
+   colors. The defaults below are the app's own accent, so a game component
+   dropped outside a themed root still looks at home.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --game-from: oklch(0.72 0.14 210);
+  --game-to: oklch(0.62 0.19 277);
+  --game-glow: oklch(0.62 0.19 277 / 0.35);
+  /* Podium metals, shared by every game's results and leaderboard. */
+  --game-gold: oklch(0.84 0.16 85);
+  --game-silver: oklch(0.82 0.02 250);
+  --game-bronze: oklch(0.7 0.12 55);
+}
+
+/* The game's gradient as a fill. */
+@utility game-gradient {
+  background-image: linear-gradient(135deg, var(--game-from), var(--game-to));
+}
+
+/* The game's gradient as slowly drifting text — the game-page headline. */
+@utility game-text {
+  background-image: linear-gradient(
+    90deg,
+    var(--game-from),
+    var(--game-to),
+    var(--game-from)
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: gradient-shift 6s ease infinite;
+}
+
+/* A hairline in the game's color plus the glow it casts — the "this surface
+   belongs to the game" treatment for cards and panels. */
+@utility game-glow {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--game-from), transparent 65%),
+    0 18px 50px -20px var(--game-glow);
+}
+
+/* A comet of the game's gradient circling an element's border — marks the
+   one thing on screen that's live right now (your own lane, the hub's
+   playable card). Same masking trick as `animate-border-glow`. */
+@utility game-ring {
+  position: relative;
+  isolation: isolate;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(
+      from var(--game-ring-angle, 0deg),
+      transparent 0deg,
+      var(--game-from) 60deg,
+      var(--game-to) 120deg,
+      transparent 180deg,
+      transparent 360deg
+    );
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: game-ring-spin 3.5s linear infinite;
+    pointer-events: none;
+  }
+}
+
+@property --game-ring-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes game-ring-spin {
+  to {
+    --game-ring-angle: 360deg;
+  }
+}
+
+/* A faint perspective grid drifting toward the viewer — the arcade floor
+   behind a game page's hero. Purely decorative. */
+@utility game-grid {
+  background-image:
+    linear-gradient(
+      color-mix(in oklch, var(--game-from), transparent 82%) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--game-to), transparent 82%) 1px,
+      transparent 1px
+    );
+  background-size: 2.5rem 2.5rem;
+  mask-image: radial-gradient(ellipse at 50% 0%, #000 20%, transparent 70%);
+  animation: game-grid-drift 6s linear infinite;
+}
+
+@keyframes game-grid-drift {
+  to {
+    background-position:
+      0 2.5rem,
+      0 2.5rem;
+  }
+}
+
+@keyframes countdown-pop {
+  0% {
+    transform: scale(2.6);
+    opacity: 0;
+    filter: blur(12px);
+  }
+  22% {
+    transform: scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+  78% {
+    transform: scale(0.94);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.55);
+    opacity: 0;
+  }
+}
+
+/* One countdown number: slams in out of focus, holds, then shrinks away.
+   Keyed per number so each one replays (see CountdownOverlay). */
+@utility animate-countdown-pop {
+  animation: countdown-pop 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes go-burst {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  30% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
+/* The "GO!" that bursts out when the race goes live, and the shockwave ring
+   behind it. */
+@utility animate-go-burst {
+  animation: go-burst 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes caret-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  95% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* The typing caret's idle blink — it holds solid while the racer is typing
+   (the class comes off) and only starts blinking again once they pause. */
+@utility animate-caret-blink {
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+
+@keyframes podium-rise {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+/* Podium columns grow up out of the floor, third place first. */
+@utility animate-podium-rise {
+  transform-origin: bottom;
+  animation: podium-rise 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes medal-drop {
+  0% {
+    transform: translateY(-28px) scale(0.3) rotate(-25deg);
+    opacity: 0;
+  }
+  60% {
+    transform: translateY(3px) scale(1.18) rotate(8deg);
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* A medal (or place badge) dropping onto its podium or leaderboard row. */
+@utility animate-medal-drop {
+  animation: medal-drop 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes confetti-fall {
+  0% {
+    transform: translate3d(0, -12vh, 0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(var(--confetti-drift, 0px), 110vh, 0)
+      rotate(var(--confetti-spin, 720deg));
+    opacity: 0.85;
+  }
+}
+
+/* One confetti flake; drift, spin, delay and duration are set per flake
+   inline (see Confetti). */
+@utility animate-confetti-fall {
+  animation: confetti-fall var(--confetti-duration, 2.8s)
+    cubic-bezier(0.25, 0.46, 0.45, 0.94) var(--confetti-delay, 0s) both;
+}
+
+@keyframes lane-sheen {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+/* A glint travelling along a moving progress lane. */
+@utility animate-lane-sheen {
+  animation: lane-sheen 1.8s ease-in-out infinite;
+}
+
+@keyframes seat-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+/* An empty lobby seat, gently breathing while it waits for someone. */
+@utility animate-seat-breathe {
+  animation: seat-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes type-error {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-2px);
+  }
+  75% {
+    transform: translateX(2px);
+  }
+}
+
+/* A mistyped character's tiny jolt. */
+@utility animate-type-error {
+  animation: type-error 0.18s ease-in-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skeleton-shimmer,
   .animate-gradient-shift,
@@ -1184,8 +1473,25 @@ html[data-app-shell="immersive"] body {
   .animate-avatar-ring,
   .animate-progress-stripes,
   .animate-marching-ants,
-  .animate-underline-grow {
+  .animate-underline-grow,
+  .game-text,
+  .game-ring::before,
+  .game-grid,
+  .animate-countdown-pop,
+  .animate-go-burst,
+  .animate-caret-blink,
+  .animate-podium-rise,
+  .animate-medal-drop,
+  .animate-confetti-fall,
+  .animate-lane-sheen,
+  .animate-seat-breathe,
+  .animate-type-error {
     animation: none;
+  }
+
+  /* Confetti is pure motion; with it off there's nothing to show. */
+  .animate-confetti-fall {
+    display: none;
   }
 
   /* The jump highlight is applied from script (see `jumpToMessage`), so
@@ -1205,7 +1511,9 @@ html[data-app-shell="immersive"] body {
   .animate-pop-open,
   .animate-dialog-in,
   .animate-backdrop-blur-in,
-  .animate-underline-grow {
+  .animate-underline-grow,
+  .animate-podium-rise,
+  .animate-medal-drop {
     opacity: 1;
     filter: none;
     transform: none;

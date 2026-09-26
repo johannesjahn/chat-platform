@@ -86,20 +86,22 @@ services:
   # instead; MinIO exists purely for dev-prod parity in local/in-cluster dev
   # (mirrored by the Helm chart's `minio.enabled` flag).
   #
-  # Pulled from quay.io, not Docker Hub: MinIO's `minio/minio` and
-  # `minio/mc` images are no longer anonymously pullable there (an
-  # unauthenticated pull now fails with "pull access denied ... repository
-  # does not exist or may require 'docker login'", which broke CI's
-  # docker-compose boot). quay.io is MinIO's own registry and serves the
-  # same tags for linux/amd64, arm64 and ppc64le — so keep the `quay.io/`
-  # prefix on both images here and on `minio.image`/`minio.mcImage` in
-  # k8s/chat-platform/values.yaml.
+  # Chainguard's MinIO build, not MinIO's own images: upstream's `minio/minio`
+  # and `minio/mc` are no longer anonymously pullable from either Docker Hub
+  # or quay.io (both now answer an unauthenticated pull with 401, which broke
+  # CI's docker-compose boot). cgr.dev/chainguard/minio is built from MinIO's
+  # source, kept current, public, and multi-arch (amd64/arm64). Its public
+  # tier only publishes `latest`, so it's pinned by digest — Renovate bumps
+  # the digest. The same image carries the `mc` client and a shell, so the
+  # `minio-init` job below reuses it; it has no curl, hence `mc ready` as the
+  # healthcheck. Mirrored by `minio.image` in k8s/chat-platform/values.yaml.
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: cgr.dev/chainguard/minio:latest@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID before running docker compose up}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY to a long random secret before running docker compose up}
+      MC_HOST_local: http://localhost:9000
     volumes:
       - miniodata:/data
     # 9000 (the S3 API) is bound to localhost so it's reachable from the
@@ -112,7 +114,10 @@ services:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      # `mc ready` polls the server's own health endpoint; the alias comes
+      # from MC_HOST_local rather than stored config, and needs no
+      # credentials.
+      test: ["CMD", "mc", "ready", "local"]
       interval: 2s
       timeout: 5s
       retries: 20
@@ -121,7 +126,7 @@ services:
   # buckets on its own, unlike a managed cloud bucket you'd provision
   # out-of-band before pointing S3_ENDPOINT at it.
   minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    image: cgr.dev/chainguard/minio:latest@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
     depends_on:
       minio:
         condition: service_healthy

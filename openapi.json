@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Api",
-    "version": "0.27.2"
+    "version": "0.28.0"
   },
   "paths": {
     "/users/search": {
@@ -6296,6 +6296,760 @@
           }
         }
       }
+    },
+    "/games/{game}/lobbies": {
+      "get": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.listGameLobbies",
+        "parameters": [
+          {
+            "name": "game",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/GameId"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GameLobbyList",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameLobbyList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.createGameLobby",
+        "parameters": [
+          {
+            "name": "game",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/GameId"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "game",
+                    "hostId",
+                    "phase",
+                    "round",
+                    "passage",
+                    "startsAt",
+                    "endsAt",
+                    "serverNow",
+                    "maxPlayers",
+                    "players",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    },
+                    "game": {
+                      "$ref": "#/components/schemas/GameId"
+                    },
+                    "hostId": {
+                      "type": "number"
+                    },
+                    "phase": {
+                      "$ref": "#/components/schemas/GameLobbyPhase"
+                    },
+                    "round": {
+                      "type": "number"
+                    },
+                    "passage": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "startsAt": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "endsAt": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "serverNow": {
+                      "type": "number"
+                    },
+                    "maxPlayers": {
+                      "type": "number"
+                    },
+                    "players": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GameLobbyPlayer"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{game}/quick-play": {
+      "post": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.quickPlay",
+        "parameters": [
+          {
+            "name": "game",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/GameId"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GameLobby",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameLobby"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/lobbies/{id}": {
+      "get": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.getGameLobby",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GameLobby",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameLobby"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/lobbies/{id}/join": {
+      "post": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.joinGameLobby",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GameLobby",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameLobby"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidGameRequest"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/lobbies/{id}/leave": {
+      "post": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.leaveGameLobby",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/lobbies/{id}/start": {
+      "post": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.startGameLobby",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GameLobby",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameLobby"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidGameRequest"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/lobbies/{id}/finish": {
+      "post": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.finishRace",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GameLobby",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameLobby"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidGameRequest"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinishRaceBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/games/lobbies/{id}/rematch": {
+      "post": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.rematchGameLobby",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GameLobby",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameLobby"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidGameRequest"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{game}/leaderboard": {
+      "get": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.getLeaderboard",
+        "parameters": [
+          {
+            "name": "game",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/GameId"
+            },
+            "required": true
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/LeaderboardPeriod"
+            },
+            "required": false
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Leaderboard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Leaderboard"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8787,6 +9541,296 @@
           }
         },
         "additionalProperties": false
+      },
+      "GameId": {
+        "type": "string",
+        "enum": [
+          "typing"
+        ]
+      },
+      "GameLobbyList": {
+        "type": "object",
+        "required": [
+          "lobbies"
+        ],
+        "properties": {
+          "lobbies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GameLobby"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "GameLobby": {
+        "type": "object",
+        "required": [
+          "id",
+          "game",
+          "hostId",
+          "phase",
+          "round",
+          "passage",
+          "startsAt",
+          "endsAt",
+          "serverNow",
+          "maxPlayers",
+          "players",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "game": {
+            "$ref": "#/components/schemas/GameId"
+          },
+          "hostId": {
+            "type": "number"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/GameLobbyPhase"
+          },
+          "round": {
+            "type": "number"
+          },
+          "passage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startsAt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "serverNow": {
+            "type": "number"
+          },
+          "maxPlayers": {
+            "type": "number"
+          },
+          "players": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GameLobbyPlayer"
+            }
+          },
+          "createdAt": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GameLobbyPhase": {
+        "type": "string",
+        "enum": [
+          "waiting",
+          "countdown",
+          "racing",
+          "finished"
+        ]
+      },
+      "GameLobbyPlayer": {
+        "type": "object",
+        "required": [
+          "user",
+          "joinedAt",
+          "durationMs",
+          "score",
+          "accuracy",
+          "place"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/User"
+          },
+          "joinedAt": {
+            "type": "number"
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "place": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "InvalidGameRequest": {
+        "type": "object",
+        "required": [
+          "message",
+          "_tag"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "InvalidGameRequest"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "FinishRaceBody": {
+        "type": "object",
+        "required": [
+          "typed",
+          "errors"
+        ],
+        "properties": {
+          "typed": {
+            "type": "string",
+            "description": "a string at most 2000 character(s) long",
+            "title": "maxLength(2000)",
+            "maxLength": 2000
+          },
+          "errors": {
+            "type": "integer",
+            "description": "a number between 0 and 100000",
+            "title": "between(0, 100000)",
+            "minimum": 0,
+            "maximum": 100000
+          }
+        },
+        "additionalProperties": false
+      },
+      "LeaderboardPeriod": {
+        "type": "string",
+        "enum": [
+          "day",
+          "week",
+          "all"
+        ]
+      },
+      "Leaderboard": {
+        "type": "object",
+        "required": [
+          "game",
+          "period",
+          "entries",
+          "me"
+        ],
+        "properties": {
+          "game": {
+            "$ref": "#/components/schemas/GameId"
+          },
+          "period": {
+            "$ref": "#/components/schemas/LeaderboardPeriod"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardEntry"
+            }
+          },
+          "me": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LeaderboardEntry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "LeaderboardEntry": {
+        "type": "object",
+        "required": [
+          "rank",
+          "user",
+          "bestScore",
+          "averageScore",
+          "averageAccuracy",
+          "races",
+          "wins"
+        ],
+        "properties": {
+          "rank": {
+            "type": "number"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          },
+          "bestScore": {
+            "type": "number"
+          },
+          "averageScore": {
+            "type": "number"
+          },
+          "averageAccuracy": {
+            "type": "number"
+          },
+          "races": {
+            "type": "number"
+          },
+          "wins": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
       }
     },
     "securitySchemes": {
@@ -8824,6 +9868,9 @@
     },
     {
       "name": "admin"
+    },
+    {
+      "name": "games"
     }
   ]
 }
