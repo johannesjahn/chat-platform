@@ -43,10 +43,12 @@ export class AttachmentStorage extends Context.Tag("AttachmentStorage")<
 // indefinitely.
 const PRESIGNED_URL_TTL_SECONDS = 15 * 60;
 
-// Real S3-compatible backend (AWS S3, Cloudflare R2, GCS's S3-compat API, or
-// MinIO in local/in-cluster dev — see k8s/chat-platform's `minio.enabled`
-// values flag and docker-compose.yml) via Bun's native `S3Client`. Used
-// whenever `S3_ENDPOINT` is configured.
+// Real S3-compatible backend (Garage in docker-compose.yml and the Helm
+// chart's `garage.enabled`, or a managed bucket such as Cloudflare R2,
+// Backblaze B2, or AWS S3) via Bun's native `S3Client`. Used whenever
+// `S3_ENDPOINT` is configured. `S3_REGION` has to match the store's own region
+// — Garage rejects SigV4 signatures scoped to any other (Bun defaults to
+// "auto").
 export const S3AttachmentStorageLive = Layer.sync(AttachmentStorage, () => {
   const client = new S3Client({
     bucket: process.env.S3_BUCKET_NAME,
@@ -58,7 +60,7 @@ export const S3AttachmentStorageLive = Layer.sync(AttachmentStorage, () => {
 
   // `S3_ENDPOINT` is what *this process* uses to reach the bucket — inside
   // docker-compose/Kubernetes that's normally an internal service hostname
-  // (e.g. `http://minio:9000`), which isn't reachable from a browser holding
+  // (e.g. `http://garage:3900`), which isn't reachable from a browser holding
   // a presigned URL. When the browser-facing address differs,
   // `S3_PUBLIC_ENDPOINT` gives presigned URLs the public host instead.
   //

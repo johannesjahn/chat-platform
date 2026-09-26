@@ -1,0 +1,157 @@
+{{- if .Values.garage.enabled }}
+{{- $fullname := include "chat-platform.fullname" . -}}
+{{- $uid := int .Values.garage.securityContext.runAsUser -}}
+{{- $gid := int .Values.garage.securityContext.runAsGroup -}}
+# In-cluster S3-compatible object storage for file/media uploads (issue #221,
+# moved from MinIO to Garage in issue #424) — see src/AttachmentStorage.ts.
+# Mirrors docker-compose.yml's `garage` service. Disable (garage.enabled:
+# false) and point backend.s3.* at a managed bucket (Cloudflare R2, Backblaze
+# B2, AWS S3) to take storage state out of the cluster instead.
+#
+# `--single-node --default-bucket` has Garage lay out its own one-node
+# cluster, import the S3 key pair from garage.auth.existingSecret, and create
+# garage.bucketName granted to it — on every boot, idempotently — so there's
+# no separate bucket-init Job the way MinIO needed one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-garage
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+spec:
+  # A single replica writing to its own volume — Recreate avoids two pods
+  # ever mounting the same ReadWriteOnce PVC at once during a rollout
+  # (mirrors redis-deployment.yaml).
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "chat-platform.selectorLabels" (dict "Release" .Release "Chart" .Chart "component" "garage") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "chat-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: garage
+      annotations:
+        # Roll the pod when garage.toml changes — Garage only reads it at boot.
+        checksum/config: {{ include (print $.Template.BasePath "/garage-configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsUser: {{ $uid }}
+        runAsGroup: {{ $gid }}
+        runAsNonRoot: true
+        # Covers volume types that honor it. It has no effect on hostPath
+        # volumes (microk8s-hostpath included) — that's what the
+        # initContainer below is for.
+        fsGroup: {{ $gid }}
+      initContainers:
+        # Hands the data volume to Garage's non-root uid/gid on every start.
+        # `fsGroup` can't do this for hostPath-backed PVCs, which is how the
+        # MinIO image switch took attachments down (#424: root-owned data, a
+        # non-root server, crash loop until a manual `chown` on the node).
+        # Re-running it each start also repairs a restore of root-owned data.
+        # The only container here that runs as root, and it only chowns.
+        - name: volume-permissions
+          image: "{{ .Values.garage.initImage.repository }}:{{ .Values.garage.initImage.tag }}"
+          command:
+            - /bin/sh
+            - -c
+            - mkdir -p /var/lib/garage/meta /var/lib/garage/data && chown -R {{ $uid }}:{{ $gid }} /var/lib/garage
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/garage
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: garage
+          # `FROM scratch`: just the /garage binary, so it runs as whatever
+          # uid it's given.
+          image: "{{ .Values.garage.image.repository }}:{{ .Values.garage.image.tag }}"
+          command: ["/garage", "server", "--single-node", "--default-bucket"]
+          env:
+            - name: GARAGE_RPC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "chat-platform.garageSecretName" . }}
+                  key: rpc-secret
+            - name: GARAGE_DEFAULT_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "chat-platform.garageSecretName" . }}
+                  key: access-key
+            - name: GARAGE_DEFAULT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "chat-platform.garageSecretName" . }}
+                  key: secret-key
+            - name: GARAGE_DEFAULT_BUCKET
+              value: {{ .Values.garage.bucketName | quote }}
+          ports:
+            - containerPort: 3900
+              name: s3
+            - containerPort: 3903
+              name: admin
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/garage
+            - name: config
+              mountPath: /etc/garage.toml
+              subPath: garage.toml
+              readOnly: true
+          # /health answers 200 only once the node's layout is up and it can
+          # serve requests.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          # Liveness only checks the S3 listener is up, so a transiently
+          # unhealthy /health doesn't get the pod restarted.
+          livenessProbe:
+            tcpSocket:
+              port: s3
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.garage.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fullname }}-garage
+        - name: data
+          {{- if .Values.garage.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $fullname }}-garage
+          {{- else }}
+          # Garage needs a writable metadata/data directory regardless (the
+          # root filesystem is read-only) — non-persistent, lost on restart.
+          emptyDir: {}
+          {{- end }}
+{{- end }}

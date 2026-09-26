@@ -1,0 +1,33 @@
+{{- if .Values.garage.enabled }}
+# Garage's config file (mirrors docker-compose.yml's `garage-config`). The RPC
+# secret and the default S3 key/bucket come from the Deployment's env instead
+# (see garage-deployment.yaml), so nothing secret lives in here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-garage
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+data:
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir = "/var/lib/garage/data"
+    # SQLite rather than Garage's default LMDB: LMDB's metadata store can be
+    # corrupted by an unclean shutdown and maps its whole database into
+    # memory, while this deployment is tiny and RAM-constrained.
+    db_engine = "sqlite"
+    replication_factor = 1
+    # Single node (`--single-node`) — nothing outside the pod needs RPC.
+    rpc_bind_addr = "127.0.0.1:3901"
+
+    [s3_api]
+    api_bind_addr = "0.0.0.0:3900"
+    s3_region = {{ .Values.garage.region | quote }}
+
+    # Only for the kubelet's /health probe. With no admin_token set, every
+    # privileged admin endpoint is disabled (answers 403); /health and
+    # /metrics stay open. The Service below doesn't expose this port.
+    [admin]
+    api_bind_addr = "0.0.0.0:3903"
+{{- end }}

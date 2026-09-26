@@ -18,7 +18,7 @@ const savedEnv: Record<string, string | undefined> = {};
 beforeEach(() => {
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   process.env.S3_BUCKET_NAME = "test-bucket";
-  process.env.S3_ENDPOINT = "http://internal-minio:9000";
+  process.env.S3_ENDPOINT = "http://internal-garage:3900";
   process.env.S3_REGION = "us-east-1";
   process.env.S3_ACCESS_KEY_ID = "test-access-key";
   process.env.S3_SECRET_ACCESS_KEY = "test-secret-key";
@@ -41,8 +41,8 @@ const presignGetUrl = (key: string) =>
 test("presignGetUrl signs against S3_ENDPOINT when no public endpoint is configured", async () => {
   const url = new URL(await presignGetUrl("attachments/some-key"));
 
-  expect(url.hostname).toBe("internal-minio");
-  expect(url.port).toBe("9000");
+  expect(url.hostname).toBe("internal-garage");
+  expect(url.port).toBe("3900");
 });
 
 test("presignGetUrl signs against S3_PUBLIC_ENDPOINT's host and port directly, not by rewriting the S3_ENDPOINT URL (#246)", async () => {

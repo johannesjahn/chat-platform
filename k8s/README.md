@@ -1,7 +1,7 @@
 # Kubernetes deployment
 
 This directory contains a Helm chart ([`chat-platform/`](chat-platform/)) that
-deploys the **backend**, **Postgres**, **Redis**, and **MinIO** to a
+deploys the **backend**, **Postgres**, **Redis**, and **Garage** to a
 Kubernetes cluster.
 It takes inspiration from
 [johannesjahn/chat-api-helm](https://github.com/johannesjahn/chat-api-helm),
@@ -23,14 +23,15 @@ itself — see
 
 ## What's in the chart
 
-| Component  | Kind                               | Notes                                                                                                                                                                                                                                                                                                                  |
-| ---------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `backend`  | `Deployment` + `Service`           | The Bun/Effect API. `Ingress` optional (on by default).                                                                                                                                                                                                                                                                |
-| `migrate`  | `Job`                              | Runs Drizzle database migrations standalone prior to Deployment rollouts (Helm `pre-install,pre-upgrade` hook).                                                                                                                                                                                                        |
-| `postgres` | `StatefulSet` + headless `Service` | Persisted via a `volumeClaimTemplate` (disable with `postgres.persistence.enabled=false`).                                                                                                                                                                                                                             |
-| `redis`    | `Deployment` + `Service`           | Backs realtime Pub/Sub fan-out and rate limiting; no persistence by default.                                                                                                                                                                                                                                           |
-| `minio`    | `Deployment` + `Service` + `Job`   | S3-compatible object storage backing file/media uploads (issue #221). Persisted via a PVC. The `Job` (`minio-init`) creates the upload bucket, since MinIO doesn't do that on its own. Disable with `minio.enabled=false` and set `backend.s3.*` to use a real cloud bucket (AWS S3, Cloudflare R2, GCS) instead.      |
-| secrets    | `Secret`                           | `JWT_SECRET`, the Postgres password, the Redis password, and (when `minio.enabled`) MinIO's access/secret key pair. `values.yaml` defaults all of these to `existingSecret`, pointing at Secrets (`jwt`, `postgres-password`, `redis-password`, `minio-credentials`) created once by hand in-cluster — see note below. |
+| Component  | Kind                                 | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend`  | `Deployment` + `Service`             | The Bun/Effect API. `Ingress` optional (on by default).                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `migrate`  | `Job`                                | Runs Drizzle database migrations standalone prior to Deployment rollouts (Helm `pre-install,pre-upgrade` hook).                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `postgres` | `StatefulSet` + headless `Service`   | Persisted via a `volumeClaimTemplate` (disable with `postgres.persistence.enabled=false`).                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `redis`    | `Deployment` + `Service`             | Backs realtime Pub/Sub fan-out and rate limiting; no persistence by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `garage`   | `Deployment` + `Service` + `Ingress` | S3-compatible object storage ([Garage](https://garagehq.deuxfleurs.fr)) backing file/media uploads (issues #221, #424). Persisted via a PVC. Creates its own bucket and imports its S3 key on boot (`--single-node --default-bucket`), so there is no init `Job`. Runs as non-root. An initContainer chowns the volume on every start, because `fsGroup` has no effect on hostPath volumes. Disable with `garage.enabled=false` and set `backend.s3.*` to use a managed bucket (Cloudflare R2, Backblaze B2, AWS S3) instead. |
+| `minio`    | `Deployment` + `Service` + `Job`     | **Transitional** (issue #424): the pre-Garage attachment store, kept running only so the `minio-migrate` hook `Job` can copy its bucket into Garage. See [Migrating off MinIO](#migrating-off-minio).                                                                                                                                                                                                                                                                                                                         |
+| secrets    | `Secret`                             | `JWT_SECRET`, the Postgres password, the Redis password, and (when `garage.enabled`) Garage's S3 key pair and RPC secret. `values.yaml` defaults all of these to `existingSecret`, pointing at Secrets (`jwt`, `postgres-password`, `redis-password`, `garage-credentials`) created once by hand in-cluster. See the note below.                                                                                                                                                                                              |
 
 Nothing here builds the backend's container image — the chart just deploys
 one. Build and push the repo-root [`Dockerfile`](../Dockerfile) to a
@@ -69,41 +70,44 @@ for the full set, with comments):
   Defaults assume an `nginx` `IngressClass` and cert-manager with a
   `letsencrypt-prod` `ClusterIssuer`; adjust or set `backend.ingress.enabled:
 false` if your cluster's setup differs.
-- `postgres.persistence.*` / `redis.persistence.*` / `minio.persistence.*` —
+- `postgres.persistence.*` / `redis.persistence.*` / `garage.persistence.*` —
   size and `storageClassName` (empty uses the cluster default).
 - `backend.resources` / `postgres.resources` / `redis.resources` /
-  `minio.resources` — memory requests are kept at a realistic steady-state
+  `garage.resources` — memory requests are kept at a realistic steady-state
   figure (~half of each limit) rather than a token floor, since requests are
   what the scheduler packs a node with: a limit far above the request lets a
   node accept more pods than it can actually feed. This chart's workloads sum
   to ~1.4Gi of memory requests and ~2.8Gi of limits; see
   [`observability/README.md`](observability/README.md#resource-footprint) for
   the whole-node picture including the observability stack.
-- `minio.enabled` — set to `false` to skip deploying MinIO entirely and
-  point the backend at a real cloud bucket instead via `backend.s3.endpoint`
+- `garage.enabled` — set to `false` to skip deploying Garage entirely and
+  point the backend at a managed bucket instead via `backend.s3.endpoint`
   / `backend.s3.bucketName` / `backend.s3.region` /
   `backend.s3.existingSecret` (see `src/AttachmentStorage.ts`).
   `backend.s3.publicEndpoint` only matters if `backend.s3.endpoint` isn't
   already reachable from the browser.
 - `jwt.existingSecret` / `postgres.auth.existingSecret` /
-  `redis.auth.existingSecret` / `minio.auth.existingSecret` — **required**,
+  `redis.auth.existingSecret` / `garage.auth.existingSecret` — **required**,
   the name of a pre-existing Secret holding each value (the chart no longer
   generates these itself — see below for why). This repo's `values.yaml`
   defaults all four to Secrets (`jwt`, `postgres-password`,
-  `redis-password`, `minio-credentials`) created once by hand, e.g.:
+  `redis-password`, `garage-credentials`) created once by hand, e.g.:
   ```bash
   kubectl create secret generic postgres-password -n chat-platform \
     --from-literal=postgres-password="$(openssl rand -base64 24)"
   ```
   (same for `redis-password` / `jwt`, each with a data key matching its own
   Secret name — the chart reads the key by that same name, so there's no
-  separate key field to set). `minio-credentials` is the exception — it
-  holds a credential _pair_, so its data keys are fixed names instead
-  (`access-key`/`secret-key`) rather than matching the Secret's own name:
+  separate key field to set). `garage-credentials` is the exception. It
+  holds several values, so its data keys have fixed names instead of
+  matching the Secret's own name: `access-key`/`secret-key` (the S3 key
+  pair; Garage requires a secret key of at least 16 characters) and
+  `rpc-secret` (exactly 64 hex characters):
   ```bash
-  kubectl create secret generic minio-credentials -n chat-platform \
+  kubectl create secret generic garage-credentials -n chat-platform \
     --from-literal=access-key=chat-platform \
-    --from-literal=secret-key="$(openssl rand -base64 24)"
+    --from-literal=secret-key="$(openssl rand -hex 32)" \
+    --from-literal=rpc-secret="$(openssl rand -hex 32)"
   ```
   **Why not have the chart auto-generate these
   password on first install?** An earlier version did exactly that (leave
@@ -139,6 +143,43 @@ PVC in place if it's still on the previous major version — a no-op once it's
 current. This runs against your live production data with no separate
 staging step, so back up the PVC (e.g. `kubectl exec` a `pg_dumpall` off the
 running pod) before rolling out a major-version bump.
+
+### Migrating off MinIO
+
+Issue #424 replaced MinIO with Garage. Upstream MinIO images are no longer
+anonymously pullable, and the Chainguard fork's switch to uid 65532 caused
+the 2026-09-26 outage. The first release with Garage does the move in place:
+
+1. **Before syncing**, create the `garage-credentials` Secret (see above).
+   Keep `minio-credentials`: the transitional MinIO still uses it.
+2. **Sync/upgrade.** Garage comes up on its own PVC, the backend switches to
+   it, and the `s3.` Ingress host now routes to Garage (same host and TLS
+   Secret, so no DNS or certificate changes). MinIO keeps running with no
+   Ingress. A post-install/post-upgrade hook `Job`
+   (`minio-migrate`, `templates/minio-migrate-job.yaml`) then runs
+   `rclone copy` from the MinIO bucket into Garage, followed by
+   `rclone check --one-way`, which fails the Job if any object is missing or
+   differs. It uses `copy`, never `sync`, so objects uploaded to Garage
+   since the switch are never deleted. Until the Job finishes (seconds for
+   the production bucket), pre-existing attachments return 404 on
+   Garage.
+3. **Verify** the Job's log. It ends with `rclone size` for both buckets,
+   and the Garage count must be at least the MinIO count (67 objects in
+   production at the time of the switch). Then open a few old chats/posts
+   with attachments and an avatar or two. Object keys are copied as-is, and
+   presigned URLs are minted fresh on every read, so nothing else needs
+   rewriting:
+   ```bash
+   kubectl logs -n chat-platform job/<release>-chat-platform-minio-migrate-<n>
+   ```
+4. **Turn MinIO off** with `minio.enabled: false`. That removes its
+   Deployment, Service, and the migrate Job. Its PVC is annotated
+   `helm.sh/resource-policy: keep` and
+   `argocd.argoproj.io/sync-options: Prune=false,Delete=false`, so neither
+   Helm nor ArgoCD deletes it. Once you're satisfied, delete it by hand
+   (`kubectl delete pvc <release>-chat-platform-minio`), along with the
+   `minio-credentials` Secret. A later change can then drop the `minio-*`
+   templates and the `minio:` values block.
 
 ### Chart version
 

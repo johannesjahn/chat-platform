@@ -1,0 +1,17 @@
+{{- if and .Values.garage.enabled .Values.garage.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-garage
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.garage.persistence.storageClassName }}
+  storageClassName: {{ .Values.garage.persistence.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.garage.persistence.size | quote }}
+{{- end }}

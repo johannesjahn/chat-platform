@@ -128,8 +128,9 @@ This is a two-package repo:
   `REDIS_URL` is set, so multiple horizontally-scaled instances share events
   — see [`src/Realtime.ts`](src/Realtime.ts). `docker compose up` (see
   [`docker-compose.yml`](docker-compose.yml) and [`Dockerfile`](Dockerfile))
-  runs a real Postgres and Redis plus the backend wired to both. Sources in
-  `src/`.
+  runs a real Postgres, Redis, and Garage (S3-compatible attachment storage —
+  see [`src/AttachmentStorage.ts`](src/AttachmentStorage.ts)) plus the backend
+  wired to all three. Sources in `src/`.
 - **Frontend** (`web/`): TanStack Start (React) in SPA mode, calling the backend
   over HTTP. Has its own `package.json`.
 

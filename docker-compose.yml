@@ -81,65 +81,55 @@ services:
       retries: 20
 
   # S3-compatible object storage for file/media uploads (issue #221) — see
-  # src/AttachmentStorage.ts. In production this is replaced by a real
-  # cloud bucket (AWS S3, Cloudflare R2, GCS) by pointing S3_ENDPOINT there
-  # instead; MinIO exists purely for dev-prod parity in local/in-cluster dev
-  # (mirrored by the Helm chart's `minio.enabled` flag).
+  # src/AttachmentStorage.ts. Garage (https://garagehq.deuxfleurs.fr), which
+  # replaced MinIO (issue #424): upstream MinIO's images stopped being
+  # anonymously pullable, and Garage is a single small binary built for
+  # exactly this kind of self-hosted, low-RAM setup. Mirrored by the Helm
+  # chart's `garage.*` values; point S3_ENDPOINT at a managed bucket instead
+  # to skip it entirely.
   #
-  # Chainguard's MinIO build, not MinIO's own images: upstream's `minio/minio`
-  # and `minio/mc` are no longer anonymously pullable from either Docker Hub
-  # or quay.io (both now answer an unauthenticated pull with 401, which broke
-  # CI's docker-compose boot). cgr.dev/chainguard/minio is built from MinIO's
-  # source, kept current, public, and multi-arch (amd64/arm64). Its public
-  # tier only publishes `latest`, so it's pinned by digest — Renovate bumps
-  # the digest. The same image carries the `mc` client and a shell, so the
-  # `minio-init` job below reuses it; it has no curl, hence `mc ready` as the
-  # healthcheck. Mirrored by `minio.image` in k8s/chat-platform/values.yaml.
-  minio:
-    image: cgr.dev/chainguard/minio:latest@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
-    command: server /data --console-address ":9001"
+  # `--single-node --default-bucket` has Garage set up its own one-node
+  # cluster layout, import S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY as an S3 key,
+  # and create the bucket (granted to that key) on boot — idempotently, so
+  # there's no separate bucket-init service the way MinIO needed one. The
+  # image is `FROM scratch` (just the `/garage` binary, no shell), versioned,
+  # and anonymously pullable from Docker Hub; mirrored by `garage.image` in
+  # k8s/chat-platform/values.yaml. It runs as root here since a fresh named
+  # volume is root-owned (the chart runs it non-root — see
+  # garage-statefulset.yaml).
+  garage:
+    image: dxflrs/garage:v2.4.1
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID before running docker compose up}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY to a long random secret before running docker compose up}
-      MC_HOST_local: http://localhost:9000
+      # Garage refuses to start without an RPC secret (64 hex chars) even on
+      # a single node. RPC only listens on the container's own loopback (see
+      # garage.toml below), but it grants full cluster control, so there's
+      # no well-known default — generate one with `openssl rand -hex 32`.
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?Set GARAGE_RPC_SECRET to 64 random hex characters (openssl rand -hex 32) before running docker compose up}
+      GARAGE_DEFAULT_ACCESS_KEY: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID before running docker compose up}
+      # Garage rejects secret keys shorter than 16 characters.
+      GARAGE_DEFAULT_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY to a long random secret before running docker compose up}
+      GARAGE_DEFAULT_BUCKET: ${S3_BUCKET_NAME:-chat-platform-attachments}
+    configs:
+      - source: garage-config
+        target: /etc/garage.toml
     volumes:
-      - miniodata:/data
-    # 9000 (the S3 API) is bound to localhost so it's reachable from the
+      - garagedata:/var/lib/garage
+    # 3900 (the S3 API) is bound to localhost so it's reachable from the
     # *browser* too, not just the `app` container — presigned attachment
     # URLs point at whatever S3_PUBLIC_ENDPOINT below resolves to, and on a
-    # dev machine that's this host's localhost. 9001 is the web console, for
-    # poking at the bucket by hand; neither is meant to be exposed beyond
-    # local dev.
+    # dev machine that's this host's localhost. Not meant to be exposed
+    # beyond local dev.
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "127.0.0.1:3900:3900"
     healthcheck:
-      # `mc ready` polls the server's own health endpoint; the alias comes
-      # from MC_HOST_local rather than stored config, and needs no
-      # credentials.
-      test: ["CMD", "mc", "ready", "local"]
+      # No shell or curl in the image, so ask the binary itself — it talks
+      # to the local node over RPC using GARAGE_RPC_SECRET from the
+      # environment above.
+      test: ["CMD", "/garage", "status"]
       interval: 2s
       timeout: 5s
       retries: 20
-
-  # One-shot: creates the bucket `app` uploads into. MinIO doesn't create
-  # buckets on its own, unlike a managed cloud bucket you'd provision
-  # out-of-band before pointing S3_ENDPOINT at it.
-  minio-init:
-    image: cgr.dev/chainguard/minio:latest@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-chat-platform-attachments}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID before running docker compose up}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY to a long random secret before running docker compose up}
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 \"$$S3_ACCESS_KEY_ID\" \"$$S3_SECRET_ACCESS_KEY\" &&
-      mc mb --ignore-existing local/\"$$S3_BUCKET_NAME\"
-      "
-    restart: "no"
 
   # Runs Drizzle migrations to completion before the `app` service boots,
   # matching the Helm chart's pre-upgrade migration Job (see issue #178).
@@ -178,11 +168,14 @@ services:
       # forge an admin access token (see src/Jwt.ts).
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a long random secret before running docker compose up}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3001}
-      # `app` reaches MinIO over the compose network by service name, but a
+      # `app` reaches Garage over the compose network by service name, but a
       # presigned URL handed to the browser needs the host-mapped address
       # instead — see src/AttachmentStorage.ts's S3_PUBLIC_ENDPOINT.
-      S3_ENDPOINT: http://minio:9000
-      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_ENDPOINT: http://garage:3900
+      S3_PUBLIC_ENDPOINT: http://localhost:3900
+      # Must match `s3_region` in garage.toml below — Garage rejects SigV4
+      # signatures scoped to any other region (Bun's default is "auto").
+      S3_REGION: garage
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-chat-platform-attachments}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID before running docker compose up}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY to a long random secret before running docker compose up}
@@ -191,8 +184,8 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
+      garage:
+        condition: service_healthy
     # Readiness (see src/Health.ts's `/ready`), not just liveness — confirms
     # the app can actually reach `db`/`redis` before compose reports it
     # healthy, matching the Dockerfile's own (liveness-only) HEALTHCHECK.
@@ -211,4 +204,24 @@ services:
 
 volumes:
   pgdata:
-  miniodata:
+  garagedata:
+
+configs:
+  # Mirrors the chart's garage-configmap.yaml. The RPC secret and default
+  # key/bucket come from the `garage` service's environment instead, so
+  # nothing secret lives in here.
+  garage-config:
+    content: |
+      metadata_dir = "/var/lib/garage/meta"
+      data_dir = "/var/lib/garage/data"
+      # SQLite rather than Garage's default LMDB: LMDB's metadata store can
+      # be corrupted by an unclean shutdown and maps its whole database into
+      # memory, while this deployment is tiny and RAM-constrained.
+      db_engine = "sqlite"
+      replication_factor = 1
+      # Single node — nothing outside this container needs to reach RPC.
+      rpc_bind_addr = "127.0.0.1:3901"
+
+      [s3_api]
+      api_bind_addr = "0.0.0.0:3900"
+      s3_region = "garage"

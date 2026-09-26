@@ -1,0 +1,19 @@
+{{- if .Values.garage.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-garage
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "chat-platform.selectorLabels" (dict "Release" .Release "Chart" .Chart "component" "garage") | nindent 4 }}
+  # Only the S3 API. The admin port (3903) is for the kubelet's probes and
+  # stays pod-local; RPC (3901) only listens on the pod's loopback.
+  ports:
+    - port: 3900
+      targetPort: s3
+      name: s3
+{{- end }}
