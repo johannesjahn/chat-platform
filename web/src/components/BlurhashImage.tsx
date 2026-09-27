@@ -1,5 +1,5 @@
 import { decode } from "blurhash";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 type BlurhashImageProps = {
@@ -27,14 +27,17 @@ const FALLBACK_ASPECT_RATIO = "4 / 3";
 // `bg-muted` box (issue #248). `width`/`height` (when known) fix the
 // container's aspect ratio up front so nothing shifts as the image loads.
 //
-// Keyed by `src` internally (see the wrapper below) so `Inner`'s `loaded`
-// state always starts fresh for a new image instead of needing an effect to
-// reset it on prop change.
-export function BlurhashImage(props: BlurhashImageProps) {
-  return <BlurhashImageInner key={props.src} {...props} />;
-}
-
-function BlurhashImageInner({
+// A new `src` for an image that's already on screen — in practice the same
+// attachment under a re-signed presigned URL once the old one nears expiry
+// (see lib/stableAttachmentUrls.ts) — must not drop back to the blur: the
+// new URL is loaded and decoded off-screen and only swapped in once it can
+// paint immediately, so the visible pixels never go away. A `src` change
+// before anything has loaded just switches straight over.
+//
+// Likewise an image the browser already has (the same card re-rendered after
+// navigating away and back) is shown as-is on mount — no blur placeholder, no
+// fade/blur-in replay — so returning to a page doesn't look like it reloaded.
+export function BlurhashImage({
   src,
   alt,
   width,
@@ -43,7 +46,49 @@ function BlurhashImageInner({
   className,
 }: BlurhashImageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [loaded, setLoaded] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+  // The `src` actually rendered, whether its pixels have loaded, and whether
+  // they were there without a visible load (browser cache, or a swap below)
+  // — in which case there's nothing to animate in.
+  const [shown, setShown] = useState({ src, loaded: false, instant: false });
+
+  // Nothing painted yet, so there's nothing to keep on screen — adopt the
+  // new `src` during render rather than in an effect (React's "adjusting
+  // state when a prop changes" pattern), so there's no frame of the old one.
+  if (src !== shown.src && !shown.loaded) {
+    setShown({ src, loaded: false, instant: false });
+  }
+
+  // Already decoded from the browser's image cache by the time we commit:
+  // mark it loaded before the first paint instead of fading it in from the
+  // placeholder.
+  useLayoutEffect(() => {
+    const img = imgRef.current;
+    if (shown.loaded || !img?.complete || img.naturalWidth === 0) return;
+    setShown({ src: shown.src, loaded: true, instant: true });
+  }, [shown.src, shown.loaded]);
+
+  useEffect(() => {
+    if (src === shown.src || !shown.loaded) return;
+    let cancelled = false;
+    const next = new Image();
+    next.src = src;
+    next.decode().then(
+      () => {
+        if (!cancelled) setShown({ src, loaded: true, instant: true });
+      },
+      // Broken/expired new URL: switch anyway so the `<img>` reflects the
+      // real `src` (and its failure) rather than silently pinning the old one.
+      () => {
+        if (!cancelled) setShown({ src, loaded: false, instant: false });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [src, shown.src, shown.loaded]);
+
+  const { loaded, instant } = shown;
 
   useEffect(() => {
     if (!blurhash) return;
@@ -76,24 +121,32 @@ function BlurhashImageInner({
           height={CANVAS_SIZE_PX}
           aria-hidden="true"
           className={cn(
-            "absolute inset-0 h-full w-full object-cover transition-opacity duration-300",
+            "absolute inset-0 h-full w-full object-cover",
+            !instant && "transition-opacity duration-300",
             loaded ? "opacity-0" : "opacity-100",
           )}
         />
       )}
       <img
-        src={src}
+        ref={imgRef}
+        src={shown.src}
         alt={alt}
         loading="lazy"
-        onLoad={() => setLoaded(true)}
+        onLoad={() => {
+          const loadedSrc = shown.src;
+          setShown((current) =>
+            current.src === loadedSrc ? { ...current, loaded: true } : current,
+          );
+        }}
         className={cn(
-          "absolute inset-0 h-full w-full object-cover transition-opacity duration-300",
+          "absolute inset-0 h-full w-full object-cover",
+          !instant && "transition-opacity duration-300",
           loaded ? "opacity-100" : "opacity-0",
           // The real pixels resolve *out of* the blur they're replacing
           // rather than fading in over it as a second, already-sharp layer —
           // it's the same gesture the placeholder was standing in for, so the
           // hand-off stops being a visible swap. See `animate-blur-in`.
-          loaded && "motion-safe:animate-blur-in",
+          loaded && !instant && "motion-safe:animate-blur-in",
         )}
       />
     </div>
