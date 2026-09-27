@@ -280,7 +280,7 @@ garage:
 # this to false (then delete the retained PVC by hand, and in a later change
 # these templates) — see k8s/README.md's "Migrating off MinIO".
 minio:
-  enabled: true
+  enabled: false
 
   # Chainguard's MinIO build, pinned by digest — unchanged from before the
   # switch, so the existing (already re-owned) volume keeps working as-is.
