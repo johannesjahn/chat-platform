@@ -12,7 +12,7 @@ backend:
     # Build & push the repo-root Dockerfile to a registry this cluster can
     # pull from, then point this at it (e.g. ghcr.io/<you>/chat-platform).
     repository: johannesjahn/chat-platform
-    tag: "0.29.0"
+    tag: "0.29.1"
     pullPolicy: IfNotPresent
 
   replicaCount: 2
@@ -280,7 +280,7 @@ garage:
 # this to false (then delete the retained PVC by hand, and in a later change
 # these templates) — see k8s/README.md's "Migrating off MinIO".
 minio:
-  enabled: true
+  enabled: false
 
   # Chainguard's MinIO build, pinned by digest — unchanged from before the
   # switch, so the existing (already re-owned) volume keeps working as-is.
