@@ -27,6 +27,7 @@ import {
   gamesQueryKeyRoot,
 } from "./games/lobby";
 import { noteGameProgress, setGameRoomsSocket } from "./games/rooms";
+import { notificationsQueryKeyRoot } from "./notifications";
 import { setRealtimeSocket } from "./postRooms";
 import { resetPresence, setUserOnline } from "./presence";
 import { mergeReactionCounts } from "./reactions";
@@ -73,7 +74,8 @@ type RealtimeSocketEvent =
       lobbyId: number;
       userId: number;
       progress: number;
-    };
+    }
+  | { type: "notifications_changed" };
 
 // A little more than the default Bun WebSocket idle timeout — sending
 // anything at all (the content is irrelevant, the server ignores incoming
@@ -173,6 +175,9 @@ export function useRealtimeSocket(enabled: boolean): void {
         });
         void queryClient.invalidateQueries({ queryKey: commentsQueryKeyRoot });
         void queryClient.invalidateQueries({ queryKey: gamesQueryKeyRoot });
+        void queryClient.invalidateQueries({
+          queryKey: notificationsQueryKeyRoot,
+        });
       };
 
       socket.onmessage = (event) => {
@@ -366,6 +371,13 @@ export function useRealtimeSocket(enabled: boolean): void {
             break;
           case "game_progress":
             noteGameProgress(parsed.lobbyId, parsed.userId, parsed.progress);
+            break;
+          // Something landed in (or was read from) this user's inbox —
+          // refetch the badge and, if it's open, the list.
+          case "notifications_changed":
+            void queryClient.invalidateQueries({
+              queryKey: notificationsQueryKeyRoot,
+            });
             break;
         }
       };

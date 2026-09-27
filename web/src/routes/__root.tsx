@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import {
+  Bell,
   Gamepad2,
   Gauge,
   LogOut,
@@ -27,6 +28,7 @@ import { VersionFooter } from "@/components/VersionFooter";
 import { logout } from "../lib/api";
 import { useSession } from "../lib/auth";
 import { useTotalUnreadCount } from "../lib/chats";
+import { useUnreadNotificationCount } from "../lib/notifications";
 import { OfflineQueueSync } from "../lib/offlineQueue";
 import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
@@ -98,6 +100,7 @@ function Nav() {
   const router = useRouter();
   useRealtimeSocket(!!session);
   const unreadCount = useTotalUnreadCount(!!session);
+  const unreadNotifications = useUnreadNotificationCount(!!session);
 
   return (
     // `pt-[calc(...)]` rather than `py-3`: `viewport-fit=cover` lets the page
@@ -181,6 +184,31 @@ function Nav() {
           >
             {userLabel(session.user)}
           </Link>
+          <Button
+            asChild
+            variant="ghost"
+            size="icon"
+            className="relative"
+            aria-label={
+              unreadNotifications > 0
+                ? `Notifications (${unreadNotifications} unread)`
+                : "Notifications"
+            }
+          >
+            <Link to="/notifications" className="group/nav-icon">
+              <NavIcon icon={Bell} />
+              {unreadNotifications > 0 && (
+                <span
+                  // Re-keyed like the Chats badge so the pop replays on
+                  // every new notification.
+                  key={unreadNotifications}
+                  className="absolute -right-1 -top-1 flex size-4.5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground motion-safe:animate-badge-pop"
+                >
+                  {unreadNotifications > 99 ? "99+" : unreadNotifications}
+                </span>
+              )}
+            </Link>
+          </Button>
           <Button asChild variant="ghost" size="icon" aria-label="Settings">
             <Link to="/settings" className="group/nav-icon">
               <NavIcon icon={Settings} />

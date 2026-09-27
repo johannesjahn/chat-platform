@@ -167,6 +167,21 @@ export function useLeaveLobby(lobbyId: number) {
   });
 }
 
+// Drops a `game_invite` notification into `userId`'s inbox (see
+// NotificationsHandler.ts) — nothing about the lobby itself changes.
+export function useInviteToLobby(lobbyId: number) {
+  return useMutation({
+    mutationFn: async (userId: number) => {
+      const { error } = await fetchClient.POST("/games/lobbies/{id}/invite", {
+        params: { path: { id: String(lobbyId) } },
+        body: { userId },
+      });
+      if (error !== undefined) throw error;
+      return userId;
+    },
+  });
+}
+
 export function useFinishRace(lobbyId: number, game: GameId) {
   const queryClient = useQueryClient();
   return useMutation({

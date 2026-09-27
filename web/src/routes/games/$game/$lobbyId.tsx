@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { Confetti } from "@/components/games/Confetti";
 import { GamePanel } from "@/components/games/GamePanel";
 import { GameShell } from "@/components/games/GameShell";
+import { InvitePlayers } from "@/components/games/InvitePlayers";
 import { LobbySeats } from "@/components/games/LobbySeats";
 import { PhaseBadge } from "@/components/games/PhaseBadge";
 import { ResultsPodium } from "@/components/games/ResultsPodium";
@@ -241,11 +242,16 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
           live={isHost}
           actions={
             <span className="text-xs text-muted-foreground">
-              Share the invite link to fill the seats
+              Invite players or share the link to fill the seats
             </span>
           }
         >
           <LobbySeats lobby={lobby} meId={meId} />
+          {me && !full && (
+            <div className="flex justify-center">
+              <InvitePlayers lobby={lobby} meId={meId} />
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             {isHost ? (
               <Button

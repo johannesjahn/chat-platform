@@ -233,6 +233,34 @@ which reads the game's colors from the `--game-from`/`--game-to`/`--game-glow`
 custom properties (see the "Games design system" block in
 `web/src/styles.css`) instead of hard-coding them.
 
+## Notifications
+
+In-app notifications (issue #317) — the header bell and the `/notifications`
+inbox — are backed by the `notifications` table (migration `0027`) and the
+`notifications` group in [`src/Api.ts`](src/Api.ts), read by
+[`src/NotificationsHandler.ts`](src/NotificationsHandler.ts). Rows are written
+by the handler that performed the action, always through `createNotifications`
+in [`src/notifications.ts`](src/notifications.ts), which owns the suppression
+rules (never yourself, never from someone you blocked/muted). Types: comment on
+your post, reply to your comment, reaction to either, `@mention` in a post or
+comment, a game-lobby invite (`POST /games/lobbies/:id/invite`), and losing
+your all-time #1 spot on a game's leaderboard.
+
+- **References, not copies.** A row stores ids only; the inbox excerpt is
+  joined in from `posts`/`comments` at read time, and the target FKs cascade,
+  so an edit shows through and a delete removes its notifications. Undoing a
+  reaction retracts its notification.
+- **Mentions parse like the renderer.** The server's `@username` regex mirrors
+  `web/src/lib/mentions.ts`, so only a mention the reader sees as a link
+  notifies. Edits only ping newly added names. Chat messages don't create
+  mention notifications — chats already have their own unread badge.
+- **Live delivery** is an id-less `notifications_changed` event to the
+  recipient (`notifyUsers`); the client refetches the badge/inbox.
+
+To add a notification type: add it to `NotificationType` (Api.ts), call
+`createNotifications` from the handler that causes it, and give it a sentence,
+icon, and link target in `web/src/routes/notifications.tsx`.
+
 Tooling (Prettier, ESLint, TypeScript) lives at the root and covers **both**
 packages — there is a single `eslint.config.js` and `.prettierrc.json`. Run
 lint/format from the repo root; run `typecheck` per package.
