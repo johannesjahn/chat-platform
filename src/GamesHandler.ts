@@ -13,7 +13,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { Context, Effect } from "effect";
+import { Context, Effect, Metric, MetricLabel } from "effect";
 import {
   ChatApi,
   Forbidden,
@@ -21,6 +21,7 @@ import {
   LEADERBOARD_SIZE,
   MAX_GAME_LOBBY_PLAYERS,
   NotFound,
+  TooManyRequests,
   type GameId,
   type GameLobby,
   type GameLobbyPhase,
@@ -33,10 +34,14 @@ import {
   gameLobbies,
   gameLobbyPlayers,
   gameResults,
+  notifications,
   users,
   type DbGameLobby,
 } from "./db/schema.ts";
 import { GAME_RULES } from "./games/rules.ts";
+import { rateLimitRejectionsTotal } from "./Metrics.ts";
+import { createNotifications } from "./notifications.ts";
+import { RateLimiter } from "./RateLimiter.ts";
 import { gameHubRoom, gameLobbyRoom, RealtimeConnections } from "./Realtime.ts";
 import { publicUserColumns, toPublicUser } from "./UsersHandler.ts";
 
@@ -355,6 +360,52 @@ const requireHost = (lobby: DbGameLobby, userId: number, action: string) =>
         new Forbidden({ message: `Only the lobby host can ${action}` }),
       );
 
+// Each invite drops a notification into someone else's inbox, so it gets the
+// same kind of per-user cap as the engagement writes (see
+// EngagementHandler.ts) — generous for a human filling a lobby, but a bound
+// on scripting invites at the whole user directory.
+const GAME_INVITE_MAX_PER_USER = 30;
+const GAME_INVITE_WINDOW_SECONDS = 60;
+
+const enforceInviteLimit = (userId: number) =>
+  Effect.gen(function* () {
+    const limiter = yield* RateLimiter;
+    const result = yield* limiter.consume(
+      `games:invite:user:${userId}`,
+      GAME_INVITE_MAX_PER_USER,
+      GAME_INVITE_WINDOW_SECONDS,
+    );
+    if (!result.allowed) {
+      yield* Metric.update(
+        Metric.taggedWithLabels(rateLimitRejectionsTotal, [
+          MetricLabel.make("limiter", "game_invite"),
+        ]),
+        1,
+      );
+      return yield* Effect.fail(
+        new TooManyRequests({
+          message: "Too many invites. Please try again later.",
+          retryAfterSeconds: result.retryAfterSeconds,
+        }),
+      );
+    }
+  });
+
+// The player holding `game`'s all-time best score right now (earliest to
+// reach it on a tie), or null before anyone has finished a race.
+const currentRecordHolder = (db: DrizzleDb, game: string) =>
+  Effect.tryPromise(() =>
+    db
+      .select({ userId: gameResults.userId, score: gameResults.score })
+      .from(gameResults)
+      .where(eq(gameResults.game, game))
+      .orderBy(desc(gameResults.score), asc(gameResults.id))
+      .limit(1),
+  ).pipe(
+    Effect.orDie,
+    Effect.map((rows) => rows[0] ?? null),
+  );
+
 const leaderboardEntry = (row: {
   rank: number;
   bestScore: number;
@@ -631,6 +682,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               .set({ place })
               .where(eq(gameLobbyPlayers.id, recorded[0]!.id)),
           ).pipe(Effect.orDie);
+          const record = yield* currentRecordHolder(db, lobby.game);
           yield* Effect.tryPromise(() =>
             db.insert(gameResults).values({
               game: lobby.game,
@@ -644,9 +696,109 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               playerCount: players.length,
             }),
           ).pipe(Effect.orDie);
+          // Beating someone else's all-time best tells them — the one
+          // leaderboard change worth a notification, since it's the one
+          // they'd want to win back. Improving your own record is silent.
+          if (
+            record &&
+            record.userId !== currentUser.id &&
+            result.score > record.score
+          ) {
+            yield* createNotifications([
+              {
+                userId: record.userId,
+                actorId: currentUser.id,
+                type: "game_record",
+                game: lobby.game,
+                lobbyId: id,
+              },
+            ]);
+          }
           yield* touchLobby(db, id);
           yield* notifyLobbyChanged(connections, lobby);
           return yield* buildLobby(db, id);
+        }),
+      )
+      .handle("inviteToGameLobby", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const lobby = yield* loadLobbyOr404(db, id);
+          const players = (yield* loadPlayers(db, [id])).get(id) ?? [];
+          if (!players.some((player) => player.user.id === currentUser.id)) {
+            return yield* Effect.fail(
+              new Forbidden({
+                message: "Only players in this lobby can invite others",
+              }),
+            );
+          }
+          if (payload.userId === currentUser.id) {
+            return yield* Effect.fail(
+              new InvalidGameRequest({ message: "You can't invite yourself" }),
+            );
+          }
+          if (lobbyPhase(lobby, players, Date.now()) !== "waiting") {
+            return yield* Effect.fail(
+              new InvalidGameRequest({
+                message: "Invites can only be sent before the race starts",
+              }),
+            );
+          }
+          if (players.some((player) => player.user.id === payload.userId)) {
+            return yield* Effect.fail(
+              new InvalidGameRequest({
+                message: "That player is already in this lobby",
+              }),
+            );
+          }
+          if (players.length >= lobby.maxPlayers) {
+            return yield* Effect.fail(
+              new InvalidGameRequest({ message: "This lobby is full" }),
+            );
+          }
+          const invitee = yield* Effect.tryPromise(() =>
+            db
+              .select({ id: users.id })
+              .from(users)
+              .where(eq(users.id, payload.userId))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          if (invitee.length === 0) {
+            return yield* Effect.fail(
+              new NotFound({ message: "User not found" }),
+            );
+          }
+          yield* enforceInviteLimit(currentUser.id);
+          // Re-inviting someone who hasn't opened the last invite to this
+          // same lobby yet is a no-op rather than a second inbox entry.
+          const pending = yield* Effect.tryPromise(() =>
+            db
+              .select({ id: notifications.id })
+              .from(notifications)
+              .where(
+                and(
+                  eq(notifications.userId, payload.userId),
+                  eq(notifications.actorId, currentUser.id),
+                  eq(notifications.type, "game_invite"),
+                  eq(notifications.lobbyId, id),
+                  isNull(notifications.readAt),
+                ),
+              )
+              .limit(1),
+          ).pipe(Effect.orDie);
+          if (pending.length > 0) return;
+          // A recipient who blocked/muted the caller is silently skipped
+          // inside createNotifications — the response is the same either
+          // way, so an invite can't be used to probe for a block.
+          yield* createNotifications([
+            {
+              userId: payload.userId,
+              actorId: currentUser.id,
+              type: "game_invite",
+              game: lobby.game,
+              lobbyId: id,
+            },
+          ]);
         }),
       )
       .handle("rematchGameLobby", ({ path: { id } }) =>

@@ -19,6 +19,7 @@ import { CurrentUser } from "./Auth.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
+import { notifyMentions } from "./notifications.ts";
 import { postReactionInfo, type ReactionSummary } from "./reactions.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { comments, posts } from "./db/schema.ts";
@@ -68,6 +69,11 @@ const canModify = (
   currentUser: { readonly id: number; readonly role: string },
   post: { readonly authorId: number },
 ): boolean => currentUser.role === "admin" || post.authorId === currentUser.id;
+
+// Whether a post's `content` is prose that can carry `@mentions` — only a
+// "text" post's is rendered as text (with mentions linked, see PostCard.tsx);
+// an "image_url"/"attachment" post's content is never shown as prose.
+const mentionsApply = (contentType: string): boolean => contentType === "text";
 
 // Keyset cursor for `listPosts` over its `id desc` sort — see
 // `PostsPageQuery` in Api.ts for why this is a cursor rather than an offset.
@@ -256,6 +262,13 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             type: "post_changed",
             postId: row.id,
           });
+          if (mentionsApply(row.contentType)) {
+            yield* notifyMentions({
+              actorId: currentUser.id,
+              content: row.content,
+              postId: row.id,
+            });
+          }
           return toApiPost(row, NO_REACTIONS, attachment);
         }),
       )
@@ -312,6 +325,17 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             type: "post_changed",
             postId: row.id,
           });
+          // Only names this edit added are pinged (see notifyMentions).
+          if (mentionsApply(row.contentType)) {
+            yield* notifyMentions({
+              actorId: row.authorId,
+              content: row.content,
+              previousContent: mentionsApply(existing.contentType)
+                ? existing.content
+                : undefined,
+              postId: row.id,
+            });
+          }
           return toApiPost(
             row,
             reactions.get(row.id),
