@@ -458,7 +458,7 @@ jobs:
           # the file, before any service actually builds.
           S3_ACCESS_KEY_ID: ci-docker-build-test-secret
           S3_SECRET_ACCESS_KEY: ci-docker-build-test-secret
-          GARAGE_RPC_SECRET: 0000000000000000000000000000000000000000000000000000000000000000
+          GARAGE_RPC_SECRET: "0000000000000000000000000000000000000000000000000000000000000000"
 
       # Boots the full docker-compose.yml stack (Postgres + Redis + Garage +
       # the image built from the Dockerfile) and waits for the `app`
@@ -476,8 +476,10 @@ jobs:
       # missing bucket/key grant all fail here.
       - name: Boot the stack and smoke-test it
         run: |
-          docker compose up -d
+          # Trap first, so a service that fails to start (which makes `up`
+          # itself exit non-zero) still gets its logs dumped.
           trap 'docker compose logs; docker compose down -v' EXIT
+          docker compose up -d
 
           healthy=false
           for i in $(seq 1 60); do
@@ -511,7 +513,7 @@ jobs:
           JWT_SECRET: ci-docker-build-test-secret
           S3_ACCESS_KEY_ID: ci-docker-build-test-secret
           S3_SECRET_ACCESS_KEY: ci-docker-build-test-secret
-          GARAGE_RPC_SECRET: 0000000000000000000000000000000000000000000000000000000000000000
+          GARAGE_RPC_SECRET: "0000000000000000000000000000000000000000000000000000000000000000"
 
   e2e:
     name: E2E tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
