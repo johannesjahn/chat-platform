@@ -82,3 +82,61 @@ test("search requires a login", async ({ page }) => {
   await page.goto("/search?q=anything");
   await expect(page.getByText("Log in to search")).toBeVisible();
 });
+
+// A message result opens its chat on *that* message — scrolled into view and
+// highlighted — rather than at the bottom of the conversation, even when it's
+// far enough back that the chat has to page earlier history in to reach it.
+test("a message search result opens the chat on the matching message", async ({
+  page,
+  request,
+  apiUrl,
+  browser,
+  injectApiUrl,
+}) => {
+  await registerViaUi(page);
+
+  const otherContext = await browser.newContext();
+  await injectApiUrl(otherContext);
+  const otherPage = await otherContext.newPage();
+  const { username: otherUsername } = await registerViaUi(otherPage);
+  await otherContext.close();
+
+  await page.goto("/chats/new");
+  await page.getByRole("button", { name: "Direct message" }).click();
+  await page.fill("#user-search", otherUsername);
+  await page.getByRole("button", { name: `@${otherUsername}` }).click();
+  await expect(page).toHaveURL(/\/chats\/\d+/);
+  const chatId = page.url().split("/").pop();
+
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  const post = async (content: string) => {
+    const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      data: { contentType: "text", content },
+    });
+    expect(response.ok()).toBe(true);
+    return (await response.json()) as { id: number };
+  };
+
+  // Seeded from outside the chat so it opens cold (see the reply-jump test in
+  // chats.spec.ts for why), with the target pushed out of the first page.
+  await page.goto("/chats");
+  const target = await post("Meet at the lighthouse after sunset");
+  for (let i = 1; i <= 11; i++) {
+    await post(`Filler message ${i}`);
+  }
+
+  await page.goto("/search?q=lighthouse");
+  await page.getByRole("button", { name: "Messages", exact: true }).click();
+  await page.getByRole("link").filter({ hasText: "lighthouse" }).click();
+
+  await expect(page).toHaveURL(
+    new RegExp(`/chats/${chatId}\\?message=${target.id}$`),
+  );
+  const targetBubble = page.locator(`[data-message-id="${target.id}"]`);
+  await expect(targetBubble).toBeInViewport();
+  await expect(targetBubble.getByTestId("jump-highlight")).toBeVisible();
+  await expect(page.locator("[data-message-id]").last()).not.toBeInViewport();
+});
