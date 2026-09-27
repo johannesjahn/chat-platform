@@ -2494,6 +2494,10 @@ export const LeaderboardQuery = Schema.Struct({
   period: Schema.optional(LeaderboardPeriod),
 });
 
+export const GameInviteBody = Schema.Struct({
+  userId: Schema.Number.pipe(Schema.int(), Schema.positive()),
+}).annotations({ identifier: "GameInviteBody" });
+
 const GamesGroup = HttpApiGroup.make("games")
   .add(
     // Lobbies worth showing in the lobby browser: every lobby still
@@ -2581,11 +2585,135 @@ const GamesGroup = HttpApiGroup.make("games")
       .middleware(Authentication),
   )
   .add(
+    // Seated-players-only: invites another user into the caller's lobby. The
+    // invitee gets a `game_invite` notification linking to it — nothing is
+    // reserved for them, so a lobby that fills up or starts in the meantime
+    // is simply not joinable when they arrive. Only while "waiting".
+    HttpApiEndpoint.post("inviteToGameLobby", "/games/lobbies/:id/invite")
+      .setPath(GameLobbyIdPath)
+      .setPayload(GameInviteBody)
+      .addSuccess(Schema.Void)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidGameRequest, { status: 400 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
     // Ranked by each player's best score in the period (default: all time).
     HttpApiEndpoint.get("getLeaderboard", "/games/:game/leaderboard")
       .setPath(GamePath)
       .setUrlParams(LeaderboardQuery)
       .addSuccess(Leaderboard)
+      .middleware(Authentication),
+  );
+
+// --- Notifications (issue #317, see NotificationsHandler.ts) ----------------
+//
+// What happened to the caller's content or to them directly:
+//  - "comment":     `actor` commented on the caller's post.
+//  - "reply":       `actor` replied to the caller's comment.
+//  - "reaction":    `actor` reacted with `emoji` to the caller's post (only
+//                   `postId` set) or comment (`commentId` set too).
+//  - "mention":     `actor` @mentioned the caller in a post (only `postId`)
+//                   or a comment/reply (`commentId` set too).
+//  - "game_invite": `actor` invited the caller into lobby `lobbyId` of
+//                   `game`.
+//  - "game_record": `actor` took the caller's #1 spot on `game`'s all-time
+//                   leaderboard.
+export const NotificationType = Schema.Literal(
+  "comment",
+  "reply",
+  "reaction",
+  "mention",
+  "game_invite",
+  "game_record",
+).annotations({ identifier: "NotificationType" });
+export type NotificationType = typeof NotificationType.Type;
+
+export const Notification = Schema.Struct({
+  id: Schema.Number,
+  type: NotificationType,
+  actor: User,
+  postId: Schema.NullOr(Schema.Number),
+  commentId: Schema.NullOr(Schema.Number),
+  emoji: Schema.NullOr(Schema.String),
+  game: Schema.NullOr(GameId),
+  lobbyId: Schema.NullOr(Schema.Number),
+  // A short plain-text slice of the comment (when `commentId` is set) or
+  // post the notification is about, read live at request time — so it
+  // reflects edits. Null for game notifications and non-text posts.
+  excerpt: Schema.NullOr(Schema.String),
+  read: Schema.Boolean,
+  createdAt: Schema.Number,
+}).annotations({ identifier: "Notification" });
+export type Notification = typeof Notification.Type;
+
+export const DEFAULT_NOTIFICATIONS_LIMIT = 20;
+export const MAX_NOTIFICATIONS_LIMIT = 50;
+
+// Newest first, keyset on id. Anonymous for the reason in CLAUDE.md.
+export const NotificationsPageQuery = Schema.Struct({
+  cursor: Schema.optional(Schema.String),
+  limit: Schema.optional(
+    Schema.NumberFromString.pipe(
+      Schema.int(),
+      Schema.between(1, MAX_NOTIFICATIONS_LIMIT),
+    ),
+  ),
+});
+
+export const NotificationsPage = Schema.Struct({
+  notifications: Schema.Array(Notification),
+  limit: Schema.Number,
+  nextCursor: Schema.NullOr(Schema.String),
+  // Same number `GET /notifications/unread-count` returns, bundled so the
+  // inbox and its badge never disagree after one fetch.
+  unreadCount: Schema.Number,
+}).annotations({ identifier: "NotificationsPage" });
+
+export const UnreadNotificationCount = Schema.Struct({
+  count: Schema.Number,
+}).annotations({ identifier: "UnreadNotificationCount" });
+
+export class InvalidNotificationRequest extends Schema.TaggedError<InvalidNotificationRequest>()(
+  "InvalidNotificationRequest",
+  { message: Schema.String },
+) {}
+
+const NotificationIdPath = Schema.Struct({ id: Schema.NumberFromString });
+
+const NotificationsGroup = HttpApiGroup.make("notifications")
+  .add(
+    HttpApiEndpoint.get("listNotifications", "/notifications")
+      .setUrlParams(NotificationsPageQuery)
+      .addSuccess(NotificationsPage)
+      .addError(InvalidNotificationRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // The header bell's badge — cheap enough to fetch on every page load.
+    HttpApiEndpoint.get(
+      "getUnreadNotificationCount",
+      "/notifications/unread-count",
+    )
+      .addSuccess(UnreadNotificationCount)
+      .middleware(Authentication),
+  )
+  .add(
+    // Registered ahead of `/notifications/:id/read` for the same reason as
+    // `/users/by-username` vs `/users/:id`.
+    HttpApiEndpoint.post("markAllNotificationsRead", "/notifications/read-all")
+      .addSuccess(UnreadNotificationCount)
+      .middleware(Authentication),
+  )
+  .add(
+    // Idempotent. Someone else's notification is a 404, not a 403, so ids
+    // can't be probed.
+    HttpApiEndpoint.post("markNotificationRead", "/notifications/:id/read")
+      .setPath(NotificationIdPath)
+      .addSuccess(UnreadNotificationCount)
+      .addError(NotFound, { status: 404 })
       .middleware(Authentication),
   );
 
@@ -2600,4 +2728,5 @@ export class ChatApi extends HttpApi.make("chat-platform")
   .add(RealtimeGroup)
   .add(AdminGroup)
   .add(GamesGroup)
+  .add(NotificationsGroup)
   .annotate(OpenApi.Version, packageJson.version) {}

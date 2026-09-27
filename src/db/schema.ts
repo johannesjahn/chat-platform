@@ -806,3 +806,70 @@ export const gameResults = pgTable(
 );
 
 export type DbGameResult = typeof gameResults.$inferSelect;
+
+// In-app notifications (issue #317): one row per thing that happened *to*
+// `userId` — someone commented on their post, replied to their comment,
+// reacted to either, @mentioned them, invited them to a game lobby, or took
+// their top spot on a game's leaderboard. Rows are written by the handler
+// that performed the action (see src/notifications.ts), never by a trigger,
+// and are delivered live as an id-less `notifications_changed` realtime
+// event so the client just refetches.
+//
+// The row stores only references, never a copy of the content: the excerpt
+// a client renders is joined in from `posts`/`comments` at read time, so an
+// edit shows through and a delete takes its notifications with it — both
+// target FKs cascade. `lobbyId` is deliberately *not* a foreign key (same as
+// `game_results.lobby_id`): lobbies are ephemeral, and an invite outliving
+// its lobby just links to a "lobby not found" page rather than vanishing
+// from the inbox.
+//
+// `type` is free-form `text` rather than a DB enum so a new kind of
+// notification is a code change, not a migration — the allowed set is
+// `NotificationType` in Api.ts.
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorId: integer("actor_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    postId: integer("post_id").references(() => posts.id, {
+      onDelete: "cascade",
+    }),
+    commentId: integer("comment_id").references(() => comments.id, {
+      onDelete: "cascade",
+    }),
+    // Set only for a `reaction` notification.
+    emoji: text("emoji"),
+    // Set only for the game notifications — the game's slug (see GameId in
+    // Api.ts) and, for an invite, the lobby it points at.
+    game: text("game"),
+    lobbyId: integer("lobby_id"),
+    readAt: timestamp("read_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    // The inbox is one user's rows, newest first, keyset-paginated on id.
+    index("notifications_user_id_id_idx").on(table.userId, table.id),
+    // The bell's unread count only ever looks at unread rows, which stay a
+    // small fraction of an active user's history.
+    index("notifications_user_id_unread_idx")
+      .on(table.userId)
+      .where(sql`${table.readAt} IS NULL`),
+    // Postgres doesn't index FK columns on its own — without these the
+    // cascades from `users`/`posts`/`comments` would scan the table, and
+    // undoing a reaction looks its notification up by target.
+    index("notifications_actor_id_idx").on(table.actorId),
+    index("notifications_post_id_idx").on(table.postId),
+    index("notifications_comment_id_idx").on(table.commentId),
+  ],
+);
+
+export type DbNotification = typeof notifications.$inferSelect;
+export type NewDbNotification = typeof notifications.$inferInsert;

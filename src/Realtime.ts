@@ -173,6 +173,14 @@ export type GameProgressEvent = {
   readonly progress: number;
 };
 
+// Pushed to one user (every tab they have open) whenever their notification
+// inbox changes — a new notification landed, or they marked some read from
+// another tab (issue #317, see src/notifications.ts). Carries nothing: the
+// client refetches the unread count and, if open, the inbox.
+export type NotificationsEvent = {
+  readonly type: "notifications_changed";
+};
+
 // Event payloads mostly carry no data beyond an id — clients refetch the
 // affected queries over the existing REST endpoints rather than trusting a
 // duplicated copy of the state pushed over the socket. Presence/typing are
@@ -190,7 +198,8 @@ export type RealtimeEvent =
   | StatusEvent
   | GameLobbyEvent
   | GameLobbiesEvent
-  | GameProgressEvent;
+  | GameProgressEvent
+  | NotificationsEvent;
 
 // A connected client's outbound channel — bound to one open `/ws` socket.
 type Writer = (chunk: string) => Effect.Effect<void, unknown>;

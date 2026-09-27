@@ -20,6 +20,7 @@ import { Db } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { EngagementHandlerLive } from "./EngagementHandler.ts";
 import { GamesHandlerLive } from "./GamesHandler.ts";
+import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
 import { JwtLive } from "./Jwt.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
@@ -48,6 +49,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(VersionHandlerLive),
   Layer.provide(AdminHandlerLive),
   Layer.provide(GamesHandlerLive),
+  Layer.provide(NotificationsHandlerLive),
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(RealtimeConnectionsLive),
   Layer.provide(AuthenticationLive),

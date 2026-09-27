@@ -18,6 +18,11 @@ import {
   postReactionInfoOne,
   type ReactionSummary,
 } from "./reactions.ts";
+import {
+  createNotifications,
+  notifyMentions,
+  retractReactionNotification,
+} from "./notifications.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { comments, likes, posts } from "./db/schema.ts";
@@ -196,7 +201,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           const connections = yield* RealtimeConnections;
           yield* enforceEngagementLimit(currentUser.id);
-          yield* getPostOr404(id);
+          const post = yield* getPostOr404(id);
           // Idempotent: the (userId, postId, emoji) unique constraint turns a
           // repeat reaction with the same emoji into a no-op rather than a
           // duplicate row or an error. `.returning()` lets us tell an actual
@@ -224,6 +229,15 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               targetId: id,
               reactions: toReactionCounts(reactions),
             });
+            yield* createNotifications([
+              {
+                userId: post.authorId,
+                actorId: currentUser.id,
+                type: "reaction",
+                postId: id,
+                emoji: payload.emoji,
+              },
+            ]);
           }
           return { reactions };
         }),
@@ -260,6 +274,11 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               targetId: id,
               reactions: toReactionCounts(reactions),
             });
+            yield* retractReactionNotification({
+              actorId: currentUser.id,
+              emoji: payload.emoji,
+              postId: id,
+            });
           }
           return { reactions };
         }),
@@ -280,7 +299,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           const connections = yield* RealtimeConnections;
           yield* enforceEngagementLimit(currentUser.id);
-          yield* getPostOr404(id);
+          const post = yield* getPostOr404(id);
           const now = new Date();
           const rows = yield* Effect.tryPromise(() =>
             db
@@ -303,6 +322,24 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             type: "comment_changed",
             postId: id,
             commentId: row.id,
+          });
+          yield* createNotifications([
+            {
+              userId: post.authorId,
+              actorId: currentUser.id,
+              type: "comment",
+              postId: id,
+              commentId: row.id,
+            },
+          ]);
+          // The post's author already hears about this comment above; a
+          // mention of them in it would only notify them twice.
+          yield* notifyMentions({
+            actorId: currentUser.id,
+            content: row.content,
+            postId: id,
+            commentId: row.id,
+            exclude: [post.authorId],
           });
           return toApiComment(row);
         }),
@@ -356,6 +393,22 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             postId: parent.postId,
             commentId: row.id,
           });
+          yield* createNotifications([
+            {
+              userId: parent.authorId,
+              actorId: currentUser.id,
+              type: "reply",
+              postId: parent.postId,
+              commentId: row.id,
+            },
+          ]);
+          yield* notifyMentions({
+            actorId: currentUser.id,
+            content: row.content,
+            postId: parent.postId,
+            commentId: row.id,
+            exclude: [parent.authorId],
+          });
           return toApiComment(row);
         }),
       )
@@ -391,6 +444,16 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               targetId: id,
               reactions: toReactionCounts(reactions),
             });
+            yield* createNotifications([
+              {
+                userId: comment.authorId,
+                actorId: currentUser.id,
+                type: "reaction",
+                postId: comment.postId,
+                commentId: id,
+                emoji: payload.emoji,
+              },
+            ]);
           }
           return { reactions };
         }),
@@ -424,6 +487,11 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               targetId: id,
               reactions: toReactionCounts(reactions),
             });
+            yield* retractReactionNotification({
+              actorId: currentUser.id,
+              emoji: payload.emoji,
+              commentId: id,
+            });
           }
           return { reactions };
         }),
@@ -456,6 +524,16 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
           yield* connections.notifyPostRoom(row.postId, {
             type: "comment_changed",
+            postId: row.postId,
+            commentId: row.id,
+          });
+          // Only names added by this edit are pinged. Attributed to the
+          // comment's author even when an admin made the edit — it's their
+          // words the mention sits in.
+          yield* notifyMentions({
+            actorId: row.authorId,
+            content: row.content,
+            previousContent: existing.content,
             postId: row.postId,
             commentId: row.id,
           });

@@ -18,6 +18,7 @@ import { JwtLive } from "./Jwt.ts";
 import { MetricsRouteLive, recordHttpMetrics } from "./Metrics.ts";
 import { EngagementHandlerLive } from "./EngagementHandler.ts";
 import { GamesHandlerLive } from "./GamesHandler.ts";
+import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { PresenceStoreLive } from "./Presence.ts";
 import { PubSubLive } from "./PubSub.ts";
@@ -54,6 +55,7 @@ const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
   Layer.provide(RealtimeHandlerLive),
   Layer.provide(AdminHandlerLive),
   Layer.provide(GamesHandlerLive),
+  Layer.provide(NotificationsHandlerLive),
   Layer.provide(AuthenticationLive),
   Layer.provide(TokenVersionCacheLive),
   Layer.provide(JwtLive),
