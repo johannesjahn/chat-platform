@@ -125,7 +125,13 @@ backend:
 postgres:
   image:
     repository: postgres
-    tag: "18-alpine"
+    # Pinned to a minor release, not the floating "18-alpine": with the
+    # default IfNotPresent pull policy a node keeps whatever "18-alpine" it
+    # cached first, so the floating tag silently stopped taking patch
+    # releases (production sat on 18.4 while 18.6 was out). Renovate bumps
+    # this, and postgres.upgradeImage reuses it, so pgautoupgrade must
+    # publish the same tag.
+    tag: "18.6-alpine"
 
   # Runs once as an initContainer ahead of the `postgres` container below
   # (see postgres-statefulset.yaml) to pg_upgrade the PVC in place before a
