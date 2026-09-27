@@ -1278,6 +1278,12 @@ test("clicking a reply's quoted snippet jumps the thread to the message it answe
   await expect(anchorBubble).toHaveCount(0);
   await quote.click();
   await expect(anchorBubble).toBeInViewport();
+  // …and is highlighted once it gets there, so it's clear which message the
+  // jump landed on. The highlight clears itself again afterwards.
+  const highlight = anchorBubble.getByTestId("jump-highlight");
+  await expect(highlight).toBeVisible();
+  await expect(highlight).toHaveCSS("animation-name", "jump-flash");
+  await expect(highlight).toHaveCount(0);
 
   // And once it *is* loaded, a jump from the bottom of the thread is a plain
   // scroll — no further fetching.
@@ -1286,4 +1292,5 @@ test("clicking a reply's quoted snippet jumps the thread to the message it answe
   await expect(anchorBubble).not.toBeInViewport();
   await quote.click();
   await expect(anchorBubble).toBeInViewport();
+  await expect(highlight).toBeVisible();
 });

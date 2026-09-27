@@ -74,6 +74,14 @@ type MessageBubbleProps = {
   // this replying to?". Omitted where there's nothing to scroll (e.g. the
   // quoted parent rendered outside the thread).
   onJumpToParent?: () => void;
+  // Set while this message is the one the thread just jumped to (a reply's
+  // quote, a pinned row, a search result), and changed on every new jump to
+  // it so the highlight replays. Rendered as its own overlay element rather
+  // than a class toggled on the row from script: the row already runs
+  // `animate-bubble-in` behind a `motion-safe:` variant, which out-ranks a
+  // plain `animate-jump-flash` in the cascade and swallowed the pulse, and
+  // any re-render of the row's `className` wiped a script-added class anyway.
+  highlightKey?: number;
   style?: CSSProperties;
 };
 
@@ -101,6 +109,7 @@ export function MessageBubble({
   onDelete,
   onReply,
   onJumpToParent,
+  highlightKey,
   style,
 }: MessageBubbleProps) {
   const queryClient = useQueryClient();
@@ -470,7 +479,9 @@ export function MessageBubble({
         } as CSSProperties
       }
       className={cn(
-        "group flex w-full items-center gap-1.5 motion-safe:animate-bubble-in stagger-in",
+        // `relative isolate` gives the jump highlight below something to
+        // position against and a stacking context to sit at the back of.
+        "group relative isolate flex w-full items-center gap-1.5 motion-safe:animate-bubble-in stagger-in",
         // The origin pins the scale to the corner the bubble's tail is on, so
         // the row unfolds from that side instead of shrinking toward its own
         // centre and drifting sideways on the way in.
@@ -479,6 +490,17 @@ export function MessageBubble({
           : "justify-start origin-bottom-left",
       )}
     >
+      {highlightKey != null && (
+        // Keyed by the jump, so a repeat jump to the same message remounts it
+        // and the pulse starts over. Behind the bubble (`-z-10`) so the tint
+        // never washes over the text it's pointing at.
+        <span
+          key={highlightKey}
+          aria-hidden
+          data-testid="jump-highlight"
+          className="pointer-events-none absolute -inset-x-2 -inset-y-1 -z-10 animate-jump-flash"
+        />
+      )}
       {!isOwn && senderAvatar && (
         <Link
           to="/users/$id"

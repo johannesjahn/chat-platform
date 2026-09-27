@@ -589,7 +589,7 @@ function MessageRow({
   chats: readonly MessageSearchChat[];
   currentUserId: number;
 }) {
-  const { sender, snippet, createdAt, chatId } = result;
+  const { id, sender, snippet, createdAt, chatId } = result;
   const chat = chats.find((c) => c.id === chatId);
   const chatName = chat ? messageSearchChatName(chat, currentUserId) : "Chat";
   return (
@@ -597,6 +597,8 @@ function MessageRow({
       <Link
         to="/chats/$id"
         params={{ id: String(chatId) }}
+        // Open the chat on the matching message, not at its newest one.
+        search={{ message: id }}
         className={rowClass}
       >
         <Avatar name={chatName} size="sm" />

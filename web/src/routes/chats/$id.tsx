@@ -50,7 +50,16 @@ import { clearTyping, useTypingUsers } from "@/lib/typing";
 import { userAvatarName, userLabel } from "@/lib/users";
 import { useImmersiveShell } from "@/lib/viewport";
 
+// `?message=<id>` opens the chat scrolled to (and highlighting) that message
+// instead of the newest one — how a message search result lands on the
+// message it matched rather than just the bottom of its conversation.
+type ChatSearch = { message?: number };
+
 export const Route = createFileRoute("/chats/$id")({
+  validateSearch: (search: Record<string, unknown>): ChatSearch => {
+    const message = Number(search.message);
+    return Number.isInteger(message) && message > 0 ? { message } : {};
+  },
   component: ChatViewPage,
 });
 
@@ -66,11 +75,10 @@ const BOTTOM_EPSILON_PX = 24;
 // the whole history.
 const JUMP_MAX_EARLIER_PAGES = 20;
 
-// The one-shot highlight `jumpToMessage` drops on the message it lands on
-// (see `animate-jump-flash`), and how long it's left there — two runs of the
-// 0.9s pulse, which is also roughly how long the static tint the
-// reduced-motion build paints instead should hold for.
-const JUMP_FLASH_CLASS = "animate-jump-flash";
+// How long the highlight `jumpToMessage` puts on the message it lands on (see
+// `highlightKey` on MessageBubble and `animate-jump-flash`) is left there —
+// two runs of the 0.9s pulse, which is also roughly how long the static tint
+// the reduced-motion build paints instead should hold for.
 const JUMP_FLASH_MS = 1800;
 
 // How long a jump's smooth scroll is given to travel and settle before the
@@ -103,13 +111,20 @@ const CHAT_HEADER_CLASS =
 
 function ChatViewPage() {
   const { id } = Route.useParams();
+  const { message } = Route.useSearch();
   // Keyed by `id` so every hook (including the message pagination window in
   // `useChatMessages`) starts fresh when navigating between chats, instead
   // of a stale window "leaking" across chats.
-  return <ChatView key={id} id={id} />;
+  return <ChatView key={id} id={id} targetMessageId={message} />;
 }
 
-function ChatView({ id }: { id: string }) {
+function ChatView({
+  id,
+  targetMessageId,
+}: {
+  id: string;
+  targetMessageId?: number;
+}) {
   const chatId = Number(id);
   const session = useSession();
   const queryClient = useQueryClient();
@@ -186,10 +201,21 @@ function ChatView({ id }: { id: string }) {
   // has had time to land — see `jumpToMessage` for what it holds off.
   const jumpScrollingRef = useRef(false);
   const jumpSettleTimerRef = useRef<number | null>(null);
+  // The message a jump last landed on, plus a counter that changes on every
+  // jump so landing on the same message twice replays its highlight. Cleared
+  // again after `JUMP_FLASH_MS`.
+  const [jumpHighlight, setJumpHighlight] = useState<{
+    messageId: number;
+    key: number;
+  } | null>(null);
+  const jumpHighlightTimerRef = useRef<number | null>(null);
   useEffect(
     () => () => {
       if (jumpSettleTimerRef.current !== null) {
         window.clearTimeout(jumpSettleTimerRef.current);
+      }
+      if (jumpHighlightTimerRef.current !== null) {
+        window.clearTimeout(jumpHighlightTimerRef.current);
       }
     },
     [],
@@ -328,7 +354,13 @@ function ChatView({ id }: { id: string }) {
   // hasn't been paged in yet, so older pages are pulled in a page at a time
   // until it turns up (or the history runs out / the budget below is spent,
   // where it gives up quietly rather than erroring).
-  async function jumpToMessage(messageId: number) {
+  //
+  // `behavior` is "auto" when arriving from outside the chat (a search
+  // result): there's no "where you were" to travel from, so it just lands.
+  async function jumpToMessage(
+    messageId: number,
+    behavior: ScrollBehavior = "smooth",
+  ) {
     // Scrolls to the message if it's rendered, reporting whether it was.
     const scrollToTarget = () => {
       const el = scrollRef.current?.querySelector<HTMLElement>(
@@ -350,21 +382,25 @@ function ChatView({ id }: { id: string }) {
         jumpSettleTimerRef.current = null;
         jumpScrollingRef.current = false;
       }, JUMP_SETTLE_MS);
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      // A double pulse rather than the flat background tint this used to
-      // hold for a second and a half: on a long smooth scroll that tint had
-      // usually already been removed by the time the view arrived, so the
-      // message you jumped to looked like every other one. The animation
-      // restarts cleanly on a repeat jump to the same message (dropping the
-      // class and re-adding it a frame later is what replays it) and needs
-      // no timer to undo itself. See `animate-jump-flash` in styles.css.
-      el.classList.remove(JUMP_FLASH_CLASS);
-      requestAnimationFrame(() => el.classList.add(JUMP_FLASH_CLASS));
+      el.scrollIntoView({ behavior, block: "center" });
+      // A double pulse (see `animate-jump-flash` in styles.css), so the
+      // target is still calling attention to itself once a long smooth
+      // scroll arrives. It's React state rather than a class poked onto the
+      // row, which the row's own entrance animation out-ranked and any
+      // re-render overwrote — see `highlightKey` on MessageBubble.
+      setJumpHighlight((prev) => ({
+        messageId,
+        key: (prev?.key ?? 0) + 1,
+      }));
       // A timer rather than `animationend`, because with motion reduced the
-      // class paints a plain static tint and no animation runs at all — there
-      // would be no event to clean up after, and the tint would never leave.
-      window.setTimeout(() => {
-        el.classList.remove(JUMP_FLASH_CLASS);
+      // highlight paints a plain static tint and no animation runs at all —
+      // there would be no event to clean up after, and it would never leave.
+      if (jumpHighlightTimerRef.current !== null) {
+        window.clearTimeout(jumpHighlightTimerRef.current);
+      }
+      jumpHighlightTimerRef.current = window.setTimeout(() => {
+        jumpHighlightTimerRef.current = null;
+        setJumpHighlight(null);
       }, JUMP_FLASH_MS);
       return true;
     };
@@ -391,6 +427,26 @@ function ChatView({ id }: { id: string }) {
       setLoadingEarlier(false);
     }
   }
+
+  // Arriving with `?message=` (a search result): once the thread has
+  // rendered, jump to that message instead of leaving the view at the bottom.
+  // A layout effect declared after the scroll-to-bottom one above, so on the
+  // commit that first shows the messages it runs second and the thread paints
+  // straight at the target. Once per target: later renders (new messages, a
+  // refetch) mustn't keep yanking the reader back to it. The param stays in
+  // the URL — it works as a link to the message — and following a result
+  // again remounts this view (it's keyed by chat, and search is another
+  // route), so the jump happens afresh.
+  const handledTargetRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (targetMessageId == null || !chatReady || messagesLoading) return;
+    if (handledTargetRef.current === targetMessageId) return;
+    handledTargetRef.current = targetMessageId;
+    void jumpToMessage(targetMessageId, "auto");
+    // `jumpToMessage` is recreated every render; this should only fire when
+    // there's a new target and a thread to find it in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetMessageId, chatReady, messagesLoading]);
 
   // Mark everything up to the newest loaded message as read once we know
   // there's something unread — keeps this chat's badge and the nav badge live.
@@ -774,6 +830,11 @@ function ChatView({ id }: { id: string }) {
                           parentId == null
                             ? undefined
                             : () => void jumpToMessage(parentId)
+                        }
+                        highlightKey={
+                          jumpHighlight?.messageId === message.id
+                            ? jumpHighlight.key
+                            : undefined
                         }
                         senderLabel={
                           chat.type === "group" && sender

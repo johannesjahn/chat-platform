@@ -1494,10 +1494,10 @@ html[data-app-shell="immersive"] body {
     display: none;
   }
 
-  /* The jump highlight is applied from script (see `jumpToMessage`), so
-     unlike everything else here it isn't behind a `motion-safe:` variant and
-     still needs to mark the message it landed on. A flat tint does that
-     without any motion; the caller's timer takes it off again. */
+  /* The jump highlight (see `jumpToMessage` and `highlightKey` on
+     MessageBubble) isn't behind a `motion-safe:` variant like everything else
+     here: it still needs to mark the message it landed on. A flat tint does
+     that without any motion; the caller's timer takes it off again. */
   .animate-jump-flash {
     background-color: color-mix(in oklch, var(--primary), transparent 85%);
   }
