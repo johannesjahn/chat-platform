@@ -30,7 +30,6 @@ itself — see
 | `postgres` | `StatefulSet` + headless `Service`   | Persisted via a `volumeClaimTemplate` (disable with `postgres.persistence.enabled=false`).                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `redis`    | `Deployment` + `Service`             | Backs realtime Pub/Sub fan-out and rate limiting; no persistence by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `garage`   | `Deployment` + `Service` + `Ingress` | S3-compatible object storage ([Garage](https://garagehq.deuxfleurs.fr)) backing file/media uploads (issues #221, #424). Persisted via a PVC. Creates its own bucket and imports its S3 key on boot (`--single-node --default-bucket`), so there is no init `Job`. Runs as non-root. An initContainer chowns the volume on every start, because `fsGroup` has no effect on hostPath volumes. Disable with `garage.enabled=false` and set `backend.s3.*` to use a managed bucket (Cloudflare R2, Backblaze B2, AWS S3) instead. |
-| `minio`    | `Deployment` + `Service` + `Job`     | **Transitional** (issue #424): the pre-Garage attachment store, kept running only so the `minio-migrate` hook `Job` can copy its bucket into Garage. See [Migrating off MinIO](#migrating-off-minio).                                                                                                                                                                                                                                                                                                                         |
 | secrets    | `Secret`                             | `JWT_SECRET`, the Postgres password, the Redis password, and (when `garage.enabled`) Garage's S3 key pair and RPC secret. `values.yaml` defaults all of these to `existingSecret`, pointing at Secrets (`jwt`, `postgres-password`, `redis-password`, `garage-credentials`) created once by hand in-cluster. See the note below.                                                                                                                                                                                              |
 
 Nothing here builds the backend's container image — the chart just deploys
@@ -146,40 +145,14 @@ running pod) before rolling out a major-version bump.
 
 ### Migrating off MinIO
 
-Issue #424 replaced MinIO with Garage. Upstream MinIO images are no longer
-anonymously pullable, and the Chainguard fork's switch to uid 65532 caused
-the 2026-09-26 outage. The first release with Garage does the move in place:
-
-1. **Before syncing**, create the `garage-credentials` Secret (see above).
-   Keep `minio-credentials`: the transitional MinIO still uses it.
-2. **Sync/upgrade.** Garage comes up on its own PVC, the backend switches to
-   it, and the `s3.` Ingress host now routes to Garage (same host and TLS
-   Secret, so no DNS or certificate changes). MinIO keeps running with no
-   Ingress. A post-install/post-upgrade hook `Job`
-   (`minio-migrate`, `templates/minio-migrate-job.yaml`) then runs
-   `rclone copy` from the MinIO bucket into Garage, followed by
-   `rclone check --one-way`, which fails the Job if any object is missing or
-   differs. It uses `copy`, never `sync`, so objects uploaded to Garage
-   since the switch are never deleted. Until the Job finishes (seconds for
-   the production bucket), pre-existing attachments return 404 on
-   Garage.
-3. **Verify** the Job's log. It ends with `rclone size` for both buckets,
-   and the Garage count must be at least the MinIO count (67 objects in
-   production at the time of the switch). Then open a few old chats/posts
-   with attachments and an avatar or two. Object keys are copied as-is, and
-   presigned URLs are minted fresh on every read, so nothing else needs
-   rewriting:
-   ```bash
-   kubectl logs -n chat-platform job/<release>-chat-platform-minio-migrate-<n>
-   ```
-4. **Turn MinIO off** with `minio.enabled: false`. That removes its
-   Deployment, Service, and the migrate Job. Its PVC is annotated
-   `helm.sh/resource-policy: keep` and
-   `argocd.argoproj.io/sync-options: Prune=false,Delete=false`, so neither
-   Helm nor ArgoCD deletes it. Once you're satisfied, delete it by hand
-   (`kubectl delete pvc <release>-chat-platform-minio`), along with the
-   `minio-credentials` Secret. A later change can then drop the `minio-*`
-   templates and the `minio:` values block.
+Issue #424 replaced MinIO with Garage. Chart 0.29.x ran both side by side
+and copied the bucket into Garage with a hook `Job`. Later versions have no
+MinIO templates at all. If you are upgrading an install from before 0.29.0,
+upgrade to 0.29.1 first and follow the "Migrating off MinIO" steps in that
+version's `k8s/README.md`. **Do not upgrade straight past it**: releases
+before 0.29.0 don't mark the MinIO PVC `helm.sh/resource-policy: keep`, so
+`helm upgrade` deletes it, and with a `Delete` reclaim policy your
+attachments go with it.
 
 ### Chart version
 
