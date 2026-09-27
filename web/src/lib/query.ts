@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import type { PersistQueryClientOptions } from "@tanstack/react-query-persist-client";
+import { stableAttachmentStructuralSharing } from "./stableAttachmentUrls";
 
 // How long a persisted cache entry may sit in storage before the persister
 // refuses to restore it (`maxAge` below) — also drives `gcTime`, since a
@@ -29,12 +30,18 @@ const PERSIST_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // timer fires — 24h later — instead of at the end of the build. Overriding
 // it unconditionally is exactly what caused that hang; matching React
 // Query's own server-vs-client branch here avoids it.
+//
+// `structuralSharing` keeps an attachment's presigned URL stable across
+// refetches (the backend re-signs it on every read) so a background refetch
+// doesn't swap the `src` of every image/video/audio already on screen —
+// see lib/stableAttachmentUrls.ts.
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: false,
       networkMode: "online",
       gcTime: typeof window === "undefined" ? Infinity : PERSIST_MAX_AGE_MS,
+      structuralSharing: stableAttachmentStructuralSharing,
     },
   },
 });
