@@ -1,0 +1,123 @@
+{{- if and .Values.minio.enabled .Values.garage.enabled }}
+{{- $fullname := include "chat-platform.fullname" . -}}
+# TRANSITIONAL (issue #424): copies every object from the legacy MinIO bucket
+# into Garage, then verifies that each one arrived with a matching size and
+# checksum (`rclone check --one-way`; the Job fails, and retries, otherwise).
+# Object keys are what Postgres references (attachments.storage_key, the
+# avatar keys), so a straight key-for-key copy keeps every existing
+# attachment and avatar resolving — presigned URLs are minted fresh per read,
+# so nothing signed against MinIO needs to survive.
+#
+# `copy`, never `sync`: it never deletes anything from Garage, so objects
+# uploaded to Garage since the backend switched over are safe, and re-running
+# it (every sync while minio.enabled) only transfers what's missing.
+#
+# A Helm hook for the same ArgoCD reason as backend-migration-job.yaml (see
+# issue #235). post-install/post-upgrade, since Garage has to be up first;
+# backoffLimit retries until it is.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-minio-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio-migrate
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "chat-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: minio-migrate
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+      containers:
+        - name: minio-migrate
+          image: "{{ .Values.minio.migrate.image.repository }}:{{ .Values.minio.migrate.image.tag }}"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              rclone copy "src:$SRC_BUCKET" "dst:$DST_BUCKET" --metadata --stats-one-line -v
+              rclone check "src:$SRC_BUCKET" "dst:$DST_BUCKET" --one-way
+              echo "MinIO bucket:"; rclone size "src:$SRC_BUCKET"
+              echo "Garage bucket:"; rclone size "dst:$DST_BUCKET"
+          env:
+            # rclone reads remotes straight from RCLONE_CONFIG_<NAME>_* env
+            # vars, so no config file is needed; HOME just gives its cache a
+            # writable place under the read-only root filesystem.
+            - name: HOME
+              value: /tmp
+            - name: RCLONE_CONFIG_SRC_TYPE
+              value: s3
+            - name: RCLONE_CONFIG_SRC_PROVIDER
+              value: Minio
+            - name: RCLONE_CONFIG_SRC_ENDPOINT
+              value: {{ printf "http://%s-minio:9000" $fullname | quote }}
+            - name: RCLONE_CONFIG_SRC_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "minio.auth.existingSecret is required while minio.enabled is true" .Values.minio.auth.existingSecret }}
+                  key: access-key
+            - name: RCLONE_CONFIG_SRC_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.auth.existingSecret }}
+                  key: secret-key
+            - name: SRC_BUCKET
+              value: {{ .Values.minio.bucketName | quote }}
+            - name: RCLONE_CONFIG_DST_TYPE
+              value: s3
+            - name: RCLONE_CONFIG_DST_PROVIDER
+              value: Other
+            - name: RCLONE_CONFIG_DST_ENDPOINT
+              value: {{ printf "http://%s-garage:3900" $fullname | quote }}
+            - name: RCLONE_CONFIG_DST_REGION
+              value: {{ .Values.garage.region | quote }}
+            - name: RCLONE_CONFIG_DST_FORCE_PATH_STYLE
+              value: "true"
+            - name: RCLONE_CONFIG_DST_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "chat-platform.garageSecretName" . }}
+                  key: access-key
+            - name: RCLONE_CONFIG_DST_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "chat-platform.garageSecretName" . }}
+                  key: secret-key
+            - name: DST_BUCKET
+              value: {{ .Values.garage.bucketName | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

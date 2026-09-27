@@ -348,7 +348,7 @@ test("uploadAttachment stores the file and returns metadata with a usable url", 
       // and blurhash — an image carries neither.
       expect(attachment.waveform).toBeNull();
       expect(attachment.durationMs).toBeNull();
-      // No real S3/MinIO is configured in tests, so AttachmentStorageLive
+      // No real S3 store is configured in tests, so AttachmentStorageLive
       // falls back to the in-memory backend, which serves bytes back as a
       // `data:` URL rather than a presigned link (see AttachmentStorage.ts).
       expect(attachment.url.startsWith("data:image/webp;base64,")).toBe(true);
@@ -437,7 +437,7 @@ test("uploadAttachment stores a video file transcoded to webm", () =>
       // Below the 1280px scaling cap, so dimensions pass through unchanged.
       expect(attachment.width).toBe(320);
       expect(attachment.height).toBe(240);
-      // No real S3/MinIO is configured in tests, so AttachmentStorageLive
+      // No real S3 store is configured in tests, so AttachmentStorageLive
       // falls back to the in-memory backend, which serves bytes back as a
       // `data:` URL rather than a presigned link (see AttachmentStorage.ts).
       expect(attachment.url.startsWith("data:video/webm;base64,")).toBe(true);

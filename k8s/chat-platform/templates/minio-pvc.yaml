@@ -6,6 +6,14 @@ metadata:
   labels:
     {{- include "chat-platform.labels" . | nindent 4 }}
     app.kubernetes.io/component: minio
+  # Holds the only copy of pre-Garage attachments until the migration to
+  # Garage is verified (issue #424), so turning minio.enabled off must never
+  # delete it along with the Deployment — neither by Helm nor by an ArgoCD
+  # prune. Delete it by hand once Garage's copy has been checked (see
+  # k8s/README.md's "Migrating off MinIO").
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
 spec:
   accessModes: ["ReadWriteOnce"]
   {{- if .Values.minio.persistence.storageClassName }}

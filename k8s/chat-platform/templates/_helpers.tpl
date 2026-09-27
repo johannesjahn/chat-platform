@@ -76,36 +76,46 @@ to match the Secret's own name (see values.yaml's redis.auth.existingSecret).
 {{- end -}}
 
 {{/*
-Resolved Secret name holding S3-compatible credentials (issue #221) — access
-key and secret key, at data keys "access-key"/"secret-key" (unlike the
-single-key secrets above, since this one holds a credential pair). When
-minio.enabled, this doubles as the in-cluster MinIO's own root credentials
-(see minio-deployment.yaml); when it's disabled, point this at a Secret
-holding your real S3-compatible provider's (AWS S3, Cloudflare R2, GCS)
-access/secret key instead.
+Resolved Secret name for the in-cluster Garage (issue #424): data keys
+"access-key"/"secret-key" (the S3 key pair Garage imports on boot and the
+backend signs with) and "rpc-secret" (Garage's cluster RPC secret, which only
+Garage itself reads).
+*/}}
+{{- define "chat-platform.garageSecretName" -}}
+{{- required "garage.auth.existingSecret is required when garage.enabled is true — create a Secret with access-key/secret-key/rpc-secret data keys and set this to its name (see values.yaml)" .Values.garage.auth.existingSecret -}}
+{{- end -}}
+
+{{/*
+Resolved Secret name holding the backend's S3-compatible credentials (issue
+#221) — access key and secret key, at data keys "access-key"/"secret-key"
+(unlike the single-key secrets above, since this one holds a credential
+pair). When garage.enabled, that's Garage's own Secret (see
+garage-deployment.yaml); when it's disabled, point backend.s3.existingSecret
+at a Secret holding your managed provider's (Cloudflare R2, Backblaze B2, AWS
+S3) access/secret key instead.
 */}}
 {{- define "chat-platform.s3SecretName" -}}
-{{- if .Values.minio.enabled -}}
-{{- required "minio.auth.existingSecret is required when minio.enabled is true — create a Secret with access-key/secret-key data keys and set this to its name (see values.yaml)" .Values.minio.auth.existingSecret -}}
+{{- if .Values.garage.enabled -}}
+{{- include "chat-platform.garageSecretName" . -}}
 {{- else -}}
-{{- required "backend.s3.existingSecret is required when minio.enabled is false — create a Secret with access-key/secret-key data keys holding your S3-compatible credentials and set this to its name (see values.yaml)" .Values.backend.s3.existingSecret -}}
+{{- required "backend.s3.existingSecret is required when garage.enabled is false — create a Secret with access-key/secret-key data keys holding your S3-compatible credentials and set this to its name (see values.yaml)" .Values.backend.s3.existingSecret -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
 Resolved public endpoint for presigned attachment URLs handed to the browser
-(see src/AttachmentStorage.ts's S3_PUBLIC_ENDPOINT). When minio.enabled, this
-is the in-cluster MinIO's own Ingress (see minio-ingress.yaml) if it's
-turned on — MinIO's internal Service address isn't reachable from a
-browser. Otherwise it comes from backend.s3.publicEndpoint (a real cloud
-bucket's public endpoint, if it differs from backend.s3.endpoint). Empty if
-neither applies, e.g. minio.ingress.enabled is false — attachments then
-simply won't be viewable outside the cluster, same as before this existed.
+(see src/AttachmentStorage.ts's S3_PUBLIC_ENDPOINT). When garage.enabled,
+this is Garage's own Ingress (see garage-ingress.yaml) if it's turned on —
+Garage's internal Service address isn't reachable from a browser. Otherwise
+it comes from backend.s3.publicEndpoint (a managed bucket's public endpoint,
+if it differs from backend.s3.endpoint). Empty if neither applies, e.g.
+garage.ingress.enabled is false — attachments then simply won't be viewable
+outside the cluster.
 */}}
 {{- define "chat-platform.s3PublicEndpoint" -}}
-{{- if .Values.minio.enabled -}}
-{{- if .Values.minio.ingress.enabled -}}
-{{- printf "%s://%s" (ternary "https" "http" .Values.minio.ingress.tls.enabled) .Values.minio.ingress.host -}}
+{{- if .Values.garage.enabled -}}
+{{- if .Values.garage.ingress.enabled -}}
+{{- printf "%s://%s" (ternary "https" "http" .Values.garage.ingress.tls.enabled) .Values.garage.ingress.host -}}
 {{- end -}}
 {{- else -}}
 {{- .Values.backend.s3.publicEndpoint -}}
@@ -114,24 +124,25 @@ simply won't be viewable outside the cluster, same as before this existed.
 
 {{/*
 Shared env-var block for the S3-compatible client (see
-src/AttachmentStorage.ts). Used by both the backend Deployment and the
-minio-init Job. When minio.enabled, endpoint/bucket point at the in-cluster
-MinIO Service below; otherwise they come from backend.s3.* (a real cloud
-bucket).
+src/AttachmentStorage.ts), used by the backend Deployment. When
+garage.enabled, endpoint/bucket/region point at the in-cluster Garage;
+otherwise they come from backend.s3.* (a managed bucket).
 */}}
 {{- define "chat-platform.s3Env" -}}
 - name: S3_ENDPOINT
-  value: {{ if .Values.minio.enabled }}{{ printf "http://%s-minio:9000" (include "chat-platform.fullname" .) | quote }}{{ else }}{{ .Values.backend.s3.endpoint | quote }}{{ end }}
+  value: {{ if .Values.garage.enabled }}{{ printf "http://%s-garage:3900" (include "chat-platform.fullname" .) | quote }}{{ else }}{{ .Values.backend.s3.endpoint | quote }}{{ end }}
 {{- $publicEndpoint := include "chat-platform.s3PublicEndpoint" . }}
 {{- if $publicEndpoint }}
 - name: S3_PUBLIC_ENDPOINT
   value: {{ $publicEndpoint | quote }}
 {{- end }}
 - name: S3_BUCKET_NAME
-  value: {{ if .Values.minio.enabled }}{{ .Values.minio.bucketName | quote }}{{ else }}{{ .Values.backend.s3.bucketName | quote }}{{ end }}
-{{- if .Values.backend.s3.region }}
+  value: {{ if .Values.garage.enabled }}{{ .Values.garage.bucketName | quote }}{{ else }}{{ .Values.backend.s3.bucketName | quote }}{{ end }}
+{{- /* Garage rejects SigV4 signatures scoped to any region but its own s3_region. */}}
+{{- $region := ternary .Values.garage.region .Values.backend.s3.region .Values.garage.enabled }}
+{{- if $region }}
 - name: S3_REGION
-  value: {{ .Values.backend.s3.region | quote }}
+  value: {{ $region | quote }}
 {{- end }}
 - name: S3_ACCESS_KEY_ID
   valueFrom:

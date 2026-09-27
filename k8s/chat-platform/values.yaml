@@ -12,7 +12,7 @@ backend:
     # Build & push the repo-root Dockerfile to a registry this cluster can
     # pull from, then point this at it (e.g. ghcr.io/<you>/chat-platform).
     repository: johannesjahn/chat-platform
-    tag: "0.28.1"
+    tag: "0.29.0"
     pullPolicy: IfNotPresent
 
   replicaCount: 2
@@ -54,10 +54,11 @@ backend:
   trustProxy: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,loopback"
 
   # S3-compatible object storage for file/media uploads (issue #221) — see
-  # src/AttachmentStorage.ts. Ignored when minio.enabled is true (the
-  # backend is wired to the in-cluster MinIO below automatically instead —
-  # see backend-deployment.yaml). Set these and disable minio.enabled to
-  # point at a real cloud bucket in production.
+  # src/AttachmentStorage.ts. Ignored when garage.enabled is true (the
+  # backend is wired to the in-cluster Garage below automatically instead —
+  # see chat-platform.s3Env in _helpers.tpl). Set these and disable
+  # garage.enabled to use a managed bucket (Cloudflare R2, Backblaze B2, AWS
+  # S3) instead.
   s3:
     endpoint: ""
     # Only needed when `endpoint` isn't already reachable from the browser
@@ -68,7 +69,7 @@ backend:
     bucketName: ""
     region: ""
     # Secret with access-key/secret-key data keys holding your S3-compatible
-    # provider's credentials — required when minio.enabled is false (see
+    # provider's credentials — required when garage.enabled is false (see
     # postgres.auth.existingSecret above for the same convention).
     existingSecret: ""
 
@@ -197,48 +198,56 @@ jwt:
   # postgres.auth.existingSecret above for why.
   existingSecret: "jwt"
 
-minio:
-  # Local/in-cluster S3-compatible object storage for file/media uploads
-  # (issue #221) — see src/AttachmentStorage.ts and minio-deployment.yaml.
-  # Set to false and configure backend.s3.* above to use a real cloud bucket
-  # (AWS S3, Cloudflare R2, GCS) instead — this exists purely for dev-prod
-  # parity, mirroring docker-compose.yml's `minio` service.
+garage:
+  # In-cluster S3-compatible object storage for file/media uploads (issue
+  # #221; replaced MinIO in issue #424) — see src/AttachmentStorage.ts and
+  # garage-deployment.yaml. Set to false and configure backend.s3.* above to
+  # use a managed bucket (Cloudflare R2, Backblaze B2, AWS S3) instead.
+  # Mirrors docker-compose.yml's `garage` service.
   enabled: true
 
-  # Chainguard's MinIO build — upstream's own images are no longer
-  # anonymously pullable from Docker Hub or quay.io; see the comment on the
-  # `minio` service in docker-compose.yml. Only `latest` is published, so
-  # it's pinned by digest (Renovate bumps it). Runs as non-root uid 65532
-  # (see the pod's fsGroup in minio-deployment.yaml).
+  # Versioned and anonymously pullable from Docker Hub (Renovate bumps it).
+  # `FROM scratch` — just the binary, run as the non-root uid below.
   image:
-    repository: cgr.dev/chainguard/minio
-    tag: "latest@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
+    repository: dxflrs/garage
+    tag: "v2.4.1"
 
-  # The image for the one-shot bucket-creation Job (see minio-init-job.yaml)
-  # — MinIO doesn't create buckets on its own. The Chainguard image above
-  # already ships the `mc` client and a shell, so it's the same image.
-  mcImage:
-    repository: cgr.dev/chainguard/minio
-    tag: "latest@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
+  # For the initContainer that chowns the data volume to
+  # securityContext.runAsUser/runAsGroup below on every start (see
+  # garage-deployment.yaml for why fsGroup alone isn't enough).
+  initImage:
+    repository: busybox
+    tag: "1.38.0"
+
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
 
   auth:
-    # Secret with access-key/secret-key data keys — doubles as MinIO's own
-    # root credentials (MINIO_ROOT_USER/MINIO_ROOT_PASSWORD) and as the
-    # backend's S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY. Required when
-    # minio.enabled is true — see postgres.auth.existingSecret above for the
-    # same convention. Create it once by hand, e.g.:
-    #   kubectl create secret generic minio-credentials \
+    # Secret with three data keys (see postgres.auth.existingSecret above for
+    # the same convention):
+    #   access-key / secret-key — the S3 key pair Garage imports on boot and
+    #     the backend signs with (S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY).
+    #     Garage requires the secret key to be at least 16 characters.
+    #   rpc-secret — Garage's cluster RPC secret, exactly 64 hex characters.
+    # Required when garage.enabled is true. Create it once by hand, e.g.:
+    #   kubectl create secret generic garage-credentials \
     #     --from-literal=access-key=chat-platform \
-    #     --from-literal=secret-key="$(openssl rand -base64 24)"
-    existingSecret: "minio-credentials"
+    #     --from-literal=secret-key="$(openssl rand -hex 32)" \
+    #     --from-literal=rpc-secret="$(openssl rand -hex 32)"
+    existingSecret: "garage-credentials"
 
   bucketName: chat-platform-attachments
 
-  # Exposes only the S3 API (port 9000) publicly — required for browsers to
-  # be able to fetch presigned attachment URLs at all (see issue #238 and
-  # chat-platform.s3PublicEndpoint in _helpers.tpl). Never exposes the admin
-  # console (port 9001). Leave disabled only if backend.s3.* is used instead
-  # (minio.enabled: false) to point at an already-public cloud bucket.
+  # Garage's `s3_region` (see garage-configmap.yaml) — the backend is given
+  # the same value as S3_REGION, since Garage rejects signatures scoped to
+  # any other region.
+  region: garage
+
+  # Exposes only the S3 API publicly — required for browsers to be able to
+  # fetch presigned attachment URLs at all (see issue #238 and
+  # chat-platform.s3PublicEndpoint in _helpers.tpl). Same host MinIO used,
+  # so switching needed no DNS/certificate change.
   ingress:
     enabled: true
     className: "traefik"
@@ -254,7 +263,49 @@ minio:
     size: 10Gi
     storageClassName: ""
 
-  # See backend.resources above for the request/limit sizing rationale.
+  # Garage idles at a few tens of MiB for a bucket this size. See
+  # backend.resources above for the request/limit sizing rationale.
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# TRANSITIONAL (issue #424): the MinIO that held attachments before Garage.
+# The backend no longer uses it and its Ingress is gone; while enabled it
+# only runs so minio-migrate-job.yaml can copy its bucket into Garage on every
+# sync. Once that Job has succeeded and the object count checks out, set
+# this to false (then delete the retained PVC by hand, and in a later change
+# these templates) — see k8s/README.md's "Migrating off MinIO".
+minio:
+  enabled: true
+
+  # Chainguard's MinIO build, pinned by digest — unchanged from before the
+  # switch, so the existing (already re-owned) volume keeps working as-is.
+  # Runs as non-root uid 65532.
+  image:
+    repository: cgr.dev/chainguard/minio
+    tag: "latest@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
+
+  auth:
+    # The existing Secret with MinIO's access-key/secret-key.
+    existingSecret: "minio-credentials"
+
+  bucketName: chat-platform-attachments
+
+  # Copies the MinIO bucket into Garage (see minio-migrate-job.yaml).
+  migrate:
+    image:
+      repository: rclone/rclone
+      tag: "1.75.1"
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClassName: ""
+
   resources:
     requests:
       cpu: 50m

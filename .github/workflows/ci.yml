@@ -452,30 +452,42 @@ jobs:
           POSTGRES_PASSWORD: ci-docker-build-test-secret
           REDIS_PASSWORD: ci-docker-build-test-secret
           JWT_SECRET: ci-docker-build-test-secret
-          # Required (no insecure fallback default — see the `minio`/
-          # `minio-init`/`app` services in docker-compose.yml) even just to
-          # build the images: compose resolves every service's env
-          # interpolation while parsing the file, before any service
-          # actually builds.
+          # Required (no insecure fallback default — see the `garage`/`app`
+          # services in docker-compose.yml) even just to build the images:
+          # compose resolves every service's env interpolation while parsing
+          # the file, before any service actually builds.
           S3_ACCESS_KEY_ID: ci-docker-build-test-secret
           S3_SECRET_ACCESS_KEY: ci-docker-build-test-secret
+          GARAGE_RPC_SECRET: "0000000000000000000000000000000000000000000000000000000000000000"
 
-      # Boots the full docker-compose.yml stack (Postgres + Redis + the image
-      # built from the Dockerfile) and waits for the `app` service's own
-      # healthcheck (/ready, see src/Health.ts) to pass. Catches a broken
-      # COPY, a `--production` install dropping a needed dep, or a
-      # Dockerfile/compose wiring mismatch that unit tests against PGlite
-      # can't see, instead of only surfacing once deployed.
-      - name: Boot the stack and wait for the app to become healthy
+      # Boots the full docker-compose.yml stack (Postgres + Redis + Garage +
+      # the image built from the Dockerfile) and waits for the `app`
+      # service's own healthcheck (/ready, see src/Health.ts) to pass.
+      # Catches a broken COPY, a `--production` install dropping a needed
+      # dep, or a Dockerfile/compose wiring mismatch that unit tests against
+      # PGlite can't see, instead of only surfacing once deployed.
+      #
+      # Then smoke-tests attachment storage end to end (issue #424): the app
+      # container uploads through its own S3 client and mints a presigned
+      # URL signed for S3_PUBLIC_ENDPOINT (http://localhost:3900 — not the
+      # http://garage:3900 it talks to itself), and the runner fetches that
+      # URL through the host-mapped port the way a browser would. A wrong
+      # region, a host baked into the signature that doesn't match, or a
+      # missing bucket/key grant all fail here.
+      - name: Boot the stack and smoke-test it
         run: |
-          docker compose up -d
+          # Trap first, so a service that fails to start (which makes `up`
+          # itself exit non-zero) still gets its logs dumped.
           trap 'docker compose logs; docker compose down -v' EXIT
+          docker compose up -d
 
+          healthy=false
           for i in $(seq 1 60); do
             status=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q app)" 2>/dev/null || echo starting)
             if [ "$status" = "healthy" ]; then
               echo "App is healthy."
-              exit 0
+              healthy=true
+              break
             fi
             if [ "$status" = "unhealthy" ]; then
               echo "::error::App container reported unhealthy."
@@ -483,15 +495,25 @@ jobs:
             fi
             sleep 2
           done
+          if [ "$healthy" != true ]; then
+            echo "::error::App did not become healthy in time."
+            exit 1
+          fi
 
-          echo "::error::App did not become healthy in time."
-          exit 1
+          url=$(docker compose exec -T app bun scripts/s3-smoke-test.ts)
+          body=$(curl -sf "$url") || { echo "::error::Presigned attachment URL was rejected: $url"; exit 1; }
+          if [ "$body" != "chat-platform s3 smoke test" ]; then
+            echo "::error::Presigned attachment URL returned unexpected content: $body"
+            exit 1
+          fi
+          echo "Presigned attachment URL works end to end."
         env:
           POSTGRES_PASSWORD: ci-docker-build-test-secret
           REDIS_PASSWORD: ci-docker-build-test-secret
           JWT_SECRET: ci-docker-build-test-secret
           S3_ACCESS_KEY_ID: ci-docker-build-test-secret
           S3_SECRET_ACCESS_KEY: ci-docker-build-test-secret
+          GARAGE_RPC_SECRET: "0000000000000000000000000000000000000000000000000000000000000000"
 
   e2e:
     name: E2E tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})

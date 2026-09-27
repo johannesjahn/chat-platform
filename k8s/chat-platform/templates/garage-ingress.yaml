@@ -1,0 +1,40 @@
+{{- if and .Values.garage.enabled .Values.garage.ingress.enabled -}}
+# Exposes Garage's S3 API publicly. Needed so presigned attachment GET URLs
+# (see src/AttachmentStorage.ts and chat-platform.s3PublicEndpoint in
+# _helpers.tpl) resolve to something a browser can actually reach; without
+# it, S3_PUBLIC_ENDPOINT has nothing to point at and attachments silently
+# fail to load in the frontend (issue #238). Uses the same host MinIO's
+# Ingress had, so the switch (issue #424) needs no DNS or certificate change.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "chat-platform.fullname" . }}-garage
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: garage
+  {{- with .Values.garage.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.garage.ingress.className }}
+  ingressClassName: {{ .Values.garage.ingress.className }}
+  {{- end }}
+  {{- if .Values.garage.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.garage.ingress.host }}
+      secretName: {{ .Values.garage.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.garage.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "chat-platform.fullname" . }}-garage
+                port:
+                  name: s3
+{{- end }}

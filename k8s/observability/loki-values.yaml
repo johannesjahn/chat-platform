@@ -13,7 +13,7 @@ loki:
 
   # Filesystem storage backend on the PVC below (singleBinary.persistence),
   # sized similarly to the Postgres/Redis PVCs in
-  # ../chat-platform/values.yaml — no object storage (S3/GCS/MinIO) needed
+  # ../chat-platform/values.yaml — no object storage (S3/GCS/Garage) needed
   # for a single-node deployment.
   storage:
     type: filesystem
