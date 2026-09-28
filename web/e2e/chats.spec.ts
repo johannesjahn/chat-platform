@@ -268,6 +268,11 @@ test("the creator can add participants to a group chat, and the new participant 
   browser,
   injectApiUrl,
 }) => {
+  // Three browser contexts and three UI registrations before the group is even
+  // created: this ran at 29.4s against the default 30s budget on a green CI
+  // run and tipped over (during teardown) on the next. Same fix as the invite
+  // test above — timing headroom, not a logic change.
+  test.slow();
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
