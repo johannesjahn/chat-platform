@@ -26,7 +26,11 @@ export const MAX_GROUP_PARTICIPANTS = 20;
 // same idea as PostCard's threshold but shorter — chat bubbles are narrow.
 export const MESSAGE_COLLAPSE_THRESHOLD = 300;
 
-const MESSAGES_PAGE_SIZE = 10;
+// Matches the backend's `DEFAULT_MESSAGES_LIMIT` (src/Api.ts): enough to fill
+// a tall desktop viewport on open, so the first page doesn't immediately
+// trigger a "load earlier" fetch, while staying well under
+// `MESSAGES_MAX_LIMIT` so several pages fit before a re-anchor.
+const MESSAGES_PAGE_SIZE = 30;
 const MESSAGES_MAX_LIMIT = 100;
 
 type MessagesPageResponse = components["schemas"]["MessagesPage"];
@@ -366,7 +370,7 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       // here instead would treat "reopening a chat visited earlier this
       // session" the same as "re-anchoring after outgrowing
       // MESSAGES_MAX_LIMIT", fetching a 100-message window on every reopen
-      // instead of the intended 10-message first page.
+      // instead of the intended `MESSAGES_PAGE_SIZE` first page.
       const hasWindowThisMount = newestCursorRef.current != null;
 
       if (isLoadEarlierFetch && prev && oldestCursorRef.current) {

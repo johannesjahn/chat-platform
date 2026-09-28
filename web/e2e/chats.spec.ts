@@ -537,9 +537,8 @@ test("infinite scroll stops requesting more messages once the oldest one is load
   }
 
   // Repeatedly scroll to the top and give each `loadEarlier` fetch a moment
-  // to settle. MESSAGES_PAGE_SIZE is 10 and there are 130 seeded messages,
-  // so reaching offset 0 takes on the order of a dozen scroll-triggered
-  // fetches.
+  // to settle. MESSAGES_PAGE_SIZE is 30 and there are 130 seeded messages,
+  // so reaching offset 0 takes a handful of scroll-triggered fetches.
   for (let i = 0; i < 20; i++) {
     await scrollToTop();
     await page.waitForTimeout(300);
@@ -567,6 +566,10 @@ test("reopening an already-visited chat still paginates instead of loading its w
   request,
   apiUrl,
 }) => {
+  // Seeding more than a full page of messages one HTTP request at a time
+  // (below) doesn't reliably fit the default 30s test timeout.
+  test.setTimeout(60_000);
+
   await registerViaUi(page);
 
   const otherContext = await browser.newContext();
@@ -596,14 +599,14 @@ test("reopening an already-visited chat still paginates instead of loading its w
   await page.getByRole("link", { name: "Back to chats" }).click();
   await expect(page).toHaveURL("/chats");
 
-  // More than MESSAGES_PAGE_SIZE (10) so a "load everything" regression is
+  // More than MESSAGES_PAGE_SIZE (30) so a "load everything" regression is
   // visibly distinguishable from the intended small first page, but well
   // under MESSAGES_MAX_LIMIT (100) so a full-history load would show every
   // seeded message at once.
   const session = await page.evaluate(() =>
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
   );
-  const totalMessages = 15;
+  const totalMessages = 40;
   for (let i = 0; i < totalMessages; i++) {
     const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
@@ -626,7 +629,7 @@ test("reopening an already-visited chat still paginates instead of loading its w
   // Reopen the same chat via a client-side link click (well within the query
   // cache's default 5min retention). With the bug, the hook mistook the
   // leftover cached page for a "re-anchor after MESSAGES_MAX_LIMIT" and
-  // re-fetched with limit=100 instead of the intended 10-message first page,
+  // re-fetched with limit=100 instead of the intended 30-message first page,
   // dumping the whole (short) history in at once.
   //
   // `waitForResponse` (rather than just `getByText(...).toBeVisible()`) is
@@ -650,9 +653,9 @@ test("reopening an already-visited chat still paginates instead of loading its w
     .click();
   await expect(page).toHaveURL(`/chats/${chatId}`);
   await messagesResponse;
-  await expect(page.getByText("Seeded message 14")).toBeVisible();
+  await expect(page.getByText("Seeded message 39")).toBeVisible();
 
-  expect(messagesLimits).toEqual(["10"]);
+  expect(messagesLimits).toEqual(["30"]);
   await expect(page.getByText("Seeded message 0")).not.toBeVisible();
 });
 
@@ -1214,6 +1217,10 @@ test("clicking a reply's quoted snippet jumps the thread to the message it answe
   browser,
   injectApiUrl,
 }) => {
+  // Seeding more than a full page of messages one HTTP request at a time
+  // (below) doesn't reliably fit the default 30s test timeout.
+  test.setTimeout(60_000);
+
   await registerViaUi(page);
 
   // B only has to exist for A to start a direct chat with them — the whole
@@ -1235,8 +1242,8 @@ test("clicking a reply's quoted snippet jumps the thread to the message it answe
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
   );
   // Seeding over HTTP rather than through the composer: this test needs more
-  // than a page of history, and a dozen round trips through the UI is a dozen
-  // chances to be slow for no extra coverage.
+  // than a page of history, and a few dozen round trips through the UI are a
+  // few dozen chances to be slow for no extra coverage.
   const post = async (body: Record<string, unknown>) => {
     const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
@@ -1255,8 +1262,8 @@ test("clicking a reply's quoted snippet jumps the thread to the message it answe
   const anchorText = "Which of these two dates works better for you?";
   const anchor = await post({ contentType: "text", content: anchorText });
   // Enough conversation between the anchor and its reply that the anchor
-  // falls outside the 10-message page the chat opens with.
-  for (let i = 1; i <= 11; i++) {
+  // falls outside the 30-message page the chat opens with.
+  for (let i = 1; i <= 31; i++) {
     await post({ contentType: "text", content: `Filler message ${i}` });
   }
   const replyText = "The second one, definitely";
