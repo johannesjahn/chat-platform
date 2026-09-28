@@ -5,18 +5,18 @@ import { LoginPrompt } from "@/components/LoginPrompt";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { useSession } from "@/lib/auth";
 import { useGameLobbies } from "@/lib/games/lobby";
-import { GAMES } from "@/lib/games/registry";
+import { GAMES, type GameId } from "@/lib/games/registry";
 import { gameHubRoom, useGameRoom } from "@/lib/games/rooms";
 
 export const Route = createFileRoute("/games/")({
   component: ArcadePage,
 });
 
-// The typing race's live-activity pill on its hub card: how many lobbies are
-// open right now, kept live through the hub room.
-function TypingActivity() {
-  useGameRoom(gameHubRoom("typing"));
-  const { data: lobbies } = useGameLobbies("typing", true);
+// A playable game's live-activity pill on its hub card: how many lobbies
+// are open right now, kept live through the game's hub room.
+function GameActivity({ game }: { game: GameId }) {
+  useGameRoom(gameHubRoom(game));
+  const { data: lobbies } = useGameLobbies(game, true);
   if (!lobbies) return null;
   const players = lobbies.reduce((sum, l) => sum + l.players.length, 0);
   return (
@@ -49,7 +49,7 @@ function ArcadePage() {
         </h1>
         <p className="max-w-md text-muted-foreground">
           Quick games to play with everyone on the platform. Jump into a lobby,
-          race your friends live, and climb the leaderboards.
+          race or doodle with your friends live, and climb the leaderboards.
         </p>
       </header>
 
@@ -67,7 +67,11 @@ function ArcadePage() {
               key={game.id}
               game={game}
               index={index}
-              live={game.id === "typing" ? <TypingActivity /> : undefined}
+              live={
+                game.status === "live" ? (
+                  <GameActivity game={game.id} />
+                ) : undefined
+              }
             />
           ))}
         </div>

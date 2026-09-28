@@ -10,9 +10,12 @@ const GO_MS = 900;
 export function CountdownOverlay({
   startsAt,
   now,
+  hint = "Read ahead — typing unlocks at zero",
 }: {
   startsAt: number;
   now: number;
+  /** What to expect at zero, shown under "Get ready". */
+  hint?: string;
 }) {
   const remaining = startsAt - now;
   if (remaining <= -GO_MS) return null;
@@ -34,9 +37,7 @@ export function CountdownOverlay({
           <span className="text-sm font-semibold uppercase tracking-[0.3em] text-muted-foreground">
             Get ready
           </span>
-          <span className="text-lg text-muted-foreground">
-            Read ahead — typing unlocks at zero
-          </span>
+          <span className="text-lg text-muted-foreground">{hint}</span>
         </div>
       ) : (
         <div key={label} className="relative flex items-center justify-center">

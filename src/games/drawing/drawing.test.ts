@@ -277,7 +277,7 @@ describe("timeline", () => {
     const timeline = buildTimeline(START, oneRound());
     expect(timeline.map((stage) => stage.kind)).toEqual([
       "draw",
-      ...players.flatMap(() => ["bluff", "vote", "reveal"]),
+      ...players.flatMap(() => ["bluff", "vote", "reveal"] as const),
     ]);
     expect(timeline[0]).toMatchObject({
       startedAt: START,

@@ -224,15 +224,53 @@ everything else is shared plumbing keyed by a game slug (`GameId`):
 
 **Adding a game:** add its slug to `GameId` (Api.ts); add a `GameRules`
 module next to [`src/games/typing.ts`](src/games/typing.ts) and register it in
-`GAME_RULES` ([`src/games/rules.ts`](src/games/rules.ts)); add its entry to
-`GAMES` in [`web/src/lib/games/registry.ts`](web/src/lib/games/registry.ts)
-(name, copy, icon, and a two-color theme); and register its play area in
-`PLAY_AREAS` in `web/src/routes/games/$game/$lobbyId.tsx`. The lobby browser,
+`GAME_RULES` ([`src/games/rules.ts`](src/games/rules.ts)) — a `"race"` (every
+finish scored as it lands) or its own kind, with its seat bounds; add its
+entry to `GAMES` in
+[`web/src/lib/games/registry.ts`](web/src/lib/games/registry.ts) (name, copy,
+how-to steps, icon, and a two-color theme); and register its play area in
+`PLAY_AREAS` in `web/src/routes/games/$game/$lobbyId.tsx` (plus, optionally,
+waiting-room settings in `LOBBY_SETTINGS` and a results extra in
+`RESULTS_EXTRAS`). The lobby browser,
 waiting room, countdown, results podium, and leaderboard come for free from
 the shared kit in [`web/src/components/games/`](web/src/components/games/),
 which reads the game's colors from the `--game-from`/`--game-to`/`--game-glow`
 custom properties (see the "Games design system" block in
 `web/src/styles.css`) instead of hard-coding them.
+
+### Sketchy (the `drawing` game, issue #440)
+
+A Drawful-style party game: everyone draws a secret prompt, then each drawing
+takes a turn in the spotlight — bluff (write a fake title), vote (find the
+real one), reveal. Server logic is in
+[`src/games/drawing/`](src/games/drawing/), kept as pure modules (`timeline`,
+`ballot`, `scoring`, `view`, `prompts`) that GamesHandler.ts feeds rows into;
+the client is `web/src/components/games/drawing/`. Load-bearing rules:
+
+- **Stages are derived, like phases.** `buildTimeline` lays the game out from
+  `startsAt` and the `game_drawings`/`game_bluffs`/`game_votes` rows (migration
+  `0028`): each stage runs its full timer _or_ ends at its last required
+  submission. A submission is only accepted while its stage is current (the
+  draw stage has a short grace), and bluffs/votes are stamped with the
+  instant that was checked, so a stage that's over never moves again. The set
+  of players is frozen by the drawings dealt at start, so someone leaving
+  can't retroactively shift the schedule — they just time out.
+- **Secrets live in one place.** `projectDrawingGame` (view.ts) is the only
+  code that turns rows into what a viewer sees: prompts only at their reveal
+  (the artist always knows theirs), strokes from the bluff stage, a ballot with
+  nothing that marks the truth, authorship/votes only at the reveal. Its order
+  comes from a random per-drawing `shuffle_seed` that's never sent out.
+  `src/sketchy.test.ts` asserts no response or published event leaks a prompt
+  — keep it passing when touching any of this. Realtime stays id-only.
+- **Scoring is settled lazily, exactly once.** Scores are derived from votes;
+  the first read to find a game over writes `game_results` in a transaction
+  guarded by `game_lobbies.settled_round`. A rematch settles first, then
+  deletes the game's drawings (cascading to bluffs/votes).
+- **Packs are code** (`src/games/drawing/packs/`, 60+ ASCII prompts each, held
+  to that by `drawing.test.ts`); `GET /games/drawing/packs` returns samples and
+  counts, never the prompt lists. Stroke colors are palette indexes — the
+  client's `DRAWING_PALETTE` must stay `DRAWING_PALETTE_SIZE` long and never be
+  reordered.
 
 ## Notifications
 

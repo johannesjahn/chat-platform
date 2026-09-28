@@ -21,6 +21,9 @@ import { InvitePlayers } from "@/components/games/InvitePlayers";
 import { LobbySeats } from "@/components/games/LobbySeats";
 import { PhaseBadge } from "@/components/games/PhaseBadge";
 import { ResultsPodium } from "@/components/games/ResultsPodium";
+import { SketchyGallery } from "@/components/games/drawing/SketchyGallery";
+import { SketchyGame } from "@/components/games/drawing/SketchyGame";
+import { SketchySettings } from "@/components/games/drawing/SketchySettings";
 import { TypingRace } from "@/components/games/typing/TypingRace";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { TypingDots } from "@/components/reactbits/TypingDots";
@@ -57,11 +60,25 @@ type PlayAreaProps = {
   now: number;
 };
 
-// The only per-game piece of a lobby page: what's on screen while the race
+// The only per-game piece of a lobby page: what's on screen while the game
 // runs. Everything around it — waiting room, countdown, results, rematch —
 // is shared. A new game registers its play area here.
 const PLAY_AREAS: Record<GameId, ComponentType<PlayAreaProps>> = {
   typing: TypingRace,
+  drawing: SketchyGame,
+};
+
+// Optional extras a game can slot into the shared pages: settings the host
+// picks in the waiting room, and something to show under the podium.
+const LOBBY_SETTINGS: Partial<
+  Record<GameId, ComponentType<{ lobby: GameLobby; isHost: boolean }>>
+> = {
+  drawing: SketchySettings,
+};
+const RESULTS_EXTRAS: Partial<
+  Record<GameId, ComponentType<{ lobby: GameLobby }>>
+> = {
+  drawing: SketchyGallery,
 };
 
 function LobbyRoute() {
@@ -133,7 +150,7 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
       <GameShell game={game} back={{ game: gameId, label: game.name }}>
         <LoginPrompt
           title="Log in to join this lobby"
-          description="Sign in to race — or watch — with everyone here."
+          description="Sign in to play — or watch — with everyone here."
         />
       </GameShell>
     );
@@ -153,7 +170,7 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
         <EmptyState
           icon={DoorOpen}
           title="This lobby has closed"
-          description="Everyone left, or the link is wrong. Find another race in the lobby browser."
+          description="Everyone left, or the link is wrong. Find another game in the lobby browser."
         >
           <Button asChild>
             <Link to="/games/$game" params={{ game: gameId }}>
@@ -169,7 +186,10 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
   const isHost = lobby.hostId === meId;
   const host = lobby.players.find((p) => p.user.id === lobby.hostId);
   const full = lobby.players.length >= lobby.maxPlayers;
+  const missing = Math.max(0, lobby.minPlayers - lobby.players.length);
   const PlayArea = PLAY_AREAS[gameId];
+  const Settings = LOBBY_SETTINGS[gameId];
+  const ResultsExtras = RESULTS_EXTRAS[gameId];
   const won =
     phase === "finished" && me?.place === 1 && lobby.players.length > 1;
 
@@ -252,17 +272,29 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
               <InvitePlayers lobby={lobby} meId={meId} />
             </div>
           )}
+          {Settings && <Settings lobby={lobby} isHost={isHost} />}
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             {isHost ? (
-              <Button
-                size="lg"
-                disabled={start.isPending}
-                onClick={() => start.mutate()}
-                className="game-gradient min-w-48 border-0 text-white shadow-lg shadow-[var(--game-glow)] hover:opacity-95"
-              >
-                <Play className="size-4 fill-current" />
-                {lobby.players.length === 1 ? "Start solo race" : "Start race"}
-              </Button>
+              <div className="flex flex-col items-center gap-1.5">
+                <Button
+                  size="lg"
+                  disabled={start.isPending || missing > 0}
+                  onClick={() => start.mutate()}
+                  className="game-gradient min-w-48 border-0 text-white shadow-lg shadow-[var(--game-glow)] hover:opacity-95"
+                >
+                  <Play className="size-4 fill-current" />
+                  {lobby.players.length === 1
+                    ? game.verbs.startSolo
+                    : game.verbs.start}
+                </Button>
+                {missing > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    Waiting for {missing} more{" "}
+                    {missing === 1 ? "player" : "players"} — this game needs{" "}
+                    {lobby.minPlayers}
+                  </span>
+                )}
+              </div>
             ) : me ? (
               <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
                 Waiting for {host ? userLabel(host.user) : "the host"} to start
@@ -276,7 +308,7 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
                 className="game-gradient min-w-48 border-0 text-white shadow-lg shadow-[var(--game-glow)] hover:opacity-95"
               >
                 <Swords className="size-4" />
-                {full ? "Lobby full" : "Join the race"}
+                {full ? "Lobby full" : game.verbs.join}
               </Button>
             )}
           </div>
@@ -313,6 +345,7 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
             players={lobby.players}
             scoreUnit={game.scoreUnit}
             meId={meId}
+            raceStats={game.raceStats}
           />
           <div className="flex justify-center pt-2">
             <Button asChild variant="ghost" size="sm">
@@ -324,6 +357,8 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
           </div>
         </GamePanel>
       )}
+
+      {phase === "finished" && ResultsExtras && <ResultsExtras lobby={lobby} />}
     </GameShell>
   );
 }

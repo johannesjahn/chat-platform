@@ -44,7 +44,7 @@ function noteServerClock(lobby: GameLobby, receivedAt: number): void {
   clockOffsetMs = receivedAt - lobby.serverNow;
 }
 
-function unwrap<T>(result: { data?: T; error?: unknown }): T {
+export function unwrap<T>(result: { data?: T; error?: unknown }): T {
   if (result.error !== undefined || result.data === undefined) {
     throw result.error ?? new Error("Empty response");
   }
@@ -53,7 +53,10 @@ function unwrap<T>(result: { data?: T; error?: unknown }): T {
 
 // Seeds the lobby's detail cache from any mutation that returns it, so the
 // page updates without waiting for the realtime echo.
-function primeLobby(queryClient: QueryClient, lobby: GameLobby): GameLobby {
+export function primeLobby(
+  queryClient: QueryClient,
+  lobby: GameLobby,
+): GameLobby {
   noteServerClock(lobby, Date.now());
   queryClient.setQueryData(gameLobbyQueryKey(lobby.id), lobby);
   return lobby;
@@ -213,6 +216,11 @@ export function livePhase(lobby: GameLobby, now: number): GameLobbyPhase {
   }
   if (now < lobby.startsAt) return "countdown";
   if (now >= lobby.endsAt) return "finished";
+  // A Sketchy game's end depends on submissions this client can't see (see
+  // src/games/drawing/timeline.ts) — `endsAt` is only its latest possible
+  // end — so past the countdown, the server has the final word.
+  if (lobby.drawing)
+    return lobby.phase === "countdown" ? "racing" : lobby.phase;
   if (
     lobby.players.length > 0 &&
     lobby.players.every((player) => player.durationMs !== null)
