@@ -1,5 +1,4 @@
 import { expect, test } from "./fixtures";
-import { registerViaUi } from "./helpers";
 
 // Auto-linking bare `http(s)` URLs in post/comment/message text (issue
 // #319): a shared link becomes clickable — opened in a new tab, with
@@ -9,8 +8,9 @@ test("a URL in a post, its comment, and a chat message all render as clickable l
   page,
   browser,
   injectApiUrl,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
 
   await page.goto("/posts/new");
   await page.getByRole("button", { name: "Text" }).click();
@@ -56,7 +56,7 @@ test("a URL in a post, its comment, and a chat message all render as clickable l
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await page.goto("/chats/new");
   await page.getByRole("button", { name: "Direct message" }).click();

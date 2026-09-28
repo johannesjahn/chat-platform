@@ -1,5 +1,4 @@
 import { expect, test } from "./fixtures";
-import { registerViaUi } from "./helpers";
 
 // The admin dashboard's *happy* path is covered by src/admin.test.ts, which
 // can promote a user in the database directly; e2e drives the real backend in
@@ -9,8 +8,8 @@ import { registerViaUi } from "./helpers";
 // lands on the refusal rather than a broken page or a spinner that never
 // resolves.
 
-test("a regular user gets no Admin nav entry", async ({ page }) => {
-  await registerViaUi(page);
+test("a regular user gets no Admin nav entry", async ({ page, signUp }) => {
+  await signUp(page);
 
   await expect(page.getByRole("link", { name: "Users" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
@@ -18,8 +17,9 @@ test("a regular user gets no Admin nav entry", async ({ page }) => {
 
 test("a regular user visiting /admin is told it's admins only", async ({
   page,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
   await page.goto("/admin");
 
   await expect(

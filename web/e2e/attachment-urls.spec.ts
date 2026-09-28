@@ -1,6 +1,6 @@
 import type { APIRequestContext, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { makeSolidPng, registerViaUi } from "./helpers";
+import { makeSolidPng } from "./helpers";
 
 // Regression tests for the "page opens, then refreshes a moment later"
 // flash (issue #433): the backend re-signs every attachment's presigned S3
@@ -16,7 +16,7 @@ import { makeSolidPng, registerViaUi } from "./helpers";
 
 const BUCKET = "http://attachments.e2e.test";
 
-// Each test boots its own backend and registers users through the UI.
+// Each test boots its own backend and drives more than one browser context.
 test.describe.configure({ timeout: 60_000 });
 const PNG = makeSolidPng(64, 48, [200, 120, 40]);
 
@@ -161,9 +161,10 @@ test("a feed refetch keeps attachment images as they are instead of reloading th
   page,
   request,
   apiUrl,
+  signUp,
 }) => {
   const bucket = await simulatePresignedUrls(page, apiUrl);
-  await registerViaUi(page);
+  await signUp(page);
   const headers = await authHeaders(page);
   const attachment = await uploadImage(request, apiUrl, headers);
   const post = await request.post(`${apiUrl}/posts`, {
@@ -217,19 +218,15 @@ test("a feed refetch keeps attachment images as they are instead of reloading th
 
 test("a chat refetch keeps attachment images as they are instead of reloading them", async ({
   page,
-  browser,
-  injectApiUrl,
   request,
   apiUrl,
+  createUser,
+  signUp,
 }) => {
   const bucket = await simulatePresignedUrls(page, apiUrl);
-  await registerViaUi(page);
+  await signUp(page);
 
-  const otherContext = await browser.newContext();
-  await injectApiUrl(otherContext);
-  const otherPage = await otherContext.newPage();
-  const { username: otherUsername } = await registerViaUi(otherPage);
-  await otherContext.close();
+  const { username: otherUsername } = await createUser();
 
   await page.goto("/chats/new");
   await page.getByRole("button", { name: "Direct message" }).click();

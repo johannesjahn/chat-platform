@@ -125,21 +125,3 @@ export async function fakeOnScreenKeyboard(page: Page): Promise<void> {
     });
   });
 }
-
-// Registers a new user through the UI (which auto-logs them in) and returns
-// the credentials, so callers can act as this user or log back in as them
-// from a different browser context.
-export async function registerViaUi(
-  page: Page,
-): Promise<{ username: string; password: string }> {
-  const username = randomUsername();
-  const password = "playwright-pw-123";
-
-  await page.goto("/register");
-  await page.fill("#username", username);
-  await page.fill("#password", password);
-  await page.getByRole("button", { name: "Register" }).click();
-  await page.waitForURL("/");
-
-  return { username, password };
-}

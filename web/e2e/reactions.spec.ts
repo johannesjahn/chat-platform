@@ -1,9 +1,9 @@
 import { expect, test } from "./fixtures";
-import { registerViaUi } from "./helpers";
 
 test("reacting to a chat message from the hover button adds a pill below the bubble", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   // A direct chat needs a second user to exist, but only A drives the UI —
   // A reacts to their own message (any participant may react, so the sender
@@ -12,12 +12,12 @@ test("reacting to a chat message from the hover button adds a pill below the bub
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();
@@ -57,18 +57,19 @@ test("reacting to a chat message from the hover button adds a pill below the bub
 test("long-pressing a chat message on touch opens the reaction picker (issue #309)", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   // A touch-capable context: no hover state exists, so the desktop hover-reveal
   // of the action group can't fire — the long-press path is the only way in.
   const contextA = await browser.newContext({ hasTouch: true });
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();
@@ -152,16 +153,17 @@ test("long-pressing a chat message on touch opens the reaction picker (issue #30
 test("a group chat shows the sender's avatar beside their message", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  const { username: usernameA } = await registerViaUi(pageA);
+  const { username: usernameA } = await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Group chat" }).click();
@@ -192,8 +194,9 @@ test("a group chat shows the sender's avatar beside their message", async ({
 
 test("adding and removing a reaction on a post updates the pill through the real API", async ({
   page,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
   await page.goto("/posts/new");
   await page.getByRole("button", { name: "Text" }).click();
   await page.fill("#content", "React to this post");
@@ -222,8 +225,9 @@ test("adding and removing a reaction on a post updates the pill through the real
 test("a failed post reaction shows a visible error instead of silently doing nothing (issue #233)", async ({
   page,
   apiUrl,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
   await page.goto("/posts/new");
   await page.getByRole("button", { name: "Text" }).click();
   await page.fill("#content", "Reacting to this will fail");
@@ -257,6 +261,7 @@ test("a failed post reaction shows a visible error instead of silently doing not
 test("a failed comment reaction shows a visible error instead of silently doing nothing (issue #233)", async ({
   page,
   apiUrl,
+  signUp,
 }) => {
   // A taller viewport keeps the comment's reaction trigger (and the fixed-
   // position emoji popover it opens, positioned just below it) fully
@@ -264,7 +269,7 @@ test("a failed comment reaction shows a visible error instead of silently doing 
   // scroll while the popover is open closes it (see ReactionPicker's
   // "close on scroll" listener), which would otherwise race the click.
   await page.setViewportSize({ width: 1280, height: 1600 });
-  await registerViaUi(page);
+  await signUp(page);
   await page.goto("/posts/new");
   await page.getByRole("button", { name: "Text" }).click();
   await page.fill("#content", "Comment reactions can fail too");

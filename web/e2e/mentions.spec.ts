@@ -1,17 +1,16 @@
 import { expect, test } from "./fixtures";
-import { registerViaUi } from "./helpers";
 
 // `@mention` support (issue #318): autocomplete while composing, and a link
 // to the mentioned user's profile once the content is rendered.
 
 test("the post composer autocompletes an @mention, and the posted mention links to that profile", async ({
   page,
+  createUser,
+  signUp,
 }) => {
-  // Register the user who'll be mentioned first, then register (and stay
-  // signed in as) the author — the second registration replaces the
-  // session, so both accounts exist but only the author is logged in.
-  const { username: mentioned } = await registerViaUi(page);
-  await registerViaUi(page);
+  // The mentioned user only has to exist; the author is the one signed in.
+  const { username: mentioned } = await createUser();
+  await signUp(page);
 
   await page.goto("/posts/new");
   await page.getByRole("button", { name: "Text" }).click();
@@ -43,8 +42,8 @@ test("the post composer autocompletes an @mention, and the posted mention links 
   await expect(page.getByText(`@${mentioned}`).first()).toBeVisible();
 });
 
-test("an unknown @mention stays plain text", async ({ page }) => {
-  await registerViaUi(page);
+test("an unknown @mention stays plain text", async ({ page, signUp }) => {
+  await signUp(page);
 
   await page.goto("/posts/new");
   await page.getByRole("button", { name: "Text" }).click();
@@ -62,16 +61,17 @@ test("an unknown @mention stays plain text", async ({ page }) => {
 test("picking a chat mention with Enter completes it instead of sending the message", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  const { username: usernameA } = await registerViaUi(pageA);
+  const { username: usernameA } = await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();

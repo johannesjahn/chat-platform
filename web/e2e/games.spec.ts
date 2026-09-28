@@ -1,6 +1,5 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { registerViaUi } from "./helpers";
 
 // The passage is rendered one span per character inside an aria-hidden
 // container (input goes through a transparent field laid over it — see
@@ -23,18 +22,19 @@ async function typePassage(page: Page, text: string): Promise<void> {
 test("two players race live and both land on the results podium", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   test.setTimeout(120_000);
 
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  const alice = await registerViaUi(pageA);
+  const alice = await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const bob = await registerViaUi(pageB);
+  const bob = await signUp(pageB);
 
   // Alice opens a lobby from the arcade.
   await pageA.getByRole("link", { name: "Games" }).click();
