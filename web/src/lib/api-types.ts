@@ -1012,6 +1012,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/drawing/packs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["games.listDrawingPacks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/lobbies/{id}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["games.updateDrawingSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/lobbies/{id}/drawing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["games.submitDrawing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/lobbies/{id}/bluff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["games.submitBluff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/lobbies/{id}/vote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["games.submitVote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game}/leaderboard": {
         parameters: {
             query?: never;
@@ -1703,7 +1783,7 @@ export interface components {
             backend: string;
         };
         /** @enum {string} */
-        GameId: "typing";
+        GameId: "typing" | "drawing";
         GameLobbyList: {
             lobbies: components["schemas"]["GameLobby"][];
         };
@@ -1717,8 +1797,10 @@ export interface components {
             startsAt: number | null;
             endsAt: number | null;
             serverNow: number;
+            minPlayers: number;
             maxPlayers: number;
             players: components["schemas"]["GameLobbyPlayer"][];
+            drawing: components["schemas"]["DrawingGame"] | null;
             createdAt: number;
         };
         /** @enum {string} */
@@ -1730,6 +1812,68 @@ export interface components {
             score: number | null;
             accuracy: number | null;
             place: number | null;
+        };
+        DrawingGame: {
+            packs: string[];
+            rounds: number;
+            stage: components["schemas"]["DrawingStage"] | null;
+            myPrompt: string | null;
+            participantIds: number[];
+            drawings: components["schemas"]["DrawingEntry"][];
+            scores: components["schemas"]["DrawingScore"][];
+        };
+        DrawingStage: {
+            kind: components["schemas"]["DrawingStageKind"];
+            turn: number;
+            drawingId: number | null;
+            startedAt: number;
+            endsAt: number;
+        };
+        /** @enum {string} */
+        DrawingStageKind: "draw" | "bluff" | "vote" | "reveal";
+        DrawingEntry: {
+            id: number;
+            turn: number;
+            position: number;
+            artistId: number;
+            submitted: boolean;
+            strokes: components["schemas"]["DrawingStroke"][] | null;
+            prompt: string | null;
+            revealed: boolean;
+            bluffCount: number;
+            voteCount: number;
+            myBluff: string | null;
+            myVote: number | null;
+            answers: components["schemas"]["DrawingAnswer"][] | null;
+        };
+        DrawingStroke: {
+            /**
+             * between(0, 9)
+             * @description a number between 0 and 9
+             */
+            color: number;
+            brush: components["schemas"]["DrawingBrush"];
+            /**
+             * maxItems(12000)
+             * @description an array of at most 12000 item(s)
+             */
+            points: number[];
+        };
+        /** @enum {string} */
+        DrawingBrush: "thin" | "thick";
+        DrawingAnswer: {
+            id: number;
+            text: string;
+            mine: boolean;
+            real: boolean | null;
+            authorId: number | null;
+            voterIds: number[] | null;
+            points: number | null;
+            revealAt: number | null;
+        };
+        DrawingScore: {
+            userId: number;
+            score: number;
         };
         InvalidGameRequest: {
             message: string;
@@ -1754,6 +1898,47 @@ export interface components {
              * @description a positive number
              */
             userId: number;
+        };
+        DrawingPackList: {
+            packs: components["schemas"]["DrawingPack"][];
+        };
+        DrawingPack: {
+            slug: string;
+            name: string;
+            icon: string;
+            description: string;
+            samples: string[];
+            promptCount: number;
+        };
+        DrawingSettingsBody: {
+            /**
+             * maxItems(20)
+             * @description an array of at most 20 item(s)
+             */
+            packs: string[];
+            /**
+             * between(1, 3)
+             * @description a number between 1 and 3
+             */
+            rounds: number;
+        };
+        SubmitDrawingBody: {
+            /**
+             * maxItems(400)
+             * @description an array of at most 400 item(s)
+             */
+            strokes: components["schemas"]["DrawingStroke"][];
+        };
+        SubmitBluffBody: {
+            /** @description a string that will be trimmed */
+            text: string;
+        };
+        SubmitVoteBody: {
+            /**
+             * nonNegative
+             * @description a non-negative number
+             */
+            answer: number;
         };
         /** @enum {string} */
         LeaderboardPeriod: "day" | "week" | "all";
@@ -6009,8 +6194,10 @@ export interface operations {
                         startsAt: number | null;
                         endsAt: number | null;
                         serverNow: number;
+                        minPlayers: number;
                         maxPlayers: number;
                         players: components["schemas"]["GameLobbyPlayer"][];
+                        drawing: components["schemas"]["DrawingGame"] | null;
                         createdAt: number;
                     };
                 };
@@ -6463,6 +6650,292 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TooManyRequests"];
+                };
+            };
+        };
+    };
+    "games.listDrawingPacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description DrawingPackList */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DrawingPackList"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+        };
+    };
+    "games.updateDrawingSettings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DrawingSettingsBody"];
+            };
+        };
+        responses: {
+            /** @description GameLobby */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameLobby"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Forbidden"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
+                };
+            };
+        };
+    };
+    "games.submitDrawing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitDrawingBody"];
+            };
+        };
+        responses: {
+            /** @description GameLobby */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameLobby"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Forbidden"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
+                };
+            };
+        };
+    };
+    "games.submitBluff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitBluffBody"];
+            };
+        };
+        responses: {
+            /** @description GameLobby */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameLobby"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Forbidden"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
+                };
+            };
+        };
+    };
+    "games.submitVote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitVoteBody"];
+            };
+        };
+        responses: {
+            /** @description GameLobby */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameLobby"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Forbidden"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
                 };
             };
         };

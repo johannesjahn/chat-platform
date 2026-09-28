@@ -2375,13 +2375,19 @@ const AdminGroup = HttpApiGroup.make("admin").add(
 // game means adding its slug here plus its rules module; the lobby plumbing
 // and the frontend's game-shell components (web/src/components/games) are
 // shared.
-export const GameId = Schema.Literal("typing").annotations({
+//  - "typing":  Type Race — everyone races to type the same passage.
+//  - "drawing": Sketchy — a Drawful-style party game: everyone draws a
+//               secret prompt, bluffs fake titles for each other's drawings,
+//               and votes for the real one (see src/games/drawing/).
+export const GameId = Schema.Literal("typing", "drawing").annotations({
   identifier: "GameId",
 });
 export type GameId = typeof GameId.Type;
 
-// Seats per lobby. Small on purpose: every racer's lane is on screen at
-// once, and every progress frame fans out to the whole room.
+// Seats per typing lobby. Small on purpose: every racer's lane is on screen
+// at once, and every progress frame fans out to the whole room. Each game
+// sets its own bounds (see `GameRules` in src/games/rules.ts); a lobby
+// reports them as `minPlayers`/`maxPlayers`.
 export const MAX_GAME_LOBBY_PLAYERS = 6;
 
 // The phase a lobby is in *right now*, derived at read time from what the
@@ -2405,13 +2411,170 @@ export const GameLobbyPlayer = Schema.Struct({
   joinedAt: Schema.Number,
   // The four result fields are null until this player finishes the current
   // round. `score` is the game's headline number — words per minute for the
-  // typing race.
+  // typing race, points for Sketchy (where `accuracy` is the share of this
+  // player's votes that found the real title, and `durationMs` the length of
+  // the whole game).
   durationMs: Schema.NullOr(Schema.Number),
   score: Schema.NullOr(Schema.Number),
   accuracy: Schema.NullOr(Schema.Number),
   place: Schema.NullOr(Schema.Number),
 }).annotations({ identifier: "GameLobbyPlayer" });
 export type GameLobbyPlayer = typeof GameLobbyPlayer.Type;
+
+// --- Sketchy (the "drawing" game — see src/games/drawing/) -----------------
+//
+// Drawings are submitted as vector strokes on a fixed virtual canvas rather
+// than as images: a few kilobytes of JSON, validated server-side, rendered
+// (and replayed stroke by stroke) by the client at any size.
+export const DRAWING_WIDTH = 800;
+export const DRAWING_HEIGHT = 600;
+// Colors are indexes into the client's fixed palette (`DRAWING_PALETTE` in
+// web/src/lib/games/drawing.ts, which must stay this long) — the server only
+// needs to know they're in range.
+export const DRAWING_PALETTE_SIZE = 10;
+// Hard caps on one drawing. A real 75-second sketch, with the client's point
+// thinning, lands far below both.
+export const MAX_DRAWING_STROKES = 400;
+export const MAX_DRAWING_POINTS = 6000;
+export const MAX_BLUFF_LENGTH = 60;
+export const MIN_DRAWING_ROUNDS = 1;
+export const MAX_DRAWING_ROUNDS = 3;
+
+export const DrawingBrush = Schema.Literal("thin", "thick").annotations({
+  identifier: "DrawingBrush",
+});
+
+// One pen-down-to-pen-up line. `points` is flat — [x0, y0, x1, y1, …] — in
+// whole canvas units; the pairing (even length, y within DRAWING_HEIGHT) and
+// the drawing-wide point budget are checked by the handler, since a schema
+// can only bound each number on its own.
+export const DrawingStroke = Schema.Struct({
+  color: Schema.Number.pipe(
+    Schema.int(),
+    Schema.between(0, DRAWING_PALETTE_SIZE - 1),
+  ),
+  brush: DrawingBrush,
+  points: Schema.Array(
+    Schema.Number.pipe(Schema.int(), Schema.between(0, DRAWING_WIDTH)),
+  ).pipe(Schema.minItems(2), Schema.maxItems(MAX_DRAWING_POINTS * 2)),
+}).annotations({ identifier: "DrawingStroke" });
+export type DrawingStroke = typeof DrawingStroke.Type;
+
+export const DrawingStrokes = Schema.Array(DrawingStroke).pipe(
+  Schema.maxItems(MAX_DRAWING_STROKES),
+);
+
+// A theme pack, as the pack picker shows it. Deliberately *not* the prompt
+// list — with it, a voter could look the real title up (see
+// src/games/drawing/packs/).
+export const DrawingPack = Schema.Struct({
+  slug: Schema.String,
+  name: Schema.String,
+  // A single emoji.
+  icon: Schema.String,
+  description: Schema.String,
+  samples: Schema.Array(Schema.String),
+  promptCount: Schema.Number,
+}).annotations({ identifier: "DrawingPack" });
+export type DrawingPack = typeof DrawingPack.Type;
+
+export const DrawingPackList = Schema.Struct({
+  packs: Schema.Array(DrawingPack),
+}).annotations({ identifier: "DrawingPackList" });
+
+// Where a Sketchy game is inside the "racing" phase. Each round opens with a
+// "draw" stage (everyone at once), then every drawing of that round takes a
+// "bluff" → "vote" → "reveal" turn in the spotlight. Derived from the clock
+// and the submissions at read time, exactly like `GameLobbyPhase`.
+export const DrawingStageKind = Schema.Literal(
+  "draw",
+  "bluff",
+  "vote",
+  "reveal",
+).annotations({ identifier: "DrawingStageKind" });
+export type DrawingStageKind = typeof DrawingStageKind.Type;
+
+export const DrawingStage = Schema.Struct({
+  kind: DrawingStageKind,
+  // 1-based round within this game (see `rounds`).
+  turn: Schema.Number,
+  // The drawing in the spotlight; null during "draw".
+  drawingId: Schema.NullOr(Schema.Number),
+  // Epoch ms. `endsAt` can move *earlier* (everyone submitted) but never
+  // later.
+  startedAt: Schema.Number,
+  endsAt: Schema.Number,
+}).annotations({ identifier: "DrawingStage" });
+export type DrawingStage = typeof DrawingStage.Type;
+
+// One title on the vote ballot. Until the drawing's reveal, only `id`,
+// `text` and `mine` are filled in — nothing in a pre-reveal answer tells the
+// real title from a bluff.
+export const DrawingAnswer = Schema.Struct({
+  // Ballot position — what a vote submits.
+  id: Schema.Number,
+  text: Schema.String,
+  // The viewer can't vote for this one: it's their own bluff (or, for the
+  // artist, their own prompt).
+  mine: Schema.Boolean,
+  real: Schema.NullOr(Schema.Boolean),
+  // Who wrote this bluff; null for the real title.
+  authorId: Schema.NullOr(Schema.Number),
+  voterIds: Schema.NullOr(Schema.Array(Schema.Number)),
+  // What this answer earned its author (the artist, for the real one).
+  points: Schema.NullOr(Schema.Number),
+  // Epoch ms at which the live reveal turns this answer over — every client
+  // plays the same sequence off the server's clock, the truth landing last.
+  // Null for a bluff nobody picked (it isn't given a beat), and once the
+  // game is over.
+  revealAt: Schema.NullOr(Schema.Number),
+}).annotations({ identifier: "DrawingAnswer" });
+export type DrawingAnswer = typeof DrawingAnswer.Type;
+
+// One player's drawing, filtered for the viewer: strokes appear once the
+// drawing reaches its bluff stage (the artist always sees their own), the
+// prompt only at its reveal (the artist always knows theirs), the ballot
+// from its vote stage on.
+export const DrawingEntry = Schema.Struct({
+  id: Schema.Number,
+  turn: Schema.Number,
+  // Order within the round's bluff/vote/reveal turns.
+  position: Schema.Number,
+  artistId: Schema.Number,
+  submitted: Schema.Boolean,
+  strokes: Schema.NullOr(DrawingStrokes),
+  prompt: Schema.NullOr(Schema.String),
+  revealed: Schema.Boolean,
+  // How many bluffs/votes are in — the "3 of 5" progress, never who or what.
+  bluffCount: Schema.Number,
+  voteCount: Schema.Number,
+  myBluff: Schema.NullOr(Schema.String),
+  myVote: Schema.NullOr(Schema.Number),
+  answers: Schema.NullOr(Schema.Array(DrawingAnswer)),
+}).annotations({ identifier: "DrawingEntry" });
+export type DrawingEntry = typeof DrawingEntry.Type;
+
+export const DrawingScore = Schema.Struct({
+  userId: Schema.Number,
+  score: Schema.Number,
+}).annotations({ identifier: "DrawingScore" });
+
+export const DrawingGame = Schema.Struct({
+  // The host's picks (see `updateDrawingSettings`).
+  packs: Schema.Array(Schema.String),
+  rounds: Schema.Number,
+  // Null while waiting, counting down, or finished.
+  stage: Schema.NullOr(DrawingStage),
+  // The viewer's own secret prompt for the current round's draw stage.
+  myPrompt: Schema.NullOr(Schema.String),
+  // Everyone dealt into this game — fixed at the start, so a player who
+  // leaves mid-game still has their drawing played out.
+  participantIds: Schema.Array(Schema.Number),
+  drawings: Schema.Array(DrawingEntry),
+  // Running totals over every drawing revealed so far, highest first.
+  scores: Schema.Array(DrawingScore),
+}).annotations({ identifier: "DrawingGame" });
+export type DrawingGame = typeof DrawingGame.Type;
 
 export const GameLobby = Schema.Struct({
   id: Schema.Number,
@@ -2429,9 +2592,14 @@ export const GameLobby = Schema.Struct({
   // The server's clock when this response was built, so a client can correct
   // for its own clock skew when it renders the countdown and race timer.
   serverNow: Schema.Number,
+  // The host can't start with fewer seated players than this.
+  minPlayers: Schema.Number,
   maxPlayers: Schema.Number,
   // Seated players, in join order.
   players: Schema.Array(GameLobbyPlayer),
+  // Sketchy's state, filtered for the caller (see DrawingGame); null for
+  // every other game. The lobby browser only ever gets the settings.
+  drawing: Schema.NullOr(DrawingGame),
   createdAt: Schema.Number,
 }).annotations({ identifier: "GameLobby" });
 export type GameLobby = typeof GameLobby.Type;
@@ -2497,6 +2665,34 @@ export const LeaderboardQuery = Schema.Struct({
 export const GameInviteBody = Schema.Struct({
   userId: Schema.Number.pipe(Schema.int(), Schema.positive()),
 }).annotations({ identifier: "GameInviteBody" });
+
+export const DrawingSettingsBody = Schema.Struct({
+  // Pack slugs (see `listDrawingPacks`); unknown ones are rejected.
+  packs: Schema.Array(Schema.String.pipe(Schema.maxLength(40))).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(20),
+  ),
+  rounds: Schema.Number.pipe(
+    Schema.int(),
+    Schema.between(MIN_DRAWING_ROUNDS, MAX_DRAWING_ROUNDS),
+  ),
+}).annotations({ identifier: "DrawingSettingsBody" });
+
+export const SubmitDrawingBody = Schema.Struct({
+  strokes: DrawingStrokes,
+}).annotations({ identifier: "SubmitDrawingBody" });
+
+export const SubmitBluffBody = Schema.Struct({
+  text: Schema.Trim.pipe(
+    Schema.minLength(1),
+    Schema.maxLength(MAX_BLUFF_LENGTH),
+  ),
+}).annotations({ identifier: "SubmitBluffBody" });
+
+export const SubmitVoteBody = Schema.Struct({
+  // A `DrawingAnswer.id` from the current ballot.
+  answer: Schema.Number.pipe(Schema.int(), Schema.nonNegative()),
+}).annotations({ identifier: "SubmitVoteBody" });
 
 const GamesGroup = HttpApiGroup.make("games")
   .add(
@@ -2597,6 +2793,64 @@ const GamesGroup = HttpApiGroup.make("games")
       .addError(Forbidden, { status: 403 })
       .addError(InvalidGameRequest, { status: 400 })
       .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Sketchy's theme packs, for the host's pack picker — never the prompts
+    // themselves (see DrawingPack).
+    HttpApiEndpoint.get("listDrawingPacks", "/games/drawing/packs")
+      .addSuccess(DrawingPackList)
+      .middleware(Authentication),
+  )
+  .add(
+    // Host-only, while "waiting", Sketchy only: picks the theme packs and
+    // round count. Everyone in the lobby sees the change live.
+    HttpApiEndpoint.put("updateDrawingSettings", "/games/lobbies/:id/settings")
+      .setPath(GameLobbyIdPath)
+      .setPayload(DrawingSettingsBody)
+      .addSuccess(GameLobby)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidGameRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Sketchy, "draw" stage: submits the caller's drawing for this round.
+    // Once per drawing; a submission landing a moment after the timer is
+    // still accepted, since the client sends whatever is on the canvas when
+    // time runs out.
+    HttpApiEndpoint.post("submitDrawing", "/games/lobbies/:id/drawing")
+      .setPath(GameLobbyIdPath)
+      .setPayload(SubmitDrawingBody)
+      .addSuccess(GameLobby)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidGameRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Sketchy, "bluff" stage: a fake title for the drawing in the spotlight.
+    // Not for its artist; rejected if it's too close to the real prompt or
+    // repeats another player's bluff.
+    HttpApiEndpoint.post("submitBluff", "/games/lobbies/:id/bluff")
+      .setPath(GameLobbyIdPath)
+      .setPayload(SubmitBluffBody)
+      .addSuccess(GameLobby)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidGameRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Sketchy, "vote" stage: the caller's pick for the real title. Not for
+    // the artist, and never for your own bluff.
+    HttpApiEndpoint.post("submitVote", "/games/lobbies/:id/vote")
+      .setPath(GameLobbyIdPath)
+      .setPayload(SubmitVoteBody)
+      .addSuccess(GameLobby)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidGameRequest, { status: 400 })
       .middleware(Authentication),
   )
   .add(

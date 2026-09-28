@@ -13,6 +13,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { DrawingStroke } from "../Api.ts";
 
 export const users = pgTable(
   "users",
@@ -718,8 +719,21 @@ export const gameLobbies = pgTable(
     // so nobody can rehearse it in the lobby.
     passage: text("passage"),
     startsAt: timestamp("starts_at", { mode: "date" }),
+    // For Sketchy, the *latest* the game can end (every stage running its
+    // full timer) — the real end is derived from the submissions (see
+    // src/games/drawing/timeline.ts).
     endsAt: timestamp("ends_at", { mode: "date" }),
     maxPlayers: integer("max_players").notNull(),
+    // Game-specific lobby settings — Sketchy's theme packs and round count
+    // (null for the typing race). jsonb rather than columns so a game's
+    // options stay a code change; the shape is `DrawingLobbySettings`.
+    settings: jsonb("settings").$type<DrawingLobbySettings>(),
+    // The `round` whose results have been written to `game_results`, for
+    // games scored all at once at the end (Sketchy) rather than per finish.
+    // Settling is lazy — whichever read first sees the game over does it,
+    // guarded on this column so it happens exactly once (see
+    // `settleDrawingGame` in GamesHandler.ts).
+    settledRound: integer("settled_round"),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -740,6 +754,15 @@ export const gameLobbies = pgTable(
 );
 
 export type DbGameLobby = typeof gameLobbies.$inferSelect;
+
+export type DrawingLobbySettings = {
+  readonly packs: ReadonlyArray<string>;
+  readonly rounds: number;
+  // The previous game's prompts, carried over a rematch (which deletes its
+  // drawings) so the next deal can avoid repeating them. Never sent to
+  // clients.
+  readonly recentPrompts?: ReadonlyArray<string>;
+};
 
 // A player seated in a lobby, plus their outcome for the lobby's *current*
 // round (all four result columns are null until they finish, and are reset
@@ -806,6 +829,104 @@ export const gameResults = pgTable(
 );
 
 export type DbGameResult = typeof gameResults.$inferSelect;
+
+// Sketchy (see src/games/drawing/). Starting a game deals every seated
+// player one drawing per round, each with its own secret prompt — so these
+// rows also freeze who is playing, which keeps the clock-derived timeline
+// stable if someone leaves mid-game. Bluffs and votes hang off a drawing.
+// All three are per-game scratch space: a rematch deletes the lobby's
+// drawings (cascading to the rest), and only the final scores outlive them,
+// in `game_results`.
+export const gameDrawings = pgTable(
+  "game_drawings",
+  {
+    id: serial("id").primaryKey(),
+    lobbyId: integer("lobby_id")
+      .notNull()
+      .references(() => gameLobbies.id, { onDelete: "cascade" }),
+    artistId: integer("artist_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // 1-based round within the game.
+    turn: integer("turn").notNull(),
+    // This drawing's slot in its round's bluff/vote/reveal sequence.
+    position: integer("position").notNull(),
+    // Secret until the drawing's reveal — see the per-viewer filtering in
+    // src/games/drawing/view.ts.
+    prompt: text("prompt").notNull(),
+    // Seeds the ballot's shuffle. Random and never sent to clients, so the
+    // order the answers are listed in says nothing about which is real.
+    shuffleSeed: integer("shuffle_seed").notNull(),
+    // Null until submitted; a drawing nobody submitted plays out as blank.
+    strokes: jsonb("strokes").$type<ReadonlyArray<DrawingStroke>>(),
+    submittedAt: timestamp("submitted_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    unique().on(table.lobbyId, table.turn, table.artistId),
+    // "No prompt repeats within a game", held by the database too.
+    unique().on(table.lobbyId, table.prompt),
+    index("game_drawings_artist_id_idx").on(table.artistId),
+  ],
+);
+
+export type DbGameDrawing = typeof gameDrawings.$inferSelect;
+
+export const gameBluffs = pgTable(
+  "game_bluffs",
+  {
+    id: serial("id").primaryKey(),
+    drawingId: integer("drawing_id")
+      .notNull()
+      .references(() => gameDrawings.id, { onDelete: "cascade" }),
+    authorId: integer("author_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    // `text` folded for comparison (see `normalizeTitle`) — two bluffs that
+    // would read as the same ballot entry can't both land.
+    normalized: text("normalized").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    unique().on(table.drawingId, table.authorId),
+    unique().on(table.drawingId, table.normalized),
+    index("game_bluffs_author_id_idx").on(table.authorId),
+  ],
+);
+
+export type DbGameBluff = typeof gameBluffs.$inferSelect;
+
+export const gameVotes = pgTable(
+  "game_votes",
+  {
+    id: serial("id").primaryKey(),
+    drawingId: integer("drawing_id")
+      .notNull()
+      .references(() => gameDrawings.id, { onDelete: "cascade" }),
+    voterId: integer("voter_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // The bluff voted for, or null for a vote for the real prompt.
+    bluffId: integer("bluff_id").references(() => gameBluffs.id, {
+      onDelete: "cascade",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    unique().on(table.drawingId, table.voterId),
+    index("game_votes_voter_id_idx").on(table.voterId),
+    index("game_votes_bluff_id_idx").on(table.bluffId),
+  ],
+);
+
+export type DbGameVote = typeof gameVotes.$inferSelect;
 
 // In-app notifications (issue #317): one row per thing that happened *to*
 // `userId` — someone commented on their post, replied to their comment,
