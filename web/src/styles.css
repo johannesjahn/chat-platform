@@ -984,16 +984,24 @@ html[data-app-shell="immersive"] body {
   }
 }
 
+@property --border-glow-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
 @keyframes border-glow {
   to {
-    transform: rotate(360deg);
+    --border-glow-angle: 360deg;
   }
 }
 
 /* A conic sheen that sweeps around an element's border, marking it as live
    without adding another badge. Applied to a chat row with unread messages:
-   the ring is a rotating conic gradient masked to the border box, so the
-   content inside is untouched. */
+   the ring is a conic gradient masked to the border box, so the content
+   inside is untouched. The gradient's start angle is what animates — rotating
+   the pseudo-element itself would swing its rectangle around the card's
+   centre and spill the sheen far outside a wide row. */
 @utility animate-border-glow {
   position: relative;
   isolation: isolate;
@@ -1004,13 +1012,18 @@ html[data-app-shell="immersive"] body {
     inset: -1px;
     z-index: -1;
     border-radius: inherit;
+    padding: 1px;
     background: conic-gradient(
-      from 0deg,
+      from var(--border-glow-angle, 0deg),
       transparent 0deg,
-      color-mix(in oklch, var(--primary), transparent 35%) 40deg,
+      var(--primary) 40deg,
       transparent 110deg,
       transparent 360deg
     );
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
     animation: border-glow 4s linear infinite;
     pointer-events: none;
   }
