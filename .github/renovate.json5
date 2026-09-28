@@ -161,21 +161,27 @@
       enabled: false,
     },
 
-    // TypeScript 7.0 is a hard break for two things this repo's CI depends
-    // on, confirmed by PR #161 (which bumped to 7.0.2 and left every one of
-    // these failing): typescript-eslint refuses to run at all against TS
-    // 7.0 ("typescript-eslint does not support TS 7.0" — see
-    // https://github.com/typescript-eslint/typescript-eslint/issues/10940),
-    // failing the `lint` CI job outright, and openapi-typescript's bundled
-    // `ts.mjs` calls `ts.factory.createKeywordTypeNode` in a way TS 7's
-    // reshaped factory API no longer supports, throwing
-    // `TypeError: Cannot read properties of undefined (reading
-    // 'createKeywordTypeNode')` and failing the `openapi` job's
-    // `gen:types` step. Block major bumps here until both upstream
-    // projects ship TS 7 support — remove this rule once they do.
+    // TypeScript runs as two side-by-side installs (see "TypeScript 7 +
+    // the TS 6 compatibility layer" in CLAUDE.md): `@typescript/native` is
+    // an alias for typescript@7 and provides the `tsc` every `typecheck`
+    // script runs, while `typescript` is an alias for the
+    // @typescript/typescript6 compatibility package, which re-exports the
+    // TS 6 JS API for tools that `import "typescript"` — typescript-eslint
+    // and openapi-typescript, neither of which runs on TS 7 (7.0 ships no
+    // JS API). Keep the compat package on 6.x until both support TS 7.1's
+    // new API. (matchDepNames, not matchPackageNames: for an npm alias
+    // the package name is the alias target, @typescript/typescript6.)
+    //
+    // Bumping the compat package needs a hand-check of bun.lock: Bun
+    // resolves its nested `@typescript/old` (npm:typescript@^6) dependency
+    // against the root `typescript` alias — whose own version, 6.0.x,
+    // satisfies ^6 — so a regenerated lockfile makes it require itself and
+    // `import "typescript"` yields an empty module.
+    // The `"typescript/@typescript/old"` entry in both bun.lock files must
+    // point at a real `typescript@6.x`.
     {
       matchManagers: ["bun"],
-      matchPackageNames: ["typescript"],
+      matchDepNames: ["typescript"],
       matchUpdateTypes: ["major"],
       enabled: false,
     },

@@ -266,6 +266,28 @@ Tooling (Prettier, ESLint, TypeScript) lives at the root and covers **both**
 packages — there is a single `eslint.config.js` and `.prettierrc.json`. Run
 lint/format from the repo root; run `typecheck` per package.
 
+### TypeScript 7 + the TS 6 compatibility layer
+
+Both packages compile/typecheck with **TypeScript 7** (the native Go port) but
+keep the **TypeScript 6 JS API** installed for tooling, since TS 7.0 ships no
+JS API. In each `package.json`:
+
+- `"@typescript/native": "npm:typescript@7.x"` — provides the `tsc` binary
+  every `typecheck` script runs.
+- `"typescript": "npm:@typescript/typescript6@6.x"` — the official
+  compatibility package: re-exports the TS 6 API (and a `tsc6` binary), so
+  anything that does `import "typescript"` — typescript-eslint,
+  openapi-typescript (`gen:types`) — keeps working on 6.x.
+
+**Bun lockfile gotcha:** the compat package depends on
+`"@typescript/old": "npm:typescript@^6"`, and Bun resolves that against the
+root `typescript` alias (version 6.0.x satisfies `^6`), making it require
+_itself_ — `import "typescript"` then yields an empty module. Both
+`bun.lock` files carry a hand-corrected `"typescript/@typescript/old"` entry
+pointing at the real `typescript@6.x`; `bun install` (frozen or not) keeps it,
+but re-check it whenever the compat package is bumped or a lockfile is
+regenerated from scratch.
+
 ## Testing
 
 - **Backend** — `bun test ./src --parallel --timeout=15000` (Bun's test
