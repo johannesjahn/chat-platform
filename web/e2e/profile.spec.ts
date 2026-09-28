@@ -1,16 +1,16 @@
 import { expect, test } from "./fixtures";
-import { registerViaUi } from "./helpers";
 
 test("a profile page shows the user's recent posts and post count, and Message starts a direct chat", async ({
   browser,
   injectApiUrl,
   request,
   apiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const sessionA = await pageA.evaluate(() =>
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
@@ -25,7 +25,7 @@ test("a profile page shows the user's recent posts and post count, and Message s
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  await registerViaUi(pageB);
+  await signUp(pageB);
 
   await pageB.goto(`/users/${authorId}`);
   await expect(
@@ -45,8 +45,9 @@ test("a user's own profile shows 'Your posts' with no Message button", async ({
   page,
   request,
   apiUrl,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
   const session = await page.evaluate(() =>
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
   );

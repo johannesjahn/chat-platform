@@ -1,12 +1,13 @@
 import { expect, test } from "./fixtures";
-import { makeSolidPng, registerViaUi } from "./helpers";
+import { makeSolidPng } from "./helpers";
 
 test("creating a post shows it in the feed, and infinite scroll loads more posts in batches of 5 then 3", async ({
   page,
   request,
   apiUrl,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
 
   // Create the first post through the actual "New post" page.
   await page.goto("/posts/new");
@@ -60,16 +61,17 @@ test("creating a post shows it in the feed, and infinite scroll loads more posts
 test("a post created by one user appears live in another user's already-open feed", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  const { username: usernameA } = await registerViaUi(pageA);
+  const { username: usernameA } = await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  await registerViaUi(pageB);
+  await signUp(pageB);
 
   // B sits on the feed and just leaves it open — no reload from here on, so
   // anything B sees has to come from the `/ws` push invalidating the feed
@@ -104,11 +106,12 @@ test("a post created by one user appears live in another user's already-open fee
 test("edit is only available to a post's author, both in the UI and when navigating directly", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  const { username: usernameA } = await registerViaUi(pageA);
+  const { username: usernameA } = await signUp(pageA);
 
   await pageA.goto("/posts/new");
   await pageA.fill("#content", "Only the author should be able to edit this");
@@ -121,7 +124,7 @@ test("edit is only available to a post's author, both in the UI and when navigat
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  await registerViaUi(pageB);
+  await signUp(pageB);
   await pageB.goto("/");
 
   const cardOnB = pageB.getByRole("article", { name: `Post by @${usernameA}` });
@@ -153,8 +156,9 @@ test("long posts are collapsed behind a Show more toggle", async ({
   page,
   request,
   apiUrl,
+  signUp,
 }) => {
-  const { username } = await registerViaUi(page);
+  const { username } = await signUp(page);
 
   // Longer than PostCard's 500-char collapse threshold — created directly
   // against the API since the point is to check the feed's rendering, not
@@ -189,8 +193,9 @@ test("clicking a feed image post opens it full-size in a lightbox", async ({
   page,
   request,
   apiUrl,
+  signUp,
 }) => {
-  const { username } = await registerViaUi(page);
+  const { username } = await signUp(page);
 
   // Seed an image post directly against the API — the point here is the
   // feed's lightbox behavior, not the "new post" upload flow. The host is on
@@ -228,8 +233,9 @@ test("the full-screen viewer zooms and pans an image past its on-page size", asy
   page,
   request,
   apiUrl,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
   const session = await page.evaluate(() =>
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
   );

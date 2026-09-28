@@ -1,20 +1,21 @@
 import type { WebSocketRoute } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { fakeOnScreenKeyboard, registerViaUi } from "./helpers";
+import { fakeOnScreenKeyboard } from "./helpers";
 
 test("starting a direct chat, sending a message, and seeing it marked read", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  const { username: usernameA } = await registerViaUi(pageA);
+  const { username: usernameA } = await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   // A starts a direct chat with B from the "New chat" picker.
   await pageA.goto("/chats/new");
@@ -56,16 +57,17 @@ test("starting a direct chat, sending a message, and seeing it marked read", asy
 test("group chats can be created, renamed by the creator, and show all participants", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Group chat" }).click();
@@ -108,20 +110,17 @@ test("a user can redeem a group invite through the join page and via a direct in
   injectApiUrl,
   apiUrl,
   request,
+  createUser,
+  signUp,
 }) => {
-  // This one spins up four browser contexts and registers four users through
-  // the UI (seed + A + B + C), which alone flirts with the default 30s budget
-  // on the slower sharded CI runners — every assertion passes, it just tips
-  // over during teardown. Give it the tripled "slow" budget so that timing
-  // headroom, not a logic change, is what keeps it green.
+  // Four users (seed + A + B + C) and three browser contexts: this ran at
+  // 37s against the default 30s budget on the sharded CI runners back when
+  // users were registered through the form. `signUp` took most of that away,
+  // but keep the tripled "slow" budget as headroom rather than cutting it close.
   test.slow();
   // A seed user just so the group can be created (a group needs at least one
   // other participant); B and C below join purely through the invite flow.
-  const contextSeed = await browser.newContext();
-  await injectApiUrl(contextSeed);
-  const pageSeed = await contextSeed.newPage();
-  const { username: usernameSeed } = await registerViaUi(pageSeed);
-  await contextSeed.close();
+  const { username: usernameSeed } = await createUser();
 
   // Owner A creates a group chat and mints an invite code for it. The code is
   // created over the API (the UI only ever exposes it truncated + via
@@ -129,7 +128,7 @@ test("a user can redeem a group invite through the join page and via a direct in
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Group chat" }).click();
@@ -156,7 +155,7 @@ test("a user can redeem a group invite through the join page and via a direct in
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  await registerViaUi(pageB);
+  await signUp(pageB);
 
   // Path 1: B pastes the code into the join page and clicks Continue. The
   // confirmation step (a child route) must actually render — the regression
@@ -178,7 +177,7 @@ test("a user can redeem a group invite through the join page and via a direct in
   const contextC = await browser.newContext();
   await injectApiUrl(contextC);
   const pageC = await contextC.newPage();
-  await registerViaUi(pageC);
+  await signUp(pageC);
 
   await pageC.goto(`/chats/join/${code}`);
   await expect(pageC.getByText("You've been invited to a chat")).toBeVisible();
@@ -194,16 +193,17 @@ test("a user can redeem a group invite through the join page and via a direct in
 test("messages are grouped under a sticky day separator (issue #307)", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();
@@ -234,16 +234,17 @@ test("messages are grouped under a sticky day separator (issue #307)", async ({
 test("long messages are collapsed behind a Show more toggle", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();
@@ -267,26 +268,27 @@ test("long messages are collapsed behind a Show more toggle", async ({
 test("the creator can add participants to a group chat, and the new participant sees it in their list", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
-  // Three browser contexts and three UI registrations before the group is even
-  // created: this ran at 29.4s against the default 30s budget on a green CI
-  // run and tipped over (during teardown) on the next. Same fix as the invite
-  // test above — timing headroom, not a logic change.
+  // Three browser contexts before the group is even created: this ran at
+  // 29.4s against the default 30s budget (and then tipped over) back when
+  // users were registered through the form. Same headroom as the invite test
+  // above.
   test.slow();
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   const contextC = await browser.newContext();
   await injectApiUrl(contextC);
   const pageC = await contextC.newPage();
-  const { username: usernameC } = await registerViaUi(pageC);
+  const { username: usernameC } = await signUp(pageC);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Group chat" }).click();
@@ -318,16 +320,17 @@ test("the creator can add participants to a group chat, and the new participant 
 test("navigating directly to a chat you can't access shows a not-found message", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();
@@ -339,7 +342,7 @@ test("navigating directly to a chat you can't access shows a not-found message",
   const contextC = await browser.newContext();
   await injectApiUrl(contextC);
   const pageC = await contextC.newPage();
-  await registerViaUi(pageC);
+  await signUp(pageC);
 
   // A chat id that doesn't exist at all...
   await pageC.goto("/chats/999999");
@@ -358,16 +361,17 @@ test("navigating directly to a chat you can't access shows a not-found message",
 test("a message sent by one user appears on the other's already-open chat via the websocket push", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  const { username: usernameA } = await registerViaUi(pageA);
+  const { username: usernameA } = await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();
@@ -396,6 +400,7 @@ test("a message sent by one user appears on the other's already-open chat via th
 test("sending a message doesn't leave a duplicate copy in the sender's own view (issue #203)", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
@@ -423,12 +428,12 @@ test("sending a message doesn't leave a duplicate copy in the sender's own view 
       });
     },
   );
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();
@@ -466,24 +471,20 @@ test("sending a message doesn't leave a duplicate copy in the sender's own view 
 });
 
 test("infinite scroll stops requesting more messages once the oldest one is loaded", async ({
-  browser,
-  injectApiUrl,
   page,
   request,
   apiUrl,
+  createUser,
+  signUp,
 }) => {
   // Seeding 130 messages one HTTP request at a time (below), plus draining
   // several rounds of `loadEarlier` pagination, comfortably exceeds the
   // default 30s test timeout.
   test.setTimeout(90_000);
 
-  await registerViaUi(page);
+  await signUp(page);
 
-  const otherContext = await browser.newContext();
-  await injectApiUrl(otherContext);
-  const otherPage = await otherContext.newPage();
-  const { username: otherUsername } = await registerViaUi(otherPage);
-  await otherContext.close();
+  const { username: otherUsername } = await createUser();
 
   await page.goto("/chats/new");
   await page.getByRole("button", { name: "Direct message" }).click();
@@ -560,23 +561,19 @@ test("infinite scroll stops requesting more messages once the oldest one is load
 });
 
 test("reopening an already-visited chat still paginates instead of loading its whole history", async ({
-  browser,
-  injectApiUrl,
   page,
   request,
   apiUrl,
+  createUser,
+  signUp,
 }) => {
   // Seeding more than a full page of messages one HTTP request at a time
   // (below) doesn't reliably fit the default 30s test timeout.
   test.setTimeout(60_000);
 
-  await registerViaUi(page);
+  await signUp(page);
 
-  const otherContext = await browser.newContext();
-  await injectApiUrl(otherContext);
-  const otherPage = await otherContext.newPage();
-  const { username: otherUsername } = await registerViaUi(otherPage);
-  await otherContext.close();
+  const { username: otherUsername } = await createUser();
 
   // Client-side navigation throughout (no `page.goto` after this point) is
   // essential: the bug only reproduces while the SPA's in-memory React Query
@@ -662,6 +659,7 @@ test("reopening an already-visited chat still paginates instead of loading its w
 test("a client that missed a chat_updated push while its socket was down catches up via a full refetch on reconnect (issue #54)", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
@@ -691,12 +689,12 @@ test("a client that missed a chat_updated push while its socket was down catches
     },
   );
 
-  const { username: usernameA } = await registerViaUi(pageA);
+  const { username: usernameA } = await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();
@@ -739,18 +737,14 @@ test("a long conversation fits the viewport and opens scrolled to the newest mes
   page,
   request,
   apiUrl,
-  browser,
-  injectApiUrl,
+  createUser,
+  signUp,
 }) => {
   test.setTimeout(90_000);
 
-  await registerViaUi(page);
+  await signUp(page);
 
-  const otherContext = await browser.newContext();
-  await injectApiUrl(otherContext);
-  const otherPage = await otherContext.newPage();
-  const { username: otherUsername } = await registerViaUi(otherPage);
-  await otherContext.close();
+  const { username: otherUsername } = await createUser();
 
   await page.goto("/chats/new");
   await page.getByRole("button", { name: "Direct message" }).click();
@@ -813,16 +807,12 @@ test("a long conversation fits the viewport and opens scrolled to the newest mes
 
 test("the empty composer is one line tall and only grows once there's something to grow for", async ({
   page,
-  browser,
-  injectApiUrl,
+  createUser,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
 
-  const otherContext = await browser.newContext();
-  await injectApiUrl(otherContext);
-  const otherPage = await otherContext.newPage();
-  const { username: otherUsername } = await registerViaUi(otherPage);
-  await otherContext.close();
+  const { username: otherUsername } = await createUser();
 
   await page.goto("/chats/new");
   await page.getByRole("button", { name: "Direct message" }).click();
@@ -897,16 +887,12 @@ test("the empty composer is one line tall and only grows once there's something 
 
 test("the composer's extra send modes collapse into one attach button", async ({
   page,
-  browser,
-  injectApiUrl,
+  createUser,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
 
-  const otherContext = await browser.newContext();
-  await injectApiUrl(otherContext);
-  const otherPage = await otherContext.newPage();
-  const { username: otherUsername } = await registerViaUi(otherPage);
-  await otherContext.close();
+  const { username: otherUsername } = await createUser();
 
   await page.goto("/chats/new");
   await page.getByRole("button", { name: "Direct message" }).click();
@@ -966,8 +952,8 @@ test("the composer's extra send modes collapse into one attach button", async ({
 
 test("the chat fits the *visual* viewport, not the layout viewport the keyboard lies about", async ({
   page,
-  browser,
-  injectApiUrl,
+  createUser,
+  signUp,
 }) => {
   // A phone-shaped screen, where the composer being pushed off the bottom is
   // the difference between a usable chat and an unusable one.
@@ -975,13 +961,9 @@ test("the chat fits the *visual* viewport, not the layout viewport the keyboard 
 
   await fakeOnScreenKeyboard(page);
 
-  await registerViaUi(page);
+  await signUp(page);
 
-  const otherContext = await browser.newContext();
-  await injectApiUrl(otherContext);
-  const otherPage = await otherContext.newPage();
-  const { username: otherUsername } = await registerViaUi(otherPage);
-  await otherContext.close();
+  const { username: otherUsername } = await createUser();
 
   await page.goto("/chats/new");
   await page.getByRole("button", { name: "Direct message" }).click();
@@ -1038,8 +1020,8 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
   page,
   request,
   apiUrl,
-  browser,
-  injectApiUrl,
+  createUser,
+  signUp,
 }) => {
   test.setTimeout(90_000);
 
@@ -1047,13 +1029,9 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
   await page.setViewportSize({ width: 390, height: 844 });
   await fakeOnScreenKeyboard(page);
 
-  await registerViaUi(page);
+  await signUp(page);
 
-  const otherContext = await browser.newContext();
-  await injectApiUrl(otherContext);
-  const otherPage = await otherContext.newPage();
-  const { username: otherUsername } = await registerViaUi(otherPage);
-  await otherContext.close();
+  const { username: otherUsername } = await createUser();
 
   await page.goto("/chats/new");
   await page.getByRole("button", { name: "Direct message" }).click();
@@ -1214,22 +1192,18 @@ test("clicking a reply's quoted snippet jumps the thread to the message it answe
   page,
   request,
   apiUrl,
-  browser,
-  injectApiUrl,
+  createUser,
+  signUp,
 }) => {
   // Seeding more than a full page of messages one HTTP request at a time
   // (below) doesn't reliably fit the default 30s test timeout.
   test.setTimeout(60_000);
 
-  await registerViaUi(page);
+  await signUp(page);
 
   // B only has to exist for A to start a direct chat with them — the whole
   // flow under test happens in A's window.
-  const otherContext = await browser.newContext();
-  await injectApiUrl(otherContext);
-  const otherPage = await otherContext.newPage();
-  const { username: otherUsername } = await registerViaUi(otherPage);
-  await otherContext.close();
+  const { username: otherUsername } = await createUser();
 
   await page.goto("/chats/new");
   await page.getByRole("button", { name: "Direct message" }).click();

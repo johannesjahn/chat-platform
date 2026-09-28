@@ -1,5 +1,4 @@
 import { expect, test } from "./fixtures";
-import { registerViaUi } from "./helpers";
 
 // Seeds a couple of text posts through the API, then drives the header search
 // box → results page and asserts the matching post shows up with a highlighted
@@ -8,8 +7,9 @@ test("header search finds a post and highlights the match", async ({
   page,
   request,
   apiUrl,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
 
   const session = await page.evaluate(() =>
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
@@ -50,8 +50,9 @@ test("search matches a fragment inside a word and finds people", async ({
   page,
   request,
   apiUrl,
+  signUp,
 }) => {
-  const { username } = await registerViaUi(page);
+  const { username } = await signUp(page);
 
   const session = await page.evaluate(() =>
     JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
@@ -90,16 +91,12 @@ test("a message search result opens the chat on the matching message", async ({
   page,
   request,
   apiUrl,
-  browser,
-  injectApiUrl,
+  createUser,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
 
-  const otherContext = await browser.newContext();
-  await injectApiUrl(otherContext);
-  const otherPage = await otherContext.newPage();
-  const { username: otherUsername } = await registerViaUi(otherPage);
-  await otherContext.close();
+  const { username: otherUsername } = await createUser();
 
   await page.goto("/chats/new");
   await page.getByRole("button", { name: "Direct message" }).click();

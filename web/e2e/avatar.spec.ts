@@ -1,10 +1,11 @@
 import { expect, test } from "./fixtures";
-import { makeSolidPng, registerViaUi } from "./helpers";
+import { makeSolidPng } from "./helpers";
 
 test("uploads and crops an avatar from settings, replacing the initials everywhere it's shown", async ({
   page,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
 
   await page.goto("/settings");
   // Before uploading, the avatar preview falls back to initials — no <img>.
@@ -57,8 +58,9 @@ test("uploads and crops an avatar from settings, replacing the initials everywhe
 
 test("removes an uploaded avatar back to the initials placeholder", async ({
   page,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
   await page.goto("/settings");
 
   const png = makeSolidPng(300, 300, [60, 140, 220]);
@@ -87,8 +89,9 @@ test("removes an uploaded avatar back to the initials placeholder", async ({
 
 test("uploadAvatar rejects an image smaller than the minimum dimensions, before any upload", async ({
   page,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
   await page.goto("/settings");
 
   const tinyPng = makeSolidPng(100, 100, [10, 200, 10]);

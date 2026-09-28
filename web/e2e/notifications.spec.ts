@@ -1,5 +1,4 @@
 import { expect, test } from "./fixtures";
-import { registerViaUi } from "./helpers";
 
 // In-app notifications (issue #317): the header bell lights up live when
 // something happens to you, and the inbox links back to it.
@@ -7,16 +6,17 @@ import { registerViaUi } from "./helpers";
 test("an @mention lights up the bell live and the inbox links to the post", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  const alice = await registerViaUi(pageA);
+  const alice = await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const bob = await registerViaUi(pageB);
+  const bob = await signUp(pageB);
 
   await expect(
     pageA.getByRole("link", { name: "Notifications", exact: true }),
@@ -48,16 +48,17 @@ test("an @mention lights up the bell live and the inbox links to the post", asyn
 test("a game invite lands in the inbox and opens the lobby", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  const alice = await registerViaUi(pageA);
+  const alice = await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const bob = await registerViaUi(pageB);
+  const bob = await signUp(pageB);
 
   await pageA.goto("/games/typing");
   await pageA.getByRole("button", { name: "New lobby" }).click();

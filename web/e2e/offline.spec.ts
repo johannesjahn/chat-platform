@@ -1,19 +1,19 @@
 import { expect, test } from "./fixtures";
-import { registerViaUi } from "./helpers";
 
 test("losing connectivity mid-session keeps already-loaded messages on screen and shows an offline banner, and persists the cache to localStorage for a later reload", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();
@@ -56,6 +56,7 @@ test("losing connectivity mid-session keeps already-loaded messages on screen an
 test("visiting a chat with no cached data during a connectivity failure shows an offline-specific message, not a generic not-found", async ({
   page,
   apiUrl,
+  signUp,
 }) => {
   // `context.setOffline` blocks the dev server's own asset requests too (no
   // service worker in this dev-server e2e setup to serve the app shell —
@@ -63,7 +64,7 @@ test("visiting a chat with no cached data during a connectivity failure shows an
   // can't be driven here at all. Aborting just the one API request instead
   // reproduces the same network-level failure (a rejected `fetch()`, not a
   // decoded HTTP error) that a genuinely offline, never-cached visit hits.
-  await registerViaUi(page);
+  await signUp(page);
   await page.route(`${apiUrl}/chats/999999`, (route) => route.abort("failed"));
   await page.goto("/chats/999999");
 
@@ -81,8 +82,9 @@ test("visiting a chat with no cached data during a connectivity failure shows an
 test("a failed request doesn't blank already-loaded posts behind an error message", async ({
   page,
   apiUrl,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
   await page.goto("/posts/new");
   await page.getByRole("button", { name: "Text" }).click();
   await page.fill("#content", "Post loaded before the network hiccup");
@@ -119,16 +121,17 @@ test("a failed request doesn't blank already-loaded posts behind an error messag
 test("queues a message sent while offline and delivers it automatically once back online (issue #177)", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();
@@ -172,16 +175,17 @@ test("queues a message sent while offline and delivers it automatically once bac
 test("retries a queued message that failed to send, without losing its place", async ({
   browser,
   injectApiUrl,
+  signUp,
 }) => {
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
-  await registerViaUi(pageA);
+  await signUp(pageA);
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
   const pageB = await contextB.newPage();
-  const { username: usernameB } = await registerViaUi(pageB);
+  const { username: usernameB } = await signUp(pageB);
 
   await pageA.goto("/chats/new");
   await pageA.getByRole("button", { name: "Direct message" }).click();
@@ -227,8 +231,9 @@ test("retries a queued message that failed to send, without losing its place", a
 test("queues a post created while offline and publishes it automatically once back online (issue #177)", async ({
   page,
   context,
+  signUp,
 }) => {
-  await registerViaUi(page);
+  await signUp(page);
   // Reach /posts/new via a client-side `Link` click, not `page.goto` — a
   // `goto` is a real browser navigation that discards this page's JS module
   // cache, so the "/" route's lazily-loaded chunk (needed below to navigate
@@ -262,9 +267,9 @@ test("queues a post created while offline and publishes it automatically once ba
 test("a post queued offline by one user isn't sent under a different user who logs in on the same browser afterward", async ({
   page,
   context,
+  signUp,
 }) => {
-  const { username: usernameA, password: passwordA } =
-    await registerViaUi(page);
+  const { username: usernameA, password: passwordA } = await signUp(page);
 
   await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
   await page.getByRole("link", { name: "New post" }).click();
@@ -288,7 +293,7 @@ test("a post queued offline by one user isn't sent under a different user who lo
   // must neither send nor even render for B, despite the connectivity
   // restore that would otherwise trigger a replay.
   await context.setOffline(false);
-  await registerViaUi(page);
+  await signUp(page);
   await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
   await expect(page.getByTestId("pending-post")).toHaveCount(0);
   await expect(page.getByText("A's offline post")).toHaveCount(0);

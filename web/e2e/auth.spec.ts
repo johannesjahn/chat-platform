@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { randomUsername, registerViaUi } from "./helpers";
+import { randomUsername } from "./helpers";
 
 test("registers a new user and sees the user list after login", async ({
   page,
@@ -27,8 +27,9 @@ test("registers a new user and sees the user list after login", async ({
 
 test("changes password from settings and can log back in with the new one", async ({
   page,
+  signUp,
 }) => {
-  const { username, password } = await registerViaUi(page);
+  const { username, password } = await signUp(page);
   const newPassword = "playwright-new-pw-456";
 
   await page.goto("/settings");
@@ -55,8 +56,9 @@ test("changes password from settings and can log back in with the new one", asyn
 
 test("setting a display name replaces the username in the nav, but the profile page still shows both", async ({
   page,
+  signUp,
 }) => {
-  const { username } = await registerViaUi(page);
+  const { username } = await signUp(page);
   const displayName = "Ada Lovelace";
 
   // The settings page no longer offers a way to change the username itself —
