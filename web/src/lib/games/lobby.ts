@@ -249,6 +249,23 @@ export function useServerClock(intervalMs: number, active: boolean): number {
   return now;
 }
 
+// Holds the page's drifting background blob still while `active` (see the
+// `data-aurora` rule in styles.css) — for the length of a game, whose glass
+// panels would otherwise all be re-blurred over it on every frame.
+let auroraPauses = 0;
+export function usePauseAurora(active: boolean): void {
+  useEffect(() => {
+    if (!active) return;
+    const root = document.documentElement;
+    auroraPauses++;
+    root.dataset.aurora = "paused";
+    return () => {
+      auroraPauses--;
+      if (auroraPauses === 0) delete root.dataset.aurora;
+    };
+  }, [active]);
+}
+
 export const formatDuration = (ms: number): string => {
   const totalSeconds = ms / 1000;
   if (totalSeconds < 60) return `${totalSeconds.toFixed(1)}s`;

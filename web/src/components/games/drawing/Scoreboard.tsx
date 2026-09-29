@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp } from "lucide-react";
 import { PlaceBadge } from "@/components/games/PlaceBadge";
 import { CountUp } from "@/components/reactbits/CountUp";
@@ -20,7 +20,7 @@ const ranksOf = (scores: ReadonlyArray<Score>) =>
 // a FLIP animation: measure where every row was, let React reorder them,
 // then play each one from its old position back to zero — and each score
 // rolls up to its new total, a climber flagged with an arrow.
-export function Scoreboard({
+export const Scoreboard = memo(function Scoreboard({
   scores,
   cast,
   meId,
@@ -115,4 +115,4 @@ export function Scoreboard({
       })}
     </ol>
   );
-}
+});

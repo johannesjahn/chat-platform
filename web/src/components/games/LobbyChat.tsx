@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { memo, useEffect, useRef, useState, type FormEvent } from "react";
 import { Lock, MessageSquare, Send } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,13 @@ const STICK_TO_BOTTOM_PX = 48;
 // The lobby's chat and reaction bar, shared by every game and shown in every
 // phase. When the game closes its chat mid-play (Sketchy — see `chatOpen`),
 // the history folds away and only the reactions stay.
-export function LobbyChat({ lobby, meId }: { lobby: GameLobby; meId: number }) {
+export const LobbyChat = memo(function LobbyChat({
+  lobby,
+  meId,
+}: {
+  lobby: GameLobby;
+  meId: number;
+}) {
   const { data: messages = [], isLoading } = useLobbyChat(lobby.id, true);
   const post = usePostLobbyChat(lobby.id);
   const [draft, setDraft] = useState("");
@@ -143,4 +149,4 @@ export function LobbyChat({ lobby, meId }: { lobby: GameLobby; meId: number }) {
       )}
     </GamePanel>
   );
-}
+});

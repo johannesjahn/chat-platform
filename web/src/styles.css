@@ -123,6 +123,14 @@
     animation: aurora-drift 24s ease-in-out infinite alternate;
   }
 
+  /* Held still while a game is being played (see `usePauseAurora`): every
+     glass panel's backdrop blur sits over this blob, and while it drifts
+     each of them is re-blurred on every frame — a steady GPU cost a long
+     game can do without. */
+  :root[data-aurora="paused"] body::before {
+    animation-play-state: paused;
+  }
+
   /* Sleek, unobtrusive scrollbars that match the surface tokens. */
   * {
     scrollbar-width: thin;
@@ -1461,8 +1469,15 @@ html[data-app-shell="immersive"] body {
    ─────────────────────────────────────────────────────────────────────────── */
 
 /* Drawing paper: warm off-white with a faint dot grid, the same in either
-   theme — a drawing is a picture, and ink must stay ink. */
+   theme — a drawing is a picture, and ink must stay ink.
+
+   `will-change` gives every sheet its own compositing layer. A drawing can
+   be hundreds of paths, and it sits inside panels that repaint every frame
+   (the `game-ring` comet animates a custom property, which the compositor
+   can't take over) — on its own layer the drawing is rasterized once and
+   reused, instead of redrawn with every frame of the panel around it. */
 @utility sketch-paper {
+  will-change: transform;
   background-color: #fffdf6;
   background-image: radial-gradient(
     circle at 1px 1px,

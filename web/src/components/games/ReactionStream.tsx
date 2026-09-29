@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { memo, type CSSProperties } from "react";
 import type { GameLobby } from "@/lib/games/lobby";
 import { useFlyingReactions } from "@/lib/games/reactions";
 import { userLabel } from "@/lib/users";
@@ -6,7 +6,7 @@ import { userLabel } from "@/lib/users";
 // Reactions flung in this lobby, floating up the right-hand side of the
 // screen over whatever is going on. Purely decorative — screen readers skip
 // it — and never in the way of a click.
-export function ReactionStream({
+export const ReactionStream = memo(function ReactionStream({
   lobby,
   meId,
 }: {
@@ -48,4 +48,4 @@ export function ReactionStream({
       })}
     </div>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/errors";
@@ -68,10 +68,14 @@ export function DrawStage({
   const submit = useSubmitDrawing(lobbyId);
   const { mutate, isPending, isSuccess } = submit;
 
-  const onChange = (next: DrawingStroke[]) => {
-    setStrokes(next);
-    saveDraft(key, next);
-  };
+  // Stable, so the memoized canvas skips the game clock's re-renders.
+  const onChange = useCallback(
+    (next: DrawingStroke[]) => {
+      setStrokes(next);
+      saveDraft(key, next);
+    },
+    [key],
+  );
 
   const send = () => mutate(strokes, { onSuccess: () => saveDraft(key, null) });
 
