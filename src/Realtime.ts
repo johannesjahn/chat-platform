@@ -304,6 +304,14 @@ export class RealtimeConnections extends Context.Tag("RealtimeConnections")<
 const ROOM_NAME_PATTERN =
   /^(game-hub:[a-z][a-z0-9-]{0,31}|game-lobby:\d{1,10})$/;
 
+// How many post comment rooms / named rooms one connection may be in at
+// once. A real client is in a handful (the comment sections open on screen;
+// a games hub and a lobby) — the caps only stop a scripted socket from
+// joining millions. Joins past a cap are dropped silently, like any other
+// malformed control message.
+export const MAX_POST_ROOMS_PER_CONNECTION = 200;
+export const MAX_ROOMS_PER_CONNECTION = 32;
+
 export const isValidRoomName = (room: unknown): room is string =>
   typeof room === "string" && ROOM_NAME_PATTERN.test(room);
 
@@ -358,6 +366,23 @@ export const RealtimeConnectionsLive = Layer.effect(
     // room name -> local connection writers subscribed to it (see
     // `subscribeRoom`). Same local-only bookkeeping as `byPost`.
     const byRoom = new Map<string, Set<Writer>>();
+    // The reverse of `byPost`/`byRoom`: what each connection has joined. It
+    // caps how much one socket can join (room names and post ids come
+    // straight off the wire, so without it a single client could grow the
+    // maps above without bound), and lets a disconnect sweep only its own
+    // memberships instead of every room on the instance.
+    const joined = new Map<
+      Writer,
+      { posts: Set<number>; rooms: Set<string> }
+    >();
+    const joinedBy = (write: Writer) => {
+      let entry = joined.get(write);
+      if (!entry) {
+        entry = { posts: new Set(), rooms: new Set() };
+        joined.set(write, entry);
+      }
+      return entry;
+    };
 
     // A dead/broken socket write must never fail the mutation that triggered
     // it (same reasoning as notifyUsers/broadcastAll's Effect.ignore below),
@@ -469,6 +494,11 @@ export const RealtimeConnectionsLive = Layer.effect(
       typeof RealtimeConnections
     >["subscribePost"] = (postId, write) =>
       Effect.sync(() => {
+        const mine = joinedBy(write).posts;
+        if (!mine.has(postId) && mine.size >= MAX_POST_ROOMS_PER_CONNECTION) {
+          return;
+        }
+        mine.add(postId);
         const set = byPost.get(postId) ?? new Set();
         set.add(write);
         byPost.set(postId, set);
@@ -478,6 +508,7 @@ export const RealtimeConnectionsLive = Layer.effect(
       typeof RealtimeConnections
     >["unsubscribePost"] = (postId, write) =>
       Effect.sync(() => {
+        joined.get(write)?.posts.delete(postId);
         const set = byPost.get(postId);
         if (!set) return;
         set.delete(write);
@@ -497,6 +528,9 @@ export const RealtimeConnectionsLive = Layer.effect(
       typeof RealtimeConnections
     >["subscribeRoom"] = (room, write) =>
       Effect.sync(() => {
+        const mine = joinedBy(write).rooms;
+        if (!mine.has(room) && mine.size >= MAX_ROOMS_PER_CONNECTION) return;
+        mine.add(room);
         const set = byRoom.get(room) ?? new Set();
         set.add(write);
         byRoom.set(room, set);
@@ -506,6 +540,7 @@ export const RealtimeConnectionsLive = Layer.effect(
       typeof RealtimeConnections
     >["unsubscribeRoom"] = (room, write) =>
       Effect.sync(() => {
+        joined.get(write)?.rooms.delete(room);
         const set = byRoom.get(room);
         if (!set) return;
         set.delete(write);
@@ -553,18 +588,21 @@ export const RealtimeConnectionsLive = Layer.effect(
             current.delete(write);
             if (current.size === 0) byUser.delete(userId);
           }
-          // Sweep this connection out of every post room it had joined, so a
-          // dropped socket leaves no dangling room membership (the client has
-          // no chance to send `unsubscribe_post_comments` on an abrupt
-          // close). Iterating every room is fine — a process holds at most a
-          // handful of open comment sections' worth.
-          for (const [postId, writers] of byPost) {
-            if (writers.delete(write) && writers.size === 0) {
+          // Sweep this connection out of every post and named room it had
+          // joined, so a dropped socket leaves no dangling room membership
+          // (the client has no chance to send `unsubscribe_post_comments` on
+          // an abrupt close).
+          const mine = joined.get(write);
+          joined.delete(write);
+          for (const postId of mine?.posts ?? []) {
+            const writers = byPost.get(postId);
+            if (writers?.delete(write) && writers.size === 0) {
               byPost.delete(postId);
             }
           }
-          for (const [room, writers] of byRoom) {
-            if (writers.delete(write) && writers.size === 0) {
+          for (const room of mine?.rooms ?? []) {
+            const writers = byRoom.get(room);
+            if (writers?.delete(write) && writers.size === 0) {
               byRoom.delete(room);
             }
           }

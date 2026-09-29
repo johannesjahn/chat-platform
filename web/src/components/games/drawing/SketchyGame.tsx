@@ -30,6 +30,11 @@ export function SketchyGame({
 }) {
   const cast = useCast(lobby);
   useStageAdvance(lobby, now);
+  // Someone who left the game can still come back to watch, but leaving
+  // forfeits — they see it as a spectator (their own drawing included),
+  // not with the draw/bluff/vote controls the server would turn away.
+  const seated = lobby.players.some((player) => player.user.id === meId);
+  const viewerId = seated ? meId : undefined;
   const game = lobby.drawing!;
   const stage = game.stage;
   const spotlight =
@@ -79,7 +84,7 @@ export function SketchyGame({
                   game={game}
                   stage={stage}
                   cast={cast}
-                  meId={meId}
+                  meId={viewerId}
                   now={now}
                 />
               )}
@@ -89,7 +94,7 @@ export function SketchyGame({
                   game={game}
                   drawing={spotlight}
                   cast={cast}
-                  meId={meId}
+                  meId={viewerId}
                 />
               )}
               {stage.kind === "vote" && spotlight && (
@@ -98,14 +103,14 @@ export function SketchyGame({
                   game={game}
                   drawing={spotlight}
                   cast={cast}
-                  meId={meId}
+                  meId={viewerId}
                 />
               )}
               {stage.kind === "reveal" && spotlight && (
                 <RevealStage
                   drawing={spotlight}
                   cast={cast}
-                  meId={meId}
+                  meId={viewerId}
                   now={now}
                 />
               )}
@@ -124,7 +129,7 @@ export function SketchyGame({
       </GamePanel>
 
       <GamePanel title="Scores" icon={Trophy}>
-        <Scoreboard scores={game.scores} cast={cast} meId={meId} />
+        <Scoreboard scores={game.scores} cast={cast} meId={viewerId} />
       </GamePanel>
     </div>
   );
