@@ -32,7 +32,12 @@ import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
 import { UsersHandlerLive } from "./UsersHandler.ts";
 import { VersionHandlerLive } from "./VersionHandler.ts";
 import { InMemoryWsTicketLive } from "./WsTicket.ts";
-import { gameLobbies, gameResults, users } from "./db/schema.ts";
+import {
+  gameLobbies,
+  gameLobbyMessages,
+  gameResults,
+  users,
+} from "./db/schema.ts";
 import { MAX_PLAUSIBLE_WPM, TYPING_COUNTDOWN_MS } from "./games/typing.ts";
 
 // JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
@@ -596,5 +601,108 @@ test("the leaderboard ranks by best score, counts wins, and always includes me",
         "speedy",
         "alice",
       ]);
+    }),
+  ));
+
+test("the lobby chat takes lines from players and spectators, even mid-race", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "s3cret-pw");
+      const bob = yield* registerAndLogin("bob", "s3cret-pw");
+      const a = yield* makeAuthedClient(alice.accessToken);
+      const b = yield* makeAuthedClient(bob.accessToken);
+      const lobby = yield* a.games.createGameLobby(game);
+      expect(lobby.chatOpen).toBe(true);
+
+      const sent = yield* a.games.postGameChat({
+        ...lobbyPath(lobby.id),
+        payload: { text: "glhf!" },
+      });
+      expect(sent).toMatchObject({
+        lobbyId: lobby.id,
+        text: "glhf!",
+        user: { id: alice.user.id },
+      });
+
+      // Bob isn't seated — spectators chat too — and the typing race keeps
+      // its chat open through the race itself.
+      yield* a.games.startGameLobby(lobbyPath(lobby.id));
+      yield* fastForward(lobby.id, 5_000);
+      const racing = yield* b.games.getGameLobby(lobbyPath(lobby.id));
+      expect(racing.phase).toBe("racing");
+      expect(racing.chatOpen).toBe(true);
+      yield* b.games.postGameChat({
+        ...lobbyPath(lobby.id),
+        payload: { text: "go go go" },
+      });
+
+      const { messages } = yield* b.games.listGameChat(lobbyPath(lobby.id));
+      expect(messages.map((m) => [m.user.username, m.text])).toEqual([
+        ["alice", "glhf!"],
+        ["bob", "go go go"],
+      ]);
+
+      yield* expectFailure(
+        a.games.listGameChat(lobbyPath(lobby.id + 1)),
+        "NotFound",
+      );
+    }),
+  ));
+
+test("the lobby chat hides blocked authors and is rate-limited", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "s3cret-pw");
+      const bob = yield* registerAndLogin("bob", "s3cret-pw");
+      const a = yield* makeAuthedClient(alice.accessToken);
+      const b = yield* makeAuthedClient(bob.accessToken);
+      const lobby = yield* a.games.createGameLobby(game);
+      yield* b.games.postGameChat({
+        ...lobbyPath(lobby.id),
+        payload: { text: "hi from bob" },
+      });
+      yield* a.users.setBlock({
+        path: { id: bob.user.id },
+        payload: { type: "mute" },
+      });
+      expect(
+        (yield* a.games.listGameChat(lobbyPath(lobby.id))).messages,
+      ).toEqual([]);
+      // Only for the one who muted — Bob still sees his own line.
+      expect(
+        (yield* b.games.listGameChat(lobbyPath(lobby.id))).messages,
+      ).toHaveLength(1);
+
+      for (let i = 1; i < 10; i++) {
+        yield* b.games.postGameChat({
+          ...lobbyPath(lobby.id),
+          payload: { text: `line ${i}` },
+        });
+      }
+      yield* expectFailure(
+        b.games.postGameChat({
+          ...lobbyPath(lobby.id),
+          payload: { text: "one too many" },
+        }),
+        "TooManyRequests",
+      );
+    }),
+  ));
+
+test("a lobby's chat goes with the lobby", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "s3cret-pw");
+      const a = yield* makeAuthedClient(alice.accessToken);
+      const lobby = yield* a.games.createGameLobby(game);
+      yield* a.games.postGameChat({
+        ...lobbyPath(lobby.id),
+        payload: { text: "brb" },
+      });
+      yield* a.games.leaveGameLobby(lobbyPath(lobby.id));
+      const db = yield* Db;
+      expect(
+        yield* Effect.promise(() => db.select().from(gameLobbyMessages)),
+      ).toEqual([]);
     }),
   ));

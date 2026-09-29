@@ -840,3 +840,47 @@ test("a rematch clears the game, keeps the packs, and deals fresh prompts", () =
       expect(secondDeal.filter((p) => firstDeal.includes(p))).toEqual([]);
     }),
   ));
+
+test("the lobby chat closes while a game is in play, so nobody can type out a prompt", () =>
+  run(
+    Effect.gen(function* () {
+      const { lobby, players } = yield* threePlayerLobby;
+      const [alice, bob] = players;
+      yield* bob.c.games.postGameChat({
+        ...at(lobby.id),
+        payload: { text: "ready when you are" },
+      });
+      const started = yield* alice.c.games.startGameLobby(at(lobby.id));
+      expect(started.chatOpen).toBe(false);
+      yield* expectFailure(
+        bob.c.games.postGameChat({
+          ...at(lobby.id),
+          payload: { text: "mine is a cat" },
+        }),
+        "InvalidGameRequest",
+      );
+      yield* advance(lobby.id, 10_000);
+      const drawing = yield* bob.c.games.getGameLobby(at(lobby.id));
+      expect(drawing.phase).toBe("racing");
+      expect(drawing.chatOpen).toBe(false);
+      yield* expectFailure(
+        bob.c.games.postGameChat({
+          ...at(lobby.id),
+          payload: { text: "mine is a cat" },
+        }),
+        "InvalidGameRequest",
+      );
+
+      // Once every prompt is out in the open, the chat reopens.
+      yield* advance(lobby.id, 60 * 60_000);
+      const over = yield* bob.c.games.getGameLobby(at(lobby.id));
+      expect(over.phase).toBe("finished");
+      expect(over.chatOpen).toBe(true);
+      yield* bob.c.games.postGameChat({
+        ...at(lobby.id),
+        payload: { text: "gg" },
+      });
+      const { messages } = yield* alice.c.games.listGameChat(at(lobby.id));
+      expect(messages.map((m) => m.text)).toEqual(["ready when you are", "gg"]);
+    }),
+  ));

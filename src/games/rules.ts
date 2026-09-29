@@ -14,6 +14,10 @@ type CommonRules = {
   // players away at `maxPlayers`.
   readonly minPlayers: number;
   readonly maxPlayers: number;
+  // Whether the lobby chat stays open while a game is running (countdown
+  // included). A game with secrets in play — Sketchy's prompts — closes it,
+  // so nobody can type theirs out; emoji reactions stay on either way.
+  readonly chatDuringPlay: boolean;
 };
 
 // A race: everyone plays the same content at once, and each player's finish
@@ -51,11 +55,13 @@ export const GAME_RULES: Record<GameId, GameRules> = {
   typing: {
     ...typingRules,
     kind: "race",
+    chatDuringPlay: true,
     minPlayers: 1,
     maxPlayers: MAX_GAME_LOBBY_PLAYERS,
   },
   drawing: {
     kind: "drawing",
+    chatDuringPlay: false,
     countdownMs: DRAWING_COUNTDOWN_MS,
     minPlayers: DRAWING_MIN_PLAYERS,
     maxPlayers: DRAWING_MAX_PLAYERS,

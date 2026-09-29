@@ -5,6 +5,7 @@ import {
 } from "@effect/platform";
 import { Context, Effect, type Scope } from "effect";
 import { clientIp } from "./ClientIp.ts";
+import { isGameReaction } from "./games/reactions.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import {
   gameLobbyRoom,
@@ -56,6 +57,20 @@ const GAME_PROGRESS_MAX_PER_SECOND = 15;
 // clamp it to the passage length client-side.
 const MAX_GAME_PROGRESS = 10_000;
 
+// Emoji reactions are a tap, not a stream — a few a second is already a
+// frantic mash, and each one floats across every screen in the lobby. The
+// excess is dropped silently, same as progress frames.
+const GAME_REACTION_MAX_PER_SECOND = 4;
+
+// Slides a per-connection one-second window: true (and records `now`) while
+// under `max`, false once the budget is spent.
+const withinBudget = (window: number[], max: number, now: number) => {
+  while (window.length > 0 && now - window[0]! >= 1000) window.shift();
+  if (window.length >= max) return false;
+  window.push(now);
+  return true;
+};
+
 const isInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value);
 
@@ -71,7 +86,9 @@ export const makeIncomingHandler = (
 ) => {
   // This connection's recent `game_progress` frame timestamps, for the
   // per-second budget above.
-  let progressWindow: number[] = [];
+  const progressWindow: number[] = [];
+  // Likewise for `game_reaction`, with its own (smaller) budget.
+  const reactionWindow: number[] = [];
 
   return (data: string | Uint8Array) =>
     Effect.gen(function* () {
@@ -90,6 +107,7 @@ export const makeIncomingHandler = (
         room?: unknown;
         lobbyId?: unknown;
         progress?: unknown;
+        reaction?: unknown;
       };
 
       // Named rooms (see Realtime.ts) — the games hub and individual lobbies.
@@ -122,10 +140,15 @@ export const makeIncomingHandler = (
         ) {
           return;
         }
-        const now = Date.now();
-        progressWindow = progressWindow.filter((at) => now - at < 1000);
-        if (progressWindow.length >= GAME_PROGRESS_MAX_PER_SECOND) return;
-        progressWindow.push(now);
+        if (
+          !withinBudget(
+            progressWindow,
+            GAME_PROGRESS_MAX_PER_SECOND,
+            Date.now(),
+          )
+        ) {
+          return;
+        }
         const room = gameLobbyRoom(message.lobbyId);
         if (!(yield* connections.isInRoom(room, write))) return;
         yield* connections.notifyRoom(room, {
@@ -133,6 +156,34 @@ export const makeIncomingHandler = (
           lobbyId: message.lobbyId,
           userId,
           progress: message.progress,
+        });
+        return;
+      }
+
+      // An emoji reaction, relayed the same way as progress: only into a
+      // lobby this socket is watching, stamped with its own `userId`, and
+      // only from the fixed set (see src/games/reactions.ts). Spectators
+      // may react too — cheering is half the point.
+      if (message.type === "game_reaction") {
+        if (!isInteger(message.lobbyId) || !isGameReaction(message.reaction)) {
+          return;
+        }
+        if (
+          !withinBudget(
+            reactionWindow,
+            GAME_REACTION_MAX_PER_SECOND,
+            Date.now(),
+          )
+        ) {
+          return;
+        }
+        const room = gameLobbyRoom(message.lobbyId);
+        if (!(yield* connections.isInRoom(room, write))) return;
+        yield* connections.notifyRoom(room, {
+          type: "game_reaction",
+          lobbyId: message.lobbyId,
+          userId,
+          reaction: message.reaction,
         });
         return;
       }
@@ -206,7 +257,7 @@ const wsHandler = Effect.gen(function* () {
   // Realtime.ts), so comment/reply and per-comment-like events reach it
   // without flooding every connected client. The games feature does the same
   // with named rooms (`subscribe_room`/`unsubscribe_room`) and additionally
-  // streams `game_progress` frames up the socket. `runRaw` (rather than
+  // streams `game_progress` and `game_reaction` frames up the socket. `runRaw` (rather than
   // `run`) preserves text frames as strings; anything that isn't one of these
   // JSON control messages is dropped. No per-post authorization: the feed is
   // public to any signed-in user, so any of them may watch any post's room.

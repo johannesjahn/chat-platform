@@ -100,3 +100,41 @@ test("a signed-out visitor is asked to log in before playing", async ({
   await page.goto("/games");
   await expect(page.getByText("Log in to play")).toBeVisible();
 });
+
+test("the lobby chat and reactions reach everyone in the lobby live", async ({
+  browser,
+  injectApiUrl,
+  signUp,
+}) => {
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  await signUp(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const bob = await signUp(pageB);
+
+  await pageA.getByRole("link", { name: "Games" }).click();
+  await pageA.getByRole("link", { name: /Type Race/ }).click();
+  await pageA.getByRole("button", { name: "New lobby" }).click();
+  await expect(pageA.getByText("Waiting room")).toBeVisible();
+
+  // Bob only watches — spectators get the chat too.
+  await pageB.goto(new URL(pageA.url()).pathname);
+  await expect(pageB.getByText("Spectating")).toBeVisible();
+
+  await pageB.getByLabel("Message the lobby").fill("good luck!");
+  await pageB.getByRole("button", { name: "Send" }).click();
+  const messagesA = pageA.getByRole("list", { name: "Lobby messages" });
+  await expect(messagesA.getByText("good luck!")).toBeVisible();
+  await expect(messagesA.getByText(`@${bob.username}`)).toBeVisible();
+
+  // A reaction floats up on the other screen, labeled with who sent it.
+  await pageA.getByRole("button", { name: "React 🔥" }).click();
+  await expect(pageB.getByText("🔥", { exact: true }).last()).toBeVisible();
+
+  await contextA.close();
+  await contextB.close();
+});

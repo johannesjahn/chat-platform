@@ -2600,6 +2600,10 @@ export const GameLobby = Schema.Struct({
   // Sketchy's state, filtered for the caller (see DrawingGame); null for
   // every other game. The lobby browser only ever gets the settings.
   drawing: Schema.NullOr(DrawingGame),
+  // Whether the lobby chat takes messages right now. Always open for the
+  // typing race; closed while a Sketchy game is in play, since a chat line
+  // is the easiest way to leak a secret prompt (reactions stay on).
+  chatOpen: Schema.Boolean,
   createdAt: Schema.Number,
 }).annotations({ identifier: "GameLobby" });
 export type GameLobby = typeof GameLobby.Type;
@@ -2607,6 +2611,37 @@ export type GameLobby = typeof GameLobby.Type;
 export const GameLobbyList = Schema.Struct({
   lobbies: Schema.Array(GameLobby),
 }).annotations({ identifier: "GameLobbyList" });
+
+// --- Lobby chat -------------------------------------------------------------
+//
+// A lobby's own little chat room — players and spectators alike. Lives and
+// dies with the lobby (see `gameLobbyMessages` in db/schema.ts), and arrives
+// live as an id-less `game_chat` event on the lobby's realtime room.
+export const MAX_GAME_CHAT_LENGTH = 280;
+// The chat shows (at most) this many of a lobby's newest messages.
+export const GAME_CHAT_PAGE_SIZE = 50;
+
+export const GameChatMessage = Schema.Struct({
+  id: Schema.Number,
+  lobbyId: Schema.Number,
+  user: User,
+  text: Schema.String,
+  createdAt: Schema.Number,
+}).annotations({ identifier: "GameChatMessage" });
+export type GameChatMessage = typeof GameChatMessage.Type;
+
+export const GameChat = Schema.Struct({
+  // Oldest first, ending with the newest. Leaves out anyone the caller has
+  // blocked or muted.
+  messages: Schema.Array(GameChatMessage),
+}).annotations({ identifier: "GameChat" });
+
+export const GameChatBody = Schema.Struct({
+  text: Schema.Trim.pipe(
+    Schema.minLength(1),
+    Schema.maxLength(MAX_GAME_CHAT_LENGTH),
+  ),
+}).annotations({ identifier: "GameChatBody" });
 
 // A finished race's submission. The server never takes a score from the
 // client: it checks `typed` against the passage and times the finish off its
@@ -2791,6 +2826,26 @@ const GamesGroup = HttpApiGroup.make("games")
       .addSuccess(Schema.Void)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })
+      .addError(InvalidGameRequest, { status: 400 })
+      .addError(TooManyRequests, { status: 429 })
+      .middleware(Authentication),
+  )
+  .add(
+    // The lobby chat's newest messages (see GameChat).
+    HttpApiEndpoint.get("listGameChat", "/games/lobbies/:id/chat")
+      .setPath(GameLobbyIdPath)
+      .addSuccess(GameChat)
+      .addError(NotFound, { status: 404 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Says something in the lobby chat — anyone looking at the lobby may,
+    // seated or spectating, while `chatOpen`. Rate-limited per user.
+    HttpApiEndpoint.post("postGameChat", "/games/lobbies/:id/chat")
+      .setPath(GameLobbyIdPath)
+      .setPayload(GameChatBody)
+      .addSuccess(GameChatMessage, { status: 201 })
+      .addError(NotFound, { status: 404 })
       .addError(InvalidGameRequest, { status: 400 })
       .addError(TooManyRequests, { status: 429 })
       .middleware(Authentication),

@@ -238,6 +238,28 @@ which reads the game's colors from the `--game-from`/`--game-to`/`--game-glow`
 custom properties (see the "Games design system" block in
 `web/src/styles.css`) instead of hard-coding them.
 
+### Lobby chat and reactions
+
+Every lobby page carries a chat and an emoji reaction bar (the shared
+`LobbyChat`/`ReactionStream` in `web/src/components/games/`), for players and
+spectators alike:
+
+- **Chat is persisted, per lobby.** `game_lobby_messages` (migration `0029`)
+  cascades with its lobby, so it's gone once the lobby is. `GET/POST
+/games/lobbies/:id/chat` read the newest `GAME_CHAT_PAGE_SIZE` lines
+  (hiding authors the reader blocked/muted) and post one (rate-limited per
+  user); a post publishes an id-only `game_chat` event to the lobby room.
+- **Chat closes during play when the game has secrets.** Each `GameRules`
+  sets `chatDuringPlay`; the lobby's `chatOpen` is true while waiting or
+  finished, and during play only if that's set. Sketchy clears it so nobody
+  can type out their prompt; the server rejects posts while closed.
+- **Reactions are relayed, never stored** — a `game_reaction` socket frame,
+  handled like `game_progress` (only into a joined lobby room, stamped with
+  the socket's user id, budgeted per connection). Only the fixed set in
+  [`src/games/reactions.ts`](src/games/reactions.ts) is relayed, which is
+  why they stay on mid-game; the client's `GAME_REACTIONS`
+  (`web/src/lib/games/reactions.ts`) must list the same emoji.
+
 ### Sketchy (the `drawing` game, issue #440)
 
 A Drawful-style party game: everyone draws a secret prompt, then each drawing

@@ -1012,6 +1012,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/lobbies/{id}/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["games.listGameChat"];
+        put?: never;
+        post: operations["games.postGameChat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/drawing/packs": {
         parameters: {
             query?: never;
@@ -1801,6 +1817,7 @@ export interface components {
             maxPlayers: number;
             players: components["schemas"]["GameLobbyPlayer"][];
             drawing: components["schemas"]["DrawingGame"] | null;
+            chatOpen: boolean;
             createdAt: number;
         };
         /** @enum {string} */
@@ -1898,6 +1915,20 @@ export interface components {
              * @description a positive number
              */
             userId: number;
+        };
+        GameChat: {
+            messages: components["schemas"]["GameChatMessage"][];
+        };
+        GameChatMessage: {
+            id: number;
+            lobbyId: number;
+            user: components["schemas"]["User"];
+            text: string;
+            createdAt: number;
+        };
+        GameChatBody: {
+            /** @description a string that will be trimmed */
+            text: string;
         };
         DrawingPackList: {
             packs: components["schemas"]["DrawingPack"][];
@@ -6198,6 +6229,7 @@ export interface operations {
                         maxPlayers: number;
                         players: components["schemas"]["GameLobbyPlayer"][];
                         drawing: components["schemas"]["DrawingGame"] | null;
+                        chatOpen: boolean;
                         createdAt: number;
                     };
                 };
@@ -6632,6 +6664,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Forbidden"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
+                };
+            };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequests"];
+                };
+            };
+        };
+    };
+    "games.listGameChat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description GameChat */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameChat"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
+                };
+            };
+        };
+    };
+    "games.postGameChat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GameChatBody"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: number;
+                        lobbyId: number;
+                        user: components["schemas"]["User"];
+                        text: string;
+                        createdAt: number;
+                    };
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
                 };
             };
             /** @description NotFound */

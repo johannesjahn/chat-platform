@@ -10,6 +10,7 @@ import {
   isNull,
   lt,
   ne,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
@@ -17,6 +18,7 @@ import { Context, Effect, Metric, MetricLabel } from "effect";
 import {
   ChatApi,
   DRAWING_HEIGHT,
+  GAME_CHAT_PAGE_SIZE,
   Forbidden,
   InvalidGameRequest,
   LEADERBOARD_SIZE,
@@ -24,6 +26,7 @@ import {
   NotFound,
   TooManyRequests,
   type DrawingStroke,
+  type GameChatMessage,
   type GameId,
   type GameLobby,
   type GameLobbyPhase,
@@ -36,6 +39,7 @@ import {
   gameBluffs,
   gameDrawings,
   gameLobbies,
+  gameLobbyMessages,
   gameLobbyPlayers,
   gameResults,
   gameVotes,
@@ -86,6 +90,7 @@ import {
 } from "./games/drawing/view.ts";
 import { GAME_RULES, type RaceRules } from "./games/rules.ts";
 import { rateLimitRejectionsTotal } from "./Metrics.ts";
+import { blockedOrMutedUserIds } from "./blocks.ts";
 import { createNotifications } from "./notifications.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { gameHubRoom, gameLobbyRoom, RealtimeConnections } from "./Realtime.ts";
@@ -285,6 +290,13 @@ const finalTallies = (snapshot: LobbySnapshot) => {
   );
 };
 
+// Whether `snapshot`'s lobby chat takes messages right now — see
+// `chatDuringPlay` in src/games/rules.ts.
+const chatOpenFor = (snapshot: Pick<LobbySnapshot, "lobby" | "phase">) =>
+  GAME_RULES[snapshot.lobby.game as GameId].chatDuringPlay ||
+  snapshot.phase === "waiting" ||
+  snapshot.phase === "finished";
+
 // `viewerId` null builds the lobby browser's view: no passage, and only the
 // settings of a Sketchy game.
 const toApiLobby = (
@@ -353,6 +365,7 @@ const toApiLobby = (
             finished: phase === "finished",
             viewerId,
           }),
+    chatOpen: chatOpenFor(snapshot),
     createdAt: lobby.createdAt.getTime(),
   };
 };
@@ -634,6 +647,49 @@ const enforceInviteLimit = (userId: number) =>
       );
     }
   });
+
+// A lobby's chat fans every line out to the whole room, so a per-user cap
+// keeps one flooder from drowning it — roomy for a lively conversation.
+const GAME_CHAT_MAX_PER_USER = 10;
+const GAME_CHAT_WINDOW_SECONDS = 15;
+
+const enforceChatLimit = (userId: number) =>
+  Effect.gen(function* () {
+    const limiter = yield* RateLimiter;
+    const result = yield* limiter.consume(
+      `games:chat:user:${userId}`,
+      GAME_CHAT_MAX_PER_USER,
+      GAME_CHAT_WINDOW_SECONDS,
+    );
+    if (!result.allowed) {
+      yield* Metric.update(
+        Metric.taggedWithLabels(rateLimitRejectionsTotal, [
+          MetricLabel.make("limiter", "game_chat"),
+        ]),
+        1,
+      );
+      return yield* Effect.fail(
+        new TooManyRequests({
+          message: "You're chatting too fast. Take a breath and try again.",
+          retryAfterSeconds: result.retryAfterSeconds,
+        }),
+      );
+    }
+  });
+
+const toApiChatMessage = (row: {
+  readonly id: number;
+  readonly lobbyId: number;
+  readonly text: string;
+  readonly createdAt: Date;
+  readonly user: Parameters<typeof toPublicUser>[0];
+}): GameChatMessage => ({
+  id: row.id,
+  lobbyId: row.lobbyId,
+  user: toPublicUser(row.user),
+  text: row.text,
+  createdAt: row.createdAt.getTime(),
+});
 
 // The player holding `game`'s all-time best score right now (earliest to
 // reach it on a tie), or null before anyone has finished a race.
@@ -1210,6 +1266,75 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               lobbyId: id,
             },
           ]);
+        }),
+      )
+      .handle("listGameChat", ({ path: { id } }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          yield* loadLobbyOr404(db, id);
+          const hidden = yield* Effect.tryPromise(() =>
+            blockedOrMutedUserIds(db, currentUser.id),
+          ).pipe(Effect.orDie);
+          const rows = yield* Effect.tryPromise(() =>
+            db
+              .select({
+                id: gameLobbyMessages.id,
+                lobbyId: gameLobbyMessages.lobbyId,
+                text: gameLobbyMessages.text,
+                createdAt: gameLobbyMessages.createdAt,
+                user: publicUserColumns,
+              })
+              .from(gameLobbyMessages)
+              .innerJoin(users, eq(users.id, gameLobbyMessages.userId))
+              .where(
+                and(
+                  eq(gameLobbyMessages.lobbyId, id),
+                  hidden.length > 0
+                    ? notInArray(gameLobbyMessages.userId, hidden)
+                    : undefined,
+                ),
+              )
+              .orderBy(desc(gameLobbyMessages.id))
+              .limit(GAME_CHAT_PAGE_SIZE),
+          ).pipe(Effect.orDie);
+          return { messages: rows.reverse().map(toApiChatMessage) };
+        }),
+      )
+      .handle("postGameChat", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const snapshot = yield* loadSnapshot(db, id);
+          if (!chatOpenFor(snapshot)) {
+            return yield* invalid(
+              "Chat is paused while the game is in play — reactions still work!",
+            );
+          }
+          yield* enforceChatLimit(currentUser.id);
+          const [row] = yield* Effect.tryPromise(() =>
+            db
+              .insert(gameLobbyMessages)
+              .values({
+                lobbyId: id,
+                userId: currentUser.id,
+                text: payload.text,
+              })
+              .returning(),
+          ).pipe(Effect.orDie);
+          const [author] = yield* Effect.tryPromise(() =>
+            db
+              .select(publicUserColumns)
+              .from(users)
+              .where(eq(users.id, currentUser.id))
+              .limit(1),
+          ).pipe(Effect.orDie);
+          yield* connections.notifyRoom(gameLobbyRoom(id), {
+            type: "game_chat",
+            lobbyId: id,
+          });
+          return toApiChatMessage({ ...row!, user: author! });
         }),
       )
       .handle("rematchGameLobby", ({ path: { id } }) =>

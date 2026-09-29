@@ -18,8 +18,10 @@ import { Confetti } from "@/components/games/Confetti";
 import { GamePanel } from "@/components/games/GamePanel";
 import { GameShell } from "@/components/games/GameShell";
 import { InvitePlayers } from "@/components/games/InvitePlayers";
+import { LobbyChat } from "@/components/games/LobbyChat";
 import { LobbySeats } from "@/components/games/LobbySeats";
 import { PhaseBadge } from "@/components/games/PhaseBadge";
+import { ReactionStream } from "@/components/games/ReactionStream";
 import { ResultsPodium } from "@/components/games/ResultsPodium";
 import { SketchyGallery } from "@/components/games/drawing/SketchyGallery";
 import { SketchyGame } from "@/components/games/drawing/SketchyGame";
@@ -359,6 +361,9 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
       )}
 
       {phase === "finished" && ResultsExtras && <ResultsExtras lobby={lobby} />}
+
+      {meId !== undefined && <LobbyChat lobby={lobby} meId={meId} />}
+      <ReactionStream lobby={lobby} meId={meId} />
     </GameShell>
   );
 }
