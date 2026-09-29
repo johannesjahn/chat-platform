@@ -590,3 +590,63 @@ test("game_progress frames beyond the per-second budget are dropped", async () =
     }),
   );
 });
+
+test("game_reaction relays only the fixed emoji, stamped with the sender's id and budgeted", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const fan = recordingWriter();
+      const player = recordingWriter();
+      yield* connections.register(1, fan.write);
+      yield* connections.register(2, player.write);
+      const fromFan = makeIncomingHandler(connections, 1, fan.write);
+      const fromPlayer = makeIncomingHandler(connections, 2, player.write);
+
+      // Not watching the lobby yet: nothing is relayed.
+      yield* fromFan(
+        JSON.stringify({ type: "game_reaction", lobbyId: 4, reaction: "🔥" }),
+      );
+      for (const handler of [fromFan, fromPlayer]) {
+        yield* handler(
+          JSON.stringify({ type: "subscribe_room", room: gameLobbyRoom(4) }),
+        );
+      }
+      fan.received.length = 0;
+      player.received.length = 0;
+
+      yield* fromFan(
+        JSON.stringify({
+          type: "game_reaction",
+          lobbyId: 4,
+          reaction: "🔥",
+          userId: 2,
+        }),
+      );
+      expect(player.received).toEqual([
+        JSON.stringify({
+          type: "game_reaction",
+          lobbyId: 4,
+          userId: 1,
+          reaction: "🔥",
+        }),
+      ]);
+
+      // Anything outside the set — words included — is dropped.
+      yield* fromFan(
+        JSON.stringify({ type: "game_reaction", lobbyId: 4, reaction: "cat" }),
+      );
+      yield* fromFan(
+        JSON.stringify({ type: "game_reaction", lobbyId: 4, reaction: 1 }),
+      );
+      expect(player.received).toHaveLength(1);
+
+      for (let i = 0; i < 20; i++) {
+        yield* fromFan(
+          JSON.stringify({ type: "game_reaction", lobbyId: 4, reaction: "👏" }),
+        );
+      }
+      expect(player.received.length).toBeGreaterThan(1);
+      expect(player.received.length).toBeLessThan(21);
+    }),
+  );
+});

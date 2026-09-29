@@ -26,6 +26,8 @@ import {
   gameLobbyQueryKey,
   gamesQueryKeyRoot,
 } from "./games/lobby";
+import { gameChatQueryKey } from "./games/chat";
+import { noteGameReaction } from "./games/reactions";
 import { noteGameProgress, setGameRoomsSocket } from "./games/rooms";
 import { notificationsQueryKeyRoot } from "./notifications";
 import { setRealtimeSocket } from "./postRooms";
@@ -75,6 +77,13 @@ type RealtimeSocketEvent =
       userId: number;
       progress: number;
     }
+  | { type: "game_chat"; lobbyId: number }
+  | {
+      type: "game_reaction";
+      lobbyId: number;
+      userId: number;
+      reaction: string;
+    }
   | { type: "notifications_changed" };
 
 // A little more than the default Bun WebSocket idle timeout — sending
@@ -114,6 +123,8 @@ export function useRealtimeSocket(enabled: boolean): void {
   const queryClient = useQueryClient();
   const session = useSession();
   const accessToken = enabled ? session?.accessToken : undefined;
+  // Only changes along with the session (and so the token) itself.
+  const meId = session?.user.id;
 
   useEffect(() => {
     if (!accessToken) return;
@@ -372,6 +383,17 @@ export function useRealtimeSocket(enabled: boolean): void {
           case "game_progress":
             noteGameProgress(parsed.lobbyId, parsed.userId, parsed.progress);
             break;
+          case "game_chat":
+            void queryClient.invalidateQueries({
+              queryKey: gameChatQueryKey(parsed.lobbyId),
+            });
+            break;
+          // Our own reactions were already drawn when we sent them.
+          case "game_reaction":
+            if (parsed.userId !== meId) {
+              noteGameReaction(parsed.lobbyId, parsed.userId, parsed.reaction);
+            }
+            break;
           // Something landed in (or was read from) this user's inbox —
           // refetch the badge and, if it's open, the list.
           case "notifications_changed":
@@ -402,5 +424,5 @@ export function useRealtimeSocket(enabled: boolean): void {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [accessToken, queryClient]);
+  }, [accessToken, meId, queryClient]);
 }

@@ -4,8 +4,8 @@ import { useEffect, useSyncExternalStore } from "react";
 // `useRealtimeSocket` — the named-room counterpart of lib/postRooms.ts. A
 // page viewing a lobby (or the lobby browser) joins that room with a
 // `subscribe_room` control message (see src/RealtimeSocket.ts), so it gets the
-// lobby's `game_lobby_updated`/`game_progress` events without every other
-// connected client getting them too. Membership is ref-counted per room and
+// lobby's `game_lobby_updated`/`game_progress`/`game_chat`/`game_reaction`
+// events without every other connected client getting them too. Membership is ref-counted per room and
 // replayed whenever the socket (re)connects.
 
 let currentSocket: WebSocket | null = null;
@@ -59,6 +59,12 @@ export function useGameRoom(room: string | null): void {
 // it — see GameProgressEvent in src/Realtime.ts).
 export function sendGameProgress(lobbyId: number, progress: number): void {
   send({ type: "game_progress", lobbyId, progress });
+}
+
+// Relays an emoji reaction to everyone in the lobby's room — stamped with
+// the sender and never stored (see GameReactionEvent in src/Realtime.ts).
+export function sendGameReaction(lobbyId: number, reaction: string): void {
+  send({ type: "game_reaction", lobbyId, reaction });
 }
 
 // Live opponent positions, fed by `game_progress` events. A tiny external

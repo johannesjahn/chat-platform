@@ -1738,7 +1738,53 @@ html[data-app-shell="immersive"] body {
   animation: ink-low 0.9s ease-in-out infinite;
 }
 
+/* A lobby reaction (see ReactionStream) rising from the bottom of the screen:
+   it pops in, sways up along its own `--reaction-drift`, and fades out near
+   the top. 2.6s — REACTION_FLIGHT_MS in lib/games/reactions.ts drops it
+   right as this ends. */
+@keyframes reaction-float {
+  0% {
+    transform: translate(0, 0) scale(0.4);
+    opacity: 0;
+  }
+  10% {
+    transform: translate(0, -4vh) scale(1.15);
+    opacity: 1;
+  }
+  45% {
+    transform: translate(calc(var(--reaction-drift, 0) * 1.5rem), -26vh)
+      scale(1);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(var(--reaction-drift, 0) * -1rem), -55vh)
+      scale(0.9);
+    opacity: 0;
+  }
+}
+
+@utility animate-reaction-float {
+  animation: reaction-float 2.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* The same reaction without the flight: it just shows and fades in place. */
+@keyframes reaction-fade {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .animate-reaction-float {
+    animation: reaction-fade 2.6s linear forwards;
+  }
+
   .skeleton-shimmer,
   .animate-gradient-shift,
   .animate-typing-bounce,

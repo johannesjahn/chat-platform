@@ -173,6 +173,25 @@ export type GameProgressEvent = {
   readonly progress: number;
 };
 
+// Pushed to a game lobby's room whenever someone says something in its chat
+// (see `postGameChat` in GamesHandler.ts). Id-only — clients refetch
+// `GET /games/lobbies/:id/chat`, which also drops authors they've blocked.
+export type GameChatEvent = {
+  readonly type: "game_chat";
+  readonly lobbyId: number;
+};
+
+// An emoji reaction flung in a lobby, relayed to its room straight from the
+// socket (see `game_reaction` in RealtimeSocket.ts) like `game_progress`:
+// never persisted, `reaction` is one of the fixed `GAME_REACTIONS`, and
+// `userId` is stamped by the server from the socket's own identity.
+export type GameReactionEvent = {
+  readonly type: "game_reaction";
+  readonly lobbyId: number;
+  readonly userId: number;
+  readonly reaction: string;
+};
+
 // Pushed to one user (every tab they have open) whenever their notification
 // inbox changes — a new notification landed, or they marked some read from
 // another tab (issue #317, see src/notifications.ts). Carries nothing: the
@@ -199,6 +218,8 @@ export type RealtimeEvent =
   | GameLobbyEvent
   | GameLobbiesEvent
   | GameProgressEvent
+  | GameChatEvent
+  | GameReactionEvent
   | NotificationsEvent;
 
 // A connected client's outbound channel — bound to one open `/ws` socket.

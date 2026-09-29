@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Api",
-    "version": "0.29.8"
+    "version": "0.29.9"
   },
   "paths": {
     "/users/search": {
@@ -6392,6 +6392,7 @@
                     "maxPlayers",
                     "players",
                     "drawing",
+                    "chatOpen",
                     "createdAt"
                   ],
                   "properties": {
@@ -6464,6 +6465,9 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "chatOpen": {
+                      "type": "boolean"
                     },
                     "createdAt": {
                       "type": "number"
@@ -7091,6 +7095,186 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/GameInviteBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/games/lobbies/{id}/chat": {
+      "get": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.listGameChat",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GameChat",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameChat"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.postGameChat",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "lobbyId",
+                    "user",
+                    "text",
+                    "createdAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "number"
+                    },
+                    "lobbyId": {
+                      "type": "number"
+                    },
+                    "user": {
+                      "$ref": "#/components/schemas/User"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidGameRequest"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "TooManyRequests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyRequests"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GameChatBody"
               }
             }
           },
@@ -10333,6 +10517,7 @@
           "maxPlayers",
           "players",
           "drawing",
+          "chatOpen",
           "createdAt"
         ],
         "properties": {
@@ -10405,6 +10590,9 @@
                 "type": "null"
               }
             ]
+          },
+          "chatOpen": {
+            "type": "boolean"
           },
           "createdAt": {
             "type": "number"
@@ -10880,6 +11068,62 @@
             "description": "a positive number",
             "title": "positive",
             "exclusiveMinimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "GameChat": {
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GameChatMessage"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "GameChatMessage": {
+        "type": "object",
+        "required": [
+          "id",
+          "lobbyId",
+          "user",
+          "text",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "lobbyId": {
+            "type": "number"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          },
+          "text": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GameChatBody": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "a string that will be trimmed"
           }
         },
         "additionalProperties": false

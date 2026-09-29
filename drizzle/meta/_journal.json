@@ -204,6 +204,13 @@
       "when": 1790636595467,
       "tag": "0028_sketchy",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1790641735143,
+      "tag": "0029_lobby_chat",
+      "breakpoints": true
     }
   ]
 }

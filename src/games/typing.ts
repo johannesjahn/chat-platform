@@ -51,7 +51,7 @@ const round1 = (value: number) => Math.round(value * 10) / 10;
 // filled in where it's registered (see GAME_RULES in rules.ts).
 export const typingRules: Omit<
   RaceRules,
-  "kind" | "minPlayers" | "maxPlayers"
+  "kind" | "minPlayers" | "maxPlayers" | "chatDuringPlay"
 > = {
   countdownMs: TYPING_COUNTDOWN_MS,
   timeLimitMs: TYPING_TIME_LIMIT_MS,

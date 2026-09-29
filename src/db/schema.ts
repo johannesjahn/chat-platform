@@ -797,6 +797,35 @@ export const gameLobbyPlayers = pgTable(
 
 export type DbGameLobbyPlayer = typeof gameLobbyPlayers.$inferSelect;
 
+// A lobby's chat (see `listGameChat`/`postGameChat` in GamesHandler.ts):
+// players and spectators talking between rounds. Scratch space tied to the
+// lobby — it goes when the lobby does — and never part of any score. Games
+// whose play hides secrets (Sketchy's prompts) close it while a game is
+// running (see `chatDuringPlay` in src/games/rules.ts).
+export const gameLobbyMessages = pgTable(
+  "game_lobby_messages",
+  {
+    id: serial("id").primaryKey(),
+    lobbyId: integer("lobby_id")
+      .notNull()
+      .references(() => gameLobbies.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (table) => [
+    // The chat reads a lobby's newest messages; also serves the cascade.
+    index("game_lobby_messages_lobby_id_id_idx").on(table.lobbyId, table.id),
+    index("game_lobby_messages_user_id_idx").on(table.userId),
+  ],
+);
+
+export type DbGameLobbyMessage = typeof gameLobbyMessages.$inferSelect;
+
 // Every accepted finish, kept after its lobby is gone — the leaderboard's
 // source of truth. `lobbyId` is deliberately not a foreign key: lobbies are
 // ephemeral and deleted once empty, results are not.
