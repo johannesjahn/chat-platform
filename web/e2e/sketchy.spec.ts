@@ -6,6 +6,10 @@ import { expect, test } from "./fixtures";
 async function scribble(page: Page): Promise<void> {
   const canvas = page.getByRole("img", { name: "Your drawing" });
   await expect(canvas).toBeVisible();
+  // Raw mouse coordinates only land if the canvas is on screen — and the
+  // page may still be scrolled down from the waiting room (e.g. to the
+  // lobby chat below the game).
+  await canvas.scrollIntoViewIfNeeded();
   const box = (await canvas.boundingBox())!;
   await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.3);
   await page.mouse.down();
