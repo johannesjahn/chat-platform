@@ -585,7 +585,7 @@ export function MessageBubble({
           if (longPressFired.current) e.preventDefault();
         }}
         className={cn(
-          "flex max-w-[75%] flex-col gap-1",
+          "flex min-w-0 max-w-[75%] flex-col gap-1",
           isOwn ? "items-end" : "items-start",
         )}
       >
@@ -687,7 +687,7 @@ export function MessageBubble({
             <>
               <p
                 className={cn(
-                  "whitespace-pre-wrap break-words text-sm leading-relaxed",
+                  "whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed",
                   !expanded && "line-clamp-4",
                 )}
               >

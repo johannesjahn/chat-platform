@@ -764,7 +764,7 @@ function ChatView({
             ref={scrollRef}
             onScroll={handleScroll}
             data-testid="chat-scroll"
-            className="h-full overflow-y-auto overscroll-contain"
+            className="h-full overflow-y-auto overflow-x-hidden overscroll-contain"
           >
             <div
               ref={contentRef}
