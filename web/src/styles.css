@@ -1836,6 +1836,7 @@ html[data-app-shell="immersive"] body {
   .animate-progress-stripes,
   .animate-marching-ants,
   .animate-underline-grow,
+  body::before,
   .game-text,
   .game-ring::before,
   .game-grid,

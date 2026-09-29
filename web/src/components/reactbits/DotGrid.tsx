@@ -7,6 +7,11 @@ import { cn } from "@/lib/utils";
 // pointer and get pushed outward on click, then spring back into place. The
 // upstream component relies on GSAP's paid InertiaPlugin for the throw-back; we
 // keep the same look using the free gsap core with an elastic ease instead.
+//
+// Frames are only drawn when something changed — the pointer moved, a click's
+// shock wave is still springing back, or the grid was rebuilt — rather than in
+// a loop that redrew every dot 60 times a second for as long as the page sat
+// open.
 
 export type DotGridProps = {
   dotSize?: number;
@@ -55,6 +60,23 @@ export function DotGrid({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dotsRef = useRef<Dot[]>([]);
   const pointerRef = useRef({ x: -1000, y: -1000 });
+  // The current frame painter, the pending frame, and until when (a click's
+  // tweens) frames should keep coming without further input.
+  const drawRef = useRef<(() => void) | null>(null);
+  const frameRef = useRef(0);
+  const animateUntilRef = useRef(0);
+
+  const requestDraw = useCallback(() => {
+    if (frameRef.current) return;
+    const tick = () => {
+      frameRef.current = 0;
+      drawRef.current?.();
+      if (performance.now() < animateUntilRef.current) {
+        frameRef.current = requestAnimationFrame(tick);
+      }
+    };
+    frameRef.current = requestAnimationFrame(tick);
+  }, []);
 
   const baseRgb = useMemo(() => hexToRgb(baseColor), [baseColor]);
   const activeRgb = useMemo(() => hexToRgb(activeColor), [activeColor]);
@@ -94,7 +116,8 @@ export function DotGrid({
       }
     }
     dotsRef.current = dots;
-  }, [dotSize, gap]);
+    requestDraw();
+  }, [dotSize, gap, requestDraw]);
 
   useEffect(() => {
     buildGrid();
@@ -109,9 +132,8 @@ export function DotGrid({
     if (!canvas || !ctx) return;
 
     const proxSq = proximity * proximity;
-    let raf = 0;
 
-    const draw = () => {
+    drawRef.current = () => {
       const { width, height } = canvas;
       const dpr = window.devicePixelRatio || 1;
       ctx.clearRect(0, 0, width / dpr, height / dpr);
@@ -139,11 +161,14 @@ export function DotGrid({
         ctx.fillStyle = `rgb(${color.r},${color.g},${color.b})`;
         ctx.fill();
       }
-      raf = requestAnimationFrame(draw);
     };
-    raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
-  }, [activeRgb, baseRgb, dotSize, proximity]);
+    requestDraw();
+    return () => {
+      drawRef.current = null;
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = 0;
+    };
+  }, [activeRgb, baseRgb, dotSize, proximity, requestDraw]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -153,10 +178,12 @@ export function DotGrid({
         x: e.clientX - rect.left,
         y: e.clientY - rect.top,
       };
+      requestDraw();
     };
 
     const onLeave = () => {
       pointerRef.current = { x: -1000, y: -1000 };
+      requestDraw();
     };
 
     const onClick = (e: MouseEvent) => {
@@ -164,6 +191,12 @@ export function DotGrid({
       if (!rect) return;
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
+      // Keep drawing through the push-out and the spring back.
+      animateUntilRef.current = Math.max(
+        animateUntilRef.current,
+        performance.now() + (0.18 + returnDuration) * 1000 + 100,
+      );
+      requestDraw();
       for (const dot of dotsRef.current) {
         const dx = dot.cx - cx;
         const dy = dot.cy - cy;
@@ -199,7 +232,7 @@ export function DotGrid({
       wrapper?.removeEventListener("mouseleave", onLeave);
       window.removeEventListener("click", onClick);
     };
-  }, [returnDuration, shockRadius, shockStrength]);
+  }, [requestDraw, returnDuration, shockRadius, shockStrength]);
 
   return (
     <div

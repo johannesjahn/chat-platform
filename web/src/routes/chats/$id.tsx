@@ -106,6 +106,35 @@ const JUMP_SETTLE_MS = 1200;
 // scheduled ahead of React's own render for an update that came from outside
 // an event handler (a resolved fetch), which would have us look for the newly
 // loaded rows before they exist.
+// "X is typing…" under the messages. Its own component, subscribed to the
+// typing store on its own, so a typing ping re-renders just this bubble —
+// not the whole chat view and every message in it.
+function TypingIndicator({
+  chatId,
+  meId,
+  showNames,
+}: {
+  chatId: number;
+  meId: number;
+  showNames: boolean;
+}) {
+  const typingUsers = useTypingUsers(chatId).filter((t) => t.userId !== meId);
+  if (typingUsers.length === 0) return null;
+  return (
+    <div className="flex w-full justify-start motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2 motion-safe:duration-300">
+      <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-border bg-card px-3.5 py-2.5 text-muted-foreground shadow-sm">
+        <TypingDots />
+        {showNames && (
+          <span className="text-xs">
+            {typingUsers.map((t) => userLabel(t)).join(", ")}{" "}
+            {typingUsers.length === 1 ? "is" : "are"} typing…
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function nextPaint(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -168,9 +197,6 @@ function ChatView({
   const otherParticipantStatus = useUserStatus(
     otherParticipantId,
     otherParticipant,
-  );
-  const typingUsers = useTypingUsers(chatId).filter(
-    (t) => t.userId !== session?.user.id,
   );
 
   const sendMessage = $api.useMutation("post", "/chats/{id}/messages");
@@ -893,19 +919,11 @@ function ChatView({
                   />
                 ))}
 
-              {typingUsers.length > 0 && (
-                <div className="flex w-full justify-start motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2 motion-safe:duration-300">
-                  <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-border bg-card px-3.5 py-2.5 text-muted-foreground shadow-sm">
-                    <TypingDots />
-                    {chat.type === "group" && (
-                      <span className="text-xs">
-                        {typingUsers.map((t) => userLabel(t)).join(", ")}{" "}
-                        {typingUsers.length === 1 ? "is" : "are"} typing…
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
+              <TypingIndicator
+                chatId={chatId}
+                meId={session.user.id}
+                showNames={chat.type === "group"}
+              />
             </div>
           </div>
         </CardContent>
