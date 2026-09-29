@@ -763,6 +763,16 @@ test("a player who drops out keeps their seat in the schedule without blocking i
       });
       // Carol closes her tab and never comes back.
       yield* carol.c.games.leaveGameLobby(at(lobby.id));
+      // Leaving forfeits, so she can't act in the game any more — even
+      // though she can still open the lobby to watch.
+      yield* expectFailure(
+        carol.c.games.submitDrawing({
+          ...at(lobby.id),
+          payload: { strokes: SCRIBBLE },
+        }),
+        "Forbidden",
+        "You left this game",
+      );
 
       // The draw stage waits out its timer, then plays on — her drawing
       // shows up blank rather than holding everyone up.

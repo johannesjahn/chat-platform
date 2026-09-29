@@ -607,15 +607,21 @@ const requireDrawingGame = (snapshot: LobbySnapshot) =>
           : "This isn't a Sketchy lobby",
       );
 
-// A caller dealt into this Sketchy game — seated at the start, whether or
-// not they're still here (a player who left can't act, since they can't
-// see the lobby's page to).
-const requireParticipant = (rows: DrawingGameRows, userId: number) =>
-  participantsOf(rows).includes(userId)
-    ? Effect.void
-    : Effect.fail(
-        new Forbidden({ message: "You're not playing in this game" }),
-      );
+// A caller dealt into this Sketchy game and still seated. Someone who left
+// keeps their place in the schedule (their drawing still plays out), but
+// leaving forfeits — they aren't on the final record, so they mustn't be
+// able to sway anyone else's score with a bluff or a vote. Anyone can
+// still open the lobby's page to spectate, so this has to be enforced here.
+const requireSeatedParticipant = (
+  snapshot: LobbySnapshot,
+  rows: DrawingGameRows,
+  userId: number,
+) =>
+  !participantsOf(rows).includes(userId)
+    ? Effect.fail(new Forbidden({ message: "You're not playing in this game" }))
+    : !snapshot.players.some((player) => player.user.id === userId)
+      ? Effect.fail(new Forbidden({ message: "You left this game" }))
+      : Effect.void;
 
 // A drawing's strokes as the schema can't check them on its own: points
 // come in (x, y) pairs, y stays on the canvas, and the whole drawing keeps
@@ -1505,7 +1511,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           yield* validateStrokes(payload.strokes);
           const snapshot = yield* loadSnapshot(db, id);
           const game = yield* requireDrawingGame(snapshot);
-          yield* requireParticipant(game.rows, currentUser.id);
+          yield* requireSeatedParticipant(snapshot, game.rows, currentUser.id);
           const stage = drawStageAt(game.timeline, snapshot.now);
           if (!stage) return yield* invalid("It isn't time to draw");
           const mine = game.rows.drawings.find(
@@ -1542,7 +1548,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           const connections = yield* RealtimeConnections;
           const snapshot = yield* loadSnapshot(db, id);
           const game = yield* requireDrawingGame(snapshot);
-          yield* requireParticipant(game.rows, currentUser.id);
+          yield* requireSeatedParticipant(snapshot, game.rows, currentUser.id);
           const drawing = spotlightAt(game, "bluff", snapshot.now);
           if (!drawing) return yield* invalid("It isn't time to bluff");
           if (drawing.artistId === currentUser.id) {
@@ -1579,9 +1585,27 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               .onConflictDoNothing()
               .returning({ id: gameBluffs.id }),
           ).pipe(Effect.orDie);
-          // Lost a race with a double-submit or an identical bluff.
+          // Lost a race with a double-submit (this author already has a
+          // bluff here) or with an identical bluff from someone else — the
+          // two unique constraints `onConflictDoNothing` can hit.
           if (inserted.length === 0) {
-            return yield* invalid("Someone already wrote that — try another.");
+            const own = yield* Effect.tryPromise(() =>
+              db
+                .select({ id: gameBluffs.id })
+                .from(gameBluffs)
+                .where(
+                  and(
+                    eq(gameBluffs.drawingId, drawing.id),
+                    eq(gameBluffs.authorId, currentUser.id),
+                  ),
+                )
+                .limit(1),
+            ).pipe(Effect.orDie);
+            return yield* invalid(
+              own.length > 0
+                ? "You already wrote a bluff for this one"
+                : "Someone already wrote that — try another.",
+            );
           }
           yield* touchLobby(db, id);
           yield* notifyLobbyChanged(connections, snapshot.lobby);
@@ -1595,7 +1619,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           const connections = yield* RealtimeConnections;
           const snapshot = yield* loadSnapshot(db, id);
           const game = yield* requireDrawingGame(snapshot);
-          yield* requireParticipant(game.rows, currentUser.id);
+          yield* requireSeatedParticipant(snapshot, game.rows, currentUser.id);
           const drawing = spotlightAt(game, "vote", snapshot.now);
           if (!drawing) return yield* invalid("It isn't time to vote");
           if (drawing.artistId === currentUser.id) {

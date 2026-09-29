@@ -3,6 +3,8 @@ import { Effect, Layer } from "effect";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
 import {
+  MAX_POST_ROOMS_PER_CONNECTION,
+  MAX_ROOMS_PER_CONNECTION,
   gameHubRoom,
   gameLobbyRoom,
   isValidRoomName,
@@ -475,6 +477,54 @@ test("notifyRoom delivers only to connections subscribed to that room", async ()
         JSON.stringify({ type: "game_lobby_updated", lobbyId: 5 }),
       ]);
       expect(bystander.received).toEqual([]);
+    }),
+  );
+});
+
+test("one connection can only be in so many rooms at once", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const flooder = recordingWriter();
+      yield* connections.register(1, flooder.write);
+      for (let id = 1; id <= MAX_ROOMS_PER_CONNECTION + 5; id++) {
+        yield* connections.subscribeRoom(gameLobbyRoom(id), flooder.write);
+      }
+      for (let id = 1; id <= MAX_POST_ROOMS_PER_CONNECTION + 5; id++) {
+        yield* connections.subscribePost(id, flooder.write);
+      }
+      // Joins past the cap are dropped...
+      expect(
+        yield* connections.isInRoom(
+          gameLobbyRoom(MAX_ROOMS_PER_CONNECTION),
+          flooder.write,
+        ),
+      ).toBe(true);
+      expect(
+        yield* connections.isInRoom(
+          gameLobbyRoom(MAX_ROOMS_PER_CONNECTION + 1),
+          flooder.write,
+        ),
+      ).toBe(false);
+      flooder.received.length = 0;
+      yield* connections.notifyPostRoom(MAX_POST_ROOMS_PER_CONNECTION + 1, {
+        type: "comment_changed",
+        postId: MAX_POST_ROOMS_PER_CONNECTION + 1,
+        commentId: 1,
+      });
+      expect(flooder.received).toEqual([]);
+
+      // ...until leaving one frees a place.
+      yield* connections.unsubscribeRoom(gameLobbyRoom(1), flooder.write);
+      const late = gameLobbyRoom(MAX_ROOMS_PER_CONNECTION + 1);
+      yield* connections.subscribeRoom(late, flooder.write);
+      expect(yield* connections.isInRoom(late, flooder.write)).toBe(true);
+
+      // The cap is per connection, not per room.
+      const other = recordingWriter();
+      yield* connections.register(2, other.write);
+      yield* connections.subscribeRoom(late, other.write);
+      expect(yield* connections.isInRoom(late, other.write)).toBe(true);
     }),
   );
 });
