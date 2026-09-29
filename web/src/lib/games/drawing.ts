@@ -105,6 +105,88 @@ export function replayTimings(
   });
 }
 
+// --- Export ---------------------------------------------------------------
+
+// A finished drawing as a standalone SVG document: the paper, then every
+// stroke, with colors resolved to hex (no CSS classes or custom properties),
+// so it renders the same in an image viewer as it does on the page.
+export function drawingSvg(strokes: ReadonlyArray<DrawingStroke>): string {
+  const paths = strokes
+    .map(
+      (stroke) =>
+        `<path d="${strokePath(stroke.points)}" stroke="${
+          DRAWING_PALETTE[stroke.color]?.value ?? "#000"
+        }" stroke-width="${BRUSH_WIDTH[stroke.brush]}"/>`,
+    )
+    .join("");
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" viewBox="0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}">` +
+    `<rect width="100%" height="100%" fill="${PAPER}"/>` +
+    `<g fill="none" stroke-linecap="round" stroke-linejoin="round">${paths}</g></svg>`
+  );
+}
+
+// A safe download name from a prompt: "A cat on a bike!" → "a-cat-on-a-bike".
+export function drawingFileName(title: string | null | undefined): string {
+  const slug = (title ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return `sketchy-${slug || "drawing"}`;
+}
+
+function saveBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  // Revoke on a later tick so the browser has started the download.
+  setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}
+
+export type DrawingExportFormat = "png" | "svg";
+
+// Saves a drawing to the user's device, rasterizing to a 2x PNG through a
+// canvas (the SVG is self-contained, so nothing taints it) or as vector SVG.
+export async function exportDrawing(
+  strokes: ReadonlyArray<DrawingStroke>,
+  title: string | null | undefined,
+  format: DrawingExportFormat,
+): Promise<void> {
+  const name = drawingFileName(title);
+  const svg = drawingSvg(strokes);
+  if (format === "svg") {
+    saveBlob(new Blob([svg], { type: "image/svg+xml" }), `${name}.svg`);
+    return;
+  }
+  const svgUrl = URL.createObjectURL(
+    new Blob([svg], { type: "image/svg+xml" }),
+  );
+  try {
+    const image = new Image();
+    image.src = svgUrl;
+    await image.decode();
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = CANVAS_WIDTH * scale;
+    canvas.height = CANVAS_HEIGHT * scale;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas is not available");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const png = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/png"),
+    );
+    if (!png) throw new Error("Could not encode the image");
+    saveBlob(png, `${name}.png`);
+  } finally {
+    URL.revokeObjectURL(svgUrl);
+  }
+}
+
 // --- Queries & mutations -------------------------------------------------
 
 export function useDrawingPacks(enabled: boolean) {

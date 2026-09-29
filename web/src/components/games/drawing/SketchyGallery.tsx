@@ -1,8 +1,8 @@
 import { useState, type CSSProperties } from "react";
-import { Images, Play } from "lucide-react";
+import { Download, Images, Play } from "lucide-react";
 import { GamePanel } from "@/components/games/GamePanel";
 import type { GameLobby } from "@/lib/games/lobby";
-import type { DrawingEntry } from "@/lib/games/drawing";
+import { exportDrawing, type DrawingEntry } from "@/lib/games/drawing";
 import { DrawingView } from "./DrawingView";
 import { castLabel, useCast, type Cast } from "@/lib/games/cast";
 
@@ -54,7 +54,18 @@ function GalleryCard({
 }) {
   // Re-keying the view replays its drawing animation from the top.
   const [replays, setReplays] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const [exportFailed, setExportFailed] = useState(false);
   const fake = bestFake(drawing);
+  const strokes = drawing.strokes;
+  const save = (format: "png" | "svg") => {
+    if (!strokes || exporting) return;
+    setExporting(true);
+    setExportFailed(false);
+    exportDrawing(strokes, drawing.prompt, format)
+      .catch(() => setExportFailed(true))
+      .finally(() => setExporting(false));
+  };
   return (
     <li
       style={
@@ -100,6 +111,37 @@ function GalleryCard({
               </span>{" "}
               — fooled {fake.voterIds!.length}
               {fake.authorId !== null && ` (${castLabel(cast, fake.authorId)})`}
+            </span>
+          )}
+          {strokes && strokes.length > 0 && (
+            <span className="mt-1 flex items-center gap-2 text-xs">
+              <Download
+                className="size-3.5 text-muted-foreground"
+                aria-hidden
+              />
+              <button
+                type="button"
+                disabled={exporting}
+                onClick={() => save("png")}
+                className="font-medium underline-offset-2 hover:underline disabled:opacity-50"
+                aria-label={`Download ${castLabel(cast, drawing.artistId)}'s drawing as PNG`}
+              >
+                PNG
+              </button>
+              <button
+                type="button"
+                disabled={exporting}
+                onClick={() => save("svg")}
+                className="font-medium underline-offset-2 hover:underline disabled:opacity-50"
+                aria-label={`Download ${castLabel(cast, drawing.artistId)}'s drawing as SVG`}
+              >
+                SVG
+              </button>
+              {exportFailed && (
+                <span role="alert" className="text-destructive">
+                  Export failed
+                </span>
+              )}
             </span>
           )}
         </figcaption>
