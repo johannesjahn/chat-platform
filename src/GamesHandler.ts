@@ -205,6 +205,9 @@ type LobbySnapshot = {
     readonly rows: DrawingGameRows;
     // Empty until the game starts.
     readonly timeline: ReadonlyArray<TimelineStage>;
+    // Whether `rows` carry the drawings' strokes (see `loadDrawingRows`) —
+    // only a snapshot that does can be shown to a player.
+    readonly withStrokes: boolean;
   } | null;
   readonly phase: GameLobbyPhase;
   readonly now: number;
@@ -218,6 +221,7 @@ const snapshotOf = (
   players: ReadonlyArray<PlayerRow>,
   rows: DrawingGameRows,
   now: number,
+  withStrokes: boolean,
 ): LobbySnapshot => {
   if (GAME_RULES[lobby.game as GameId].kind !== "drawing") {
     return {
@@ -235,7 +239,7 @@ const snapshotOf = (
   return {
     lobby,
     players,
-    drawing: { settings: settingsOf(lobby), rows, timeline },
+    drawing: { settings: settingsOf(lobby), rows, timeline, withStrokes },
     phase: started
       ? drawingPhase(lobby.startsAt!.getTime(), timeline, now)
       : "waiting",
@@ -245,7 +249,13 @@ const snapshotOf = (
 
 // Snapshots of several lobbies at once — players and Sketchy rows in a
 // fixed number of queries, however many lobbies (the lobby browser).
-const loadSnapshots = (db: DrizzleDb, lobbies: ReadonlyArray<DbGameLobby>) =>
+// Strokes are only loaded `withStrokes` — for a response that shows the
+// game to a player (`buildLobby`); everything else reads just the rest.
+const loadSnapshots = (
+  db: DrizzleDb,
+  lobbies: ReadonlyArray<DbGameLobby>,
+  { withStrokes = false }: { withStrokes?: boolean } = {},
+) =>
   Effect.gen(function* () {
     const players = yield* loadPlayers(
       db,
@@ -260,6 +270,7 @@ const loadSnapshots = (db: DrizzleDb, lobbies: ReadonlyArray<DbGameLobby>) =>
             lobby.status === "started",
         )
         .map((lobby) => lobby.id),
+      { withStrokes },
     );
     const now = Date.now();
     return lobbies.map((lobby) =>
@@ -268,13 +279,18 @@ const loadSnapshots = (db: DrizzleDb, lobbies: ReadonlyArray<DbGameLobby>) =>
         players.get(lobby.id) ?? [],
         rows.get(lobby.id) ?? EMPTY_GAME_ROWS,
         now,
+        withStrokes,
       ),
     );
   });
 
-const loadSnapshot = (db: DrizzleDb, id: number) =>
+const loadSnapshot = (
+  db: DrizzleDb,
+  id: number,
+  options?: { withStrokes?: boolean },
+) =>
   loadLobbyOr404(db, id).pipe(
-    Effect.flatMap((lobby) => loadSnapshots(db, [lobby])),
+    Effect.flatMap((lobby) => loadSnapshots(db, [lobby], options)),
     Effect.map(([snapshot]) => snapshot!),
   );
 
@@ -305,6 +321,11 @@ const toApiLobby = (
 ): GameLobby => {
   const { lobby, players, drawing, phase, now } = snapshot;
   const rules = GAME_RULES[lobby.game as GameId];
+  if (drawing && viewerId !== null && !drawing.withStrokes) {
+    // A programming error, not a request error: projecting a game read
+    // without its strokes would show every drawing as a blank canvas.
+    throw new Error("A Sketchy game shown to a player needs its strokes");
+  }
   const timelineEnd = drawing?.timeline.at(-1)?.endsAt;
   // Sketchy scores a whole game at once, so its results are derived from
   // the votes when it's over rather than stored per player like a finish.
@@ -376,7 +397,7 @@ const toApiLobby = (
 // settles its results (see `settleDrawingGame`).
 const buildLobby = (db: DrizzleDb, id: number, viewerId: number) =>
   Effect.gen(function* () {
-    const snapshot = yield* loadSnapshot(db, id);
+    const snapshot = yield* loadSnapshot(db, id, { withStrokes: true });
     yield* settleIfOver(db, snapshot);
     return toApiLobby(snapshot, viewerId);
   });
