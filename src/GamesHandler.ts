@@ -811,6 +811,19 @@ const spotlightAt = (
   );
 };
 
+// Prompts dealt recently by this process, across every lobby, newest last. A
+// fresh lobby has no rematch history, so without this two games on the same
+// pack would each draw from the full pool and repeat prompts often. Per
+// process on purpose: it only nudges variety, it isn't correctness state.
+const RECENT_DEALT_CAP = 240;
+const recentlyDealt: string[] = [];
+
+const rememberDealt = (prompts: ReadonlyArray<string>) => {
+  recentlyDealt.push(...prompts);
+  if (recentlyDealt.length > RECENT_DEALT_CAP)
+    recentlyDealt.splice(0, recentlyDealt.length - RECENT_DEALT_CAP);
+};
+
 // Deals a Sketchy game: every seated player gets one drawing per round, each
 // with a distinct prompt from the selected packs, in a shuffled order per
 // round. Null when the packs can't cover the deal.
@@ -822,9 +835,10 @@ const dealDrawings = (
   const prompts = dealPrompts(
     promptPool(settings.packs),
     playerIds.length * settings.rounds,
-    settings.recentPrompts ?? [],
+    [...(settings.recentPrompts ?? []), ...recentlyDealt],
   );
   if (!prompts) return null;
+  rememberDealt(prompts);
   return Array.from({ length: settings.rounds }, (_, index) => index + 1)
     .flatMap((turn) =>
       shuffled(playerIds, secureRandomInt).map((artistId, position) => ({
@@ -1367,9 +1381,12 @@ export const GamesHandlerLive = HttpApiBuilder.group(
                   settings: {
                     packs: drawing.settings.packs,
                     rounds: drawing.settings.rounds,
-                    recentPrompts: drawing.rows.drawings.map(
-                      (row) => row.prompt,
-                    ),
+                    // Accumulates over rematches so a long session keeps
+                    // cycling through the pool instead of ping-ponging.
+                    recentPrompts: [
+                      ...(drawing.settings.recentPrompts ?? []),
+                      ...drawing.rows.drawings.map((row) => row.prompt),
+                    ].slice(-RECENT_DEALT_CAP),
                   },
                 }),
               })
