@@ -207,8 +207,9 @@ const lobbyPath = (lobbyId: number) => ({
 export function useUpdateDrawingSettings(lobbyId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (body: { packs: string[]; rounds: number }) =>
-      primeLobby(
+    mutationFn: async (body: { packs: string[]; rounds: number }) => {
+      const sentAt = Date.now();
+      return primeLobby(
         queryClient,
         unwrap(
           await fetchClient.PUT("/games/lobbies/{id}/settings", {
@@ -216,15 +217,18 @@ export function useUpdateDrawingSettings(lobbyId: number) {
             body,
           }),
         ),
-      ),
+        sentAt,
+      );
+    },
   });
 }
 
 export function useSubmitDrawing(lobbyId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (strokes: DrawingStroke[]) =>
-      primeLobby(
+    mutationFn: async (strokes: DrawingStroke[]) => {
+      const sentAt = Date.now();
+      return primeLobby(
         queryClient,
         unwrap(
           await fetchClient.POST("/games/lobbies/{id}/drawing", {
@@ -232,15 +236,18 @@ export function useSubmitDrawing(lobbyId: number) {
             body: { strokes },
           }),
         ),
-      ),
+        sentAt,
+      );
+    },
   });
 }
 
 export function useSubmitBluff(lobbyId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (text: string) =>
-      primeLobby(
+    mutationFn: async (text: string) => {
+      const sentAt = Date.now();
+      return primeLobby(
         queryClient,
         unwrap(
           await fetchClient.POST("/games/lobbies/{id}/bluff", {
@@ -248,15 +255,18 @@ export function useSubmitBluff(lobbyId: number) {
             body: { text },
           }),
         ),
-      ),
+        sentAt,
+      );
+    },
   });
 }
 
 export function useSubmitVote(lobbyId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (answer: number) =>
-      primeLobby(
+    mutationFn: async (answer: number) => {
+      const sentAt = Date.now();
+      return primeLobby(
         queryClient,
         unwrap(
           await fetchClient.POST("/games/lobbies/{id}/vote", {
@@ -264,7 +274,9 @@ export function useSubmitVote(lobbyId: number) {
             body: { answer },
           }),
         ),
-      ),
+        sentAt,
+      );
+    },
   });
 }
 

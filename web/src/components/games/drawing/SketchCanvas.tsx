@@ -2,11 +2,13 @@ import {
   memo,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  type Ref,
 } from "react";
 import { Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -48,6 +50,22 @@ function toCanvas(event: PointerEvent, rect: DOMRect): Point {
 // Below this share of ink left, the meter starts warning.
 const LOW_INK = 0.15;
 
+// Whether a key press belongs to a text field (or other editable element),
+// whose own shortcuts — Ctrl/⌘+Z included — must be left alone.
+const isEditable = (target: EventTarget | null): boolean =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable ||
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT");
+
+export type SketchCanvasHandle = {
+  /** Ends any stroke still being drawn — committing it like a pointer-up —
+   * and returns the drawing including it. For sending the drawing when
+   * time runs out mid-stroke. */
+  flush: () => DrawingStroke[];
+};
+
 // The drawing surface for the draw stage. Works the same with a mouse, a
 // finger, or a pen — it's all Pointer Events, with the browser's coalesced
 // samples folded in so fast strokes stay smooth — and at any width down to
@@ -63,10 +81,12 @@ export const SketchCanvas = memo(function SketchCanvas({
   strokes,
   onChange,
   disabled = false,
+  handle,
 }: {
   strokes: DrawingStroke[];
   onChange: (strokes: DrawingStroke[]) => void;
   disabled?: boolean;
+  handle?: Ref<SketchCanvasHandle>;
 }) {
   const [color, setColor] = useState(0);
   const [brush, setBrush] = useState<DrawingBrush>("thin");
@@ -106,10 +126,13 @@ export const SketchCanvas = memo(function SketchCanvas({
     onChange(previous);
   }, [history, onChange]);
 
-  // Ctrl/⌘+Z, while there's something to undo and drawing is allowed.
+  // Ctrl/⌘+Z, while there's something to undo and drawing is allowed —
+  // but not while typing somewhere else on the page (the lobby chat), where
+  // it's that field's own undo.
   useEffect(() => {
     if (disabled) return;
     const onKey = (event: KeyboardEvent) => {
+      if (isEditable(event.target)) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
         undo();
@@ -155,15 +178,21 @@ export const SketchCanvas = memo(function SketchCanvas({
     });
   };
 
-  const finish = () => {
+  // Ends the stroke in progress, if any; returns the drawing as it now is.
+  const finish = (): DrawingStroke[] => {
     const current = active.current;
     active.current = null;
     cancelAnimationFrame(frame.current);
     setDraft(null);
     if (current && current.stroke.points.length >= 2) {
-      commit([...strokes, current.stroke]);
+      const next = [...strokes, current.stroke];
+      commit(next);
+      return next;
     }
+    return strokes;
   };
+
+  useImperativeHandle(handle, () => ({ flush: finish }));
 
   const onPointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     // One pen at a time — a resting palm or a second finger is ignored.
