@@ -128,9 +128,21 @@ test("three players play a full round of Sketchy: draw → bluff → vote → re
     }),
   );
   expect(new Set(prompts).size).toBe(3);
-  for (const { page } of seats) {
+  for (const [index, { page }] of seats.entries()) {
     await scribble(page);
     const done = page.getByRole("button", { name: "I'm done" });
+    if (index === 0) {
+      // Ctrl/⌘+Z in a text field (the header search) is that field's undo,
+      // not the canvas's: the stroke stays.
+      const search = page.getByRole("searchbox", { name: "Search" });
+      await search.fill("cat");
+      await search.press("ControlOrMeta+z");
+      await expect(done).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Submit a blank canvas" }),
+      ).toBeHidden();
+      await search.fill("");
+    }
     await done.click();
     // Sent — the last one in skips straight on to the first bluff.
     await expect(done).toBeHidden();

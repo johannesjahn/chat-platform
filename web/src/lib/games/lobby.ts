@@ -37,11 +37,33 @@ export const leaderboardQueryKey = (
 // carries `serverNow`, so countdowns and race timers render against the
 // server's idea of "now" — the one finishes are timed by — rather than
 // whatever this device's clock says.
+//
+// `serverNow` was read somewhere between sending the request and getting
+// the answer, so each sample is taken at the midpoint of that round trip
+// (as NTP does) instead of at arrival, which ran every countdown half a
+// round trip late. Of the last few samples, the one with the shortest
+// round trip wins: it's the one that midpoint guess can be least wrong
+// about, and it keeps one slow response from jolting the clock.
 let clockOffsetMs = 0;
 export const serverNow = () => Date.now() - clockOffsetMs;
 
-function noteServerClock(lobby: GameLobby, receivedAt: number): void {
-  clockOffsetMs = receivedAt - lobby.serverNow;
+const CLOCK_SAMPLES = 8;
+const clockSamples: Array<{ offsetMs: number; roundTripMs: number }> = [];
+
+function noteServerClock(
+  lobby: GameLobby,
+  sentAt: number,
+  receivedAt: number,
+): void {
+  const roundTripMs = Math.max(receivedAt - sentAt, 0);
+  clockSamples.push({
+    offsetMs: sentAt + roundTripMs / 2 - lobby.serverNow,
+    roundTripMs,
+  });
+  if (clockSamples.length > CLOCK_SAMPLES) clockSamples.shift();
+  clockOffsetMs = clockSamples.reduce((best, sample) =>
+    sample.roundTripMs < best.roundTripMs ? sample : best,
+  ).offsetMs;
 }
 
 export function unwrap<T>(result: { data?: T; error?: unknown }): T {
@@ -52,12 +74,14 @@ export function unwrap<T>(result: { data?: T; error?: unknown }): T {
 }
 
 // Seeds the lobby's detail cache from any mutation that returns it, so the
-// page updates without waiting for the realtime echo.
+// page updates without waiting for the realtime echo. `sentAt` is when the
+// request went out (for the clock sync above).
 export function primeLobby(
   queryClient: QueryClient,
   lobby: GameLobby,
+  sentAt: number,
 ): GameLobby {
-  noteServerClock(lobby, Date.now());
+  noteServerClock(lobby, sentAt, Date.now());
   queryClient.setQueryData(gameLobbyQueryKey(lobby.id), lobby);
   return lobby;
 }
@@ -67,12 +91,13 @@ export function useGameLobby(lobbyId: number, enabled: boolean) {
     queryKey: gameLobbyQueryKey(lobbyId),
     enabled,
     queryFn: async () => {
+      const sentAt = Date.now();
       const lobby = unwrap(
         await fetchClient.GET("/games/lobbies/{id}", {
           params: { path: { id: String(lobbyId) } },
         }),
       );
-      noteServerClock(lobby, Date.now());
+      noteServerClock(lobby, sentAt, Date.now());
       return lobby;
     },
   });
@@ -111,30 +136,36 @@ export function useLeaderboard(
 export function useCreateLobby(game: GameId) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () =>
-      primeLobby(
+    mutationFn: async () => {
+      const sentAt = Date.now();
+      return primeLobby(
         queryClient,
         unwrap(
           await fetchClient.POST("/games/{game}/lobbies", {
             params: { path: { game } },
           }),
         ),
-      ),
+        sentAt,
+      );
+    },
   });
 }
 
 export function useQuickPlay(game: GameId) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () =>
-      primeLobby(
+    mutationFn: async () => {
+      const sentAt = Date.now();
+      return primeLobby(
         queryClient,
         unwrap(
           await fetchClient.POST("/games/{game}/quick-play", {
             params: { path: { game } },
           }),
         ),
-      ),
+        sentAt,
+      );
+    },
   });
 }
 
@@ -145,6 +176,7 @@ export function useLobbyAction(lobbyId: number, action: LobbyAction) {
   return useMutation({
     mutationFn: async () => {
       const params = { params: { path: { id: String(lobbyId) } } };
+      const sentAt = Date.now();
       const result =
         action === "join"
           ? await fetchClient.POST("/games/lobbies/{id}/join", params)
@@ -152,7 +184,7 @@ export function useLobbyAction(lobbyId: number, action: LobbyAction) {
             ? await fetchClient.POST("/games/lobbies/{id}/start", params)
             : await fetchClient.POST("/games/lobbies/{id}/rematch", params);
       if (action === "rematch") resetGameProgress(lobbyId);
-      return primeLobby(queryClient, unwrap(result));
+      return primeLobby(queryClient, unwrap(result), sentAt);
     },
   });
 }
@@ -189,6 +221,7 @@ export function useFinishRace(lobbyId: number, game: GameId) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body: { typed: string; errors: number }) => {
+      const sentAt = Date.now();
       const lobby = primeLobby(
         queryClient,
         unwrap(
@@ -197,6 +230,7 @@ export function useFinishRace(lobbyId: number, game: GameId) {
             body,
           }),
         ),
+        sentAt,
       );
       void queryClient.invalidateQueries({
         queryKey: leaderboardQueryKey(game),

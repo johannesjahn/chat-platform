@@ -11,7 +11,7 @@ import {
 import { DrawingView } from "./DrawingView";
 import type { Cast } from "@/lib/games/cast";
 import { DrawRoster, WaitingPencil } from "./shared";
-import { SketchCanvas } from "./SketchCanvas";
+import { SketchCanvas, type SketchCanvasHandle } from "./SketchCanvas";
 
 // Submit this long before the timer runs out, so the drawing lands inside
 // the stage (the server allows a little grace after it, too).
@@ -75,15 +75,18 @@ export function DrawStage({
 
   const send = () => mutate(strokes, { onSuccess: () => saveDraft(key, null) });
 
-  // Time's up: send whatever is on the canvas. Once only — a failed send
-  // isn't retried on every tick.
+  // Time's up: send whatever is on the canvas — a stroke still being drawn
+  // included, which the canvas ends there and then. Once only — a failed
+  // send isn't retried on every tick.
+  const canvas = useRef<SketchCanvasHandle>(null);
   const autoSent = useRef(false);
   const due =
     !!mine && !mine.submitted && now >= stage.endsAt - AUTO_SUBMIT_LEAD_MS;
   useEffect(() => {
     if (!due || autoSent.current || isPending) return;
     autoSent.current = true;
-    mutate(strokes, { onSuccess: () => saveDraft(key, null) });
+    const final = canvas.current?.flush() ?? strokes;
+    mutate(final, { onSuccess: () => saveDraft(key, null) });
   }, [due, isPending, mutate, strokes, key]);
 
   const done = mine?.submitted || isSuccess;
@@ -118,6 +121,7 @@ export function DrawStage({
       {mine && !done && (
         <>
           <SketchCanvas
+            handle={canvas}
             strokes={strokes}
             onChange={onChange}
             disabled={isPending}
