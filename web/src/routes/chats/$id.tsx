@@ -55,6 +55,20 @@ import { useImmersiveShell } from "@/lib/viewport";
 // message it matched rather than just the bottom of its conversation.
 type ChatSearch = { message?: number };
 
+// Splits oldest-first messages into runs sharing a local calendar day, keeping
+// each message's index in the full list (used for the entry-animation stagger).
+function groupByDay<T extends { createdAt: number }>(messages: T[]) {
+  const groups: { message: T; i: number }[][] = [];
+  let lastKey: string | undefined;
+  messages.forEach((message, i) => {
+    const key = localDayKey(message.createdAt);
+    if (key !== lastKey) groups.push([]);
+    groups[groups.length - 1]!.push({ message, i });
+    lastKey = key;
+  });
+  return groups;
+}
+
 export const Route = createFileRoute("/chats/$id")({
   validateSearch: (search: Record<string, unknown>): ChatSearch => {
     const message = Number(search.message);
@@ -786,77 +800,84 @@ function ChatView({
                   No messages yet — say hi 👋
                 </p>
               ) : (
-                messages.map((message, i) => {
-                  const isOwn = message.senderId === session.user.id;
-                  const sender = chat.participants.find(
-                    (p) => p.userId === message.senderId,
-                  );
-                  // Insert a day separator before the first message and before
-                  // any message that starts a new local calendar day (issue
-                  // #307). Messages arrive oldest-first, so comparing against the
-                  // previous entry is enough.
-                  const prev = messages[i - 1];
-                  // Null for a normal message, and also once the quoted
-                  // message has been deleted — nothing to jump to either way.
-                  const parentId = message.parentMessage?.id;
-                  const showDaySeparator =
-                    prev == null ||
-                    localDayKey(prev.createdAt) !==
-                      localDayKey(message.createdAt);
-                  return (
-                    <Fragment key={message.id}>
-                      {showDaySeparator && (
-                        <DateSeparator ms={message.createdAt} />
-                      )}
-                      <MessageBubble
-                        message={message}
-                        isOwn={isOwn}
-                        isRead={message.readByUserIds.length > 0}
-                        canModify={isOwn || session.user.role === "admin"}
-                        canDeleteOthers={!isOwn && canManage}
-                        onEdit={(content) =>
-                          handleEditMessage(message.id, content)
-                        }
-                        onDelete={() => handleDeleteMessage(message.id)}
-                        onReply={() =>
-                          setReplyingTo({
-                            id: message.id,
-                            senderName: sender ? userLabel(sender) : "Someone",
-                            contentType: message.contentType,
-                            content: message.content,
-                          })
-                        }
-                        onJumpToParent={
-                          parentId == null
-                            ? undefined
-                            : () => void jumpToMessage(parentId)
-                        }
-                        highlightKey={
-                          jumpHighlight?.messageId === message.id
-                            ? jumpHighlight.key
-                            : undefined
-                        }
-                        senderLabel={
-                          chat.type === "group" && sender
-                            ? userLabel(sender)
-                            : undefined
-                        }
-                        senderAvatar={
-                          chat.type === "group" && sender && !isOwn
-                            ? {
-                                name: userAvatarName(sender),
-                                avatarUrl: sender.avatarUrl,
-                                avatarVariants: sender.avatarVariants,
-                              }
-                            : undefined
-                        }
-                        style={
-                          { "--stagger-index": Math.min(i, 6) } as CSSProperties
-                        }
-                      />
-                    </Fragment>
-                  );
-                })
+                groupByDay(messages).map((group) => (
+                  // One wrapper per calendar day: a sticky element only stays
+                  // pinned while its parent is on screen, so scoping each
+                  // separator to its own day makes it get pushed out by the
+                  // next day's separator instead of piling up behind it.
+                  <div
+                    key={group[0]!.message.id}
+                    className="flex flex-col gap-2"
+                  >
+                    {group.map(({ message, i }) => {
+                      const isOwn = message.senderId === session.user.id;
+                      const sender = chat.participants.find(
+                        (p) => p.userId === message.senderId,
+                      );
+                      // Null for a normal message, and also once the quoted
+                      // message has been deleted — nothing to jump to either way.
+                      const parentId = message.parentMessage?.id;
+                      const isFirstOfDay = group[0]!.i === i;
+                      return (
+                        <Fragment key={message.id}>
+                          {isFirstOfDay && (
+                            <DateSeparator ms={message.createdAt} />
+                          )}
+                          <MessageBubble
+                            message={message}
+                            isOwn={isOwn}
+                            isRead={message.readByUserIds.length > 0}
+                            canModify={isOwn || session.user.role === "admin"}
+                            canDeleteOthers={!isOwn && canManage}
+                            onEdit={(content) =>
+                              handleEditMessage(message.id, content)
+                            }
+                            onDelete={() => handleDeleteMessage(message.id)}
+                            onReply={() =>
+                              setReplyingTo({
+                                id: message.id,
+                                senderName: sender
+                                  ? userLabel(sender)
+                                  : "Someone",
+                                contentType: message.contentType,
+                                content: message.content,
+                              })
+                            }
+                            onJumpToParent={
+                              parentId == null
+                                ? undefined
+                                : () => void jumpToMessage(parentId)
+                            }
+                            highlightKey={
+                              jumpHighlight?.messageId === message.id
+                                ? jumpHighlight.key
+                                : undefined
+                            }
+                            senderLabel={
+                              chat.type === "group" && sender
+                                ? userLabel(sender)
+                                : undefined
+                            }
+                            senderAvatar={
+                              chat.type === "group" && sender && !isOwn
+                                ? {
+                                    name: userAvatarName(sender),
+                                    avatarUrl: sender.avatarUrl,
+                                    avatarVariants: sender.avatarVariants,
+                                  }
+                                : undefined
+                            }
+                            style={
+                              {
+                                "--stagger-index": Math.min(i, 6),
+                              } as CSSProperties
+                            }
+                          />
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                ))
               )}
 
               {!messagesLoading &&
