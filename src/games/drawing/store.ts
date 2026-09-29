@@ -1,5 +1,6 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
+import type { DrawingStroke } from "../../Api.ts";
 import type { DrizzleDb } from "../../Db.ts";
 import { gameBluffs, gameDrawings, gameVotes } from "../../db/schema.ts";
 import {
@@ -19,9 +20,15 @@ type RowsBuilder = {
 // Every drawing, bluff, and vote of the given lobbies' current games, three
 // queries total however many lobbies are asked for (the lobby browser asks
 // for a page of them at once).
+//
+// `withStrokes: false` leaves every drawing's `strokes` null. They're by far
+// the bulk of a game (up to MAX_DRAWING_POINTS a drawing), and only a view
+// shown to a player needs them — the timeline, the phase, validating a
+// submission, and settling scores never read them.
 export const loadDrawingRows = (
   db: DrizzleDb,
   lobbyIds: ReadonlyArray<number>,
+  { withStrokes }: { withStrokes: boolean },
 ) =>
   Effect.gen(function* () {
     const byLobby = new Map<number, RowsBuilder>();
@@ -41,7 +48,9 @@ export const loadDrawingRows = (
               position: gameDrawings.position,
               prompt: gameDrawings.prompt,
               shuffleSeed: gameDrawings.shuffleSeed,
-              strokes: gameDrawings.strokes,
+              strokes: withStrokes
+                ? gameDrawings.strokes
+                : sql<ReadonlyArray<DrawingStroke> | null>`null`,
               submittedAt: gameDrawings.submittedAt,
             })
             .from(gameDrawings)
@@ -105,6 +114,6 @@ export const loadDrawingRows = (
   });
 
 export const loadDrawingGame = (db: DrizzleDb, lobbyId: number) =>
-  loadDrawingRows(db, [lobbyId]).pipe(
+  loadDrawingRows(db, [lobbyId], { withStrokes: true }).pipe(
     Effect.map((rows) => rows.get(lobbyId) ?? EMPTY_GAME_ROWS),
   );
