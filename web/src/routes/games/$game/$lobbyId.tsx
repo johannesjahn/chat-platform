@@ -39,6 +39,7 @@ import {
   useGameLobby,
   useLeaveLobby,
   useLobbyAction,
+  usePauseAurora,
   useServerClock,
   type GameLobby,
 } from "@/lib/games/lobby";
@@ -119,6 +120,7 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
     serverPhase === "countdown" || serverPhase === "racing",
   );
   const phase = lobby ? livePhase(lobby, now) : undefined;
+  usePauseAurora(phase === "countdown" || phase === "racing");
 
   // The race can end on the clock (time limit) with no event to say so —
   // refetch to pick up the server's final word the moment it does.

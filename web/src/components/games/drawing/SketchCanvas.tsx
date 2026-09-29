@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -51,11 +52,14 @@ const LOW_INK = 0.15;
 // finger, or a pen — it's all Pointer Events, with the browser's coalesced
 // samples folded in so fast strokes stay smooth — and at any width down to
 // a phone's. While a stroke is in progress only that one path re-renders
-// (once per animation frame); finished strokes go to `onChange`.
+// (once per animation frame); finished strokes go to `onChange`. The brush
+// cursor never re-renders at all — it follows the pointer by moving its
+// circle directly, once per frame. Memoized, so the game clock ticking the
+// page around it doesn't re-render it either (pass a stable `onChange`).
 //
 // Undo walks back through every change, a "clear" included, so wiping the
 // canvas by accident is one tap (or Ctrl/⌘+Z) from undone.
-export function SketchCanvas({
+export const SketchCanvas = memo(function SketchCanvas({
   strokes,
   onChange,
   disabled = false,
@@ -67,7 +71,11 @@ export function SketchCanvas({
   const [color, setColor] = useState(0);
   const [brush, setBrush] = useState<DrawingBrush>("thin");
   const [draft, setDraft] = useState<DrawingStroke | null>(null);
-  const [cursor, setCursor] = useState<Point | null>(null);
+  // Where the brush cursor should be drawn (null: hidden), applied to
+  // `cursorRef`'s circle on the next frame.
+  const cursorRef = useRef<SVGCircleElement>(null);
+  const cursorAt = useRef<Point | null>(null);
+  const cursorFrame = useRef(0);
   // Bumped each time a stroke runs dry, to replay the meter's shake.
   const [inkOut, setInkOut] = useState(0);
 
@@ -111,7 +119,29 @@ export function SketchCanvas({
     return () => window.removeEventListener("keydown", onKey);
   }, [disabled, undo]);
 
-  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(frame.current);
+      cancelAnimationFrame(cursorFrame.current);
+    },
+    [],
+  );
+
+  const moveCursor = (point: Point | null) => {
+    cursorAt.current = point;
+    if (cursorFrame.current) return;
+    cursorFrame.current = requestAnimationFrame(() => {
+      cursorFrame.current = 0;
+      const circle = cursorRef.current;
+      if (!circle) return;
+      const at = cursorAt.current;
+      circle.setAttribute("visibility", at ? "visible" : "hidden");
+      if (at) {
+        circle.setAttribute("cx", String(at.x));
+        circle.setAttribute("cy", String(at.y));
+      }
+    });
+  };
 
   const scheduleDraw = () => {
     cancelAnimationFrame(frame.current);
@@ -159,7 +189,7 @@ export function SketchCanvas({
   const onPointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     if (event.pointerType !== "touch" && !disabled) {
-      setCursor(toCanvas(event.nativeEvent, rect));
+      moveCursor(toCanvas(event.nativeEvent, rect));
     }
     const current = active.current;
     if (!current || current.pointerId !== event.pointerId) return;
@@ -225,7 +255,7 @@ export function SketchCanvas({
           onPointerMove={onPointerMove}
           onPointerUp={finish}
           onPointerCancel={finish}
-          onPointerLeave={() => setCursor(null)}
+          onPointerLeave={() => moveCursor(null)}
         >
           {committed}
           {draft && (
@@ -237,10 +267,14 @@ export function SketchCanvas({
           )}
           {/* The brush itself, following a mouse or pen: its size and color
               exactly, so what you see is what you'll draw. */}
-          {cursor && !disabled && (
+          {!disabled && (
             <circle
-              cx={cursor.x}
-              cy={cursor.y}
+              ref={cursorRef}
+              // Constant props, so re-renders never undo `moveCursor`'s
+              // direct updates; it starts hidden until the pointer moves.
+              visibility="hidden"
+              cx={0}
+              cy={0}
               r={BRUSH_WIDTH[brush] / 2}
               fill={DRAWING_PALETTE[color]!.value}
               fillOpacity={0.35}
@@ -378,4 +412,4 @@ export function SketchCanvas({
       </div>
     </div>
   );
-}
+});
