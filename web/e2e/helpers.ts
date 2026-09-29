@@ -74,9 +74,14 @@ export function makeSolidPng(
 }
 
 // A unique username per run so repeated runs never collide on the (unique)
-// username column. base64url keeps it to URL-safe, schema-valid characters.
+// username column. Hex, not base64url: base64url's alphabet includes "-",
+// and a name ending in one (~1 in 64) isn't `@mention`able — the mention
+// parser hands trailing "."/"-" back to the prose (see `isMentionable` in
+// src/lib/mentions.ts), so the composer offers no suggestion and a posted
+// mention neither links nor notifies. Hex also keeps "_" (a LIKE wildcard)
+// out of the fragments tests search by.
 export function randomUsername(): string {
-  return `u_${randomBytes(9).toString("base64url")}`;
+  return `u_${randomBytes(9).toString("hex")}`;
 }
 
 declare global {
