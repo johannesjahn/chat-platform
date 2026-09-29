@@ -12,6 +12,10 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
+  globalSetup: "./e2e/global-setup.ts",
+  // `vite dev` compiles route chunks on first request, which is slow on a cold
+  // CI runner; the default 5s is too tight for the first assertion after load.
+  expect: { timeout: 10_000 },
   reporter: "list",
   use: {
     baseURL: `http://localhost:${WEB_PORT}`,
