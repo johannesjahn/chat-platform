@@ -1,4 +1,4 @@
-import type { GameRules } from "./rules.ts";
+import type { RaceRules } from "./rules.ts";
 
 // The typing race's passage bank. Plain ASCII only — no curly quotes, em
 // dashes, or accented letters — so every passage is typeable as-is on any
@@ -47,7 +47,12 @@ const CHARS_PER_WORD = 5;
 
 const round1 = (value: number) => Math.round(value * 10) / 10;
 
-export const typingRules: GameRules = {
+// The race-specific half of the typing race's rules; its seats and kind are
+// filled in where it's registered (see GAME_RULES in rules.ts).
+export const typingRules: Omit<
+  RaceRules,
+  "kind" | "minPlayers" | "maxPlayers"
+> = {
   countdownMs: TYPING_COUNTDOWN_MS,
   timeLimitMs: TYPING_TIME_LIMIT_MS,
   // Never the passage just raced, so a rematch always feels fresh.

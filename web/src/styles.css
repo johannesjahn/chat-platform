@@ -1450,6 +1450,294 @@ html[data-app-shell="immersive"] body {
   animation: type-error 0.18s ease-in-out;
 }
 
+/* ───────────────────────────────────────────────────────────────────────────
+   Sketchy (the drawing game)
+
+   Its motion is all about paper and ink: strokes that draw themselves,
+   ballot cards dealt onto the table and flipped over, stamps slammed onto
+   the fakes, and the truth landing last with a glow. Everything reads the
+   game's `--game-*` colors, and every animation below is switched off (and,
+   for entrances, left in its final state) under reduced motion.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Drawing paper: warm off-white with a faint dot grid, the same in either
+   theme — a drawing is a picture, and ink must stay ink. */
+@utility sketch-paper {
+  background-color: #fffdf6;
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    rgb(29 27 38 / 0.09) 1px,
+    transparent 0
+  );
+  background-size: 22px 22px;
+}
+
+@keyframes stroke-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* One stroke of a drawing replaying itself. Needs `pathLength="1"` on the
+   path; duration and delay come per stroke from `--stroke-duration` and
+   `--stroke-delay` (see DrawingView). The dash is only offset *inside* the
+   keyframes (with a backwards fill for the delay), so with the animation
+   off the stroke is simply there. */
+@utility animate-stroke-draw {
+  stroke-dasharray: 1;
+  animation: stroke-draw var(--stroke-duration, 400ms)
+    cubic-bezier(0.45, 0.05, 0.35, 1) var(--stroke-delay, 0ms) backwards;
+}
+
+@keyframes dot-draw {
+  from {
+    opacity: 0;
+  }
+}
+
+/* A single dot has no length to draw along; it just appears on its beat. */
+@utility animate-dot-draw {
+  animation: dot-draw 120ms ease-out var(--stroke-delay, 0ms) backwards;
+}
+
+@keyframes card-deal {
+  from {
+    transform: translateY(-36px) rotate(var(--deal-tilt, -6deg)) scale(0.9);
+    opacity: 0;
+  }
+  70% {
+    transform: translateY(3px) rotate(calc(var(--deal-tilt, -6deg) * -0.25))
+      scale(1.01);
+    opacity: 1;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* A ballot card dealt onto the table, each at its own slight tilt
+   (`--deal-tilt`) and on its own beat (`stagger-in`). */
+@utility animate-card-deal {
+  animation: card-deal 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes card-flip {
+  0% {
+    transform: perspective(900px) rotateY(-100deg) scale(0.92);
+    opacity: 0;
+  }
+  55% {
+    transform: perspective(900px) rotateY(12deg) scale(1.04);
+    opacity: 1;
+  }
+  100% {
+    transform: perspective(900px) rotateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+/* A reveal card turning over to show who wrote it. */
+@utility animate-card-flip {
+  backface-visibility: hidden;
+  animation: card-flip 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes stamp-slam {
+  0% {
+    transform: scale(2.4) rotate(var(--stamp-tilt, -12deg));
+    opacity: 0;
+  }
+  60% {
+    transform: scale(0.92) rotate(var(--stamp-tilt, -12deg));
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(var(--stamp-tilt, -12deg));
+    opacity: 1;
+  }
+}
+
+/* "FAKE" / "TRUTH" slammed onto a reveal card like a rubber stamp. The tilt
+   is part of the resting state, so it's set by the keyframes' end too. */
+@utility animate-stamp {
+  transform: rotate(var(--stamp-tilt, -12deg));
+  animation: stamp-slam 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes truth-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--game-from), transparent 40%),
+      0 0 28px -6px var(--game-glow);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px color-mix(in oklch, var(--game-to), transparent 20%),
+      0 0 60px -4px var(--game-glow);
+  }
+}
+
+/* The real title, once revealed, breathing in the game's light. */
+@utility animate-truth-glow {
+  animation: truth-glow 2.4s ease-in-out infinite;
+}
+
+@keyframes points-float {
+  0% {
+    transform: translateY(8px) scale(0.6);
+    opacity: 0;
+  }
+  25% {
+    transform: translateY(0) scale(1.12);
+    opacity: 1;
+  }
+  45% {
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+/* A "+500" chip springing up next to whoever earned it. */
+@utility animate-points-float {
+  animation: points-float 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes avatar-hop {
+  0% {
+    transform: translateY(-18px) scale(0.4);
+    opacity: 0;
+  }
+  60% {
+    transform: translateY(2px) scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* A voter's avatar hopping onto the answer they fell for. */
+@utility animate-avatar-hop {
+  animation: avatar-hop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes prompt-unfold {
+  0% {
+    transform: perspective(700px) rotateX(-85deg);
+    opacity: 0;
+    filter: blur(6px);
+  }
+  60% {
+    transform: perspective(700px) rotateX(8deg);
+    opacity: 1;
+    filter: blur(0);
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* The secret prompt card unfolding towards you at the start of a round. */
+@utility animate-prompt-unfold {
+  transform-origin: top center;
+  animation: prompt-unfold 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes timer-urgent {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+/* The stage timer's heartbeat in its last few seconds. */
+@utility animate-timer-urgent {
+  animation: timer-urgent 1s ease-in-out infinite;
+}
+
+@keyframes doodle-wobble {
+  0%,
+  100% {
+    transform: rotate(-2deg);
+  }
+  50% {
+    transform: rotate(2deg);
+  }
+}
+
+/* A hand-drawn jitter for sketchy decorations (the waiting pencil, the
+   stage icon). */
+@utility animate-doodle-wobble {
+  animation: doodle-wobble 1.6s ease-in-out infinite;
+}
+
+@keyframes pencil-scribble {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(-8deg);
+  }
+  25% {
+    transform: translate(6px, -3px) rotate(4deg);
+  }
+  50% {
+    transform: translate(12px, 1px) rotate(-6deg);
+  }
+  75% {
+    transform: translate(5px, 3px) rotate(6deg);
+  }
+}
+
+/* The little pencil scribbling away while other players are still at it. */
+@utility animate-pencil-scribble {
+  animation: pencil-scribble 1.1s ease-in-out infinite;
+}
+
+@keyframes stage-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+/* Each new stage of a round sliding into place (keyed on the stage). */
+@utility animate-stage-enter {
+  animation: stage-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes ink-low {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* The ink meter blinking once the drawing is nearly out of points. */
+@utility animate-ink-low {
+  animation: ink-low 0.9s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skeleton-shimmer,
   .animate-gradient-shift,
@@ -1498,7 +1786,21 @@ html[data-app-shell="immersive"] body {
   .animate-confetti-fall,
   .animate-lane-sheen,
   .animate-seat-breathe,
-  .animate-type-error {
+  .animate-type-error,
+  .animate-stroke-draw,
+  .animate-dot-draw,
+  .animate-card-deal,
+  .animate-card-flip,
+  .animate-stamp,
+  .animate-truth-glow,
+  .animate-points-float,
+  .animate-avatar-hop,
+  .animate-prompt-unfold,
+  .animate-timer-urgent,
+  .animate-doodle-wobble,
+  .animate-pencil-scribble,
+  .animate-stage-enter,
+  .animate-ink-low {
     animation: none;
   }
 
@@ -1526,7 +1828,13 @@ html[data-app-shell="immersive"] body {
   .animate-backdrop-blur-in,
   .animate-underline-grow,
   .animate-podium-rise,
-  .animate-medal-drop {
+  .animate-medal-drop,
+  .animate-card-deal,
+  .animate-card-flip,
+  .animate-points-float,
+  .animate-avatar-hop,
+  .animate-prompt-unfold,
+  .animate-stage-enter {
     opacity: 1;
     filter: none;
     transform: none;

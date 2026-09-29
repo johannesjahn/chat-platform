@@ -51,7 +51,7 @@ function describe(n: Notification): string {
     case "mention":
       return `mentioned you in a ${onComment ? "comment" : "post"}`;
     case "game_invite":
-      return `invited you to a ${gameName(n.game)} race`;
+      return `invited you to play ${gameName(n.game)}`;
     case "game_record":
       return `took your #1 spot on the ${gameName(n.game)} leaderboard`;
   }

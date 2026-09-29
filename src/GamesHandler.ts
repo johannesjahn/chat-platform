@@ -16,12 +16,14 @@ import {
 import { Context, Effect, Metric, MetricLabel } from "effect";
 import {
   ChatApi,
+  DRAWING_HEIGHT,
   Forbidden,
   InvalidGameRequest,
   LEADERBOARD_SIZE,
-  MAX_GAME_LOBBY_PLAYERS,
+  MAX_DRAWING_POINTS,
   NotFound,
   TooManyRequests,
+  type DrawingStroke,
   type GameId,
   type GameLobby,
   type GameLobbyPhase,
@@ -31,14 +33,58 @@ import {
 import { CurrentUser } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import {
+  gameBluffs,
+  gameDrawings,
   gameLobbies,
   gameLobbyPlayers,
   gameResults,
+  gameVotes,
   notifications,
   users,
   type DbGameLobby,
+  type DrawingLobbySettings,
 } from "./db/schema.ts";
-import { GAME_RULES } from "./games/rules.ts";
+import { buildBallot } from "./games/drawing/ballot.ts";
+import {
+  bluffsFor,
+  EMPTY_GAME_ROWS,
+  participantsOf,
+  type DrawingGameRows,
+} from "./games/drawing/model.ts";
+import {
+  DRAWING_PACKS,
+  findDrawingPack,
+  promptPool,
+} from "./games/drawing/packs/index.ts";
+import {
+  dealPrompts,
+  isTooCloseToPrompt,
+  normalizeTitle,
+  secureRandomInt,
+  shuffled,
+} from "./games/drawing/prompts.ts";
+import {
+  DEFAULT_DRAWING_SETTINGS,
+  DRAWING_SUBMIT_GRACE_MS,
+} from "./games/drawing/rules.ts";
+import {
+  guessAccuracy,
+  placeOf,
+  tallyScores,
+} from "./games/drawing/scoring.ts";
+import { loadDrawingRows } from "./games/drawing/store.ts";
+import {
+  buildTimeline,
+  currentStage,
+  drawingPhase,
+  worstCaseDurationMs,
+  type TimelineStage,
+} from "./games/drawing/timeline.ts";
+import {
+  drawingSettingsOnly,
+  projectDrawingGame,
+} from "./games/drawing/view.ts";
+import { GAME_RULES, type RaceRules } from "./games/rules.ts";
 import { rateLimitRejectionsTotal } from "./Metrics.ts";
 import { createNotifications } from "./notifications.ts";
 import { RateLimiter } from "./RateLimiter.ts";
@@ -142,45 +188,184 @@ const loadPlayers = (db: DrizzleDb, lobbyIds: ReadonlyArray<number>) =>
     return byLobby;
   });
 
-const toApiLobby = (
+// Everything a response about one lobby is built from, read once so every
+// part of it agrees on the same instant: the lobby row, its seated players,
+// and — for a started Sketchy game — the game's rows and the timeline
+// derived from them.
+type LobbySnapshot = {
+  readonly lobby: DbGameLobby;
+  readonly players: ReadonlyArray<PlayerRow>;
+  readonly drawing: {
+    readonly settings: DrawingLobbySettings;
+    readonly rows: DrawingGameRows;
+    // Empty until the game starts.
+    readonly timeline: ReadonlyArray<TimelineStage>;
+  } | null;
+  readonly phase: GameLobbyPhase;
+  readonly now: number;
+};
+
+const settingsOf = (lobby: DbGameLobby): DrawingLobbySettings =>
+  lobby.settings ?? DEFAULT_DRAWING_SETTINGS;
+
+const snapshotOf = (
   lobby: DbGameLobby,
   players: ReadonlyArray<PlayerRow>,
+  rows: DrawingGameRows,
   now: number,
-  { revealPassage }: { readonly revealPassage: boolean },
+): LobbySnapshot => {
+  if (GAME_RULES[lobby.game as GameId].kind !== "drawing") {
+    return {
+      lobby,
+      players,
+      drawing: null,
+      phase: lobbyPhase(lobby, players, now),
+      now,
+    };
+  }
+  const started = lobby.status === "started" && lobby.startsAt !== null;
+  const timeline = started
+    ? buildTimeline(lobby.startsAt!.getTime(), rows)
+    : [];
+  return {
+    lobby,
+    players,
+    drawing: { settings: settingsOf(lobby), rows, timeline },
+    phase: started
+      ? drawingPhase(lobby.startsAt!.getTime(), timeline, now)
+      : "waiting",
+    now,
+  };
+};
+
+// Snapshots of several lobbies at once — players and Sketchy rows in a
+// fixed number of queries, however many lobbies (the lobby browser).
+const loadSnapshots = (db: DrizzleDb, lobbies: ReadonlyArray<DbGameLobby>) =>
+  Effect.gen(function* () {
+    const players = yield* loadPlayers(
+      db,
+      lobbies.map((lobby) => lobby.id),
+    );
+    const rows = yield* loadDrawingRows(
+      db,
+      lobbies
+        .filter(
+          (lobby) =>
+            GAME_RULES[lobby.game as GameId].kind === "drawing" &&
+            lobby.status === "started",
+        )
+        .map((lobby) => lobby.id),
+    );
+    const now = Date.now();
+    return lobbies.map((lobby) =>
+      snapshotOf(
+        lobby,
+        players.get(lobby.id) ?? [],
+        rows.get(lobby.id) ?? EMPTY_GAME_ROWS,
+        now,
+      ),
+    );
+  });
+
+const loadSnapshot = (db: DrizzleDb, id: number) =>
+  loadLobbyOr404(db, id).pipe(
+    Effect.flatMap((lobby) => loadSnapshots(db, [lobby])),
+    Effect.map(([snapshot]) => snapshot!),
+  );
+
+// A finished Sketchy game's final standings — every drawing counted.
+const finalTallies = (snapshot: LobbySnapshot) => {
+  const { rows } = snapshot.drawing!;
+  return tallyScores(
+    participantsOf(rows),
+    rows.drawings,
+    rows.bluffs,
+    rows.votes,
+    () => true,
+  );
+};
+
+// `viewerId` null builds the lobby browser's view: no passage, and only the
+// settings of a Sketchy game.
+const toApiLobby = (
+  snapshot: LobbySnapshot,
+  viewerId: number | null,
 ): GameLobby => {
-  const phase = lobbyPhase(lobby, players, now);
+  const { lobby, players, drawing, phase, now } = snapshot;
+  const rules = GAME_RULES[lobby.game as GameId];
+  const timelineEnd = drawing?.timeline.at(-1)?.endsAt;
+  // Sketchy scores a whole game at once, so its results are derived from
+  // the votes when it's over rather than stored per player like a finish.
+  const tallies =
+    drawing && phase === "finished" ? finalTallies(snapshot) : null;
+  const gameLength =
+    lobby.startsAt && timelineEnd !== undefined
+      ? timelineEnd - lobby.startsAt.getTime()
+      : null;
+
   return {
     id: lobby.id,
     game: lobby.game as GameId,
     hostId: lobby.hostId,
     phase,
     round: lobby.round,
-    passage: revealPassage && phase !== "waiting" ? lobby.passage : null,
+    passage:
+      viewerId !== null && !drawing && phase !== "waiting"
+        ? lobby.passage
+        : null,
     startsAt: phase === "waiting" ? null : (lobby.startsAt?.getTime() ?? null),
-    endsAt: phase === "waiting" ? null : (lobby.endsAt?.getTime() ?? null),
+    endsAt:
+      phase === "waiting"
+        ? null
+        : (timelineEnd ?? lobby.endsAt?.getTime() ?? null),
     serverNow: now,
+    minPlayers: rules.minPlayers,
     maxPlayers: lobby.maxPlayers,
-    players: players.map((player) => ({
-      user: toPublicUser(player.user),
-      joinedAt: player.joinedAt.getTime(),
-      durationMs: player.durationMs,
-      score: player.score,
-      accuracy: player.accuracy,
-      place: player.place,
-    })),
+    players: players.map((player) => {
+      const tally = tallies?.find((t) => t.userId === player.user.id);
+      return {
+        user: toPublicUser(player.user),
+        joinedAt: player.joinedAt.getTime(),
+        ...(tallies
+          ? {
+              durationMs: tally ? gameLength : null,
+              score: tally?.score ?? null,
+              accuracy: tally ? guessAccuracy(tally) : null,
+              place: tally ? placeOf(tallies, tally.score) : null,
+            }
+          : {
+              durationMs: player.durationMs,
+              score: player.score,
+              accuracy: player.accuracy,
+              place: player.place,
+            }),
+      };
+    }),
+    drawing: !drawing
+      ? null
+      : viewerId === null || phase === "waiting"
+        ? drawingSettingsOnly(drawing.settings)
+        : projectDrawingGame({
+            settings: drawing.settings,
+            rows: drawing.rows,
+            timeline: drawing.timeline,
+            now,
+            finished: phase === "finished",
+            viewerId,
+          }),
     createdAt: lobby.createdAt.getTime(),
   };
 };
 
-// The full lobby as its own page renders it — passage included once a race
-// is underway.
-const buildLobby = (db: DrizzleDb, id: number) =>
+// The full lobby as its own page renders it for `viewerId` — passage
+// included once a race is underway, a Sketchy game filtered down to what
+// the viewer may see. The first read to find a Sketchy game over also
+// settles its results (see `settleDrawingGame`).
+const buildLobby = (db: DrizzleDb, id: number, viewerId: number) =>
   Effect.gen(function* () {
-    const lobby = yield* loadLobbyOr404(db, id);
-    const players = yield* loadPlayers(db, [id]);
-    return toApiLobby(lobby, players.get(id) ?? [], Date.now(), {
-      revealPassage: true,
-    });
+    const snapshot = yield* loadSnapshot(db, id);
+    yield* settleIfOver(db, snapshot);
+    return toApiLobby(snapshot, viewerId);
   });
 
 // Everyone looking at this lobby refetches it; everyone looking at the
@@ -294,11 +479,11 @@ const joinLobby = (
     const lobby = yield* loadLobbyOr404(db, lobbyId);
     const players = (yield* loadPlayers(db, [lobbyId])).get(lobbyId) ?? [];
     if (players.some((player) => player.user.id === userId)) {
-      return yield* buildLobby(db, lobbyId);
+      return yield* buildLobby(db, lobbyId, userId);
     }
-    if (lobbyPhase(lobby, players, Date.now()) !== "waiting") {
+    if (lobby.status !== "waiting") {
       return yield* Effect.fail(
-        new InvalidGameRequest({ message: "This race has already started" }),
+        new InvalidGameRequest({ message: "This game has already started" }),
       );
     }
     if (players.length >= lobby.maxPlayers) {
@@ -315,7 +500,7 @@ const joinLobby = (
     ).pipe(Effect.orDie);
     yield* touchLobby(db, lobbyId);
     yield* notifyLobbyChanged(connections, lobby);
-    return yield* buildLobby(db, lobbyId);
+    return yield* buildLobby(db, lobbyId, userId);
   });
 
 const createLobby = (
@@ -332,17 +517,23 @@ const createLobby = (
         .delete(gameLobbies)
         .where(lt(gameLobbies.updatedAt, new Date(Date.now() - DEAD_LOBBY_MS))),
     ).pipe(Effect.orDie);
+    const rules = GAME_RULES[game];
     const [lobby] = yield* Effect.tryPromise(() =>
       db
         .insert(gameLobbies)
-        .values({ game, hostId: userId, maxPlayers: MAX_GAME_LOBBY_PLAYERS })
+        .values({
+          game,
+          hostId: userId,
+          maxPlayers: rules.maxPlayers,
+          settings: rules.kind === "drawing" ? DEFAULT_DRAWING_SETTINGS : null,
+        })
         .returning(),
     ).pipe(Effect.orDie);
     yield* Effect.tryPromise(() =>
       db.insert(gameLobbyPlayers).values({ lobbyId: lobby!.id, userId }),
     ).pipe(Effect.orDie);
     yield* notifyLobbyChanged(connections, lobby!);
-    return yield* buildLobby(db, lobby!.id);
+    return yield* buildLobby(db, lobby!.id, userId);
   });
 
 // createLobby/quickPlay read back a lobby they've only just created or
@@ -359,6 +550,59 @@ const requireHost = (lobby: DbGameLobby, userId: number, action: string) =>
     : Effect.fail(
         new Forbidden({ message: `Only the lobby host can ${action}` }),
       );
+
+const invalid = (message: string) =>
+  Effect.fail(new InvalidGameRequest({ message }));
+
+// The race-only rules of `lobby`'s game, or a 400 for any other game.
+const requireRace = (lobby: DbGameLobby) => {
+  const rules = GAME_RULES[lobby.game as GameId];
+  return rules.kind === "race"
+    ? Effect.succeed<RaceRules>(rules)
+    : invalid("This game has no races to finish");
+};
+
+// A started Sketchy game's state, or a 400 for anything else — the common
+// preamble of every Sketchy submission.
+const requireDrawingGame = (snapshot: LobbySnapshot) =>
+  snapshot.drawing && snapshot.lobby.status === "started"
+    ? Effect.succeed(snapshot.drawing)
+    : invalid(
+        snapshot.drawing
+          ? "The game hasn't started yet"
+          : "This isn't a Sketchy lobby",
+      );
+
+// A caller dealt into this Sketchy game — seated at the start, whether or
+// not they're still here (a player who left can't act, since they can't
+// see the lobby's page to).
+const requireParticipant = (rows: DrawingGameRows, userId: number) =>
+  participantsOf(rows).includes(userId)
+    ? Effect.void
+    : Effect.fail(
+        new Forbidden({ message: "You're not playing in this game" }),
+      );
+
+// A drawing's strokes as the schema can't check them on its own: points
+// come in (x, y) pairs, y stays on the canvas, and the whole drawing keeps
+// to the point budget.
+const validateStrokes = (strokes: ReadonlyArray<DrawingStroke>) => {
+  let total = 0;
+  for (const stroke of strokes) {
+    if (stroke.points.length % 2 !== 0) {
+      return invalid("Every stroke point needs an x and a y");
+    }
+    for (let i = 1; i < stroke.points.length; i += 2) {
+      if (stroke.points[i]! > DRAWING_HEIGHT) {
+        return invalid("A stroke goes off the canvas");
+      }
+    }
+    total += stroke.points.length / 2;
+  }
+  return total > MAX_DRAWING_POINTS
+    ? invalid("That drawing has too many points")
+    : Effect.void;
+};
 
 // Each invite drops a notification into someone else's inbox, so it gets the
 // same kind of per-user cap as the engagement writes (see
@@ -406,6 +650,141 @@ const currentRecordHolder = (db: DrizzleDb, game: string) =>
     Effect.map((rows) => rows[0] ?? null),
   );
 
+// Tells the holder of `game`'s all-time best (as it stood before `results`
+// were recorded) that they've lost it, if one of `results` took it from
+// them — the one leaderboard change worth a notification, since it's the
+// one they'd want to win back. Improving your own record is silent.
+const notifyRecordBroken = (
+  game: string,
+  lobbyId: number,
+  previous: { readonly userId: number; readonly score: number } | null,
+  results: ReadonlyArray<{ readonly userId: number; readonly score: number }>,
+) =>
+  Effect.gen(function* () {
+    if (!previous) return;
+    const best = [...results].sort((a, b) => b.score - a.score)[0];
+    if (!best || best.userId === previous.userId) return;
+    if (best.score <= previous.score) return;
+    yield* createNotifications([
+      {
+        userId: previous.userId,
+        actorId: best.userId,
+        type: "game_record",
+        game,
+        lobbyId,
+      },
+    ]);
+  });
+
+// Records a finished Sketchy game's results — exactly once, whichever read
+// gets here first on whichever replica: claiming the round in
+// `settled_round` and inserting its `game_results` share one transaction,
+// and the claim is conditional, so a concurrent settle finds nothing left to
+// claim. Only players still seated at the end are recorded — leaving
+// mid-game forfeits.
+const settleIfOver = (db: DrizzleDb, snapshot: LobbySnapshot) =>
+  Effect.gen(function* () {
+    const { lobby, drawing, phase, players } = snapshot;
+    if (!drawing || phase !== "finished" || !lobby.startsAt) return;
+    if (lobby.settledRound === lobby.round) return;
+
+    const tallies = finalTallies(snapshot);
+    const seated = new Set(players.map((player) => player.user.id));
+    const endsAt = drawing.timeline.at(-1)?.endsAt ?? lobby.startsAt.getTime();
+    const results = tallies
+      .filter((tally) => seated.has(tally.userId))
+      .map((tally) => ({
+        game: lobby.game,
+        userId: tally.userId,
+        lobbyId: lobby.id,
+        round: lobby.round,
+        score: tally.score,
+        accuracy: guessAccuracy(tally),
+        durationMs: endsAt - lobby.startsAt!.getTime(),
+        place: placeOf(tallies, tally.score),
+        playerCount: tallies.length,
+      }));
+
+    const record = yield* currentRecordHolder(db, lobby.game);
+    const settled = yield* Effect.tryPromise(() =>
+      db.transaction(async (tx) => {
+        const claimed = await tx
+          .update(gameLobbies)
+          .set({ settledRound: lobby.round })
+          .where(
+            and(
+              eq(gameLobbies.id, lobby.id),
+              eq(gameLobbies.round, lobby.round),
+              or(
+                isNull(gameLobbies.settledRound),
+                ne(gameLobbies.settledRound, lobby.round),
+              ),
+            ),
+          )
+          .returning({ id: gameLobbies.id });
+        if (claimed.length === 0) return false;
+        if (results.length > 0) await tx.insert(gameResults).values(results);
+        return true;
+      }),
+    ).pipe(Effect.orDie);
+    if (settled) {
+      yield* notifyRecordBroken(lobby.game, lobby.id, record, results);
+    }
+  });
+
+// The draw stage a drawing submitted `now` belongs to: the one in progress,
+// or one whose timer ran out within the grace period.
+const drawStageAt = (timeline: ReadonlyArray<TimelineStage>, now: number) =>
+  timeline.find(
+    (stage) =>
+      stage.kind === "draw" &&
+      stage.startedAt <= now &&
+      now < stage.endsAt + DRAWING_SUBMIT_GRACE_MS,
+  );
+
+// The drawing in the spotlight, if the game is in a `kind` stage right now.
+const spotlightAt = (
+  drawing: NonNullable<LobbySnapshot["drawing"]>,
+  kind: "bluff" | "vote",
+  now: number,
+) => {
+  const stage = currentStage(drawing.timeline, now);
+  if (stage?.kind !== kind || stage.drawingId === null) return null;
+  return (
+    drawing.rows.drawings.find((row) => row.id === stage.drawingId) ?? null
+  );
+};
+
+// Deals a Sketchy game: every seated player gets one drawing per round, each
+// with a distinct prompt from the selected packs, in a shuffled order per
+// round. Null when the packs can't cover the deal.
+const dealDrawings = (
+  lobbyId: number,
+  playerIds: ReadonlyArray<number>,
+  settings: DrawingLobbySettings,
+) => {
+  const prompts = dealPrompts(
+    promptPool(settings.packs),
+    playerIds.length * settings.rounds,
+    settings.recentPrompts ?? [],
+  );
+  if (!prompts) return null;
+  return Array.from({ length: settings.rounds }, (_, index) => index + 1)
+    .flatMap((turn) =>
+      shuffled(playerIds, secureRandomInt).map((artistId, position) => ({
+        lobbyId,
+        artistId,
+        turn,
+        position,
+      })),
+    )
+    .map((drawing, index) => ({
+      ...drawing,
+      prompt: prompts[index]!,
+      shuffleSeed: secureRandomInt(0x7fff_ffff),
+    }));
+};
+
 const leaderboardEntry = (row: {
   rank: number;
   bestScore: number;
@@ -446,20 +825,13 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               .orderBy(desc(gameLobbies.updatedAt), desc(gameLobbies.id))
               .limit(MAX_LISTED_LOBBIES),
           ).pipe(Effect.orDie);
-          const players = yield* loadPlayers(
-            db,
-            lobbies.map((lobby) => lobby.id),
-          );
+          const snapshots = yield* loadSnapshots(db, lobbies);
           return {
-            lobbies: lobbies
-              .map((lobby) =>
-                toApiLobby(lobby, players.get(lobby.id) ?? [], now, {
-                  revealPassage: false,
-                }),
-              )
-              // A finished race is only interesting to the people in it,
+            lobbies: snapshots
+              // A finished game is only interesting to the people in it,
               // until the host rematches it back to "waiting".
-              .filter((lobby) => lobby.phase !== "finished"),
+              .filter((snapshot) => snapshot.phase !== "finished")
+              .map((snapshot) => toApiLobby(snapshot, null)),
           };
         }),
       )
@@ -500,7 +872,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               (player) => player.user.id === currentUser.id,
             ),
           );
-          if (seated) return yield* buildLobby(db, seated.id);
+          if (seated) return yield* buildLobby(db, seated.id, currentUser.id);
           // Fullest lobby with room first — gets a race going soonest.
           const candidate = open
             .filter(
@@ -527,7 +899,8 @@ export const GamesHandlerLive = HttpApiBuilder.group(
       .handle("getGameLobby", ({ path: { id } }) =>
         Effect.gen(function* () {
           const db = yield* Db;
-          return yield* buildLobby(db, id);
+          const currentUser = yield* CurrentUser;
+          return yield* buildLobby(db, id, currentUser.id);
         }),
       )
       .handle("joinGameLobby", ({ path: { id } }) =>
@@ -553,33 +926,87 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           const connections = yield* RealtimeConnections;
           const lobby = yield* loadLobbyOr404(db, id);
-          yield* requireHost(lobby, currentUser.id, "start the race");
+          yield* requireHost(lobby, currentUser.id, "start the game");
           const rules = GAME_RULES[lobby.game as GameId];
-          const startsAt = new Date(Date.now() + rules.countdownMs);
-          // Conditional on still "waiting", so a double-click (or two tabs)
-          // can't restart a race that's already counting down.
-          const started = yield* Effect.tryPromise(() =>
-            db
-              .update(gameLobbies)
-              .set({
-                status: "started",
-                passage: rules.pickPassage(lobby.passage),
-                startsAt,
-                endsAt: new Date(startsAt.getTime() + rules.timeLimitMs),
-                updatedAt: new Date(),
-              })
-              .where(
-                and(eq(gameLobbies.id, id), eq(gameLobbies.status, "waiting")),
-              )
-              .returning({ id: gameLobbies.id }),
-          ).pipe(Effect.orDie);
-          if (started.length === 0) {
-            return yield* Effect.fail(
-              new InvalidGameRequest({ message: "The race already started" }),
+          const players = (yield* loadPlayers(db, [id])).get(id) ?? [];
+          if (lobby.status !== "waiting") {
+            return yield* invalid("The game already started");
+          }
+          if (players.length < rules.minPlayers) {
+            return yield* invalid(
+              `This game needs at least ${rules.minPlayers} players`,
             );
           }
+          const startsAt = new Date(Date.now() + rules.countdownMs);
+
+          if (rules.kind === "race") {
+            // Conditional on still "waiting", so a double-click (or two
+            // tabs) can't restart a race that's already counting down.
+            const started = yield* Effect.tryPromise(() =>
+              db
+                .update(gameLobbies)
+                .set({
+                  status: "started",
+                  passage: rules.pickPassage(lobby.passage),
+                  startsAt,
+                  endsAt: new Date(startsAt.getTime() + rules.timeLimitMs),
+                  updatedAt: new Date(),
+                })
+                .where(
+                  and(
+                    eq(gameLobbies.id, id),
+                    eq(gameLobbies.status, "waiting"),
+                  ),
+                )
+                .returning({ id: gameLobbies.id }),
+            ).pipe(Effect.orDie);
+            if (started.length === 0) {
+              return yield* invalid("The game already started");
+            }
+          } else {
+            const settings = settingsOf(lobby);
+            const drawings = dealDrawings(
+              id,
+              players.map((player) => player.user.id),
+              settings,
+            );
+            if (!drawings) {
+              return yield* invalid(
+                "The selected packs don't have enough prompts for this many players",
+              );
+            }
+            // The deal and the status flip land together: a reader must
+            // never see a started game with no drawings (its timeline would
+            // be empty, i.e. over before it began).
+            const started = yield* Effect.tryPromise(() =>
+              db.transaction(async (tx) => {
+                const flipped = await tx
+                  .update(gameLobbies)
+                  .set({
+                    status: "started",
+                    startsAt,
+                    endsAt: new Date(
+                      startsAt.getTime() +
+                        worstCaseDurationMs(players.length, settings.rounds),
+                    ),
+                    updatedAt: new Date(),
+                  })
+                  .where(
+                    and(
+                      eq(gameLobbies.id, id),
+                      eq(gameLobbies.status, "waiting"),
+                    ),
+                  )
+                  .returning({ id: gameLobbies.id });
+                if (flipped.length === 0) return false;
+                await tx.insert(gameDrawings).values(drawings);
+                return true;
+              }),
+            ).pipe(Effect.orDie);
+            if (!started) return yield* invalid("The game already started");
+          }
           yield* notifyLobbyChanged(connections, lobby);
-          return yield* buildLobby(db, id);
+          return yield* buildLobby(db, id, currentUser.id);
         }),
       )
       .handle("finishRace", ({ path: { id }, payload }) =>
@@ -589,6 +1016,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           const connections = yield* RealtimeConnections;
           const now = Date.now();
           const lobby = yield* loadLobbyOr404(db, id);
+          const rules = yield* requireRace(lobby);
           const players = (yield* loadPlayers(db, [id])).get(id) ?? [];
           const me = players.find(
             (player) => player.user.id === currentUser.id,
@@ -621,7 +1049,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           }
 
           const durationMs = now - lobby.startsAt.getTime();
-          const result = GAME_RULES[lobby.game as GameId].score({
+          const result = rules.score({
             passage: lobby.passage,
             typed: payload.typed,
             errors: payload.errors,
@@ -696,27 +1124,12 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               playerCount: players.length,
             }),
           ).pipe(Effect.orDie);
-          // Beating someone else's all-time best tells them — the one
-          // leaderboard change worth a notification, since it's the one
-          // they'd want to win back. Improving your own record is silent.
-          if (
-            record &&
-            record.userId !== currentUser.id &&
-            result.score > record.score
-          ) {
-            yield* createNotifications([
-              {
-                userId: record.userId,
-                actorId: currentUser.id,
-                type: "game_record",
-                game: lobby.game,
-                lobbyId: id,
-              },
-            ]);
-          }
+          yield* notifyRecordBroken(lobby.game, id, record, [
+            { userId: currentUser.id, score: result.score },
+          ]);
           yield* touchLobby(db, id);
           yield* notifyLobbyChanged(connections, lobby);
-          return yield* buildLobby(db, id);
+          return yield* buildLobby(db, id, currentUser.id);
         }),
       )
       .handle("inviteToGameLobby", ({ path: { id }, payload }) =>
@@ -737,11 +1150,9 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               new InvalidGameRequest({ message: "You can't invite yourself" }),
             );
           }
-          if (lobbyPhase(lobby, players, Date.now()) !== "waiting") {
-            return yield* Effect.fail(
-              new InvalidGameRequest({
-                message: "Invites can only be sent before the race starts",
-              }),
+          if (lobby.status !== "waiting") {
+            return yield* invalid(
+              "Invites can only be sent before the game starts",
             );
           }
           if (players.some((player) => player.user.id === payload.userId)) {
@@ -806,18 +1217,18 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const connections = yield* RealtimeConnections;
-          const lobby = yield* loadLobbyOr404(db, id);
+          const snapshot = yield* loadSnapshot(db, id);
+          const { lobby, drawing } = snapshot;
           yield* requireHost(lobby, currentUser.id, "start a rematch");
-          const players = (yield* loadPlayers(db, [id])).get(id) ?? [];
-          if (lobbyPhase(lobby, players, Date.now()) !== "finished") {
-            return yield* Effect.fail(
-              new InvalidGameRequest({
-                message: "The current race hasn't finished yet",
-              }),
-            );
+          if (snapshot.phase !== "finished") {
+            return yield* invalid("The current game hasn't finished yet");
           }
-          // `passage` is kept (hidden while waiting — see toApiLobby) so the
-          // next start can avoid repeating it.
+          // A rematch wipes the game it replaces, so its results must be
+          // on record first — normally a read already did this.
+          yield* settleIfOver(db, snapshot);
+          // The typing race keeps `passage` (hidden while waiting — see
+          // toApiLobby) so the next start can avoid repeating it; Sketchy
+          // carries its prompts over in its settings for the same reason.
           const reset = yield* Effect.tryPromise(() =>
             db
               .update(gameLobbies)
@@ -827,6 +1238,15 @@ export const GamesHandlerLive = HttpApiBuilder.group(
                 startsAt: null,
                 endsAt: null,
                 updatedAt: new Date(),
+                ...(drawing && {
+                  settings: {
+                    packs: drawing.settings.packs,
+                    rounds: drawing.settings.rounds,
+                    recentPrompts: drawing.rows.drawings.map(
+                      (row) => row.prompt,
+                    ),
+                  },
+                }),
               })
               .where(
                 and(eq(gameLobbies.id, id), eq(gameLobbies.round, lobby.round)),
@@ -845,9 +1265,204 @@ export const GamesHandlerLive = HttpApiBuilder.group(
                 })
                 .where(eq(gameLobbyPlayers.lobbyId, id)),
             ).pipe(Effect.orDie);
+            // Bluffs and votes go with their drawings (cascade).
+            yield* Effect.tryPromise(() =>
+              db.delete(gameDrawings).where(eq(gameDrawings.lobbyId, id)),
+            ).pipe(Effect.orDie);
             yield* notifyLobbyChanged(connections, lobby);
           }
-          return yield* buildLobby(db, id);
+          return yield* buildLobby(db, id, currentUser.id);
+        }),
+      )
+      .handle("listDrawingPacks", () =>
+        Effect.succeed({
+          packs: DRAWING_PACKS.map((pack) => ({
+            slug: pack.slug,
+            name: pack.name,
+            icon: pack.icon,
+            description: pack.description,
+            samples: pack.prompts.slice(0, 3),
+            promptCount: pack.prompts.length,
+          })),
+        }),
+      )
+      .handle("updateDrawingSettings", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const lobby = yield* loadLobbyOr404(db, id);
+          if (GAME_RULES[lobby.game as GameId].kind !== "drawing") {
+            return yield* invalid("This game has no settings");
+          }
+          yield* requireHost(lobby, currentUser.id, "change the settings");
+          if (lobby.status !== "waiting") {
+            return yield* invalid(
+              "Settings can only be changed before the game starts",
+            );
+          }
+          const packs = [...new Set(payload.packs)];
+          const unknown = packs.find((slug) => !findDrawingPack(slug));
+          if (unknown !== undefined) {
+            return yield* invalid(`Unknown theme pack: ${unknown}`);
+          }
+          const updated = yield* Effect.tryPromise(() =>
+            db
+              .update(gameLobbies)
+              .set({
+                settings: {
+                  // In the picker's order, whatever order they were sent in.
+                  packs: DRAWING_PACKS.map((pack) => pack.slug).filter((slug) =>
+                    packs.includes(slug),
+                  ),
+                  rounds: payload.rounds,
+                  recentPrompts: settingsOf(lobby).recentPrompts ?? [],
+                },
+                updatedAt: new Date(),
+              })
+              .where(
+                and(eq(gameLobbies.id, id), eq(gameLobbies.status, "waiting")),
+              )
+              .returning({ id: gameLobbies.id }),
+          ).pipe(Effect.orDie);
+          if (updated.length === 0) {
+            return yield* invalid(
+              "Settings can only be changed before the game starts",
+            );
+          }
+          yield* notifyLobbyChanged(connections, lobby);
+          return yield* buildLobby(db, id, currentUser.id);
+        }),
+      )
+      .handle("submitDrawing", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          yield* validateStrokes(payload.strokes);
+          const snapshot = yield* loadSnapshot(db, id);
+          const game = yield* requireDrawingGame(snapshot);
+          yield* requireParticipant(game.rows, currentUser.id);
+          const stage = drawStageAt(game.timeline, snapshot.now);
+          if (!stage) return yield* invalid("It isn't time to draw");
+          const mine = game.rows.drawings.find(
+            (row) => row.turn === stage.turn && row.artistId === currentUser.id,
+          );
+          if (!mine) return yield* invalid("You have nothing to draw");
+          const saved = yield* Effect.tryPromise(() =>
+            db
+              .update(gameDrawings)
+              .set({
+                strokes: payload.strokes,
+                submittedAt: new Date(snapshot.now),
+              })
+              .where(
+                and(
+                  eq(gameDrawings.id, mine.id),
+                  isNull(gameDrawings.submittedAt),
+                ),
+              )
+              .returning({ id: gameDrawings.id }),
+          ).pipe(Effect.orDie);
+          if (saved.length === 0) {
+            return yield* invalid("You already submitted your drawing");
+          }
+          yield* touchLobby(db, id);
+          yield* notifyLobbyChanged(connections, snapshot.lobby);
+          return yield* buildLobby(db, id, currentUser.id);
+        }),
+      )
+      .handle("submitBluff", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const snapshot = yield* loadSnapshot(db, id);
+          const game = yield* requireDrawingGame(snapshot);
+          yield* requireParticipant(game.rows, currentUser.id);
+          const drawing = spotlightAt(game, "bluff", snapshot.now);
+          if (!drawing) return yield* invalid("It isn't time to bluff");
+          if (drawing.artistId === currentUser.id) {
+            return yield* invalid("You can't bluff on your own drawing");
+          }
+          const normalized = normalizeTitle(payload.text);
+          if (normalized.length === 0) {
+            return yield* invalid("Write a title with some words in it");
+          }
+          if (isTooCloseToPrompt(payload.text, drawing.prompt)) {
+            return yield* invalid("Too close to the truth — try another.");
+          }
+          const bluffs = bluffsFor(game.rows, drawing.id);
+          if (bluffs.some((bluff) => bluff.authorId === currentUser.id)) {
+            return yield* invalid("You already wrote a bluff for this one");
+          }
+          if (
+            bluffs.some((bluff) => normalizeTitle(bluff.text) === normalized)
+          ) {
+            return yield* invalid("Someone already wrote that — try another.");
+          }
+          // Stamped with the instant the stage was checked against, so the
+          // timeline sees it land inside the stage (see `stageEnd`).
+          const inserted = yield* Effect.tryPromise(() =>
+            db
+              .insert(gameBluffs)
+              .values({
+                drawingId: drawing.id,
+                authorId: currentUser.id,
+                text: payload.text,
+                normalized,
+                createdAt: new Date(snapshot.now),
+              })
+              .onConflictDoNothing()
+              .returning({ id: gameBluffs.id }),
+          ).pipe(Effect.orDie);
+          // Lost a race with a double-submit or an identical bluff.
+          if (inserted.length === 0) {
+            return yield* invalid("Someone already wrote that — try another.");
+          }
+          yield* touchLobby(db, id);
+          yield* notifyLobbyChanged(connections, snapshot.lobby);
+          return yield* buildLobby(db, id, currentUser.id);
+        }),
+      )
+      .handle("submitVote", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const snapshot = yield* loadSnapshot(db, id);
+          const game = yield* requireDrawingGame(snapshot);
+          yield* requireParticipant(game.rows, currentUser.id);
+          const drawing = spotlightAt(game, "vote", snapshot.now);
+          if (!drawing) return yield* invalid("It isn't time to vote");
+          if (drawing.artistId === currentUser.id) {
+            return yield* invalid("You can't vote on your own drawing");
+          }
+          const choice = buildBallot(drawing, bluffsFor(game.rows, drawing.id))[
+            payload.answer
+          ];
+          if (!choice) return yield* invalid("That answer isn't on the ballot");
+          if (choice.kind === "bluff" && choice.authorId === currentUser.id) {
+            return yield* invalid("You can't vote for your own bluff");
+          }
+          const inserted = yield* Effect.tryPromise(() =>
+            db
+              .insert(gameVotes)
+              .values({
+                drawingId: drawing.id,
+                voterId: currentUser.id,
+                bluffId: choice.kind === "bluff" ? choice.bluffId : null,
+                createdAt: new Date(snapshot.now),
+              })
+              .onConflictDoNothing()
+              .returning({ id: gameVotes.id }),
+          ).pipe(Effect.orDie);
+          if (inserted.length === 0) {
+            return yield* invalid("You already voted on this one");
+          }
+          yield* touchLobby(db, id);
+          yield* notifyLobbyChanged(connections, snapshot.lobby);
+          return yield* buildLobby(db, id, currentUser.id);
         }),
       )
       .handle("getLeaderboard", ({ path: { game }, urlParams }) =>

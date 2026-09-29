@@ -22,10 +22,13 @@ export function ResultsPodium({
   players,
   scoreUnit,
   meId,
+  raceStats = true,
 }: {
   players: ReadonlyArray<GameLobbyPlayer>;
   scoreUnit: string;
   meId: number | undefined;
+  /** Show each finisher's accuracy and time (a race's) beside the score. */
+  raceStats?: boolean;
 }) {
   const finishers = players
     .filter((player) => player.place !== null)
@@ -135,12 +138,16 @@ export function ResultsPodium({
                     </span>{" "}
                     {scoreUnit}
                   </span>
-                  <span className="hidden sm:inline">
-                    {player.accuracy?.toFixed(1)}%
-                  </span>
-                  <span className="hidden sm:inline">
-                    {formatDuration(player.durationMs ?? 0)}
-                  </span>
+                  {raceStats && (
+                    <>
+                      <span className="hidden sm:inline">
+                        {player.accuracy?.toFixed(1)}%
+                      </span>
+                      <span className="hidden sm:inline">
+                        {formatDuration(player.durationMs ?? 0)}
+                      </span>
+                    </>
+                  )}
                 </span>
               ) : (
                 <span className="text-xs text-muted-foreground">

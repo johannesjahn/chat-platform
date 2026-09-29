@@ -73,7 +73,7 @@ test("a game invite lands in the inbox and opens the lobby", async ({
   await pageB.getByRole("link", { name: "Notifications (1 unread)" }).click();
   await pageB
     .getByRole("button", {
-      name: new RegExp(`${alice.username}.*invited you to a Type Race race`),
+      name: new RegExp(`${alice.username}.*invited you to play Type Race`),
     })
     .click();
   await expect(pageB).toHaveURL(lobbyPath);

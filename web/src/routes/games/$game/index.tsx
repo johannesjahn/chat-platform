@@ -1,15 +1,6 @@
 import { useState, type CSSProperties } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import {
-  Crown,
-  DoorOpen,
-  Flag,
-  Plus,
-  Swords,
-  Trophy,
-  Users,
-  Zap,
-} from "lucide-react";
+import { Crown, DoorOpen, Flag, Plus, Swords, Trophy, Zap } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { GamePanel } from "@/components/games/GamePanel";
 import { GameShell } from "@/components/games/GameShell";
@@ -41,24 +32,6 @@ const PERIODS: ReadonlyArray<{ value: LeaderboardPeriod; label: string }> = [
   { value: "day", label: "Today" },
   { value: "week", label: "This week" },
   { value: "all", label: "All time" },
-];
-
-const STEPS = [
-  {
-    icon: Users,
-    title: "Gather",
-    text: "Quick play drops you into the fullest open lobby — or open your own and share the link.",
-  },
-  {
-    icon: Zap,
-    title: "Race",
-    text: "The host starts a countdown. Everyone gets the same passage; every lane moves live.",
-  },
-  {
-    icon: Trophy,
-    title: "Climb",
-    text: "Every finish counts toward the leaderboard. Speed ranks you; wins need an opponent.",
-  },
 ];
 
 function GameHubRoute() {
@@ -137,7 +110,7 @@ function GameHub({ gameId }: { gameId: GameId }) {
       {!session ? (
         <LoginPrompt
           title={`Log in to play ${game.name}`}
-          description="Sign in to join a lobby, race others live, and get on the leaderboard."
+          description="Sign in to join a lobby, play others live, and get on the leaderboard."
         />
       ) : (
         <>
@@ -148,7 +121,7 @@ function GameHub({ gameId }: { gameId: GameId }) {
           )}
 
           <ol className="grid gap-3 sm:grid-cols-3">
-            {STEPS.map((step, index) => (
+            {game.steps.map((step, index) => (
               <li
                 key={step.title}
                 style={{ "--stagger-index": index } as CSSProperties}
@@ -246,7 +219,7 @@ function GameHub({ gameId }: { gameId: GameId }) {
                     style={{ "--stagger-index": 1 } as CSSProperties}
                   />
                   <GameStat
-                    label="Races"
+                    label={game.raceStats ? "Races" : "Games"}
                     value={me.races}
                     style={{ "--stagger-index": 2 } as CSSProperties}
                   />
@@ -262,6 +235,7 @@ function GameHub({ gameId }: { gameId: GameId }) {
                 entries={leaderboard.data?.entries}
                 me={me}
                 scoreUnit={game.scoreUnit}
+                accuracyLabel={game.accuracyLabel}
                 isLoading={leaderboard.isLoading}
               />
             </GamePanel>

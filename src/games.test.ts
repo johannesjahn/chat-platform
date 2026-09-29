@@ -349,7 +349,7 @@ test("finishing is only for seated players, and not after the time limit", () =>
       yield* expectFailure(
         e.games.joinGameLobby(lobbyPath(lobby.id)),
         "InvalidGameRequest",
-        "This race has already started",
+        "This game has already started",
       );
       yield* fastForward(lobby.id, 30_000);
       yield* expectFailure(

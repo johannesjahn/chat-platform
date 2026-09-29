@@ -1,5 +1,16 @@
 import type { CSSProperties } from "react";
-import { Brain, Keyboard, Zap, type LucideIcon } from "lucide-react";
+import {
+  Brain,
+  Brush,
+  Eye,
+  Keyboard,
+  PenLine,
+  Trophy,
+  Users,
+  Vote,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import type { components } from "@/lib/api-types";
 
 export type GameId = components["schemas"]["GameId"];
@@ -20,6 +31,24 @@ export type GameTheme = {
 type PlayableGame = {
   readonly status: "live";
   readonly id: GameId;
+  // The hub's three-step "how it works" strip.
+  readonly steps: ReadonlyArray<{
+    readonly icon: LucideIcon;
+    readonly title: string;
+    readonly text: string;
+  }>;
+  // Wording for the shared lobby page — a race is started and joined, a
+  // party game is played.
+  readonly verbs: {
+    readonly start: string;
+    readonly startSolo: string;
+    readonly join: string;
+  };
+  // What the leaderboard's accuracy column means for this game.
+  readonly accuracyLabel: string;
+  // Whether a result's accuracy and time are worth showing on the podium
+  // list (they are for a race; a party game's score says it all).
+  readonly raceStats: boolean;
 };
 
 type UpcomingGame = {
@@ -57,6 +86,71 @@ export const GAMES: ReadonlyArray<GameDefinition> = [
     players: "1–6 players",
     scoreLabel: "Words per minute",
     scoreUnit: "WPM",
+    steps: [
+      {
+        icon: Users,
+        title: "Gather",
+        text: "Quick play drops you into the fullest open lobby — or open your own and share the link.",
+      },
+      {
+        icon: Zap,
+        title: "Race",
+        text: "The host starts a countdown. Everyone gets the same passage; every lane moves live.",
+      },
+      {
+        icon: Trophy,
+        title: "Climb",
+        text: "Every finish counts toward the leaderboard. Speed ranks you; wins need an opponent.",
+      },
+    ],
+    verbs: {
+      start: "Start race",
+      startSolo: "Start solo race",
+      join: "Join the race",
+    },
+    accuracyLabel: "Acc",
+    raceStats: true,
+  },
+  {
+    status: "live",
+    id: "drawing",
+    name: "Sketchy",
+    tagline: "Draw badly, lie brilliantly",
+    description:
+      "Everyone draws a secret prompt, then invents fake titles for each other's doodles. Find the truth, fool your friends.",
+    icon: Brush,
+    theme: {
+      from: "oklch(0.74 0.19 350)",
+      to: "oklch(0.8 0.15 65)",
+      glow: "oklch(0.76 0.18 20 / 0.35)",
+    },
+    players: "3–8 players",
+    scoreLabel: "Points",
+    scoreUnit: "pts",
+    steps: [
+      {
+        icon: PenLine,
+        title: "Draw",
+        text: "Everyone gets a different secret prompt from the host's theme packs — and 75 seconds to draw it.",
+      },
+      {
+        icon: Eye,
+        title: "Bluff",
+        text: "Each drawing takes a turn in the spotlight. Invent a title others will believe is the real one.",
+      },
+      {
+        icon: Vote,
+        title: "Vote",
+        text: "Find the truth for 1000 points, earn 500 for everyone you fooled, then watch the reveal.",
+      },
+    ],
+    verbs: {
+      start: "Start game",
+      startSolo: "Start game",
+      join: "Join the game",
+    },
+    accuracyLabel: "Guess",
+    raceStats: false,
   },
   {
     status: "soon",

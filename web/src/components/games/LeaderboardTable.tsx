@@ -86,11 +86,14 @@ export function LeaderboardTable({
   entries,
   me,
   scoreUnit,
+  accuracyLabel = "Acc",
   isLoading,
 }: {
   entries: ReadonlyArray<LeaderboardEntry> | undefined;
   me: LeaderboardEntry | null | undefined;
   scoreUnit: string;
+  /** The accuracy column's heading — what accuracy means in this game. */
+  accuracyLabel?: string;
   isLoading: boolean;
 }) {
   if (isLoading) {
@@ -106,8 +109,8 @@ export function LeaderboardTable({
     return (
       <EmptyState
         icon={Trophy}
-        title="No races yet"
-        description="Finish a race to put your name on the board."
+        title="No results yet"
+        description="Finish a game to put your name on the board."
         className="py-8"
       />
     );
@@ -119,7 +122,7 @@ export function LeaderboardTable({
         <span>#</span>
         <span>Player</span>
         <span className="hidden text-right sm:block">Avg</span>
-        <span className="hidden text-right sm:block">Acc</span>
+        <span className="hidden text-right sm:block">{accuracyLabel}</span>
         <span className="hidden text-right sm:block">Wins</span>
         <span className="text-right">Best</span>
       </div>
