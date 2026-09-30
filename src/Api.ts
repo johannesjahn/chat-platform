@@ -9,6 +9,11 @@ import {
 import { Option, Schema } from "effect";
 import packageJson from "../package.json" with { type: "json" };
 import { Authentication } from "./Auth.ts";
+import {
+  REFLEX_DIRECTIONS,
+  REFLEX_KINDS,
+  REFLEX_ROUNDS,
+} from "./games/reflex.ts";
 
 // "admin" can edit/delete any post; "user" can only edit/delete their own.
 // Registration always creates a "user" — admins are promoted out-of-band.
@@ -2379,9 +2384,14 @@ const AdminGroup = HttpApiGroup.make("admin").add(
 //  - "drawing": Sketchy — a Drawful-style party game: everyone draws a
 //               secret prompt, bluffs fake titles for each other's drawings,
 //               and votes for the real one (see src/games/drawing/).
-export const GameId = Schema.Literal("typing", "drawing").annotations({
-  identifier: "GameId",
-});
+//  - "reflex":  Reflex Rush — rounds of reaction tests (wait for green, dodge
+//               the decoys, match the symbol, the arrow, the target), solo
+//               or head to head (see src/games/reflex.ts).
+export const GameId = Schema.Literal("typing", "drawing", "reflex").annotations(
+  {
+    identifier: "GameId",
+  },
+);
 export type GameId = typeof GameId.Type;
 
 // Seats per typing lobby. Small on purpose: every racer's lane is on screen
@@ -2576,6 +2586,82 @@ export const DrawingGame = Schema.Struct({
 }).annotations({ identifier: "DrawingGame" });
 export type DrawingGame = typeof DrawingGame.Type;
 
+// --- Reflex Rush (the "reflex" game — see src/games/reflex.ts) -------------
+//
+// A game is a fixed schedule of rounds, laid out server-side from a secret
+// seed when the host starts it. Every client plays the same schedule off
+// the (server-corrected) clock, so everyone in a lobby gets each signal at
+// the same instant.
+export const ReflexKind = Schema.Literal(...REFLEX_KINDS).annotations({
+  identifier: "ReflexKind",
+});
+export type ReflexKind = typeof ReflexKind.Type;
+
+export const ReflexDirection = Schema.Literal(...REFLEX_DIRECTIONS).annotations(
+  { identifier: "ReflexDirection" },
+);
+
+// Something shown before a round's signal: a decoy flash ("decoy", whose
+// `variant` picks its look) or a wrong symbol ("match", whose `variant` is
+// the symbol).
+export const ReflexCue = Schema.Struct({
+  at: Schema.Number,
+  variant: Schema.Number,
+}).annotations({ identifier: "ReflexCue" });
+
+// One round. All times are epoch ms: the title card shows from `armAt`,
+// presses count as false starts from `armAt + introMs` until `signalAt`,
+// and the round is decided at `closeAt`.
+export const ReflexRound = Schema.Struct({
+  kind: ReflexKind,
+  armAt: Schema.Number,
+  signalAt: Schema.Number,
+  closeAt: Schema.Number,
+  cues: Schema.Array(ReflexCue),
+  // "match" only: the symbol to hit on.
+  symbol: Schema.NullOr(Schema.Number),
+  // "arrow" only: the direction to press.
+  direction: Schema.NullOr(ReflexDirection),
+  // "target" only: its center, as fractions of the arena's width/height.
+  target: Schema.NullOr(Schema.Struct({ x: Schema.Number, y: Schema.Number })),
+}).annotations({ identifier: "ReflexRound" });
+export type ReflexRound = typeof ReflexRound.Type;
+
+//  - "hit":   reacted in time (and, for an arrow or a target, correctly).
+//  - "early": a false start — pressed before the signal (a decoy, a wrong
+//             symbol), or within ANTICIPATION_MS of it.
+//  - "miss":  never reacted within the window.
+//  - "wrong": reacted in time, but with the wrong arrow or off the target.
+export const ReflexOutcome = Schema.Literal(
+  "hit",
+  "early",
+  "miss",
+  "wrong",
+).annotations({ identifier: "ReflexOutcome" });
+
+export const ReflexRoundResult = Schema.Struct({
+  outcome: ReflexOutcome,
+  reactionMs: Schema.NullOr(Schema.Number),
+  // Negative for a false start.
+  points: Schema.Number,
+}).annotations({ identifier: "ReflexRoundResult" });
+export type ReflexRoundResult = typeof ReflexRoundResult.Type;
+
+export const ReflexPlayerResult = Schema.Struct({
+  userId: Schema.Number,
+  rounds: Schema.Array(ReflexRoundResult),
+}).annotations({ identifier: "ReflexPlayerResult" });
+
+export const ReflexGame = Schema.Struct({
+  // The title card's length before each round is armed.
+  introMs: Schema.Number,
+  // Empty while waiting (the schedule is secret until the start).
+  rounds: Schema.Array(ReflexRound),
+  // The server-scored breakdown of everyone who has submitted their game.
+  results: Schema.Array(ReflexPlayerResult),
+}).annotations({ identifier: "ReflexGame" });
+export type ReflexGame = typeof ReflexGame.Type;
+
 export const GameLobby = Schema.Struct({
   id: Schema.Number,
   game: GameId,
@@ -2600,6 +2686,9 @@ export const GameLobby = Schema.Struct({
   // Sketchy's state, filtered for the caller (see DrawingGame); null for
   // every other game. The lobby browser only ever gets the settings.
   drawing: Schema.NullOr(DrawingGame),
+  // Reflex Rush's schedule and results (see ReflexGame); null for every
+  // other game, and in the lobby browser.
+  reflex: Schema.NullOr(ReflexGame),
   // Whether the lobby chat takes messages right now. Always open for the
   // typing race; closed while a Sketchy game is in play, since a chat line
   // is the easiest way to leak a secret prompt (reactions stay on).
@@ -2652,6 +2741,25 @@ export const FinishRaceBody = Schema.Struct({
   typed: Schema.String.pipe(Schema.maxLength(MAX_TYPED_LENGTH)),
   errors: Schema.Number.pipe(Schema.int(), Schema.between(0, 100_000)),
 }).annotations({ identifier: "FinishRaceBody" });
+
+// A played Reflex Rush game, one entry per round in order. What's measured
+// on the client — the reaction time — is judged, not trusted: under
+// ANTICIPATION_MS it's a false start, an arrow must match the round's, a
+// hit must land on the target. `early` is taken on trust, since it can only
+// cost points.
+export const ReflexTap = Schema.Struct({
+  early: Schema.Boolean,
+  reactionMs: Schema.NullOr(
+    Schema.Number.pipe(Schema.int(), Schema.between(0, 10_000)),
+  ),
+  direction: Schema.NullOr(ReflexDirection),
+  x: Schema.NullOr(Schema.Number.pipe(Schema.between(0, 1))),
+  y: Schema.NullOr(Schema.Number.pipe(Schema.between(0, 1))),
+}).annotations({ identifier: "ReflexTap" });
+
+export const FinishReflexBody = Schema.Struct({
+  taps: Schema.Array(ReflexTap).pipe(Schema.maxItems(REFLEX_ROUNDS)),
+}).annotations({ identifier: "FinishReflexBody" });
 
 export const LeaderboardPeriod = Schema.Literal(
   "day",
@@ -2798,6 +2906,20 @@ const GamesGroup = HttpApiGroup.make("games")
     HttpApiEndpoint.post("finishRace", "/games/lobbies/:id/finish")
       .setPath(GameLobbyIdPath)
       .setPayload(FinishRaceBody)
+      .addSuccess(GameLobby)
+      .addError(NotFound, { status: 404 })
+      .addError(Forbidden, { status: 403 })
+      .addError(InvalidGameRequest, { status: 400 })
+      .middleware(Authentication),
+  )
+  .add(
+    // Reflex Rush: submits the caller's whole game once its last round has
+    // closed — see FinishReflexBody for what is (and isn't) trusted. Places
+    // and leaderboard results are settled once everyone is in (or time's
+    // up).
+    HttpApiEndpoint.post("finishReflex", "/games/lobbies/:id/reflex")
+      .setPath(GameLobbyIdPath)
+      .setPayload(FinishReflexBody)
       .addSuccess(GameLobby)
       .addError(NotFound, { status: 404 })
       .addError(Forbidden, { status: 403 })

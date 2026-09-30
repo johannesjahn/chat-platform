@@ -13,6 +13,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { ReflexRoundResult } from "../games/reflex.ts";
 import type { DrawingStroke } from "../Api.ts";
 
 export const users = pgTable(
@@ -716,7 +717,8 @@ export const gameLobbies = pgTable(
     // round's race (see `finishRace`).
     round: integer("round").notNull().default(1),
     // The text being raced — chosen when the host starts, null while waiting
-    // so nobody can rehearse it in the lobby.
+    // so nobody can rehearse it in the lobby. For Reflex Rush, the seed its
+    // schedule is laid out from (see src/games/reflex.ts).
     passage: text("passage"),
     startsAt: timestamp("starts_at", { mode: "date" }),
     // For Sketchy, the *latest* the game can end (every stage running its
@@ -788,6 +790,9 @@ export const gameLobbyPlayers = pgTable(
     score: doublePrecision("score"),
     accuracy: doublePrecision("accuracy"),
     place: integer("place"),
+    // A game-specific breakdown of the result, reset with the rest —
+    // Reflex Rush's per-round outcomes (null for every other game).
+    detail: jsonb("detail").$type<ReflexPlayerDetail>(),
   },
   (table) => [
     unique().on(table.lobbyId, table.userId),
@@ -796,6 +801,10 @@ export const gameLobbyPlayers = pgTable(
 );
 
 export type DbGameLobbyPlayer = typeof gameLobbyPlayers.$inferSelect;
+
+export type ReflexPlayerDetail = {
+  readonly rounds: ReadonlyArray<ReflexRoundResult>;
+};
 
 // A lobby's chat (see `listGameChat`/`postGameChat` in GamesHandler.ts):
 // players and spectators talking between rounds. Scratch space tied to the

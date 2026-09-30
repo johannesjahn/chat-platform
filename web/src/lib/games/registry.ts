@@ -3,8 +3,10 @@ import {
   Brain,
   Brush,
   Eye,
+  Ghost,
   Keyboard,
   PenLine,
+  Timer,
   Trophy,
   Users,
   Vote,
@@ -153,6 +155,47 @@ export const GAMES: ReadonlyArray<GameDefinition> = [
     raceStats: false,
   },
   {
+    status: "live",
+    id: "reflex",
+    name: "Reflex Rush",
+    tagline: "Blink and you lose",
+    description:
+      "Eight rounds of pure nerve: wait for green, dodge the decoys, snap the symbol, hit the target. Solo or head to head, milliseconds decide it.",
+    icon: Zap,
+    theme: {
+      from: "oklch(0.8 0.2 145)",
+      to: "oklch(0.7 0.16 190)",
+      glow: "oklch(0.75 0.18 165 / 0.3)",
+    },
+    players: "1–6 players",
+    scoreLabel: "Points",
+    scoreUnit: "pts",
+    steps: [
+      {
+        icon: Timer,
+        title: "Wait for it",
+        text: "Every round hides its signal behind a random wait. Everyone in the lobby gets it at the same instant.",
+      },
+      {
+        icon: Ghost,
+        title: "Don't flinch",
+        text: "Decoys, wrong symbols, arrows and targets. Jump early and it costs you — fast and clean builds a combo.",
+      },
+      {
+        icon: Trophy,
+        title: "Climb",
+        text: "Play solo for a personal best or duel up to five friends. Every run lands on the leaderboard.",
+      },
+    ],
+    verbs: {
+      start: "Start the duel",
+      startSolo: "Play solo",
+      join: "Join the duel",
+    },
+    accuracyLabel: "Clean",
+    raceStats: false,
+  },
+  {
     status: "soon",
     id: "trivia",
     name: "Trivia Blitz",
@@ -168,23 +211,6 @@ export const GAMES: ReadonlyArray<GameDefinition> = [
     players: "2–8 players",
     scoreLabel: "Points",
     scoreUnit: "pts",
-  },
-  {
-    status: "soon",
-    id: "reflex",
-    name: "Reflex Duel",
-    tagline: "Blink and you lose",
-    description:
-      "Wait for the signal, then strike. Milliseconds decide it. Coming to the arcade soon.",
-    icon: Zap,
-    theme: {
-      from: "oklch(0.8 0.2 145)",
-      to: "oklch(0.7 0.16 190)",
-      glow: "oklch(0.75 0.18 165 / 0.3)",
-    },
-    players: "2 players",
-    scoreLabel: "Reaction time",
-    scoreUnit: "ms",
   },
 ];
 

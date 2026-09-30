@@ -72,6 +72,10 @@ export function sendGameReaction(lobbyId: number, reaction: string): void {
 // socket state with no REST resource behind it.
 type ProgressKey = `${number}:${number}`;
 const progress = new Map<ProgressKey, number>();
+// Every value each lane has moved through, in order — for a game whose
+// frames each carry something of their own (a Reflex Rush round's result),
+// not just the latest position.
+const progressLog = new Map<ProgressKey, number[]>();
 const listeners = new Set<() => void>();
 let version = 0;
 
@@ -85,6 +89,7 @@ export function noteGameProgress(
   // except through `resetGameProgress` (a rematch).
   if ((progress.get(key) ?? -1) >= value) return;
   progress.set(key, value);
+  progressLog.set(key, [...(progressLog.get(key) ?? []), value]);
   version++;
   for (const listener of listeners) listener();
 }
@@ -92,6 +97,9 @@ export function noteGameProgress(
 export function resetGameProgress(lobbyId: number): void {
   for (const key of progress.keys()) {
     if (key.startsWith(`${lobbyId}:`)) progress.delete(key);
+  }
+  for (const key of progressLog.keys()) {
+    if (key.startsWith(`${lobbyId}:`)) progressLog.delete(key);
   }
   version++;
   for (const listener of listeners) listener();
@@ -114,4 +122,13 @@ export function useGameProgressVersion(): number {
 
 export function gameProgressOf(lobbyId: number, userId: number): number {
   return progress.get(`${lobbyId}:${userId}`) ?? 0;
+}
+
+const NO_PROGRESS: ReadonlyArray<number> = [];
+
+export function gameProgressLogOf(
+  lobbyId: number,
+  userId: number,
+): ReadonlyArray<number> {
+  return progressLog.get(`${lobbyId}:${userId}`) ?? NO_PROGRESS;
 }

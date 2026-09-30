@@ -1753,6 +1753,511 @@ html[data-app-shell="immersive"] body {
   animation: ink-low 0.9s ease-in-out infinite;
 }
 
+/* ───────────────────────────────────────────────────────────────────────────
+   Reflex Rush (the reaction game)
+
+   The arena is a stage lit by one light: the whole floor changes color with
+   what's happening — deep red while armed, flooding green on the signal,
+   a sick red on a false start — over a synthwave grid rushing toward the
+   player. The *signal itself* never fades in: the floor snaps to it in the
+   frame it's timed from (see `useReflexEngine`), so a transition can't eat
+   into anyone's reaction time. Always dark, in either theme — it's a stage,
+   and the signal has to be the brightest thing on screen.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@property --arena-a {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.22 0.04 200);
+}
+
+@property --arena-b {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.12 0.02 230);
+}
+
+@utility reflex-arena {
+  --arena-a: oklch(0.24 0.05 195);
+  --arena-b: oklch(0.11 0.02 230);
+  --arena-line: oklch(0.8 0.15 170 / 0.35);
+  --arena-speed: 2.4s;
+  color: white;
+  background:
+    radial-gradient(
+      ellipse 90% 70% at 50% 42%,
+      var(--arena-a),
+      var(--arena-b) 72%
+    ),
+    var(--arena-b);
+  box-shadow:
+    inset 0 0 0 1px oklch(1 0 0 / 0.08),
+    inset 0 -40px 80px -40px oklch(0 0 0 / 0.6),
+    0 20px 60px -25px var(--arena-a);
+  transition:
+    --arena-a 0.35s ease-out,
+    --arena-b 0.35s ease-out,
+    box-shadow 0.35s ease-out;
+  -webkit-tap-highlight-color: transparent;
+
+  &[data-tone="intro"] {
+    --arena-a: oklch(0.34 0.09 175);
+    --arena-b: oklch(0.13 0.03 215);
+  }
+  &[data-tone="armed"] {
+    --arena-a: oklch(0.33 0.14 22);
+    --arena-b: oklch(0.11 0.04 18);
+    --arena-line: oklch(0.72 0.19 25 / 0.35);
+    --arena-speed: 1.1s;
+  }
+  &[data-tone="go"],
+  &[data-tone="aim"],
+  &[data-tone="decoy-amber"],
+  &[data-tone="decoy-blue"],
+  &[data-tone="decoy-red"] {
+    /* Snap, never fade — see the note above. */
+    transition: none;
+  }
+  &[data-tone="go"] {
+    --arena-a: oklch(0.8 0.22 145);
+    --arena-b: oklch(0.5 0.17 150);
+    --arena-line: oklch(0.97 0.08 145 / 0.55);
+    --arena-speed: 0.45s;
+  }
+  &[data-tone="aim"] {
+    --arena-a: oklch(0.46 0.13 160);
+    --arena-b: oklch(0.16 0.05 190);
+    --arena-line: oklch(0.85 0.16 150 / 0.4);
+    --arena-speed: 0.6s;
+  }
+  &[data-tone="decoy-amber"] {
+    --arena-a: oklch(0.8 0.17 75);
+    --arena-b: oklch(0.45 0.12 55);
+    --arena-line: oklch(0.95 0.1 80 / 0.5);
+  }
+  &[data-tone="decoy-blue"] {
+    --arena-a: oklch(0.62 0.17 245);
+    --arena-b: oklch(0.28 0.1 255);
+    --arena-line: oklch(0.9 0.08 240 / 0.5);
+  }
+  &[data-tone="decoy-red"] {
+    --arena-a: oklch(0.42 0.18 25);
+    --arena-b: oklch(0.16 0.06 20);
+    --arena-line: oklch(0.8 0.16 25 / 0.45);
+  }
+  &[data-tone="hit"] {
+    --arena-a: oklch(0.5 0.15 160);
+    --arena-b: oklch(0.15 0.05 175);
+    --arena-line: oklch(0.9 0.14 160 / 0.4);
+  }
+  &[data-tone="early"] {
+    --arena-a: oklch(0.52 0.22 25);
+    --arena-b: oklch(0.17 0.08 18);
+    --arena-line: oklch(0.8 0.2 25 / 0.5);
+    --arena-speed: 6s;
+  }
+  &[data-tone="miss"] {
+    --arena-a: oklch(0.3 0.02 250);
+    --arena-b: oklch(0.12 0.01 250);
+    --arena-line: oklch(0.7 0.02 250 / 0.25);
+    --arena-speed: 8s;
+  }
+}
+
+@keyframes reflex-floor-rush {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 48px;
+  }
+}
+
+/* The grid floor rushing toward the player, faster the higher the stakes.
+   Tilted back in perspective and faded out toward the horizon. */
+@utility reflex-floor {
+  position: absolute;
+  inset: 45% -40% -10%;
+  background-image:
+    linear-gradient(var(--arena-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--arena-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+  transform: perspective(220px) rotateX(62deg);
+  transform-origin: 50% 0;
+  mask-image: linear-gradient(to bottom, transparent, black 35%);
+  animation: reflex-floor-rush var(--arena-speed) linear infinite;
+  pointer-events: none;
+}
+
+/* Film grain-ish scanlines and a vignette over everything, for the CRT
+   arcade feel. */
+@utility reflex-scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      oklch(1 0 0 / 0.035) 0 1px,
+      transparent 1px 3px
+    ),
+    radial-gradient(ellipse at center, transparent 55%, oklch(0 0 0 / 0.55));
+}
+
+@keyframes reflex-heartbeat {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  12% {
+    transform: scale(1.09);
+  }
+  24% {
+    transform: scale(0.98);
+  }
+  36% {
+    transform: scale(1.05);
+  }
+  55% {
+    transform: scale(1);
+  }
+}
+
+/* The armed core, beating like a pulse while everyone waits. */
+@utility animate-reflex-heartbeat {
+  animation: reflex-heartbeat 0.9s ease-in-out infinite;
+}
+
+@keyframes reflex-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@utility animate-reflex-spin {
+  animation: reflex-spin 6s linear infinite;
+}
+
+@utility animate-reflex-spin-reverse {
+  animation: reflex-spin 9s linear infinite reverse;
+}
+
+@keyframes reflex-card-in {
+  0% {
+    transform: translateY(18px) scale(0.9) skewX(-8deg);
+    opacity: 0;
+    filter: blur(8px);
+  }
+  60% {
+    transform: translateY(-2px) scale(1.02) skewX(-8deg);
+    opacity: 1;
+    filter: blur(0);
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* A round's title card sliding in. */
+@utility animate-reflex-card-in {
+  animation: reflex-card-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes reflex-slam {
+  0% {
+    transform: scale(2.2);
+    opacity: 0;
+    filter: blur(10px);
+  }
+  45% {
+    transform: scale(0.94);
+    opacity: 1;
+    filter: blur(0);
+  }
+  70% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* A result (a time, TOO SOON!) slamming onto the stage. */
+@utility animate-reflex-slam {
+  animation: reflex-slam 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes reflex-shock {
+  0% {
+    transform: translate(-50%, -50%) scale(0.2);
+    opacity: 0.9;
+    border-width: 14px;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(3.2);
+    opacity: 0;
+    border-width: 1px;
+  }
+}
+
+/* A shockwave ring racing out from the signal (or a hit). Centered on its
+   own `left`/`top`. */
+@utility animate-reflex-shock {
+  animation: reflex-shock 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes reflex-flash {
+  0% {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+  12% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* A decoy's label: in hard and fast (it has to tempt), gone in 450ms
+   (REFLEX_DECOY_FLASH_MS). */
+@utility animate-reflex-flash {
+  animation: reflex-flash 0.45s ease-out both;
+}
+
+@keyframes reflex-thump {
+  0% {
+    transform: scale(1.14);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* A Snap round's card thumping as it changes symbol. The same for a wrong
+   symbol and the right one, and visible from its first frame: how a symbol
+   *arrives* must never give away which one it is. */
+@utility animate-reflex-thump {
+  animation: reflex-thump 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes reflex-arrow-in {
+  0% {
+    transform: translate(
+        calc(var(--arrow-from-x, 0) * 60%),
+        calc(var(--arrow-from-y, 0) * 60%)
+      )
+      scale(0.6);
+  }
+  55% {
+    transform: translate(
+        calc(var(--arrow-from-x, 0) * -4%),
+        calc(var(--arrow-from-y, 0) * -4%)
+      )
+      scale(1.08);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+/* The arrow streaking in from the side it points away from — visible from
+   its first frame (a signal can't fade in), only its position eases. */
+@utility animate-reflex-arrow-in {
+  animation: reflex-arrow-in 0.16s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes reflex-approach {
+  from {
+    transform: scale(2.6);
+    opacity: 0.2;
+  }
+  20% {
+    opacity: 1;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* A target's approach ring closing in on it over the round's window
+   (`--approach-ms`) — how long is left, at a glance. */
+@utility animate-reflex-approach {
+  animation: reflex-approach var(--approach-ms, 1.8s) linear both;
+}
+
+@keyframes reflex-pop-in {
+  0% {
+    transform: scale(0);
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* A target appearing, a result pill landing in a duel row. */
+@utility animate-reflex-pop-in {
+  animation: reflex-pop-in 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes reflex-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A radar sweep while a Bullseye round is armed. */
+@utility animate-reflex-sweep {
+  animation: reflex-sweep 1.6s linear infinite;
+}
+
+@keyframes reflex-whiff {
+  from {
+    transform: translate(-50%, -50%) scale(0.3);
+    opacity: 0.9;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1.6);
+    opacity: 0;
+  }
+}
+
+/* A press that missed the target: a ripple where it landed. */
+@utility animate-reflex-whiff {
+  animation: reflex-whiff 0.45s ease-out forwards;
+}
+
+@keyframes reflex-glitch {
+  0%,
+  100% {
+    transform: translate(0);
+    clip-path: inset(0 0 0 0);
+  }
+  20% {
+    transform: translate(-6px, 2px);
+    clip-path: inset(10% 0 55% 0);
+  }
+  40% {
+    transform: translate(5px, -2px);
+    clip-path: inset(60% 0 8% 0);
+  }
+  60% {
+    transform: translate(-3px, 1px);
+    clip-path: inset(30% 0 35% 0);
+  }
+  80% {
+    transform: translate(2px, 0);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* TOO SOON!'s ghost copy tearing across it. */
+@utility animate-reflex-glitch {
+  animation: reflex-glitch 0.5s steps(2, end) 2;
+}
+
+@keyframes reflex-points-rise {
+  0% {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  25% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-14px);
+    opacity: 0.9;
+  }
+}
+
+/* A round's points floating up under its time. */
+@utility animate-reflex-points {
+  animation: reflex-points-rise 1.4s ease-out both;
+}
+
+@keyframes reflex-current {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--game-from), transparent 30%);
+  }
+  50% {
+    box-shadow: 0 0 0 5px
+      color-mix(in oklch, var(--game-from), transparent 100%);
+  }
+}
+
+/* The round being played, pulsing in the round track. */
+@utility animate-reflex-current {
+  animation: reflex-current 1.2s ease-out infinite;
+}
+
+@keyframes reflex-demo-go {
+  0%,
+  55% {
+    background: oklch(0.55 0.2 25);
+  }
+  60%,
+  100% {
+    background: oklch(0.78 0.22 145);
+  }
+}
+
+@keyframes reflex-demo-decoy {
+  0%,
+  20%,
+  35%,
+  65%,
+  100% {
+    background: oklch(0.55 0.2 25);
+  }
+  24%,
+  31% {
+    background: oklch(0.78 0.17 75);
+  }
+  70%,
+  95% {
+    background: oklch(0.78 0.22 145);
+  }
+}
+
+/* The waiting room's round guide: tiny looping demos of each kind. */
+@utility animate-reflex-demo-go {
+  animation: reflex-demo-go 2.4s steps(1, end) infinite;
+}
+
+@utility animate-reflex-demo-decoy {
+  animation: reflex-demo-decoy 2.8s steps(1, end) infinite;
+}
+
+@keyframes reflex-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@utility animate-reflex-bob {
+  animation: reflex-bob 1.4s ease-in-out infinite;
+}
+
 /* A lobby reaction (see ReactionStream) rising from the bottom of the screen:
    it pops in, sways up along its own `--reaction-drift`, and fades out near
    the top. 2.6s — REACTION_FLIGHT_MS in lib/games/reactions.ts drops it
@@ -1862,8 +2367,34 @@ html[data-app-shell="immersive"] body {
   .animate-doodle-wobble,
   .animate-pencil-scribble,
   .animate-stage-enter,
-  .animate-ink-low {
+  .animate-ink-low,
+  .reflex-floor,
+  .animate-reflex-heartbeat,
+  .animate-reflex-spin,
+  .animate-reflex-spin-reverse,
+  .animate-reflex-card-in,
+  .animate-reflex-slam,
+  .animate-reflex-shock,
+  .animate-reflex-flash,
+  .animate-reflex-thump,
+  .animate-reflex-arrow-in,
+  .animate-reflex-approach,
+  .animate-reflex-pop-in,
+  .animate-reflex-sweep,
+  .animate-reflex-whiff,
+  .animate-reflex-glitch,
+  .animate-reflex-points,
+  .animate-reflex-current,
+  .animate-reflex-demo-go,
+  .animate-reflex-demo-decoy,
+  .animate-reflex-bob {
     animation: none;
+  }
+
+  /* One-shot effects that are pure motion have nothing to show still. */
+  .animate-reflex-shock,
+  .animate-reflex-whiff {
+    display: none;
   }
 
   /* Confetti is pure motion; with it off there's nothing to show. */

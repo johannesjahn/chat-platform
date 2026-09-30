@@ -32,6 +32,7 @@ import {
   type GameLobbyPhase,
   type LeaderboardEntry,
   type LeaderboardPeriod,
+  type ReflexGame,
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
@@ -46,6 +47,7 @@ import {
   notifications,
   users,
   type DbGameLobby,
+  type DbGameLobbyPlayer,
   type DrawingLobbySettings,
 } from "./db/schema.ts";
 import { buildBallot } from "./games/drawing/ballot.ts";
@@ -88,6 +90,14 @@ import {
   drawingSettingsOnly,
   projectDrawingGame,
 } from "./games/drawing/view.ts";
+import {
+  buildReflexPlan,
+  REFLEX_INTRO_MS,
+  reflexSeedOf,
+  reflexSeedToPassage,
+  scoreReflex,
+  type ReflexPlan,
+} from "./games/reflex.ts";
 import { GAME_RULES, type RaceRules } from "./games/rules.ts";
 import { rateLimitRejectionsTotal } from "./Metrics.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
@@ -125,6 +135,7 @@ type PlayerRow = {
   readonly score: number | null;
   readonly accuracy: number | null;
   readonly place: number | null;
+  readonly detail: DbGameLobbyPlayer["detail"];
   readonly user: Parameters<typeof toPublicUser>[0];
 };
 
@@ -178,6 +189,7 @@ const loadPlayers = (db: DrizzleDb, lobbyIds: ReadonlyArray<number>) =>
           score: gameLobbyPlayers.score,
           accuracy: gameLobbyPlayers.accuracy,
           place: gameLobbyPlayers.place,
+          detail: gameLobbyPlayers.detail,
           user: publicUserColumns,
         })
         .from(gameLobbyPlayers)
@@ -209,6 +221,9 @@ type LobbySnapshot = {
     // only a snapshot that does can be shown to a player.
     readonly withStrokes: boolean;
   } | null;
+  // A started Reflex Rush game's schedule; null for every other game and
+  // while waiting.
+  readonly reflex: ReflexPlan | null;
   readonly phase: GameLobbyPhase;
   readonly now: number;
 };
@@ -223,11 +238,17 @@ const snapshotOf = (
   now: number,
   withStrokes: boolean,
 ): LobbySnapshot => {
-  if (GAME_RULES[lobby.game as GameId].kind !== "drawing") {
+  const kind = GAME_RULES[lobby.game as GameId].kind;
+  if (kind !== "drawing") {
+    const seed =
+      kind === "reflex" && lobby.status === "started"
+        ? reflexSeedOf(lobby.passage)
+        : null;
     return {
       lobby,
       players,
       drawing: null,
+      reflex: seed === null ? null : buildReflexPlan(seed),
       phase: lobbyPhase(lobby, players, now),
       now,
     };
@@ -240,6 +261,7 @@ const snapshotOf = (
     lobby,
     players,
     drawing: { settings: settingsOf(lobby), rows, timeline, withStrokes },
+    reflex: null,
     phase: started
       ? drawingPhase(lobby.startsAt!.getTime(), timeline, now)
       : "waiting",
@@ -319,7 +341,7 @@ const toApiLobby = (
   snapshot: LobbySnapshot,
   viewerId: number | null,
 ): GameLobby => {
-  const { lobby, players, drawing, phase, now } = snapshot;
+  const { lobby, players, drawing, reflex, phase, now } = snapshot;
   const rules = GAME_RULES[lobby.game as GameId];
   if (drawing && viewerId !== null && !drawing.withStrokes) {
     // A programming error, not a request error: projecting a game read
@@ -342,8 +364,10 @@ const toApiLobby = (
     hostId: lobby.hostId,
     phase,
     round: lobby.round,
+    // Only a race's passage is for showing — Reflex Rush keeps its seed in
+    // the same column, and players get the schedule it lays out instead.
     passage:
-      viewerId !== null && !drawing && phase !== "waiting"
+      viewerId !== null && rules.kind === "race" && phase !== "waiting"
         ? lobby.passage
         : null,
     startsAt: phase === "waiting" ? null : (lobby.startsAt?.getTime() ?? null),
@@ -370,7 +394,10 @@ const toApiLobby = (
               durationMs: player.durationMs,
               score: player.score,
               accuracy: player.accuracy,
-              place: player.place,
+              place:
+                rules.kind === "reflex"
+                  ? reflexPlaceOf(players, player.score)
+                  : player.place,
             }),
       };
     }),
@@ -386,8 +413,53 @@ const toApiLobby = (
             finished: phase === "finished",
             viewerId,
           }),
+    reflex:
+      rules.kind !== "reflex" || viewerId === null
+        ? null
+        : toApiReflex(lobby, players, phase === "waiting" ? null : reflex),
     chatOpen: chatOpenFor(snapshot),
     createdAt: lobby.createdAt.getTime(),
+  };
+};
+
+// Reflex Rush places by score among those who've submitted — standings
+// that settle as results come in, since everyone finishes at once and a
+// later submission can outscore an earlier one. Ties share a place.
+const reflexPlaceOf = (
+  players: ReadonlyArray<Pick<PlayerRow, "score">>,
+  score: number | null,
+) =>
+  score === null
+    ? null
+    : players.filter((other) => other.score !== null && other.score > score)
+        .length + 1;
+
+const toApiReflex = (
+  lobby: DbGameLobby,
+  players: ReadonlyArray<PlayerRow>,
+  plan: ReflexPlan | null,
+): ReflexGame => {
+  const startsAt = lobby.startsAt?.getTime() ?? 0;
+  return {
+    introMs: REFLEX_INTRO_MS,
+    rounds: (plan?.rounds ?? []).map((round) => ({
+      kind: round.kind,
+      armAt: startsAt + round.armAt,
+      signalAt: startsAt + round.signalAt,
+      closeAt: startsAt + round.closeAt,
+      cues: round.cues.map((cue) => ({
+        at: startsAt + cue.at,
+        variant: cue.variant,
+      })),
+      symbol: round.symbol,
+      direction: round.direction,
+      target: round.target,
+    })),
+    results: players.flatMap((player) =>
+      player.detail
+        ? [{ userId: player.user.id, rounds: player.detail.rounds }]
+        : [],
+    ),
   };
 };
 
@@ -759,22 +831,17 @@ const notifyRecordBroken = (
     ]);
   });
 
-// Records a finished Sketchy game's results — exactly once, whichever read
-// gets here first on whichever replica: claiming the round in
-// `settled_round` and inserting its `game_results` share one transaction,
-// and the claim is conditional, so a concurrent settle finds nothing left to
-// claim. Only players still seated at the end are recorded — leaving
-// mid-game forfeits.
-const settleIfOver = (db: DrizzleDb, snapshot: LobbySnapshot) =>
-  Effect.gen(function* () {
-    const { lobby, drawing, phase, players } = snapshot;
-    if (!drawing || phase !== "finished" || !lobby.startsAt) return;
-    if (lobby.settledRound === lobby.round) return;
-
+// The `game_results` rows a finished game scored all at once at the end
+// records — null for a race, whose finishes are recorded as they land.
+// Only players still seated at the end are recorded — leaving mid-game
+// forfeits.
+const settledResults = (snapshot: LobbySnapshot, startsAt: Date) => {
+  const { lobby, drawing, reflex, players } = snapshot;
+  if (drawing) {
     const tallies = finalTallies(snapshot);
     const seated = new Set(players.map((player) => player.user.id));
-    const endsAt = drawing.timeline.at(-1)?.endsAt ?? lobby.startsAt.getTime();
-    const results = tallies
+    const endsAt = drawing.timeline.at(-1)?.endsAt ?? startsAt.getTime();
+    return tallies
       .filter((tally) => seated.has(tally.userId))
       .map((tally) => ({
         game: lobby.game,
@@ -783,10 +850,49 @@ const settleIfOver = (db: DrizzleDb, snapshot: LobbySnapshot) =>
         round: lobby.round,
         score: tally.score,
         accuracy: guessAccuracy(tally),
-        durationMs: endsAt - lobby.startsAt!.getTime(),
+        durationMs: endsAt - startsAt.getTime(),
         place: placeOf(tallies, tally.score),
         playerCount: tallies.length,
       }));
+  }
+  if (reflex) {
+    // Anyone who never submitted simply has no result — their seat still
+    // counts toward the field they'd have beaten.
+    return players.flatMap((player) =>
+      player.score === null ||
+      player.accuracy === null ||
+      player.durationMs === null
+        ? []
+        : [
+            {
+              game: lobby.game,
+              userId: player.user.id,
+              lobbyId: lobby.id,
+              round: lobby.round,
+              score: player.score,
+              accuracy: player.accuracy,
+              durationMs: player.durationMs,
+              place: reflexPlaceOf(players, player.score)!,
+              playerCount: players.length,
+            },
+          ],
+    );
+  }
+  return null;
+};
+
+// Records a finished game's results (Sketchy's, Reflex Rush's) — exactly
+// once, whichever read gets here first on whichever replica: claiming the
+// round in `settled_round` and inserting its `game_results` share one
+// transaction, and the claim is conditional, so a concurrent settle finds
+// nothing left to claim.
+const settleIfOver = (db: DrizzleDb, snapshot: LobbySnapshot) =>
+  Effect.gen(function* () {
+    const { lobby, phase } = snapshot;
+    if (phase !== "finished" || !lobby.startsAt) return;
+    if (lobby.settledRound === lobby.round) return;
+    const results = settledResults(snapshot, lobby.startsAt);
+    if (!results) return;
 
     const record = yield* currentRecordHolder(db, lobby.game);
     const settled = yield* Effect.tryPromise(() =>
@@ -1036,7 +1142,17 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           }
           const startsAt = new Date(Date.now() + rules.countdownMs);
 
-          if (rules.kind === "race") {
+          if (rules.kind === "race" || rules.kind === "reflex") {
+            let passage: string;
+            let lengthMs: number;
+            if (rules.kind === "race") {
+              passage = rules.pickPassage(lobby.passage);
+              lengthMs = rules.timeLimitMs;
+            } else {
+              const seed = secureRandomInt(0x7fff_ffff);
+              passage = reflexSeedToPassage(seed);
+              lengthMs = buildReflexPlan(seed).endsAt;
+            }
             // Conditional on still "waiting", so a double-click (or two
             // tabs) can't restart a race that's already counting down.
             const started = yield* Effect.tryPromise(() =>
@@ -1044,9 +1160,9 @@ export const GamesHandlerLive = HttpApiBuilder.group(
                 .update(gameLobbies)
                 .set({
                   status: "started",
-                  passage: rules.pickPassage(lobby.passage),
+                  passage,
                   startsAt,
-                  endsAt: new Date(startsAt.getTime() + rules.timeLimitMs),
+                  endsAt: new Date(startsAt.getTime() + lengthMs),
                   updatedAt: new Date(),
                 })
                 .where(
@@ -1224,6 +1340,71 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           yield* notifyRecordBroken(lobby.game, id, record, [
             { userId: currentUser.id, score: result.score },
           ]);
+          yield* touchLobby(db, id);
+          yield* notifyLobbyChanged(connections, lobby);
+          return yield* buildLobby(db, id, currentUser.id);
+        }),
+      )
+      .handle("finishReflex", ({ path: { id }, payload }) =>
+        Effect.gen(function* () {
+          const db = yield* Db;
+          const currentUser = yield* CurrentUser;
+          const connections = yield* RealtimeConnections;
+          const snapshot = yield* loadSnapshot(db, id);
+          const { lobby, players, reflex, now } = snapshot;
+          if (GAME_RULES[lobby.game as GameId].kind !== "reflex") {
+            return yield* invalid("This isn't a Reflex Rush lobby");
+          }
+          const me = players.find(
+            (player) => player.user.id === currentUser.id,
+          );
+          if (!me) {
+            return yield* Effect.fail(
+              new Forbidden({ message: "You are not playing in this lobby" }),
+            );
+          }
+          if (me.durationMs !== null) {
+            return yield* invalid("You already finished");
+          }
+          if (!reflex || !lobby.startsAt || !lobby.endsAt) {
+            return yield* invalid("The game has not started");
+          }
+          const startsAt = lobby.startsAt.getTime();
+          // Its last round has to have been played first — with a little
+          // slack for a client clock running slightly ahead of ours.
+          if (now < startsAt + reflex.closeAt - FINISH_GRACE_MS) {
+            return yield* invalid("The game isn't over yet");
+          }
+          if (now > lobby.endsAt.getTime() + FINISH_GRACE_MS) {
+            return yield* invalid("The game is over");
+          }
+          const result = scoreReflex(reflex, payload.taps);
+          if (!result.ok) return yield* invalid(result.reason);
+
+          // Guarded like a race finish: once, and only for the round this
+          // game was scored against.
+          const recorded = yield* Effect.tryPromise(() =>
+            db
+              .update(gameLobbyPlayers)
+              .set({
+                durationMs: now - startsAt,
+                score: result.score,
+                accuracy: result.accuracy,
+                detail: { rounds: result.rounds },
+              })
+              .where(
+                and(
+                  eq(gameLobbyPlayers.lobbyId, id),
+                  eq(gameLobbyPlayers.userId, currentUser.id),
+                  isNull(gameLobbyPlayers.durationMs),
+                  sql`exists (select 1 from ${gameLobbies} where ${gameLobbies.id} = ${id} and ${gameLobbies.round} = ${lobby.round})`,
+                ),
+              )
+              .returning({ id: gameLobbyPlayers.id }),
+          ).pipe(Effect.orDie);
+          if (recorded.length === 0) {
+            return yield* invalid("You already finished");
+          }
           yield* touchLobby(db, id);
           yield* notifyLobbyChanged(connections, lobby);
           return yield* buildLobby(db, id, currentUser.id);
@@ -1431,6 +1612,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
                   score: null,
                   accuracy: null,
                   place: null,
+                  detail: null,
                 })
                 .where(eq(gameLobbyPlayers.lobbyId, id)),
             ).pipe(Effect.orDie);

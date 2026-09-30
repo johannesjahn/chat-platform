@@ -294,6 +294,37 @@ the client is `web/src/components/games/drawing/`. Load-bearing rules:
   client's `DRAWING_PALETTE` must stay `DRAWING_PALETTE_SIZE` long and never be
   reordered.
 
+### Reflex Rush (the `reflex` game)
+
+A reaction game of eight short rounds — Quick draw (wait for green), Decoys
+(fake signals first), Snap (hit only on your symbol), Arrows (press the
+direction), Bullseye (hit the target) — playable solo or up to six at once.
+Rules and scoring are the pure module [`src/games/reflex.ts`](src/games/reflex.ts);
+the client is `web/src/components/games/reflex/` plus
+[`web/src/lib/games/reflex.ts`](web/src/lib/games/reflex.ts). Load-bearing:
+
+- **One seed, one schedule, every client.** Starting a game stores a secure
+  random seed in the lobby's `passage` column (never sent out);
+  `buildReflexPlan` expands it into every round's kind and exact signal,
+  decoy, and target times, which clients play off the server-corrected
+  clock — so everyone in a lobby gets each signal at the same instant.
+- **The client measures, the server judges.** A player submits one tap per
+  round at the end (`POST /games/lobbies/:id/reflex`). The reaction time is
+  measured client-side (from the frame the signal was painted to the
+  press's `event.timeStamp` — the signal is never faded in, and a Snap
+  round's right symbol arrives exactly like the wrong ones), but only
+  scored server-side: under `ANTICIPATION_MS` is a false start, an arrow
+  must match, a hit must land on the target. A reported false start is
+  taken on trust — it can only cost points.
+- **Places settle at the end**, like Sketchy's: placing is by score, so
+  results are written once everyone's in (or `endsAt` passes) by the lazy,
+  `settled_round`-guarded `settleIfOver`. The per-round breakdown lives in
+  `game_lobby_players.detail` (migration `0030`).
+- **Live rows ride `game_progress`.** Each round's result is packed into the
+  progress number (`(round + 1) * 1000 + code`, see `encodeLiveResult`) —
+  display only; the client's mirrored scoring constants must track the
+  server's.
+
 ## Notifications
 
 In-app notifications (issue #317) — the header bell and the `/notifications`

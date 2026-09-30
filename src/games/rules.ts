@@ -4,6 +4,7 @@ import {
   DRAWING_MAX_PLAYERS,
   DRAWING_MIN_PLAYERS,
 } from "./drawing/rules.ts";
+import { REFLEX_COUNTDOWN_MS, REFLEX_MAX_PLAYERS } from "./reflex.ts";
 import { typingRules } from "./typing.ts";
 
 // What every game has in common, whatever it plays like.
@@ -49,7 +50,12 @@ export type DrawingRules = CommonRules & { readonly kind: "drawing" };
 // seats, the realtime rooms, results and the leaderboard — is shared
 // plumbing in GamesHandler.ts, keyed by the game's slug. A new game supplies
 // one of these and adds its slug to `GameId` (Api.ts).
-export type GameRules = RaceRules | DrawingRules;
+// Reflex Rush: a fixed schedule of reaction rounds laid out from a seed at
+// the start (see src/games/reflex.ts); each player reports their whole game
+// once it's played, and places are settled all at once when it's over.
+export type ReflexRules = CommonRules & { readonly kind: "reflex" };
+
+export type GameRules = RaceRules | DrawingRules | ReflexRules;
 
 export const GAME_RULES: Record<GameId, GameRules> = {
   typing: {
@@ -65,5 +71,13 @@ export const GAME_RULES: Record<GameId, GameRules> = {
     countdownMs: DRAWING_COUNTDOWN_MS,
     minPlayers: DRAWING_MIN_PLAYERS,
     maxPlayers: DRAWING_MAX_PLAYERS,
+  },
+  reflex: {
+    kind: "reflex",
+    chatDuringPlay: true,
+    countdownMs: REFLEX_COUNTDOWN_MS,
+    // Solo is a real game here: a run against the clock and the leaderboard.
+    minPlayers: 1,
+    maxPlayers: REFLEX_MAX_PLAYERS,
   },
 };

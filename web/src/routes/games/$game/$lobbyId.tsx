@@ -26,6 +26,9 @@ import { ResultsPodium } from "@/components/games/ResultsPodium";
 import { SketchyGallery } from "@/components/games/drawing/SketchyGallery";
 import { SketchyGame } from "@/components/games/drawing/SketchyGame";
 import { SketchySettings } from "@/components/games/drawing/SketchySettings";
+import { ReflexBreakdown } from "@/components/games/reflex/ReflexBreakdown";
+import { ReflexGame } from "@/components/games/reflex/ReflexGame";
+import { ReflexGuide } from "@/components/games/reflex/ReflexGuide";
 import { TypingRace } from "@/components/games/typing/TypingRace";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { TypingDots } from "@/components/reactbits/TypingDots";
@@ -49,7 +52,11 @@ import {
   type GameDefinition,
   type GameId,
 } from "@/lib/games/registry";
-import { gameLobbyRoom, useGameRoom } from "@/lib/games/rooms";
+import {
+  gameLobbyRoom,
+  resetGameProgress,
+  useGameRoom,
+} from "@/lib/games/rooms";
 import { userLabel } from "@/lib/users";
 
 export const Route = createFileRoute("/games/$game/$lobbyId")({
@@ -69,6 +76,7 @@ type PlayAreaProps = {
 const PLAY_AREAS: Record<GameId, ComponentType<PlayAreaProps>> = {
   typing: TypingRace,
   drawing: SketchyGame,
+  reflex: ReflexGame,
 };
 
 // Optional extras a game can slot into the shared pages: settings the host
@@ -77,11 +85,13 @@ const LOBBY_SETTINGS: Partial<
   Record<GameId, ComponentType<{ lobby: GameLobby; isHost: boolean }>>
 > = {
   drawing: SketchySettings,
+  reflex: ReflexGuide,
 };
 const RESULTS_EXTRAS: Partial<
   Record<GameId, ComponentType<{ lobby: GameLobby }>>
 > = {
   drawing: SketchyGallery,
+  reflex: ReflexBreakdown,
 };
 
 function LobbyRoute() {
@@ -131,6 +141,13 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
       });
     }
   }, [phase, serverPhase, lobbyId, queryClient]);
+
+  // Live positions belong to one round: once the lobby is back to waiting
+  // (a rematch — whoever pressed it), last round's are wiped, or the next
+  // round's would sit behind them (positions only ever move forward).
+  useEffect(() => {
+    if (phase === "waiting") resetGameProgress(lobbyId);
+  }, [phase, lobbyId]);
 
   const join = useLobbyAction(lobbyId, "join");
   const start = useLobbyAction(lobbyId, "start");
