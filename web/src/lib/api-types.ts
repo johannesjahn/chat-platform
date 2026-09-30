@@ -980,6 +980,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/lobbies/{id}/reflex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["games.finishReflex"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/lobbies/{id}/rematch": {
         parameters: {
             query?: never;
@@ -1799,7 +1815,7 @@ export interface components {
             backend: string;
         };
         /** @enum {string} */
-        GameId: "typing" | "drawing";
+        GameId: "typing" | "drawing" | "reflex";
         GameLobbyList: {
             lobbies: components["schemas"]["GameLobby"][];
         };
@@ -1817,6 +1833,7 @@ export interface components {
             maxPlayers: number;
             players: components["schemas"]["GameLobbyPlayer"][];
             drawing: components["schemas"]["DrawingGame"] | null;
+            reflex: components["schemas"]["ReflexGame"] | null;
             chatOpen: boolean;
             createdAt: number;
         };
@@ -1892,6 +1909,43 @@ export interface components {
             userId: number;
             score: number;
         };
+        ReflexGame: {
+            introMs: number;
+            rounds: components["schemas"]["ReflexRound"][];
+            results: components["schemas"]["ReflexPlayerResult"][];
+        };
+        ReflexRound: {
+            kind: components["schemas"]["ReflexKind"];
+            armAt: number;
+            signalAt: number;
+            closeAt: number;
+            cues: components["schemas"]["ReflexCue"][];
+            symbol: number | null;
+            direction: components["schemas"]["ReflexDirection"] | null;
+            target: {
+                x: number;
+                y: number;
+            } | null;
+        };
+        /** @enum {string} */
+        ReflexKind: "go" | "decoy" | "match" | "arrow" | "target";
+        ReflexCue: {
+            at: number;
+            variant: number;
+        };
+        /** @enum {string} */
+        ReflexDirection: "up" | "down" | "left" | "right";
+        ReflexPlayerResult: {
+            userId: number;
+            rounds: components["schemas"]["ReflexRoundResult"][];
+        };
+        ReflexRoundResult: {
+            outcome: components["schemas"]["ReflexOutcome"];
+            reactionMs: number | null;
+            points: number;
+        };
+        /** @enum {string} */
+        ReflexOutcome: "hit" | "early" | "miss" | "wrong";
         InvalidGameRequest: {
             message: string;
             /** @enum {string} */
@@ -1908,6 +1962,20 @@ export interface components {
              * @description a number between 0 and 100000
              */
             errors: number;
+        };
+        FinishReflexBody: {
+            /**
+             * maxItems(8)
+             * @description an array of at most 8 item(s)
+             */
+            taps: components["schemas"]["ReflexTap"][];
+        };
+        ReflexTap: {
+            early: boolean;
+            reactionMs: number | null;
+            direction: components["schemas"]["ReflexDirection"] | null;
+            x: number | null;
+            y: number | null;
         };
         GameInviteBody: {
             /**
@@ -6229,6 +6297,7 @@ export interface operations {
                         maxPlayers: number;
                         players: components["schemas"]["GameLobbyPlayer"][];
                         drawing: components["schemas"]["DrawingGame"] | null;
+                        reflex: components["schemas"]["ReflexGame"] | null;
                         chatOpen: boolean;
                         createdAt: number;
                     };
@@ -6509,6 +6578,68 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["FinishRaceBody"];
+            };
+        };
+        responses: {
+            /** @description GameLobby */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameLobby"];
+                };
+            };
+            /** @description The request did not match the expected schema */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unauthorized"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Forbidden"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFound"];
+                };
+            };
+        };
+    };
+    "games.finishReflex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["schemas"]["NumberFromString"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinishReflexBody"];
             };
         };
         responses: {

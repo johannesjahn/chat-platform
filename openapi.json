@@ -6392,6 +6392,7 @@
                     "maxPlayers",
                     "players",
                     "drawing",
+                    "reflex",
                     "chatOpen",
                     "createdAt"
                   ],
@@ -6460,6 +6461,16 @@
                       "anyOf": [
                         {
                           "$ref": "#/components/schemas/DrawingGame"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "reflex": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/ReflexGame"
                         },
                         {
                           "type": "null"
@@ -6918,6 +6929,98 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/FinishRaceBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/games/lobbies/{id}/reflex": {
+      "post": {
+        "tags": [
+          "games"
+        ],
+        "operationId": "games.finishReflex",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "$ref": "#/components/schemas/NumberFromString"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GameLobby",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameLobby"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request did not match the expected schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidGameRequest"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFound"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinishReflexBody"
               }
             }
           },
@@ -10483,7 +10586,8 @@
         "type": "string",
         "enum": [
           "typing",
-          "drawing"
+          "drawing",
+          "reflex"
         ]
       },
       "GameLobbyList": {
@@ -10517,6 +10621,7 @@
           "maxPlayers",
           "players",
           "drawing",
+          "reflex",
           "chatOpen",
           "createdAt"
         ],
@@ -10585,6 +10690,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/DrawingGame"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reflex": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReflexGame"
               },
               {
                 "type": "null"
@@ -11015,6 +11130,199 @@
         },
         "additionalProperties": false
       },
+      "ReflexGame": {
+        "type": "object",
+        "required": [
+          "introMs",
+          "rounds",
+          "results"
+        ],
+        "properties": {
+          "introMs": {
+            "type": "number"
+          },
+          "rounds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReflexRound"
+            }
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReflexPlayerResult"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReflexRound": {
+        "type": "object",
+        "required": [
+          "kind",
+          "armAt",
+          "signalAt",
+          "closeAt",
+          "cues",
+          "symbol",
+          "direction",
+          "target"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ReflexKind"
+          },
+          "armAt": {
+            "type": "number"
+          },
+          "signalAt": {
+            "type": "number"
+          },
+          "closeAt": {
+            "type": "number"
+          },
+          "cues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReflexCue"
+            }
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReflexDirection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReflexKind": {
+        "type": "string",
+        "enum": [
+          "go",
+          "decoy",
+          "match",
+          "arrow",
+          "target"
+        ]
+      },
+      "ReflexCue": {
+        "type": "object",
+        "required": [
+          "at",
+          "variant"
+        ],
+        "properties": {
+          "at": {
+            "type": "number"
+          },
+          "variant": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReflexDirection": {
+        "type": "string",
+        "enum": [
+          "up",
+          "down",
+          "left",
+          "right"
+        ]
+      },
+      "ReflexPlayerResult": {
+        "type": "object",
+        "required": [
+          "userId",
+          "rounds"
+        ],
+        "properties": {
+          "userId": {
+            "type": "number"
+          },
+          "rounds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReflexRoundResult"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReflexRoundResult": {
+        "type": "object",
+        "required": [
+          "outcome",
+          "reactionMs",
+          "points"
+        ],
+        "properties": {
+          "outcome": {
+            "$ref": "#/components/schemas/ReflexOutcome"
+          },
+          "reactionMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "points": {
+            "type": "number"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReflexOutcome": {
+        "type": "string",
+        "enum": [
+          "hit",
+          "early",
+          "miss",
+          "wrong"
+        ]
+      },
       "InvalidGameRequest": {
         "type": "object",
         "required": [
@@ -11053,6 +11361,92 @@
             "title": "between(0, 100000)",
             "minimum": 0,
             "maximum": 100000
+          }
+        },
+        "additionalProperties": false
+      },
+      "FinishReflexBody": {
+        "type": "object",
+        "required": [
+          "taps"
+        ],
+        "properties": {
+          "taps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReflexTap"
+            },
+            "description": "an array of at most 8 item(s)",
+            "title": "maxItems(8)",
+            "maxItems": 8
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReflexTap": {
+        "type": "object",
+        "required": [
+          "early",
+          "reactionMs",
+          "direction",
+          "x",
+          "y"
+        ],
+        "properties": {
+          "early": {
+            "type": "boolean"
+          },
+          "reactionMs": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "description": "a number between 0 and 10000",
+                "title": "between(0, 10000)",
+                "minimum": 0,
+                "maximum": 10000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReflexDirection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "a number between 0 and 1",
+                "title": "between(0, 1)",
+                "minimum": 0,
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number",
+                "description": "a number between 0 and 1",
+                "title": "between(0, 1)",
+                "minimum": 0,
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
