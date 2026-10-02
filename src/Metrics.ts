@@ -132,7 +132,7 @@ const pathnameOf = (url: string): string => {
 };
 
 // Every dynamic path segment in `ChatApi` is a numeric id (see Api.ts's
-// `FiniteFromString` path schemas — chat/message/user ids). Collapsing runs
+// `Schema.Int` path schemas — chat/message/user ids). Collapsing runs
 // of digits keeps the "route" label's cardinality bounded to the handful of
 // route templates rather than growing with every distinct id ever
 // requested — the standard pitfall of labeling HTTP metrics by raw path.

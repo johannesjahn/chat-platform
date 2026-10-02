@@ -174,11 +174,8 @@ test("getAdminStats rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.admin
         .getAdminStats({ query: {} })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -189,11 +186,8 @@ test("getAdminStats rejects a non-admin caller with 403 Forbidden", () =>
       const c = yield* makeAuthedClient(accessToken);
       const result = yield* c.admin
         .getAdminStats({ query: {} })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Forbidden");
     }),
   ));
 
@@ -307,15 +301,11 @@ test("getAdminStats defaults the timeline to 14 days and rejects an out-of-range
       });
       expect(max.timeline).toHaveLength(MAX_ADMIN_TIMELINE_DAYS);
 
-      const tooMany = yield* c.admin
+      yield* c.admin
         .getAdminStats({ query: { days: MAX_ADMIN_TIMELINE_DAYS + 1 } })
-        .pipe(Effect.result);
-      expect(tooMany._tag).toBe("Failure");
+        .pipe(Effect.flip);
 
-      const zero = yield* c.admin
-        .getAdminStats({ query: { days: 0 } })
-        .pipe(Effect.result);
-      expect(zero._tag).toBe("Failure");
+      yield* c.admin.getAdminStats({ query: { days: 0 } }).pipe(Effect.flip);
     }),
   ));
 

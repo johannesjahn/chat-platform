@@ -96,10 +96,8 @@ test("searchPosts rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.search
         .searchPosts({ query: { q: "hello" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -353,12 +351,8 @@ test("searchPosts rejects a malformed cursor", () =>
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const result = yield* alice.client.search
         .searchPosts({ query: { q: "apple", cursor: "!!!not-base64!!!" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidSearchRequest",
-        );
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidSearchRequest");
     }),
   ));
 
@@ -616,12 +610,8 @@ test("searchUsers rejects a malformed cursor", () =>
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const result = yield* alice.client.search
         .searchUsers({ query: { q: "alice", cursor: "not-a-cursor" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidSearchRequest",
-        );
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidSearchRequest");
     }),
   ));
 
@@ -728,9 +718,7 @@ test("searchAll rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.search
         .searchAll({ query: { q: "hello" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));

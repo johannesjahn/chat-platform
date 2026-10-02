@@ -101,13 +101,8 @@ test("setBlock rejects blocking yourself", () =>
           params: { id: alice.user.id },
           payload: { type: "block" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidBlockRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidBlockRequest");
     }),
   ));
 
@@ -117,11 +112,8 @@ test("setBlock 404s for a non-existent target", () =>
       const alice = yield* registerAndLogin("alice", PW);
       const result = yield* alice.client.users
         .setBlock({ params: { id: 999999 }, payload: { type: "block" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -129,11 +121,8 @@ test("listBlocks requires authentication", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const result = yield* c.users.listBlocks().pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+      const result = yield* c.users.listBlocks().pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -203,19 +192,15 @@ test("createMessage is rejected in a direct chat when either party has blocked t
           params: { id: chat.id },
           payload: { contentType: "text", content: "hi bob" },
         })
-        .pipe(Effect.result);
-      expect(aliceSend._tag).toBe("Failure");
-      if (aliceSend._tag === "Failure") {
-        expect((aliceSend.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(aliceSend._tag).toBe("Forbidden");
 
-      const bobSend = yield* bob.client.chats
+      yield* bob.client.chats
         .createMessage({
           params: { id: chat.id },
           payload: { contentType: "text", content: "hi alice" },
         })
-        .pipe(Effect.result);
-      expect(bobSend._tag).toBe("Failure");
+        .pipe(Effect.flip);
 
       // After bob unblocks, messaging works again.
       yield* bob.client.users.removeBlock({ params: { id: alice.user.id } });

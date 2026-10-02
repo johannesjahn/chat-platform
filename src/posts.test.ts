@@ -59,11 +59,8 @@ test("createPost rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.posts
         .createPost({ payload: { contentType: "text", content: "hello" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -128,15 +125,14 @@ test("createPost rejects an image_url from a non-allowlisted host", () =>
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("bobby", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
-      const result = yield* authed.posts
+      yield* authed.posts
         .createPost({
           payload: {
             contentType: "image_url",
             content: "https://evil.example.com/cat.png",
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -145,15 +141,14 @@ test("createPost rejects a non-https image_url", () =>
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("bobbi", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
-      const result = yield* authed.posts
+      yield* authed.posts
         .createPost({
           payload: {
             contentType: "image_url",
             content: "http://picsum.photos/200",
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -162,15 +157,14 @@ test("createPost rejects a javascript: image_url", () =>
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("bobette", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
-      const result = yield* authed.posts
+      yield* authed.posts
         .createPost({
           payload: {
             contentType: "image_url",
             content: "javascript:alert(1)",
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -249,12 +243,11 @@ test("createPost rejects content over the max length", () =>
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("carol", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
-      const result = yield* authed.posts
+      yield* authed.posts
         .createPost({
           payload: { contentType: "text", content: "x".repeat(10_001) },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -263,10 +256,9 @@ test("createPost rejects an empty content string", () =>
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("dave", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
-      const result = yield* authed.posts
+      yield* authed.posts
         .createPost({ payload: { contentType: "text", content: "" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -275,15 +267,14 @@ test("createPost rejects an invalid content type", () =>
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("erin", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
-      const result = yield* authed.posts
+      yield* authed.posts
         .createPost({
           payload: {
             contentType: "video" as never,
             content: "hello",
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -299,11 +290,8 @@ test("getPost rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.posts
         .getPost({ params: { id: created.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -327,13 +315,8 @@ test("listPosts rejects an unauthenticated request", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const result = yield* c.posts
-        .listPosts({ query: {} })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+      const result = yield* c.posts.listPosts({ query: {} }).pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -402,10 +385,9 @@ test("listPosts rejects a limit above the max", () =>
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("quinn", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
-      const result = yield* authed.posts
+      yield* authed.posts
         .listPosts({ query: { limit: 101 } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -416,13 +398,8 @@ test("listPosts rejects a malformed cursor", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
         .listPosts({ query: { cursor: "not-a-real-cursor" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidPostsRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidPostsRequest");
     }),
   ));
 
@@ -433,13 +410,8 @@ test("getPost returns 404 for a missing id", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
         .getPost({ params: { id: 9999 } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { message: string }).message).toContain(
-          "9999",
-        );
-      }
+        .pipe(Effect.flip);
+      expect((result as { message: string }).message).toContain("9999");
     }),
   ));
 
@@ -482,11 +454,8 @@ test("updatePost rejects edits from a user who doesn't own the post", () =>
           params: { id: created.id },
           payload: { contentType: "text", content: "hijacked" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Forbidden");
     }),
   ));
 
@@ -526,11 +495,8 @@ test("updatePost returns 404 for a missing post", () =>
           params: { id: 9999 },
           payload: { contentType: "text", content: "nope" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -547,11 +513,8 @@ test("deletePost allows the author to delete their post", () =>
 
       const result = yield* authed.posts
         .getPost({ params: { id: created.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -568,11 +531,8 @@ test("deletePost rejects deletes from a user who doesn't own the post", () =>
       const intruderClient = yield* makeAuthedClient(intruder.accessToken);
       const result = yield* intruderClient.posts
         .deletePost({ params: { id: created.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Forbidden");
     }),
   ));
 
@@ -597,11 +557,8 @@ test("deletePost allows an admin to delete another user's post", () =>
 
       const result = yield* authorClient.posts
         .getPost({ params: { id: created.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -617,10 +574,7 @@ test("deletePost rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.posts
         .deletePost({ params: { id: created.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));

@@ -83,13 +83,10 @@ const expectFailure = <A, E>(
   message?: string,
 ) =>
   Effect.gen(function* () {
-    const result = yield* effect.pipe(Effect.result);
-    expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      const error = result.failure as { _tag: string; message?: string };
-      expect(error._tag).toBe(tag);
-      if (message !== undefined) expect(error.message).toBe(message);
-    }
+    const result = yield* effect.pipe(Effect.flip);
+    const error = result as { _tag: string; message?: string };
+    expect(error._tag).toBe(tag);
+    if (message !== undefined) expect(error.message).toBe(message);
   });
 
 const drawingGame = { params: { game: "drawing" as const } };

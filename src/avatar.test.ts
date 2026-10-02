@@ -462,11 +462,8 @@ test("deleteChatAvatar clears an uploaded group avatar and is forbidden for a pl
 
       const forbidden = yield* memberClient.chats
         .deleteChatAvatar({ params: { id: chat.id } })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
 
       const cleared = yield* ownerClient.chats.deleteChatAvatar({
         params: { id: chat.id },

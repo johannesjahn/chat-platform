@@ -103,13 +103,8 @@ test("createDirectChat rejects chatting with yourself", () =>
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const result = yield* alice.client.chats
         .createDirectChat({ payload: { userId: alice.user.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -119,11 +114,8 @@ test("createDirectChat 404s for a nonexistent user", () =>
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const result = yield* alice.client.chats
         .createDirectChat({ payload: { userId: 9999 } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -220,13 +212,8 @@ test("listChats rejects a malformed cursor", () =>
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const result = yield* alice.client.chats
         .listChats({ query: { cursor: "not-a-real-cursor" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -234,10 +221,9 @@ test("listChats rejects a limit above the max", () =>
   run(
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const result = yield* alice.client.chats
+      yield* alice.client.chats
         .listChats({ query: { limit: 101 } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -275,13 +261,8 @@ test("createGroupChat rejects duplicate participant ids", () =>
             participantIds: [bob.user.id, bob.user.id],
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -297,13 +278,8 @@ test("createGroupChat rejects including yourself in participantIds", () =>
             participantIds: [bob.user.id, alice.user.id],
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -315,11 +291,8 @@ test("createGroupChat 404s when a participant doesn't exist", () =>
         .createGroupChat({
           payload: { title: "Ghost", participantIds: [9999] },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -384,11 +357,8 @@ test("addParticipants is forbidden for non-creators and rejects exceeding the ca
           params: { id: chat.id },
           payload: { participantIds: [alice.user.id] },
         })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
 
       // Fill up remaining slots, then try to push one past the cap. Two
       // participants (alice, bob) are already in, so this is the max group
@@ -408,13 +378,8 @@ test("addParticipants is forbidden for non-creators and rejects exceeding the ca
             participantIds: [others[MAX_GROUP_PARTICIPANTS - 2]!.id],
           },
         })
-        .pipe(Effect.result);
-      expect(overCap._tag).toBe("Failure");
-      if (overCap._tag === "Failure") {
-        expect((overCap.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(overCap._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -435,11 +400,8 @@ test("updateChat lets the creator rename a group chat, but not others", () =>
 
       const forbidden = yield* bob.client.chats
         .updateChat({ params: { id: chat.id }, payload: { title: "Hijacked" } })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
     }),
   ));
 
@@ -453,13 +415,8 @@ test("updateChat rejects renaming a direct chat", () =>
       });
       const result = yield* alice.client.chats
         .updateChat({ params: { id: chat.id }, payload: { title: "Nope" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -510,11 +467,8 @@ test("createMessage sends a message, bumps chat activity, and is forbidden for n
           params: { id: chat.id },
           payload: { contentType: "text", content: "intruding" },
         })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
     }),
   ));
 
@@ -526,13 +480,12 @@ test("createMessage rejects content over the max length", () =>
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
-      const result = yield* alice.client.chats
+      yield* alice.client.chats
         .createMessage({
           params: { id: chat.id },
           payload: { contentType: "text", content: "x".repeat(4001) },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -564,7 +517,7 @@ test("createMessage rejects an image_url from a non-allowlisted host", () =>
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
-      const result = yield* alice.client.chats
+      yield* alice.client.chats
         .createMessage({
           params: { id: chat.id },
           payload: {
@@ -572,8 +525,7 @@ test("createMessage rejects an image_url from a non-allowlisted host", () =>
             content: "https://evil.example.com/cat.png",
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -585,7 +537,7 @@ test("createMessage rejects a data: image_url", () =>
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
-      const result = yield* alice.client.chats
+      yield* alice.client.chats
         .createMessage({
           params: { id: chat.id },
           payload: {
@@ -593,8 +545,7 @@ test("createMessage rejects a data: image_url", () =>
             content: "data:image/png;base64,iVBORw0KGgo=",
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -701,11 +652,8 @@ test("createMessage 404s when replying to a message from another chat", () =>
             parentMessageId: otherChatMessage.id,
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
 
       // A parent id that doesn't exist at all 404s the same way.
       const missing = yield* alice.client.chats
@@ -717,11 +665,8 @@ test("createMessage 404s when replying to a message from another chat", () =>
             parentMessageId: 999999,
           },
         })
-        .pipe(Effect.result);
-      expect(missing._tag).toBe("Failure");
-      if (missing._tag === "Failure") {
-        expect((missing.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(missing._tag).toBe("NotFound");
     }),
   ));
 
@@ -846,11 +791,8 @@ test("listMessages returns the newest window by default, oldest-first, and is fo
 
       const forbidden = yield* eve.client.chats
         .listMessages({ params: { id: chat.id }, query: {} })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
     }),
   ));
 
@@ -876,26 +818,16 @@ test("listMessages rejects a malformed cursor and setting both before and after"
           params: { id: chat.id },
           query: { before: "not-a-real-cursor" },
         })
-        .pipe(Effect.result);
-      expect(badCursor._tag).toBe("Failure");
-      if (badCursor._tag === "Failure") {
-        expect((badCursor.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(badCursor._tag).toBe("InvalidChatRequest");
 
       const both = yield* alice.client.chats
         .listMessages({
           params: { id: chat.id },
           query: { before: validCursor, after: validCursor },
         })
-        .pipe(Effect.result);
-      expect(both._tag).toBe("Failure");
-      if (both._tag === "Failure") {
-        expect((both.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(both._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -971,11 +903,8 @@ test("updateMessage lets the sender edit their message and bumps updatedAt past 
           params: { id: chat.id, messageId: message.id },
           payload: { contentType: "text", content: "hijacked" },
         })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
     }),
   ));
 
@@ -1001,11 +930,8 @@ test("updateMessage 404s for a message that doesn't belong to the given chat", (
           params: { id: chatAE.id, messageId: messageInAB.id },
           payload: { contentType: "text", content: "wrong chat" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -1028,11 +954,8 @@ test("deleteMessage removes the message and its read receipts, and is forbidden 
 
       const forbidden = yield* bob.client.chats
         .deleteMessage({ params: { id: chat.id, messageId: message.id } })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
 
       yield* alice.client.chats.deleteMessage({
         params: { id: chat.id, messageId: message.id },
@@ -1186,22 +1109,16 @@ test("addMessageReaction is forbidden for non-participants and 404s for a missin
           params: { id: chat.id, messageId: message.id },
           payload: { emoji: "👍" },
         })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
 
       const notFound = yield* alice.client.chats
         .addMessageReaction({
           params: { id: chat.id, messageId: 9999 },
           payload: { emoji: "👍" },
         })
-        .pipe(Effect.result);
-      expect(notFound._tag).toBe("Failure");
-      if (notFound._tag === "Failure") {
-        expect((notFound.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(notFound._tag).toBe("NotFound");
     }),
   ));
 
@@ -1218,14 +1135,13 @@ test("addMessageReaction rejects an emoji outside the standard set", () =>
         payload: { contentType: "text", content: "hi bob" },
       });
 
-      const result = yield* alice.client.chats
+      yield* alice.client.chats
         .addMessageReaction({
           params: { id: chat.id, messageId: message.id },
           // @ts-expect-error deliberately outside ReactionEmoji's literal union
           payload: { emoji: "🚀" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -1357,22 +1273,16 @@ test("pinMessage is forbidden for non-participants and 404s for a message in ano
           params: { id: chat.id },
           payload: { messageId: message.id },
         })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
 
       const notFound = yield* alice.client.chats
         .pinMessage({
           params: { id: chat.id },
           payload: { messageId: 9999 },
         })
-        .pipe(Effect.result);
-      expect(notFound._tag).toBe("Failure");
-      if (notFound._tag === "Failure") {
-        expect((notFound.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(notFound._tag).toBe("NotFound");
     }),
   ));
 
@@ -1460,11 +1370,8 @@ test("starMessage is idempotent and forbidden for non-participants", () =>
 
       const forbidden = yield* eve.client.chats
         .starMessage({ params: { id: chat.id, messageId: message.id } })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
     }),
   ));
 
@@ -1589,19 +1496,13 @@ test("getChat 404s for a missing chat and is forbidden for non-participants", ()
 
       const missing = yield* alice.client.chats
         .getChat({ params: { id: 9999 } })
-        .pipe(Effect.result);
-      expect(missing._tag).toBe("Failure");
-      if (missing._tag === "Failure") {
-        expect((missing.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(missing._tag).toBe("NotFound");
 
       const forbidden = yield* eve.client.chats
         .getChat({ params: { id: chat.id } })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
     }),
   ));
 
@@ -1711,11 +1612,8 @@ test("deleting a group chat's creator sets createdBy to null instead of deleting
       // With no creator left, renaming is now forbidden for everyone.
       const result = yield* bob.client.chats
         .updateChat({ params: { id: chat.id }, payload: { title: "Nope" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Forbidden");
     }),
   ));
 
@@ -1810,7 +1708,7 @@ test("createGroupChat's participant list is capped at the schema level", () =>
       // One more than that is rejected by the payload schema itself
       // (Schema.maxItems on participantIds) before it ever reaches the
       // handler's own cap check.
-      const overCap = yield* alice.client.chats
+      yield* alice.client.chats
         .createGroupChat({
           payload: {
             title: "Over cap",
@@ -1819,8 +1717,7 @@ test("createGroupChat's participant list is capped at the schema level", () =>
               .map((u) => u.id),
           },
         })
-        .pipe(Effect.result);
-      expect(overCap._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -1839,13 +1736,12 @@ test("addParticipants's participant list is capped at the schema level", () =>
       // one slot) — this is rejected by the payload schema itself
       // (Schema.maxItems), before it ever reaches the handler's own cap
       // check.
-      const overCap = yield* alice.client.chats
+      yield* alice.client.chats
         .addParticipants({
           params: { id: chat.id },
           payload: { participantIds: pool.map((u) => u.id) },
         })
-        .pipe(Effect.result);
-      expect(overCap._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -1864,13 +1760,8 @@ test("addParticipants rejects adding people to a direct chat", () =>
           params: { id: chat.id },
           payload: { participantIds: [carol.user.id] },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -1899,11 +1790,8 @@ test("sendTyping is forbidden for a non-participant", () =>
 
       const result = yield* eve.client.chats
         .sendTyping({ params: { id: chat.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Forbidden");
     }),
   ));
 
@@ -1913,11 +1801,8 @@ test("sendTyping 404s for a nonexistent chat", () =>
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const result = yield* alice.client.chats
         .sendTyping({ params: { id: 9999 } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -1941,11 +1826,8 @@ test("markRead 404s for a missing chat or a message from a different chat", () =
           params: { id: 9999 },
           payload: { messageId: messageInAB.id },
         })
-        .pipe(Effect.result);
-      expect(missingChat._tag).toBe("Failure");
-      if (missingChat._tag === "Failure") {
-        expect((missingChat.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(missingChat._tag).toBe("NotFound");
 
       const chatAC = yield* alice.client.chats.createDirectChat({
         payload: { userId: carol.user.id },
@@ -1961,11 +1843,8 @@ test("markRead 404s for a missing chat or a message from a different chat", () =
           params: { id: chatAB.id },
           payload: { messageId: messageInAC.id },
         })
-        .pipe(Effect.result);
-      expect(wrongChat._tag).toBe("Failure");
-      if (wrongChat._tag === "Failure") {
-        expect((wrongChat.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(wrongChat._tag).toBe("NotFound");
     }),
   ));
 
@@ -1996,11 +1875,8 @@ test("leaveChat lets a non-creator leave, keeping the chat for the rest", () =>
       // forbidden to him.
       const afterLeave = yield* bob.client.chats
         .getChat({ params: { id: chat.id } })
-        .pipe(Effect.result);
-      expect(afterLeave._tag).toBe("Failure");
-      if (afterLeave._tag === "Failure") {
-        expect((afterLeave.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(afterLeave._tag).toBe("Forbidden");
     }),
   ));
 
@@ -2015,13 +1891,8 @@ test("leaveChat rejects leaving a direct chat", () =>
 
       const result = yield* alice.client.chats
         .leaveChat({ params: { id: chat.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -2057,11 +1928,8 @@ test("leaveChat transfers ownership to the longest-standing remaining participan
       // Once the last participant leaves, the chat is deleted outright.
       const gone = yield* bob.client.chats
         .getChat({ params: { id: chat.id } })
-        .pipe(Effect.result);
-      expect(gone._tag).toBe("Failure");
-      if (gone._tag === "Failure") {
-        expect((gone.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(gone._tag).toBe("NotFound");
     }),
   ));
 
@@ -2088,11 +1956,8 @@ test("removeParticipant lets the creator remove someone, and an admin who isn't 
       // Non-creator, non-admin can't remove anyone.
       const forbidden = yield* carol.client.chats
         .removeParticipant({ params: { id: chat.id, userId: alice.user.id } })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
 
       yield* registerAndLogin("dave", "pw-testpass");
       const adminClient = yield* promoteToAdmin("dave", "pw-testpass");
@@ -2117,23 +1982,13 @@ test("removeParticipant rejects removing yourself, a non-participant, or the cha
 
       const removeSelf = yield* alice.client.chats
         .removeParticipant({ params: { id: chat.id, userId: alice.user.id } })
-        .pipe(Effect.result);
-      expect(removeSelf._tag).toBe("Failure");
-      if (removeSelf._tag === "Failure") {
-        expect((removeSelf.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(removeSelf._tag).toBe("InvalidChatRequest");
 
       const removeStranger = yield* alice.client.chats
         .removeParticipant({ params: { id: chat.id, userId: carol.user.id } })
-        .pipe(Effect.result);
-      expect(removeStranger._tag).toBe("Failure");
-      if (removeStranger._tag === "Failure") {
-        expect((removeStranger.failure as { _tag: string })._tag).toBe(
-          "NotFound",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(removeStranger._tag).toBe("NotFound");
 
       // Shrink the chat down to bob alone (ownership transfers to him),
       // then have an admin try to remove the last remaining participant.
@@ -2142,13 +1997,8 @@ test("removeParticipant rejects removing yourself, a non-participant, or the cha
       const adminClient = yield* promoteToAdmin("erin", "pw-testpass");
       const removeLast = yield* adminClient.chats
         .removeParticipant({ params: { id: chat.id, userId: bob.user.id } })
-        .pipe(Effect.result);
-      expect(removeLast._tag).toBe("Failure");
-      if (removeLast._tag === "Failure") {
-        expect((removeLast.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(removeLast._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -2192,34 +2042,23 @@ test("deleteChat lets the creator (or an admin) delete a group chat outright", (
       });
       const directResult = yield* alice.client.chats
         .deleteChat({ params: { id: directChat.id } })
-        .pipe(Effect.result);
-      expect(directResult._tag).toBe("Failure");
-      if (directResult._tag === "Failure") {
-        expect((directResult.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(directResult._tag).toBe("InvalidChatRequest");
 
       const groupChat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
       const forbidden = yield* bob.client.chats
         .deleteChat({ params: { id: groupChat.id } })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
 
       yield* alice.client.chats.deleteChat({ params: { id: groupChat.id } });
 
       const gone = yield* bob.client.chats
         .getChat({ params: { id: groupChat.id } })
-        .pipe(Effect.result);
-      expect(gone._tag).toBe("Failure");
-      if (gone._tag === "Failure") {
-        expect((gone.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(gone._tag).toBe("NotFound");
     }),
   ));
 
@@ -2238,13 +2077,8 @@ test("transferOwnership lets the creator hand off ownership, and 404s for a non-
           params: { id: chat.id },
           payload: { userId: carol.user.id },
         })
-        .pipe(Effect.result);
-      expect(missingTarget._tag).toBe("Failure");
-      if (missingTarget._tag === "Failure") {
-        expect((missingTarget.failure as { _tag: string })._tag).toBe(
-          "NotFound",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(missingTarget._tag).toBe("NotFound");
 
       const updated = yield* alice.client.chats.transferOwnership({
         params: { id: chat.id },
@@ -2255,13 +2089,8 @@ test("transferOwnership lets the creator hand off ownership, and 404s for a non-
       // Ownership moved — alice can no longer rename, bob now can.
       const renameByAlice = yield* alice.client.chats
         .updateChat({ params: { id: chat.id }, payload: { title: "Nope" } })
-        .pipe(Effect.result);
-      expect(renameByAlice._tag).toBe("Failure");
-      if (renameByAlice._tag === "Failure") {
-        expect((renameByAlice.failure as { _tag: string })._tag).toBe(
-          "Forbidden",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(renameByAlice._tag).toBe("Forbidden");
       const renamed = yield* bob.client.chats.updateChat({
         params: { id: chat.id },
         payload: { title: "Renamed by bob" },
@@ -2287,11 +2116,8 @@ test("transferOwnership: once a chat is ownerless, any participant can claim it,
           params: { id: chat.id },
           payload: { userId: bob.user.id },
         })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
 
       // Simulate alice's account being deleted — createdBy goes to null
       // (see db/schema.ts), leaving the group ownerless.
@@ -2306,13 +2132,8 @@ test("transferOwnership: once a chat is ownerless, any participant can claim it,
           params: { id: chat.id },
           payload: { userId: bob.user.id },
         })
-        .pipe(Effect.result);
-      expect(notParticipant._tag).toBe("Failure");
-      if (notParticipant._tag === "Failure") {
-        expect((notParticipant.failure as { _tag: string })._tag).toBe(
-          "Forbidden",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(notParticipant._tag).toBe("Forbidden");
 
       // But bob, a participant of the now-ownerless chat, can claim it.
       const claimed = yield* bob.client.chats.transferOwnership({
@@ -2371,13 +2192,8 @@ test("updateParticipantRole: only the owner can promote/demote, and not the owne
           params: { id: chat.id, userId: bob.user.id },
           payload: { role: "admin" },
         })
-        .pipe(Effect.result);
-      expect(memberAttempt._tag).toBe("Failure");
-      if (memberAttempt._tag === "Failure") {
-        expect((memberAttempt.failure as { _tag: string })._tag).toBe(
-          "Forbidden",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(memberAttempt._tag).toBe("Forbidden");
 
       // The owner promotes bob to admin.
       const promoted = yield* alice.client.chats.updateParticipantRole({
@@ -2394,13 +2210,8 @@ test("updateParticipantRole: only the owner can promote/demote, and not the owne
           params: { id: chat.id, userId: carol.user.id },
           payload: { role: "admin" },
         })
-        .pipe(Effect.result);
-      expect(adminAttempt._tag).toBe("Failure");
-      if (adminAttempt._tag === "Failure") {
-        expect((adminAttempt.failure as { _tag: string })._tag).toBe(
-          "Forbidden",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(adminAttempt._tag).toBe("Forbidden");
 
       // The owner's own role can't be changed through this endpoint.
       const targetOwner = yield* alice.client.chats
@@ -2408,13 +2219,8 @@ test("updateParticipantRole: only the owner can promote/demote, and not the owne
           params: { id: chat.id, userId: alice.user.id },
           payload: { role: "member" },
         })
-        .pipe(Effect.result);
-      expect(targetOwner._tag).toBe("Failure");
-      if (targetOwner._tag === "Failure") {
-        expect((targetOwner.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(targetOwner._tag).toBe("InvalidChatRequest");
 
       // The owner demotes bob back to member.
       const demoted = yield* alice.client.chats.updateParticipantRole({
@@ -2464,13 +2270,8 @@ test("admins (not just the owner) can rename, add/remove participants, and delet
       // A plain member can't delete someone else's message...
       const memberDelete = yield* dave.client.chats
         .deleteMessage({ params: { id: chat.id, messageId: message.id } })
-        .pipe(Effect.result);
-      expect(memberDelete._tag).toBe("Failure");
-      if (memberDelete._tag === "Failure") {
-        expect((memberDelete.failure as { _tag: string })._tag).toBe(
-          "Forbidden",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(memberDelete._tag).toBe("Forbidden");
       // ...but the chat's admin can.
       yield* bob.client.chats.deleteMessage({
         params: { id: chat.id, messageId: message.id },
@@ -2500,11 +2301,8 @@ test("removeParticipant refuses to let a chat-level admin remove the owner", () 
 
       const result = yield* bob.client.chats
         .removeParticipant({ params: { id: chat.id, userId: alice.user.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Forbidden");
     }),
   ));
 
@@ -2522,11 +2320,8 @@ test("createChatInvite is owner/admin only, and joinChatViaInvite adds the redee
 
       const forbidden = yield* bob.client.chats
         .createChatInvite({ params: { id: chat.id }, payload: {} })
-        .pipe(Effect.result);
-      expect(forbidden._tag).toBe("Failure");
-      if (forbidden._tag === "Failure") {
-        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(forbidden._tag).toBe("Forbidden");
 
       const invite = yield* alice.client.chats.createChatInvite({
         params: { id: chat.id },
@@ -2571,11 +2366,8 @@ test("joinChatViaInvite 404s for an unknown code", () =>
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const result = yield* alice.client.chats
         .joinChatViaInvite({ params: { code: "does-not-exist" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -2599,23 +2391,13 @@ test("revokeChatInvite invalidates the code for future joins", () =>
       const carol = yield* registerAndLogin("carol", "pw-testpass");
       const result = yield* carol.client.chats
         .joinChatViaInvite({ params: { code: invite.code } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidChatRequest");
 
       const doubleRevoke = yield* alice.client.chats
         .revokeChatInvite({ params: { id: chat.id, inviteId: invite.id } })
-        .pipe(Effect.result);
-      expect(doubleRevoke._tag).toBe("Failure");
-      if (doubleRevoke._tag === "Failure") {
-        expect((doubleRevoke.failure as { _tag: string })._tag).toBe(
-          "NotFound",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(doubleRevoke._tag).toBe("NotFound");
     }),
   ));
 
@@ -2640,13 +2422,8 @@ test("joinChatViaInvite enforces expiry and maxUses", () =>
       });
       const overUse = yield* dave.client.chats
         .joinChatViaInvite({ params: { code: singleUse.code } })
-        .pipe(Effect.result);
-      expect(overUse._tag).toBe("Failure");
-      if (overUse._tag === "Failure") {
-        expect((overUse.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(overUse._tag).toBe("InvalidChatRequest");
 
       // An already-expired invite (simulated by backdating it directly,
       // since expiresInHours can't express "already in the past") is
@@ -2664,13 +2441,8 @@ test("joinChatViaInvite enforces expiry and maxUses", () =>
       ).pipe(Effect.orDie);
       const expired = yield* dave.client.chats
         .joinChatViaInvite({ params: { code: expiring.code } })
-        .pipe(Effect.result);
-      expect(expired._tag).toBe("Failure");
-      if (expired._tag === "Failure") {
-        expect((expired.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(expired._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -2694,13 +2466,8 @@ test("joinChatViaInvite rejects joining once the group is at its participant cap
       const outsider = yield* registerAndLogin("outsider", "pw-testpass");
       const result = yield* outsider.client.chats
         .joinChatViaInvite({ params: { code: invite.code } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidChatRequest");
     }),
   ));
 
@@ -2773,13 +2540,8 @@ test("createChatInvite doesn't count revoked/expired invites toward the per-chat
 
       const atCap = yield* alice.client.chats
         .createChatInvite({ params: { id: chat.id }, payload: {} })
-        .pipe(Effect.result);
-      expect(atCap._tag).toBe("Failure");
-      if (atCap._tag === "Failure") {
-        expect((atCap.failure as { _tag: string })._tag).toBe(
-          "InvalidChatRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(atCap._tag).toBe("InvalidChatRequest");
 
       // Revoking one frees a slot even though the row itself still exists.
       yield* alice.client.chats.revokeChatInvite({

@@ -61,11 +61,8 @@ test("searchUsers rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.users
         .searchUsers({ query: { q: "abc" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -75,11 +72,8 @@ test("searchUsers rejects a bogus bearer token", () =>
       const c = yield* makeAuthedClient("not-a-real-token");
       const result = yield* c.users
         .searchUsers({ query: { q: "abc" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -104,15 +98,14 @@ test("register rejects a username over the maximum length", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const result = yield* c.users
+      yield* c.users
         .register({
           payload: {
             username: "a".repeat(MAX_USERNAME_LENGTH + 1),
             password: "s3cret-pw",
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -120,15 +113,14 @@ test("register rejects a password over the maximum length", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const result = yield* c.users
+      yield* c.users
         .register({
           payload: {
             username: "alice2",
             password: "a".repeat(MAX_PASSWORD_LENGTH + 1),
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -136,15 +128,14 @@ test("register rejects a password under the minimum length", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const result = yield* c.users
+      yield* c.users
         .register({
           payload: {
             username: "alice3",
             password: "a".repeat(MIN_PASSWORD_LENGTH - 1),
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -173,15 +164,14 @@ test("changePassword rejects a new password under the minimum length", () =>
         payload: { username: "xena", password: "pw-xena12" },
       });
       const authed = yield* makeAuthedClient(accessToken);
-      const result = yield* authed.users
+      yield* authed.users
         .changePassword({
           payload: {
             currentPassword: "pw-xena12",
             newPassword: "a".repeat(MIN_PASSWORD_LENGTH - 1),
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -226,13 +216,8 @@ test("searchUsers rejects a non-admin's query shorter than the minimum length", 
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
         .searchUsers({ query: { q: "ce" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidUserSearchRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidUserSearchRequest");
     }),
   ));
 
@@ -288,12 +273,11 @@ test("searchUsers rejects a query longer than the maximum length", () =>
       });
 
       const authed = yield* makeAuthedClient(accessToken);
-      const result = yield* authed.users
+      yield* authed.users
         .searchUsers({
           query: { q: "c".repeat(MAX_USER_SEARCH_QUERY_LENGTH + 1) },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -322,11 +306,8 @@ test("lookupUsersByUsername rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.users
         .lookupUsersByUsername({ query: { usernames: "alice" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -402,13 +383,8 @@ test("lookupUsersByUsername rejects a batch naming more than the maximum number 
             ).join(","),
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidUsernameLookupRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidUsernameLookupRequest");
     }),
   ));
 
@@ -424,14 +400,13 @@ test("lookupUsersByUsername rejects a parameter longer than the maximum length",
       });
 
       const authed = yield* makeAuthedClient(accessToken);
-      const result = yield* authed.users
+      yield* authed.users
         .lookupUsersByUsername({
           query: {
             usernames: "t".repeat(MAX_USERNAME_LOOKUP_LENGTH + 1),
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -444,11 +419,8 @@ test("getUser rejects an unauthenticated request", () =>
       });
       const result = yield* c.users
         .getUser({ params: { id: created.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -483,13 +455,8 @@ test("getUser returns 404 for a missing id", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
         .getUser({ params: { id: 9999 } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { message: string }).message).toContain(
-          "9999",
-        );
-      }
+        .pipe(Effect.flip);
+      expect((result as { message: string }).message).toContain("9999");
     }),
   ));
 
@@ -502,11 +469,8 @@ test("listUserPosts rejects an unauthenticated request", () =>
       });
       const result = yield* c.users
         .listUserPosts({ params: { id: created.id }, query: {} })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -523,11 +487,8 @@ test("listUserPosts returns 404 for a missing id", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
         .listUserPosts({ params: { id: 9999 }, query: {} })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -636,13 +597,8 @@ test("listUserPosts rejects a malformed cursor", () =>
           params: { id: author.id },
           query: { cursor: "not-a-real-cursor" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidPostsRequest",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidPostsRequest");
     }),
   ));
 
@@ -663,13 +619,8 @@ test('register is rate-limited per IP, incrementing rate_limit_rejections_total{
         .register({
           payload: { username: "ratelimited-tripped", password: "pw-testpass" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "TooManyRequests",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("TooManyRequests");
       expect(yield* rateLimitRejectionCount("register")).toBe(before + 1);
     }),
   ));
@@ -684,13 +635,8 @@ test('register with a duplicate username returns a 409 conflict, incrementing au
       const before = yield* authEventCount("signup", "failure");
       const result = yield* c.users
         .register({ payload: { username: "dave", password: "password-2" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { message: string }).message).toContain(
-          "dave",
-        );
-      }
+        .pipe(Effect.flip);
+      expect((result as { message: string }).message).toContain("dave");
       expect(yield* authEventCount("signup", "failure")).toBe(before + 1);
     }),
   ));
@@ -704,13 +650,8 @@ test("register with a username differing only by case from an existing one retur
       });
       const result = yield* c.users
         .register({ payload: { username: "bob", password: "password-2" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { message: string }).message).toContain(
-          "bob",
-        );
-      }
+        .pipe(Effect.flip);
+      expect((result as { message: string }).message).toContain("bob");
     }),
   ));
 
@@ -799,10 +740,9 @@ test('login fails with a wrong password, incrementing auth_events_total{event="l
         payload: { username: "frank", password: "right-pw" },
       });
       const before = yield* authEventCount("login", "failure");
-      const result = yield* c.users
+      yield* c.users
         .login({ payload: { username: "frank", password: "wrong-pw" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
       expect(yield* authEventCount("login", "failure")).toBe(before + 1);
     }),
   ));
@@ -811,10 +751,9 @@ test("login fails for an unknown username", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const result = yield* c.users
+      yield* c.users
         .login({ payload: { username: "ghost", password: "whatever" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -899,13 +838,8 @@ test("refresh rejects the previous refresh token once it's been rotated away", (
       // marked revoked on rotation, so re-presenting it must be rejected.
       const result = yield* c.users
         .refresh({ payload: { refreshToken } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidCredentials",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidCredentials");
     }),
   ));
 
@@ -926,13 +860,8 @@ test("replaying a rotated-away refresh token revokes the whole family, including
       const rotated = yield* c.users.refresh({ payload: { refreshToken } });
       const reuse = yield* c.users
         .refresh({ payload: { refreshToken } })
-        .pipe(Effect.result);
-      expect(reuse._tag).toBe("Failure");
-      if (reuse._tag === "Failure") {
-        expect((reuse.failure as { _tag: string })._tag).toBe(
-          "InvalidCredentials",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(reuse._tag).toBe("InvalidCredentials");
 
       // The replay must have poisoned the whole family: even the token the
       // legitimate client rotated to (and never leaked) is now revoked, so
@@ -940,13 +869,8 @@ test("replaying a rotated-away refresh token revokes the whole family, including
       // getting rejected while the legitimate session carries on unaware.
       const afterReuse = yield* c.users
         .refresh({ payload: { refreshToken: rotated.refreshToken } })
-        .pipe(Effect.result);
-      expect(afterReuse._tag).toBe("Failure");
-      if (afterReuse._tag === "Failure") {
-        expect((afterReuse.failure as { _tag: string })._tag).toBe(
-          "InvalidCredentials",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(afterReuse._tag).toBe("InvalidCredentials");
     }),
   ));
 
@@ -990,13 +914,8 @@ test("refresh rejects an access token used in place of a refresh token", () =>
 
       const result = yield* c.users
         .refresh({ payload: { refreshToken: accessToken } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidCredentials",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidCredentials");
     }),
   ));
 
@@ -1007,13 +926,8 @@ test('refresh rejects a bogus refresh token, incrementing auth_events_total{even
       const before = yield* authEventCount("refresh", "failure");
       const result = yield* c.users
         .refresh({ payload: { refreshToken: "not-a-real-token" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidCredentials",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidCredentials");
       expect(yield* authEventCount("refresh", "failure")).toBe(before + 1);
     }),
   ));
@@ -1033,13 +947,8 @@ test("logout revokes the presented refresh token", () =>
 
       const result = yield* c.users
         .refresh({ payload: { refreshToken } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidCredentials",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidCredentials");
     }),
   ));
 
@@ -1090,10 +999,7 @@ test("logout with allSessions revokes every session for the user", () =>
         sessionA.refreshToken,
         sessionB.refreshToken,
       ]) {
-        const result = yield* c.users
-          .refresh({ payload: { refreshToken } })
-          .pipe(Effect.result);
-        expect(result._tag).toBe("Failure");
+        yield* c.users.refresh({ payload: { refreshToken } }).pipe(Effect.flip);
       }
     }),
   ));
@@ -1123,11 +1029,8 @@ test("logout with allSessions immediately invalidates outstanding access tokens,
       const authedAfter = yield* makeAuthedClient(accessToken);
       const result = yield* authedAfter.users
         .searchUsers({ query: { q: "petra" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -1179,13 +1082,8 @@ test("refresh rejects a token signed under a token_version invalidated by a forc
       // stale token_version, which must independently be rejected.
       const result = yield* c.users
         .refresh({ payload: { refreshToken: sessionB.refreshToken } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidCredentials",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidCredentials");
     }),
   ));
 
@@ -1207,11 +1105,8 @@ test("changePassword rejects an unauthenticated request", () =>
         .changePassword({
           payload: { currentPassword: "pw-sam12", newPassword: "new-pw-sam" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -1230,13 +1125,8 @@ test("changePassword rejects a wrong current password", () =>
         .changePassword({
           payload: { currentPassword: "wrong-pw", newPassword: "new-pw-sam" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidCredentials",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidCredentials");
     }),
   ));
 
@@ -1255,10 +1145,9 @@ test("changePassword updates the password and lets the caller log in with the ne
         payload: { currentPassword: "old-pw-tara", newPassword: "new-pw-tara" },
       });
 
-      const oldLogin = yield* c.users
+      yield* c.users
         .login({ payload: { username: "tara", password: "old-pw-tara" } })
-        .pipe(Effect.result);
-      expect(oldLogin._tag).toBe("Failure");
+        .pipe(Effect.flip);
 
       const newLogin = yield* c.users.login({
         payload: { username: "tara", password: "new-pw-tara" },
@@ -1285,10 +1174,9 @@ test("changePassword returns a working access token for the calling session, des
 
       // The old access token, signed under the pre-bump token_version, is
       // now rejected...
-      const staleResult = yield* authed.users
+      yield* authed.users
         .searchUsers({ query: { q: "uma" } })
-        .pipe(Effect.result);
-      expect(staleResult._tag).toBe("Failure");
+        .pipe(Effect.flip);
 
       // ...but the freshly issued one works.
       const authedAfter = yield* makeAuthedClient(newAccessToken);
@@ -1321,10 +1209,9 @@ test("changePassword revokes every other session's refresh token", () =>
         },
       });
 
-      const refreshB = yield* c.users
+      yield* c.users
         .refresh({ payload: { refreshToken: sessionB.refreshToken } })
-        .pipe(Effect.result);
-      expect(refreshB._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -1341,27 +1228,23 @@ test("changePassword is rate-limited per account after repeated wrong attempts",
       const authed = yield* makeAuthedClient(accessToken);
       // CHANGE_PASSWORD_MAX_ATTEMPTS_PER_ACCOUNT is 5 (UsersHandler.ts).
       for (let i = 0; i < 5; i++) {
-        const attempt = yield* authed.users
+        yield* authed.users
           .changePassword({
             payload: { currentPassword: "wrong-pw", newPassword: "new-pw12" },
           })
-          .pipe(Effect.result);
-        expect(attempt._tag).toBe("Failure");
+          .pipe(Effect.flip);
       }
       const result = yield* authed.users
         .changePassword({
           payload: { currentPassword: "wrong-pw", newPassword: "new-pw12" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        const left = result.failure as {
-          _tag: string;
-          retryAfterSeconds: number;
-        };
-        expect(left._tag).toBe("TooManyRequests");
-        expect(left.retryAfterSeconds).toBeGreaterThan(0);
-      }
+        .pipe(Effect.flip);
+      const left = result as {
+        _tag: string;
+        retryAfterSeconds: number;
+      };
+      expect(left._tag).toBe("TooManyRequests");
+      expect(left.retryAfterSeconds).toBeGreaterThan(0);
     }),
   ));
 
@@ -1381,16 +1264,13 @@ test("register is rate-limited per IP after repeated attempts", () =>
         .register({
           payload: { username: "reguser5", password: "pw-register" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        const left = result.failure as {
-          _tag: string;
-          retryAfterSeconds: number;
-        };
-        expect(left._tag).toBe("TooManyRequests");
-        expect(left.retryAfterSeconds).toBeGreaterThan(0);
-      }
+        .pipe(Effect.flip);
+      const left = result as {
+        _tag: string;
+        retryAfterSeconds: number;
+      };
+      expect(left._tag).toBe("TooManyRequests");
+      expect(left.retryAfterSeconds).toBeGreaterThan(0);
     }),
   ));
 
@@ -1406,26 +1286,18 @@ test("login is rate-limited per account after repeated attempts, independent of 
       for (let i = 0; i < 5; i++) {
         const attempt = yield* c.users
           .login({ payload: { username: "ghost-account", password: "wrong" } })
-          .pipe(Effect.result);
-        expect(attempt._tag).toBe("Failure");
-        if (attempt._tag === "Failure") {
-          expect((attempt.failure as { _tag: string })._tag).toBe(
-            "InvalidCredentials",
-          );
-        }
+          .pipe(Effect.flip);
+        expect(attempt._tag).toBe("InvalidCredentials");
       }
       const result = yield* c.users
         .login({ payload: { username: "ghost-account", password: "wrong" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        const left = result.failure as {
-          _tag: string;
-          retryAfterSeconds: number;
-        };
-        expect(left._tag).toBe("TooManyRequests");
-        expect(left.retryAfterSeconds).toBeGreaterThan(0);
-      }
+        .pipe(Effect.flip);
+      const left = result as {
+        _tag: string;
+        retryAfterSeconds: number;
+      };
+      expect(left._tag).toBe("TooManyRequests");
+      expect(left.retryAfterSeconds).toBeGreaterThan(0);
     }),
   ));
 
@@ -1438,20 +1310,17 @@ test("refresh is rate-limited per IP after repeated attempts", () =>
       for (let i = 0; i < 60; i++) {
         yield* c.users
           .refresh({ payload: { refreshToken: "not-a-real-token" } })
-          .pipe(Effect.result);
+          .pipe(Effect.ignore);
       }
       const result = yield* c.users
         .refresh({ payload: { refreshToken: "not-a-real-token" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        const left = result.failure as {
-          _tag: string;
-          retryAfterSeconds: number;
-        };
-        expect(left._tag).toBe("TooManyRequests");
-        expect(left.retryAfterSeconds).toBeGreaterThan(0);
-      }
+        .pipe(Effect.flip);
+      const left = result as {
+        _tag: string;
+        retryAfterSeconds: number;
+      };
+      expect(left._tag).toBe("TooManyRequests");
+      expect(left.retryAfterSeconds).toBeGreaterThan(0);
     }),
   ));
 
@@ -1492,13 +1361,8 @@ test("authentication token version check is cached for 5 seconds and respects ex
       // 5. Third request: after cache expiration, it must fetch from DB, find the bumped version (1 !== 0), and reject as Unauthorized.
       const thirdResult = yield* authed.users
         .getUser({ params: { id: user.id } })
-        .pipe(Effect.result);
-      expect(thirdResult._tag).toBe("Failure");
-      if (thirdResult._tag === "Failure") {
-        expect((thirdResult.failure as { _tag: string })._tag).toBe(
-          "Unauthorized",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(thirdResult._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -1534,13 +1398,8 @@ test("authentication token version cache is immediately evicted via PubSub inval
       // 4. Second request: even within 5 seconds, it should fail immediately because the cache was evicted by the PubSub event.
       const secondResult = yield* authed.users
         .getUser({ params: { id: user.id } })
-        .pipe(Effect.result);
-      expect(secondResult._tag).toBe("Failure");
-      if (secondResult._tag === "Failure") {
-        expect((secondResult.failure as { _tag: string })._tag).toBe(
-          "Unauthorized",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(secondResult._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -1552,11 +1411,8 @@ test("updateProfile rejects an unauthenticated request", () =>
         .updateProfile({
           payload: { displayName: null, avatarUrl: null },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -1609,15 +1465,14 @@ test("updateProfile rejects a displayName over the maximum length", () =>
       });
       const authed = yield* makeAuthedClient(accessToken);
 
-      const result = yield* authed.users
+      yield* authed.users
         .updateProfile({
           payload: {
             displayName: "a".repeat(MAX_DISPLAY_NAME_LENGTH + 1),
             avatarUrl: null,
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -1633,15 +1488,14 @@ test("updateProfile rejects an avatarUrl on a disallowed host", () =>
       });
       const authed = yield* makeAuthedClient(accessToken);
 
-      const result = yield* authed.users
+      yield* authed.users
         .updateProfile({
           payload: {
             displayName: null,
             avatarUrl: "https://evil.example.com/avatar.png",
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -1677,11 +1531,8 @@ test("deleteAccount rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.users
         .deleteAccount({ payload: { password: "whatever" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -1698,13 +1549,8 @@ test("deleteAccount rejects a wrong password", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
         .deleteAccount({ payload: { password: "wrong-pw" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidCredentials",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidCredentials");
     }),
   ));
 
@@ -1727,10 +1573,9 @@ test("deleteAccount removes the account, cascading to its posts, and prevents fu
         payload: { password: "pw-ronny12" },
       });
 
-      const loginResult = yield* c.users
+      yield* c.users
         .login({ payload: { username: "ronny", password: "pw-ronny12" } })
-        .pipe(Effect.result);
-      expect(loginResult._tag).toBe("Failure");
+        .pipe(Effect.flip);
 
       // Register a fresh user just to get an authenticated client to look up
       // the now-deleted account/post through.
@@ -1744,23 +1589,13 @@ test("deleteAccount removes the account, cascading to its posts, and prevents fu
 
       const getUserResult = yield* otherAuthed.users
         .getUser({ params: { id: created.id } })
-        .pipe(Effect.result);
-      expect(getUserResult._tag).toBe("Failure");
-      if (getUserResult._tag === "Failure") {
-        expect((getUserResult.failure as { _tag: string })._tag).toBe(
-          "NotFound",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(getUserResult._tag).toBe("NotFound");
 
       const getPostResult = yield* otherAuthed.posts
         .getPost({ params: { id: post.id } })
-        .pipe(Effect.result);
-      expect(getPostResult._tag).toBe("Failure");
-      if (getPostResult._tag === "Failure") {
-        expect((getPostResult.failure as { _tag: string })._tag).toBe(
-          "NotFound",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(getPostResult._tag).toBe("NotFound");
     }),
   ));
 
@@ -1783,10 +1618,9 @@ test("deleteAccount immediately invalidates the caller's own outstanding tokens 
         payload: { password: "pw-quincy1" },
       });
 
-      const refreshB = yield* c.users
+      yield* c.users
         .refresh({ payload: { refreshToken: sessionB.refreshToken } })
-        .pipe(Effect.result);
-      expect(refreshB._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -1803,23 +1637,19 @@ test("deleteAccount is rate-limited per account after repeated wrong attempts", 
       const authed = yield* makeAuthedClient(accessToken);
       // DELETE_ACCOUNT_MAX_ATTEMPTS_PER_ACCOUNT is 5 (UsersHandler.ts).
       for (let i = 0; i < 5; i++) {
-        const attempt = yield* authed.users
+        yield* authed.users
           .deleteAccount({ payload: { password: "wrong-pw" } })
-          .pipe(Effect.result);
-        expect(attempt._tag).toBe("Failure");
+          .pipe(Effect.flip);
       }
       const result = yield* authed.users
         .deleteAccount({ payload: { password: "wrong-pw" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        const left = result.failure as {
-          _tag: string;
-          retryAfterSeconds: number;
-        };
-        expect(left._tag).toBe("TooManyRequests");
-        expect(left.retryAfterSeconds).toBeGreaterThan(0);
-      }
+        .pipe(Effect.flip);
+      const left = result as {
+        _tag: string;
+        retryAfterSeconds: number;
+      };
+      expect(left._tag).toBe("TooManyRequests");
+      expect(left.retryAfterSeconds).toBeGreaterThan(0);
     }),
   ));
 
@@ -1835,11 +1665,8 @@ test("updateUserRole rejects an unauthenticated request", () =>
           params: { id: created.id },
           payload: { role: "admin" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -1863,11 +1690,8 @@ test("updateUserRole rejects a non-admin caller with Forbidden", () =>
           params: { id: target.id },
           payload: { role: "admin" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Forbidden");
     }),
   ));
 
@@ -1892,11 +1716,8 @@ test("updateUserRole returns 404 for a missing target user", () =>
 
       const result = yield* authed.users
         .updateUserRole({ params: { id: 999999 }, payload: { role: "admin" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -1945,13 +1766,8 @@ test("updateUserRole promotes a user to admin, immediately invalidating their ou
       );
       const staleResult = yield* targetAuthedBefore.users
         .getUser({ params: { id: target.id } })
-        .pipe(Effect.result);
-      expect(staleResult._tag).toBe("Failure");
-      if (staleResult._tag === "Failure") {
-        expect((staleResult.failure as { _tag: string })._tag).toBe(
-          "Unauthorized",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(staleResult._tag).toBe("Unauthorized");
 
       // A fresh login reflects the new role.
       const { user: reloggedUser } = yield* c.users.login({
@@ -1970,11 +1786,8 @@ test("deleteUser rejects an unauthenticated request", () =>
       });
       const result = yield* c.users
         .deleteUser({ params: { id: created.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -1995,11 +1808,8 @@ test("deleteUser rejects a non-admin caller with Forbidden", () =>
 
       const result = yield* authed.users
         .deleteUser({ params: { id: target.id } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Forbidden");
 
       // The target still exists — the rejected call was a no-op.
       const stillThere = yield* authed.users.getUser({
@@ -2030,11 +1840,8 @@ test("deleteUser returns 404 for a missing target user", () =>
 
       const result = yield* authed.users
         .deleteUser({ params: { id: 999999 } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -2060,11 +1867,8 @@ test("deleteUser rejects an admin deleting their own account with Forbidden", ()
 
       const result = yield* authed.users
         .deleteUser({ params: { id: adminId } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Forbidden");
 
       // The admin's own account is untouched.
       const stillThere = yield* authed.users.getUser({
@@ -2114,46 +1918,29 @@ test("deleteUser removes the target, cascading to its posts, and invalidates its
       // The account and its post are gone.
       const getUserResult = yield* adminAuthed.users
         .getUser({ params: { id: target.id } })
-        .pipe(Effect.result);
-      expect(getUserResult._tag).toBe("Failure");
-      if (getUserResult._tag === "Failure") {
-        expect((getUserResult.failure as { _tag: string })._tag).toBe(
-          "NotFound",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(getUserResult._tag).toBe("NotFound");
 
       const getPostResult = yield* adminAuthed.posts
         .getPost({ params: { id: post.id } })
-        .pipe(Effect.result);
-      expect(getPostResult._tag).toBe("Failure");
-      if (getPostResult._tag === "Failure") {
-        expect((getPostResult.failure as { _tag: string })._tag).toBe(
-          "NotFound",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(getPostResult._tag).toBe("NotFound");
 
       // The target's already-issued access token is rejected immediately.
       const staleResult = yield* targetAuthed.users
         .getUser({ params: { id: target.id } })
-        .pipe(Effect.result);
-      expect(staleResult._tag).toBe("Failure");
-      if (staleResult._tag === "Failure") {
-        expect((staleResult.failure as { _tag: string })._tag).toBe(
-          "Unauthorized",
-        );
-      }
+        .pipe(Effect.flip);
+      expect(staleResult._tag).toBe("Unauthorized");
 
       // The target's refresh token no longer works either, and they can't
       // log back in.
-      const refreshResult = yield* c.users
+      yield* c.users
         .refresh({ payload: { refreshToken: targetSession.refreshToken } })
-        .pipe(Effect.result);
-      expect(refreshResult._tag).toBe("Failure");
+        .pipe(Effect.flip);
 
-      const loginResult = yield* c.users
+      yield* c.users
         .login({ payload: { username: "doomed1", password: "pw-doomed12" } })
-        .pipe(Effect.result);
-      expect(loginResult._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -2231,15 +2018,14 @@ test("updateStatus rejects a statusText over the maximum length", () =>
       });
       const authed = yield* makeAuthedClient(accessToken);
 
-      const result = yield* authed.users
+      yield* authed.users
         .updateStatus({
           payload: {
             statusText: "a".repeat(MAX_STATUS_TEXT_LENGTH + 1),
             statusEmoji: null,
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -2255,15 +2041,14 @@ test("updateStatus rejects a statusEmoji over the maximum length", () =>
       });
       const authed = yield* makeAuthedClient(accessToken);
 
-      const result = yield* authed.users
+      yield* authed.users
         .updateStatus({
           payload: {
             statusText: null,
             statusEmoji: "e".repeat(MAX_STATUS_EMOJI_LENGTH + 1),
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -2279,7 +2064,7 @@ test("updateStatus rejects expiresInMinutes when clearing the status", () =>
       });
       const authed = yield* makeAuthedClient(accessToken);
 
-      const result = yield* authed.users
+      yield* authed.users
         .updateStatus({
           payload: {
             statusText: null,
@@ -2287,8 +2072,7 @@ test("updateStatus rejects expiresInMinutes when clearing the status", () =>
             expiresInMinutes: 30,
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -2336,10 +2120,7 @@ test("updateStatus rejects an unauthenticated request", () =>
         .updateStatus({
           payload: { statusText: "Busy", statusEmoji: null },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));

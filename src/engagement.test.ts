@@ -268,13 +268,12 @@ test("addPostReaction rejects an emoji outside the standard set", () =>
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("kelly");
-      const result = yield* authed.comments
+      yield* authed.comments
         .addPostReaction({
           params: { id: post.id },
           payload: { emoji: "🚀" as never },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -285,10 +284,8 @@ test("addPostReaction returns 404 for a missing post", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
         .addPostReaction({ params: { id: 9999 }, payload: { emoji: "👍" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -299,10 +296,8 @@ test("addPostReaction rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.comments
         .addPostReaction({ params: { id: post.id }, payload: { emoji: "👍" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -451,10 +446,8 @@ test("createComment returns 404 for a missing post", () =>
           params: { id: 9999 },
           payload: { content: "hi" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -462,10 +455,9 @@ test("createComment rejects empty content", () =>
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("niaj");
-      const result = yield* authed.comments
+      yield* authed.comments
         .createComment({ params: { id: post.id }, payload: { content: "" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
+        .pipe(Effect.flip);
     }),
   ));
 
@@ -542,12 +534,8 @@ test("listComments rejects a malformed cursor", () =>
           params: { id: post.id },
           query: { cursor: "not-a-real-cursor" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidCommentRequest",
-        );
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidCommentRequest");
     }),
   ));
 
@@ -593,12 +581,8 @@ test("createReply rejects replying to a reply (depth cap)", () =>
           params: { id: reply.id },
           payload: { content: "grandchild" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe(
-          "InvalidCommentRequest",
-        );
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidCommentRequest");
     }),
   ));
 
@@ -609,10 +593,8 @@ test("createReply returns 404 for a missing parent comment", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
         .createReply({ params: { id: 9999 }, payload: { content: "x" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -661,10 +643,8 @@ test("addCommentReaction returns 404 for a missing comment", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
         .addCommentReaction({ params: { id: 9999 }, payload: { emoji: "👍" } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -702,10 +682,8 @@ test("updateComment rejects edits from a non-owner", () =>
           params: { id: comment.id },
           payload: { content: "hijacked" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Forbidden");
     }),
   ));
 
@@ -756,9 +734,7 @@ test("deleteComment cascades to its replies", () =>
           params: { id: reply.id },
           payload: { emoji: "👍" },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure")
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));

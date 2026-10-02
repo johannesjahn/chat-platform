@@ -72,12 +72,10 @@ const AVATAR_URL_FILTER_MESSAGE =
 // Bounded mainly to keep the request small — no real URL is anywhere close.
 const MAX_AVATAR_URL_LENGTH = 2048;
 
-const AvatarUrl = Schema.String.pipe(
-  Schema.check(Schema.isMaxLength(MAX_AVATAR_URL_LENGTH)),
-  Schema.check(
-    Schema.makeFilter((value) =>
-      isAllowedImageUrl(value) ? undefined : AVATAR_URL_FILTER_MESSAGE,
-    ),
+const AvatarUrl = Schema.String.check(
+  Schema.isMaxLength(MAX_AVATAR_URL_LENGTH),
+  Schema.makeFilter((value) =>
+    isAllowedImageUrl(value) ? undefined : AVATAR_URL_FILTER_MESSAGE,
   ),
 );
 
@@ -127,16 +125,16 @@ export type User = typeof User.Type;
 // JWT claims and UI without an unbounded storage/DoS risk.
 export const MAX_USERNAME_LENGTH = 32;
 
-const Username = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
-  Schema.check(Schema.isMaxLength(MAX_USERNAME_LENGTH)),
+const Username = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_USERNAME_LENGTH),
 );
 
 // Mirrors MAX_USERNAME_LENGTH's rationale but roomier, since a display name
 // may hold a full "First Last" rather than a single token.
 export const MAX_DISPLAY_NAME_LENGTH = 64;
 
-const DisplayName = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
-  Schema.check(Schema.isMaxLength(MAX_DISPLAY_NAME_LENGTH)),
+const DisplayName = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_DISPLAY_NAME_LENGTH),
 );
 
 // A generous ceiling — long enough for any real passphrase, but bounded so a
@@ -149,17 +147,15 @@ export const MAX_PASSWORD_LENGTH = 128;
 // longer recommends those; length is the stronger lever).
 export const MIN_PASSWORD_LENGTH = 8;
 
-const Password = Schema.NonEmptyString.pipe(
-  Schema.check(Schema.isMaxLength(MAX_PASSWORD_LENGTH)),
+const Password = Schema.NonEmptyString.check(
+  Schema.isMaxLength(MAX_PASSWORD_LENGTH),
 );
 
 // Only applied where a password is being newly *set* (registration, password
 // change) — `Password` alone remains the decode schema for login and
 // `currentPassword`, so accounts created before this floor existed can still
 // authenticate with their existing (possibly shorter) password.
-const NewPassword = Password.pipe(
-  Schema.check(Schema.isMinLength(MIN_PASSWORD_LENGTH)),
-);
+const NewPassword = Password.check(Schema.isMinLength(MIN_PASSWORD_LENGTH));
 
 export const RegisterBody = Schema.Struct({
   username: Username,
@@ -183,8 +179,8 @@ export type LoginResponse = typeof LoginResponse.Type;
 // verify() on.
 const MAX_REFRESH_TOKEN_LENGTH = 1024;
 
-const RefreshTokenValue = Schema.String.pipe(
-  Schema.check(Schema.isMaxLength(MAX_REFRESH_TOKEN_LENGTH)),
+const RefreshTokenValue = Schema.String.check(
+  Schema.isMaxLength(MAX_REFRESH_TOKEN_LENGTH),
 );
 
 export const RefreshBody = Schema.Struct({
@@ -235,8 +231,8 @@ export const UpdateUserRoleBody = Schema.Struct({
 // status, not a full post.
 export const MAX_STATUS_TEXT_LENGTH = 100;
 
-const StatusText = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
-  Schema.check(Schema.isMaxLength(MAX_STATUS_TEXT_LENGTH)),
+const StatusText = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_STATUS_TEXT_LENGTH),
 );
 
 // Generous enough for any real emoji grapheme (including multi-codepoint
@@ -244,8 +240,8 @@ const StatusText = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
 // what's meant to be a single status icon.
 export const MAX_STATUS_EMOJI_LENGTH = 8;
 
-const StatusEmoji = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
-  Schema.check(Schema.isMaxLength(MAX_STATUS_EMOJI_LENGTH)),
+const StatusEmoji = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_STATUS_EMOJI_LENGTH),
 );
 
 // A status may optionally auto-expire — bounded generously (30 days), the
@@ -275,18 +271,16 @@ export const UpdateStatusBody = Schema.Struct({
   statusText: Schema.NullOr(StatusText),
   statusEmoji: Schema.NullOr(StatusEmoji),
   expiresInMinutes: Schema.optional(
-    Schema.Finite.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(
-        Schema.isBetween({
-          minimum: 1,
-          maximum: MAX_STATUS_EXPIRES_IN_MINUTES,
-        }),
-      ),
+    Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isBetween({
+        minimum: 1,
+        maximum: MAX_STATUS_EXPIRES_IN_MINUTES,
+      }),
     ),
   ),
 })
-  .pipe(Schema.check(Schema.makeFilter(requireStatusForExpiry)))
+  .check(Schema.makeFilter(requireStatusForExpiry))
   .annotate({ identifier: "UpdateStatusBody" });
 
 // Privacy-control relationship kind (issue #219): "block" is the stronger
@@ -518,8 +512,8 @@ export type PostContentType = typeof PostContentType.Type;
 // fitting a long-form text post or an image URL.
 const MAX_POST_CONTENT_LENGTH = 10_000;
 
-const PostContent = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
-  Schema.check(Schema.isMaxLength(MAX_POST_CONTENT_LENGTH)),
+const PostContent = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_POST_CONTENT_LENGTH),
 );
 
 // `content` is rendered directly as an `<img src>` (MessageBubble.tsx,
@@ -607,9 +601,9 @@ export const CreatePostBody = Schema.Struct({
   // the caller — required exactly when contentType is "attachment".
   attachmentId: Schema.optional(Schema.Finite),
 })
-  .pipe(
-    Schema.check(Schema.makeFilter(requireAllowedImageUrl)),
-    Schema.check(Schema.makeFilter(requireAttachmentId)),
+  .check(
+    Schema.makeFilter(requireAllowedImageUrl),
+    Schema.makeFilter(requireAttachmentId),
   )
   .annotate({ identifier: "CreatePostBody" });
 
@@ -618,9 +612,9 @@ export const UpdatePostBody = Schema.Struct({
   content: PostContent,
   attachmentId: Schema.optional(Schema.Finite),
 })
-  .pipe(
-    Schema.check(Schema.makeFilter(requireAllowedImageUrl)),
-    Schema.check(Schema.makeFilter(requireAttachmentId)),
+  .check(
+    Schema.makeFilter(requireAllowedImageUrl),
+    Schema.makeFilter(requireAttachmentId),
   )
   .annotate({ identifier: "UpdatePostBody" });
 
@@ -655,9 +649,8 @@ export const MAX_POSTS_LIMIT = 100;
 export const PostsPageQuery = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.FiniteFromString.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_POSTS_LIMIT })),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_POSTS_LIMIT }),
     ),
   ),
 });
@@ -689,8 +682,8 @@ export const UserPostsPage = Schema.Struct({
 // Shorter than a post's cap — comments are conversational, not long-form.
 export const MAX_COMMENT_CONTENT_LENGTH = 2_000;
 
-const CommentContent = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
-  Schema.check(Schema.isMaxLength(MAX_COMMENT_CONTENT_LENGTH)),
+const CommentContent = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_COMMENT_CONTENT_LENGTH),
 );
 
 // A comment on a post, or a reply to a comment (a reply is just a comment
@@ -742,11 +735,8 @@ export const MAX_COMMENTS_LIMIT = 100;
 export const CommentsPageQuery = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.FiniteFromString.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(
-        Schema.isBetween({ minimum: 1, maximum: MAX_COMMENTS_LIMIT }),
-      ),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_COMMENTS_LIMIT }),
     ),
   ),
 });
@@ -771,8 +761,8 @@ export type ChatType = typeof ChatType.Type;
 export const MAX_GROUP_PARTICIPANTS = 20;
 const MAX_GROUP_TITLE_LENGTH = 100;
 
-const GroupTitle = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
-  Schema.check(Schema.isMaxLength(MAX_GROUP_TITLE_LENGTH)),
+const GroupTitle = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_GROUP_TITLE_LENGTH),
 );
 
 // Per-chat role (issue #220) — distinct from `User.role` (site-wide admin).
@@ -818,8 +808,8 @@ export type MessageContentType = typeof MessageContentType.Type;
 // long-form content, so a generous-but-bounded limit keeps bubbles sane.
 export const MAX_MESSAGE_CONTENT_LENGTH = 4_000;
 
-const MessageContent = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
-  Schema.check(Schema.isMaxLength(MAX_MESSAGE_CONTENT_LENGTH)),
+const MessageContent = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_MESSAGE_CONTENT_LENGTH),
 );
 
 // How much of a quoted parent message's content is echoed in a reply's
@@ -920,9 +910,9 @@ export const CreateGroupChatBody = Schema.Struct({
   title: GroupTitle,
   // The creator is added automatically — this is everyone *else*, hence one
   // short of the overall cap.
-  participantIds: Schema.Array(Schema.Finite).pipe(
-    Schema.check(Schema.isMinLength(1)),
-    Schema.check(Schema.isMaxLength(MAX_GROUP_PARTICIPANTS - 1)),
+  participantIds: Schema.Array(Schema.Finite).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_GROUP_PARTICIPANTS - 1),
   ),
 }).annotate({ identifier: "CreateGroupChatBody" });
 
@@ -934,9 +924,9 @@ export const AddParticipantsBody = Schema.Struct({
   // A group can never hold more than MAX_GROUP_PARTICIPANTS total, so a
   // single request can never legitimately add more than that minus the
   // existing creator — mirrors CreateGroupChatBody's cap.
-  participantIds: Schema.Array(Schema.Finite).pipe(
-    Schema.check(Schema.isMinLength(1)),
-    Schema.check(Schema.isMaxLength(MAX_GROUP_PARTICIPANTS - 1)),
+  participantIds: Schema.Array(Schema.Finite).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_GROUP_PARTICIPANTS - 1),
   ),
 }).annotate({ identifier: "AddParticipantsBody" });
 
@@ -959,19 +949,17 @@ export const MAX_INVITES_PER_CHAT = 50;
 export const CreateChatInviteBody = Schema.Struct({
   // Omitted means "never expires".
   expiresInHours: Schema.optional(
-    Schema.Finite.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(Schema.isBetween({ minimum: 1, maximum: 24 * 30 })),
+    Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 1, maximum: 24 * 30 }),
     ),
   ),
   // Omitted means "unlimited uses" (still bounded by the chat's own
   // MAX_GROUP_PARTICIPANTS cap at redemption time).
   maxUses: Schema.optional(
-    Schema.Finite.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(
-        Schema.isBetween({ minimum: 1, maximum: MAX_GROUP_PARTICIPANTS }),
-      ),
+    Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 1, maximum: MAX_GROUP_PARTICIPANTS }),
     ),
   ),
 }).annotate({ identifier: "CreateChatInviteBody" });
@@ -1001,9 +989,9 @@ export const CreateMessageBody = Schema.Struct({
   // ChatsHandler.ts).
   parentMessageId: Schema.optional(Schema.Finite),
 })
-  .pipe(
-    Schema.check(Schema.makeFilter(requireAllowedImageUrl)),
-    Schema.check(Schema.makeFilter(requireAttachmentId)),
+  .check(
+    Schema.makeFilter(requireAllowedImageUrl),
+    Schema.makeFilter(requireAttachmentId),
   )
   .annotate({ identifier: "CreateMessageBody" });
 
@@ -1012,9 +1000,9 @@ export const UpdateMessageBody = Schema.Struct({
   content: MessageContent,
   attachmentId: Schema.optional(Schema.Finite),
 })
-  .pipe(
-    Schema.check(Schema.makeFilter(requireAllowedImageUrl)),
-    Schema.check(Schema.makeFilter(requireAttachmentId)),
+  .check(
+    Schema.makeFilter(requireAllowedImageUrl),
+    Schema.makeFilter(requireAttachmentId),
   )
   .annotate({ identifier: "UpdateMessageBody" });
 
@@ -1048,11 +1036,8 @@ export const MessagesPageQuery = Schema.Struct({
   before: Schema.optional(Schema.String),
   after: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.FiniteFromString.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(
-        Schema.isBetween({ minimum: 1, maximum: MAX_MESSAGES_LIMIT }),
-      ),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_MESSAGES_LIMIT }),
     ),
   ),
 });
@@ -1088,9 +1073,7 @@ export const MAX_USER_SEARCH_QUERY_LENGTH = 64;
 // `minLength` here (see `MIN_USER_SEARCH_QUERY_LENGTH` above) — an empty `q`
 // is how an admin lists everyone.
 export const UserSearchQuery = Schema.Struct({
-  q: Schema.Trim.pipe(
-    Schema.check(Schema.isMaxLength(MAX_USER_SEARCH_QUERY_LENGTH)),
-  ),
+  q: Schema.Trim.check(Schema.isMaxLength(MAX_USER_SEARCH_QUERY_LENGTH)),
 });
 
 // Raised by `searchUsers` when a non-admin caller's query is shorter than
@@ -1117,9 +1100,7 @@ export const MAX_USERNAME_LOOKUP_LENGTH =
 // bound here. Left un-`identifier`-annotated for the same reason as
 // `UserSearchQuery` above (see CLAUDE.md).
 export const UsernameLookupQuery = Schema.Struct({
-  usernames: Schema.Trim.pipe(
-    Schema.check(Schema.isMaxLength(MAX_USERNAME_LOOKUP_LENGTH)),
-  ),
+  usernames: Schema.Trim.check(Schema.isMaxLength(MAX_USERNAME_LOOKUP_LENGTH)),
 });
 
 // Raised by `lookupUsersByUsername` when a caller asks for more than
@@ -1158,18 +1139,15 @@ export const MAX_AVATAR_UPLOAD_SIZE_BYTES = 8 * 1024 * 1024;
 // parser itself.
 const UploadAvatarBody = Schema.Struct({
   file: Multipart.SingleFileSchema,
-  x: Schema.FiniteFromString.pipe(
-    Schema.check(Schema.isInt()),
-    Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+  x: Schema.FiniteFromString.check(
+    Schema.isInt(),
+    Schema.isGreaterThanOrEqualTo(0),
   ),
-  y: Schema.FiniteFromString.pipe(
-    Schema.check(Schema.isInt()),
-    Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+  y: Schema.FiniteFromString.check(
+    Schema.isInt(),
+    Schema.isGreaterThanOrEqualTo(0),
   ),
-  size: Schema.FiniteFromString.pipe(
-    Schema.check(Schema.isInt()),
-    Schema.check(Schema.isGreaterThan(0)),
-  ),
+  size: Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThan(0)),
 }).pipe(
   HttpApiSchema.asMultipart({ maxFileSize: MAX_AVATAR_UPLOAD_SIZE_BYTES * 2 }),
 );
@@ -1204,7 +1182,7 @@ const UsersGroup = HttpApiGroup.make("users")
   )
   .add(
     HttpApiEndpoint.get("getUser", "/users/:id", {
-      params: Schema.Struct({ id: Schema.FiniteFromString }),
+      params: { id: Schema.Int },
       success: User,
       error: NotFound,
     }).middleware(Authentication),
@@ -1214,7 +1192,7 @@ const UsersGroup = HttpApiGroup.make("users")
     // backing the profile page's activity feed. Same keyset pagination as
     // `listPosts`, but pre-filtered to one author instead of the whole feed.
     HttpApiEndpoint.get("listUserPosts", "/users/:id/posts", {
-      params: Schema.Struct({ id: Schema.FiniteFromString }),
+      params: { id: Schema.Int },
       query: PostsPageQuery,
       success: UserPostsPage,
       error: [NotFound, InvalidPostsRequest],
@@ -1302,7 +1280,7 @@ const UsersGroup = HttpApiGroup.make("users")
     // token_version so an already-issued token can't keep acting under its
     // old role past this call — mirrors `changePassword`'s reasoning.
     HttpApiEndpoint.patch("updateUserRole", "/users/:id/role", {
-      params: Schema.Struct({ id: Schema.FiniteFromString }),
+      params: { id: Schema.Int },
       payload: UpdateUserRoleBody,
       success: User,
       error: [NotFound, Forbidden],
@@ -1318,7 +1296,7 @@ const UsersGroup = HttpApiGroup.make("users")
     // outstanding tokens are invalidated immediately. An admin can't delete
     // their own account here (that goes through `deleteAccount`).
     HttpApiEndpoint.delete("deleteUser", "/users/:id", {
-      params: Schema.Struct({ id: Schema.FiniteFromString }),
+      params: { id: Schema.Int },
       success: HttpApiSchema.NoContent,
       error: [NotFound, Forbidden],
     }).middleware(Authentication),
@@ -1350,7 +1328,7 @@ const UsersGroup = HttpApiGroup.make("users")
     // existing relationship rather than stacking a second one. Returns the
     // resulting relationship. You can't block/mute yourself (400).
     HttpApiEndpoint.put("setBlock", "/users/:id/block", {
-      params: Schema.Struct({ id: Schema.FiniteFromString }),
+      params: { id: Schema.Int },
       payload: BlockUserBody,
       success: BlockedUser,
       error: [NotFound, InvalidBlockRequest],
@@ -1361,7 +1339,7 @@ const UsersGroup = HttpApiGroup.make("users")
     // unblock/unmute action. Idempotent: succeeds even if no relationship
     // exists (nothing to remove).
     HttpApiEndpoint.delete("removeBlock", "/users/:id/block", {
-      params: Schema.Struct({ id: Schema.FiniteFromString }),
+      params: { id: Schema.Int },
       success: HttpApiSchema.NoContent,
     }).middleware(Authentication),
   );
@@ -1369,7 +1347,7 @@ const UsersGroup = HttpApiGroup.make("users")
 const PostsGroup = HttpApiGroup.make("posts")
   .add(
     HttpApiEndpoint.get("getPost", "/posts/:id", {
-      params: Schema.Struct({ id: Schema.FiniteFromString }),
+      params: { id: Schema.Int },
       success: Post,
       error: NotFound,
     }).middleware(Authentication),
@@ -1393,7 +1371,7 @@ const PostsGroup = HttpApiGroup.make("posts")
   )
   .add(
     HttpApiEndpoint.put("updatePost", "/posts/:id", {
-      params: Schema.Struct({ id: Schema.FiniteFromString }),
+      params: { id: Schema.Int },
       payload: UpdatePostBody,
       success: Post,
       error: [NotFound, Forbidden],
@@ -1401,7 +1379,7 @@ const PostsGroup = HttpApiGroup.make("posts")
   )
   .add(
     HttpApiEndpoint.delete("deletePost", "/posts/:id", {
-      params: Schema.Struct({ id: Schema.FiniteFromString }),
+      params: { id: Schema.Int },
       success: HttpApiSchema.NoContent,
       error: [NotFound, Forbidden],
     }).middleware(Authentication),
@@ -1411,7 +1389,7 @@ const PostsGroup = HttpApiGroup.make("posts")
 // (rather than folded into `posts`) since it spans two path roots
 // (`/posts/:id/...` and `/comments/:id/...`) and its own handler — the group
 // name is just an organizational label, it doesn't have to match the path.
-const IdParam = Schema.Struct({ id: Schema.FiniteFromString });
+const IdParam = Schema.Struct({ id: Schema.Int });
 
 const CommentsGroup = HttpApiGroup.make("comments")
   .add(
@@ -1513,21 +1491,21 @@ const CommentsGroup = HttpApiGroup.make("comments")
     }).middleware(Authentication),
   );
 
-const ChatIdPath = Schema.Struct({ id: Schema.FiniteFromString });
+const ChatIdPath = Schema.Struct({ id: Schema.Int });
 
 const MessageIdPath = Schema.Struct({
-  id: Schema.FiniteFromString,
-  messageId: Schema.FiniteFromString,
+  id: Schema.Int,
+  messageId: Schema.Int,
 });
 
 const ChatParticipantPath = Schema.Struct({
-  id: Schema.FiniteFromString,
-  userId: Schema.FiniteFromString,
+  id: Schema.Int,
+  userId: Schema.Int,
 });
 
 const ChatInvitePath = Schema.Struct({
-  id: Schema.FiniteFromString,
-  inviteId: Schema.FiniteFromString,
+  id: Schema.Int,
+  inviteId: Schema.Int,
 });
 
 const InviteCodePath = Schema.Struct({
@@ -1553,9 +1531,8 @@ export const MAX_CHATS_LIMIT = 100;
 export const ChatsPageQuery = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.FiniteFromString.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_CHATS_LIMIT })),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_CHATS_LIMIT }),
     ),
   ),
 });
@@ -1632,15 +1609,14 @@ export const MAX_SEARCH_ALL_LIMIT = 10;
 // handler only ever passes it (or tokens derived from it) as bound
 // parameters.
 export const SearchQuery = Schema.Struct({
-  q: Schema.Trim.pipe(
-    Schema.check(Schema.isMinLength(MIN_SEARCH_QUERY_LENGTH)),
-    Schema.check(Schema.isMaxLength(MAX_SEARCH_QUERY_LENGTH)),
+  q: Schema.Trim.check(
+    Schema.isMinLength(MIN_SEARCH_QUERY_LENGTH),
+    Schema.isMaxLength(MAX_SEARCH_QUERY_LENGTH),
   ),
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.FiniteFromString.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_SEARCH_LIMIT })),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_SEARCH_LIMIT }),
     ),
   ),
 });
@@ -1649,16 +1625,13 @@ export const SearchQuery = Schema.Struct({
 // page of every section (pagination is the per-type endpoints' job), and its
 // `limit` applies per section rather than to a single list.
 export const SearchAllQuery = Schema.Struct({
-  q: Schema.Trim.pipe(
-    Schema.check(Schema.isMinLength(MIN_SEARCH_QUERY_LENGTH)),
-    Schema.check(Schema.isMaxLength(MAX_SEARCH_QUERY_LENGTH)),
+  q: Schema.Trim.check(
+    Schema.isMinLength(MIN_SEARCH_QUERY_LENGTH),
+    Schema.isMaxLength(MAX_SEARCH_QUERY_LENGTH),
   ),
   limit: Schema.optional(
-    Schema.FiniteFromString.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(
-        Schema.isBetween({ minimum: 1, maximum: MAX_SEARCH_ALL_LIMIT }),
-      ),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_SEARCH_ALL_LIMIT }),
     ),
   ),
 });
@@ -2205,7 +2178,7 @@ const AttachmentsGroup = HttpApiGroup.make("attachments")
     // (the FK is `set null` on delete — see db/schema.ts), it doesn't block
     // the delete.
     HttpApiEndpoint.delete("deleteAttachment", "/attachments/:id", {
-      params: Schema.Struct({ id: Schema.FiniteFromString }),
+      params: { id: Schema.Int },
       success: HttpApiSchema.NoContent,
       error: NotFound,
     }).middleware(Authentication),
@@ -2370,11 +2343,8 @@ export const MAX_ADMIN_TIMELINE_DAYS = 90;
 // `$ref` would silently drop them from the generated spec.
 export const AdminStatsQuery = Schema.Struct({
   days: Schema.optional(
-    Schema.FiniteFromString.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(
-        Schema.isBetween({ minimum: 1, maximum: MAX_ADMIN_TIMELINE_DAYS }),
-      ),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_ADMIN_TIMELINE_DAYS }),
     ),
   ),
 });
@@ -2477,27 +2447,22 @@ export const DrawingBrush = Schema.Literals(["thin", "thick"]).annotate({
 // the drawing-wide point budget are checked by the handler, since a schema
 // can only bound each number on its own.
 export const DrawingStroke = Schema.Struct({
-  color: Schema.Finite.pipe(
-    Schema.check(Schema.isInt()),
-    Schema.check(
-      Schema.isBetween({ minimum: 0, maximum: DRAWING_PALETTE_SIZE - 1 }),
-    ),
+  color: Schema.Finite.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: 0, maximum: DRAWING_PALETTE_SIZE - 1 }),
   ),
   brush: DrawingBrush,
   points: Schema.Array(
-    Schema.Finite.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(Schema.isBetween({ minimum: 0, maximum: DRAWING_WIDTH })),
+    Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 0, maximum: DRAWING_WIDTH }),
     ),
-  ).pipe(
-    Schema.check(Schema.isMinLength(2)),
-    Schema.check(Schema.isMaxLength(MAX_DRAWING_POINTS * 2)),
-  ),
+  ).check(Schema.isMinLength(2), Schema.isMaxLength(MAX_DRAWING_POINTS * 2)),
 }).annotate({ identifier: "DrawingStroke" });
 export type DrawingStroke = typeof DrawingStroke.Type;
 
-export const DrawingStrokes = Schema.Array(DrawingStroke).pipe(
-  Schema.check(Schema.isMaxLength(MAX_DRAWING_STROKES)),
+export const DrawingStrokes = Schema.Array(DrawingStroke).check(
+  Schema.isMaxLength(MAX_DRAWING_STROKES),
 );
 
 // A theme pack, as the pack picker shows it. Deliberately *not* the prompt
@@ -2752,9 +2717,9 @@ export const GameChat = Schema.Struct({
 }).annotate({ identifier: "GameChat" });
 
 export const GameChatBody = Schema.Struct({
-  text: Schema.Trim.pipe(
-    Schema.check(Schema.isMinLength(1)),
-    Schema.check(Schema.isMaxLength(MAX_GAME_CHAT_LENGTH)),
+  text: Schema.Trim.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_GAME_CHAT_LENGTH),
   ),
 }).annotate({ identifier: "GameChatBody" });
 
@@ -2764,10 +2729,10 @@ export const GameChatBody = Schema.Struct({
 // can't observe) is taken on trust — and it can only ever *lower* accuracy.
 export const MAX_TYPED_LENGTH = 2000;
 export const FinishRaceBody = Schema.Struct({
-  typed: Schema.String.pipe(Schema.check(Schema.isMaxLength(MAX_TYPED_LENGTH))),
-  errors: Schema.Finite.pipe(
-    Schema.check(Schema.isInt()),
-    Schema.check(Schema.isBetween({ minimum: 0, maximum: 100_000 })),
+  typed: Schema.String.check(Schema.isMaxLength(MAX_TYPED_LENGTH)),
+  errors: Schema.Finite.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: 0, maximum: 100_000 }),
   ),
 }).annotate({ identifier: "FinishRaceBody" });
 
@@ -2779,28 +2744,22 @@ export const FinishRaceBody = Schema.Struct({
 export const ReflexTap = Schema.Struct({
   early: Schema.Boolean,
   reactionMs: Schema.NullOr(
-    Schema.Finite.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(Schema.isBetween({ minimum: 0, maximum: 10_000 })),
+    Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 0, maximum: 10_000 }),
     ),
   ),
   direction: Schema.NullOr(ReflexDirection),
   x: Schema.NullOr(
-    Schema.Finite.pipe(
-      Schema.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
-    ),
+    Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
   ),
   y: Schema.NullOr(
-    Schema.Finite.pipe(
-      Schema.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
-    ),
+    Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
   ),
 }).annotate({ identifier: "ReflexTap" });
 
 export const FinishReflexBody = Schema.Struct({
-  taps: Schema.Array(ReflexTap).pipe(
-    Schema.check(Schema.isMaxLength(REFLEX_ROUNDS)),
-  ),
+  taps: Schema.Array(ReflexTap).check(Schema.isMaxLength(REFLEX_ROUNDS)),
 }).annotate({ identifier: "FinishReflexBody" });
 
 export const LeaderboardPeriod = Schema.Literals([
@@ -2843,34 +2802,27 @@ export class InvalidGameRequest extends Schema.TaggedError<InvalidGameRequest>()
 // Anonymous (no `identifier`) for the reason in CLAUDE.md — a named path or
 // query struct silently loses its parameters in the generated spec.
 const GamePath = Schema.Struct({ game: GameId });
-const GameLobbyIdPath = Schema.Struct({ id: Schema.FiniteFromString });
+const GameLobbyIdPath = Schema.Struct({ id: Schema.Int });
 export const LeaderboardQuery = Schema.Struct({
   period: Schema.optional(LeaderboardPeriod),
 });
 
 export const GameInviteBody = Schema.Struct({
-  userId: Schema.Finite.pipe(
-    Schema.check(Schema.isInt()),
-    Schema.check(Schema.isGreaterThan(0)),
-  ),
+  userId: Schema.Finite.check(Schema.isInt(), Schema.isGreaterThan(0)),
 }).annotate({ identifier: "GameInviteBody" });
 
 export const DrawingSettingsBody = Schema.Struct({
   // Pack slugs (see `listDrawingPacks`); unknown ones are rejected.
-  packs: Schema.Array(
-    Schema.String.pipe(Schema.check(Schema.isMaxLength(40))),
-  ).pipe(
-    Schema.check(Schema.isMinLength(1)),
-    Schema.check(Schema.isMaxLength(20)),
+  packs: Schema.Array(Schema.String.check(Schema.isMaxLength(40))).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(20),
   ),
-  rounds: Schema.Finite.pipe(
-    Schema.check(Schema.isInt()),
-    Schema.check(
-      Schema.isBetween({
-        minimum: MIN_DRAWING_ROUNDS,
-        maximum: MAX_DRAWING_ROUNDS,
-      }),
-    ),
+  rounds: Schema.Finite.check(
+    Schema.isInt(),
+    Schema.isBetween({
+      minimum: MIN_DRAWING_ROUNDS,
+      maximum: MAX_DRAWING_ROUNDS,
+    }),
   ),
 }).annotate({ identifier: "DrawingSettingsBody" });
 
@@ -2879,18 +2831,15 @@ export const SubmitDrawingBody = Schema.Struct({
 }).annotate({ identifier: "SubmitDrawingBody" });
 
 export const SubmitBluffBody = Schema.Struct({
-  text: Schema.Trim.pipe(
-    Schema.check(Schema.isMinLength(1)),
-    Schema.check(Schema.isMaxLength(MAX_BLUFF_LENGTH)),
+  text: Schema.Trim.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_BLUFF_LENGTH),
   ),
 }).annotate({ identifier: "SubmitBluffBody" });
 
 export const SubmitVoteBody = Schema.Struct({
   // A `DrawingAnswer.id` from the current ballot.
-  answer: Schema.Finite.pipe(
-    Schema.check(Schema.isInt()),
-    Schema.check(Schema.isGreaterThanOrEqualTo(0)),
-  ),
+  answer: Schema.Finite.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 }).annotate({ identifier: "SubmitVoteBody" });
 
 const GamesGroup = HttpApiGroup.make("games")
@@ -3125,11 +3074,8 @@ export const MAX_NOTIFICATIONS_LIMIT = 50;
 export const NotificationsPageQuery = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.FiniteFromString.pipe(
-      Schema.check(Schema.isInt()),
-      Schema.check(
-        Schema.isBetween({ minimum: 1, maximum: MAX_NOTIFICATIONS_LIMIT }),
-      ),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_NOTIFICATIONS_LIMIT }),
     ),
   ),
 });
@@ -3153,7 +3099,7 @@ export class InvalidNotificationRequest extends Schema.TaggedError<InvalidNotifi
   { httpApiStatus: 400 },
 ) {}
 
-const NotificationIdPath = Schema.Struct({ id: Schema.FiniteFromString });
+const NotificationIdPath = Schema.Struct({ id: Schema.Int });
 
 const NotificationsGroup = HttpApiGroup.make("notifications")
   .add(

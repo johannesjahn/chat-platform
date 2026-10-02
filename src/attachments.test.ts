@@ -562,11 +562,8 @@ test("createMessage rejects an attachmentId the sender doesn't own", () =>
             attachmentId,
           },
         })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -758,11 +755,8 @@ test("deleteAttachment 404s for an attachment the caller doesn't own", () =>
       const authedBob = yield* makeAuthedClient(bob.accessToken);
       const result = yield* authedBob.attachments
         .deleteAttachment({ params: { id: attachmentId } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
 
       const db = yield* Db;
       const rows = yield* Effect.promise(() =>
@@ -782,10 +776,7 @@ test("deleteAttachment 404s for a nonexistent attachment id", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.attachments
         .deleteAttachment({ params: { id: 999999 } })
-        .pipe(Effect.result);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
