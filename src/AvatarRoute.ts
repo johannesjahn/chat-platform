@@ -1,10 +1,5 @@
-import {
-  HttpApiBuilder,
-  HttpRouter,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "@effect/platform";
-import { Context, Effect, type Scope } from "effect";
+import { HttpRouter, HttpServerResponse } from "effect/http";
+import { Effect } from "effect";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { AVATAR_CONTENT_TYPE, avatarStorageKey } from "./avatars.ts";
 
@@ -47,26 +42,10 @@ const avatarHandler = Effect.gen(function* () {
 });
 
 // Attached to the same shared router as `ChatApi` (see main.ts), the same way
-// `/ws` and `/health` are — see RealtimeSocket.ts for the fuller rationale on
-// why a raw route captures the ambient context (here `AttachmentStorage`) and
-// merges it back into the per-request handler via `mapInputContext`, leaving
-// `AttachmentStorage` as this layer's own requirement for main.ts to provide.
-export const AvatarRouteLive = HttpApiBuilder.Router.use((router) =>
-  Effect.gen(function* () {
-    const context = yield* Effect.context<AttachmentStorage>();
-    yield* router.get(
-      "/avatars/:token",
-      avatarHandler.pipe(
-        Effect.mapInputContext(
-          (
-            input: Context.Context<
-              | HttpServerRequest.HttpServerRequest
-              | HttpRouter.RouteContext
-              | Scope.Scope
-            >,
-          ) => Context.merge(context, input),
-        ),
-      ),
-    );
-  }),
+// `/ws` and `/health` are. `AttachmentStorage` stays a requirement of the
+// route, satisfied wherever main.ts provides the server's layers.
+export const AvatarRouteLive = HttpRouter.add(
+  "GET",
+  "/avatars/:token",
+  avatarHandler,
 );

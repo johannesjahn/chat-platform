@@ -21,7 +21,7 @@ const CLEANUP_INTERVAL = Duration.hours(1);
 // Runs cleanupExpiredRefreshTokens once at startup and then every
 // CLEANUP_INTERVAL for as long as the layer stays built, as a background
 // fiber tied to the layer's scope (interrupted on shutdown).
-export const RefreshTokenCleanupLive = Layer.scopedDiscard(
+export const RefreshTokenCleanupLive = Layer.effectDiscard(
   Effect.forkScoped(
     cleanupExpiredRefreshTokens.pipe(
       Effect.repeat(Schedule.spaced(CLEANUP_INTERVAL)),

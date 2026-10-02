@@ -60,7 +60,7 @@ export const cleanupOrphanedAttachments: Effect.Effect<
     yield* storage
       .delete(row.storageKey)
       .pipe(
-        Effect.catchAll((cause) =>
+        Effect.catch((cause) =>
           Effect.logWarning(
             "AttachmentCleanup: failed to delete orphaned attachment from storage",
           ).pipe(Effect.annotateLogs({ storageKey: row.storageKey, cause })),
@@ -78,7 +78,7 @@ const CLEANUP_INTERVAL = Duration.hours(1);
 // CLEANUP_INTERVAL for as long as the layer stays built, as a background
 // fiber tied to the layer's scope (interrupted on shutdown) — same shape as
 // RefreshTokenCleanupLive.
-export const AttachmentCleanupLive = Layer.scopedDiscard(
+export const AttachmentCleanupLive = Layer.effectDiscard(
   Effect.forkScoped(
     cleanupOrphanedAttachments.pipe(
       Effect.repeat(Schedule.spaced(CLEANUP_INTERVAL)),

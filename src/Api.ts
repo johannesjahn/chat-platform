@@ -1,12 +1,13 @@
+import { Multipart } from "effect/http";
 import {
   HttpApi,
   HttpApiEndpoint,
   HttpApiGroup,
+  HttpApiMiddleware,
   HttpApiSchema,
-  Multipart,
   OpenApi,
-} from "@effect/platform";
-import { Option, Schema } from "effect";
+} from "effect/http-api";
+import { Schema } from "effect";
 import packageJson from "../package.json" with { type: "json" };
 import { Authentication } from "./Auth.ts";
 import {
@@ -17,7 +18,7 @@ import {
 
 // "admin" can edit/delete any post; "user" can only edit/delete their own.
 // Registration always creates a "user" — admins are promoted out-of-band.
-export const UserRole = Schema.Literal("user", "admin").annotations({
+export const UserRole = Schema.Literals(["user", "admin"]).annotate({
   identifier: "UserRole",
 });
 export type UserRole = typeof UserRole.Type;
@@ -71,9 +72,9 @@ const AVATAR_URL_FILTER_MESSAGE =
 // Bounded mainly to keep the request small — no real URL is anywhere close.
 const MAX_AVATAR_URL_LENGTH = 2048;
 
-const AvatarUrl = Schema.String.pipe(
-  Schema.maxLength(MAX_AVATAR_URL_LENGTH),
-  Schema.filter((value) =>
+const AvatarUrl = Schema.String.check(
+  Schema.isMaxLength(MAX_AVATAR_URL_LENGTH),
+  Schema.makeFilter((value) =>
     isAllowedImageUrl(value) ? undefined : AVATAR_URL_FILTER_MESSAGE,
   ),
 );
@@ -89,12 +90,12 @@ const AvatarVariants = Schema.Struct({
   small: Schema.String,
   medium: Schema.String,
   large: Schema.String,
-}).annotations({ identifier: "AvatarVariants" });
+}).annotate({ identifier: "AvatarVariants" });
 
 // Public representation of a user — never exposes the password hash.
 // `identifier` annotations surface these as named schemas in the OpenAPI spec.
 export const User = Schema.Struct({
-  id: Schema.Number,
+  id: Schema.Finite,
   username: Schema.String,
   // Optional profile fields (issue #67) — null when unset. The UI falls back
   // to `username` for display and initials-only for the avatar (see
@@ -115,8 +116,8 @@ export const User = Schema.Struct({
   // check whether to still show it.
   statusText: Schema.NullOr(Schema.String),
   statusEmoji: Schema.NullOr(Schema.String),
-  statusExpiresAt: Schema.NullOr(Schema.Number),
-}).annotations({ identifier: "User" });
+  statusExpiresAt: Schema.NullOr(Schema.Finite),
+}).annotate({ identifier: "User" });
 export type User = typeof User.Type;
 
 // Sensible cap on username length (issue #46) — mirrors common site limits
@@ -124,16 +125,16 @@ export type User = typeof User.Type;
 // JWT claims and UI without an unbounded storage/DoS risk.
 export const MAX_USERNAME_LENGTH = 32;
 
-const Username = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_USERNAME_LENGTH),
+const Username = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_USERNAME_LENGTH),
 );
 
 // Mirrors MAX_USERNAME_LENGTH's rationale but roomier, since a display name
 // may hold a full "First Last" rather than a single token.
 export const MAX_DISPLAY_NAME_LENGTH = 64;
 
-const DisplayName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_DISPLAY_NAME_LENGTH),
+const DisplayName = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_DISPLAY_NAME_LENGTH),
 );
 
 // A generous ceiling — long enough for any real passphrase, but bounded so a
@@ -146,31 +147,31 @@ export const MAX_PASSWORD_LENGTH = 128;
 // longer recommends those; length is the stronger lever).
 export const MIN_PASSWORD_LENGTH = 8;
 
-const Password = Schema.NonEmptyString.pipe(
-  Schema.maxLength(MAX_PASSWORD_LENGTH),
+const Password = Schema.NonEmptyString.check(
+  Schema.isMaxLength(MAX_PASSWORD_LENGTH),
 );
 
 // Only applied where a password is being newly *set* (registration, password
 // change) — `Password` alone remains the decode schema for login and
 // `currentPassword`, so accounts created before this floor existed can still
 // authenticate with their existing (possibly shorter) password.
-const NewPassword = Password.pipe(Schema.minLength(MIN_PASSWORD_LENGTH));
+const NewPassword = Password.check(Schema.isMinLength(MIN_PASSWORD_LENGTH));
 
 export const RegisterBody = Schema.Struct({
   username: Username,
   password: NewPassword,
-}).annotations({ identifier: "RegisterBody" });
+}).annotate({ identifier: "RegisterBody" });
 
 export const LoginBody = Schema.Struct({
   username: Username,
   password: Password,
-}).annotations({ identifier: "LoginBody" });
+}).annotate({ identifier: "LoginBody" });
 
 export const LoginResponse = Schema.Struct({
   user: User,
   accessToken: Schema.String,
   refreshToken: Schema.String,
-}).annotations({ identifier: "LoginResponse" });
+}).annotate({ identifier: "LoginResponse" });
 export type LoginResponse = typeof LoginResponse.Type;
 
 // A well-formed token signed by this server is well under this (see
@@ -178,13 +179,13 @@ export type LoginResponse = typeof LoginResponse.Type;
 // verify() on.
 const MAX_REFRESH_TOKEN_LENGTH = 1024;
 
-const RefreshTokenValue = Schema.String.pipe(
-  Schema.maxLength(MAX_REFRESH_TOKEN_LENGTH),
+const RefreshTokenValue = Schema.String.check(
+  Schema.isMaxLength(MAX_REFRESH_TOKEN_LENGTH),
 );
 
 export const RefreshBody = Schema.Struct({
   refreshToken: RefreshTokenValue,
-}).annotations({ identifier: "RefreshBody" });
+}).annotate({ identifier: "RefreshBody" });
 
 // A refresh exchanges a valid refresh token for a new token pair — the
 // refresh token is rotated too rather than reused, so a client always holds
@@ -192,19 +193,19 @@ export const RefreshBody = Schema.Struct({
 export const RefreshResponse = Schema.Struct({
   accessToken: Schema.String,
   refreshToken: Schema.String,
-}).annotations({ identifier: "RefreshResponse" });
+}).annotate({ identifier: "RefreshResponse" });
 
 export const LogoutBody = Schema.Struct({
   refreshToken: RefreshTokenValue,
   // When true, revokes every refresh token belonging to the presented
   // token's user (all sessions/devices) instead of just this one.
   allSessions: Schema.optional(Schema.Boolean),
-}).annotations({ identifier: "LogoutBody" });
+}).annotate({ identifier: "LogoutBody" });
 
 export const ChangePasswordBody = Schema.Struct({
   currentPassword: Password,
   newPassword: NewPassword,
-}).annotations({ identifier: "ChangePasswordBody" });
+}).annotate({ identifier: "ChangePasswordBody" });
 
 // Full-replace body (mirrors `UpdatePostBody`/`UpdateChatBody`'s convention)
 // rather than a partial patch — `displayName`/`avatarUrl` are nullable so a
@@ -213,25 +214,25 @@ export const ChangePasswordBody = Schema.Struct({
 export const UpdateProfileBody = Schema.Struct({
   displayName: Schema.NullOr(DisplayName),
   avatarUrl: Schema.NullOr(AvatarUrl),
-}).annotations({ identifier: "UpdateProfileBody" });
+}).annotate({ identifier: "UpdateProfileBody" });
 
 // Deleting an account is irreversible, so — like `changePassword` — it
 // requires re-proving the current password rather than trusting the bearer
 // token alone.
 export const DeleteAccountBody = Schema.Struct({
   password: Password,
-}).annotations({ identifier: "DeleteAccountBody" });
+}).annotate({ identifier: "DeleteAccountBody" });
 
 export const UpdateUserRoleBody = Schema.Struct({
   role: UserRole,
-}).annotations({ identifier: "UpdateUserRoleBody" });
+}).annotate({ identifier: "UpdateUserRoleBody" });
 
 // Bounds a custom status message (issue #218) — short like a Slack/Discord
 // status, not a full post.
 export const MAX_STATUS_TEXT_LENGTH = 100;
 
-const StatusText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_STATUS_TEXT_LENGTH),
+const StatusText = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_STATUS_TEXT_LENGTH),
 );
 
 // Generous enough for any real emoji grapheme (including multi-codepoint
@@ -239,8 +240,8 @@ const StatusText = Schema.NonEmptyTrimmedString.pipe(
 // what's meant to be a single status icon.
 export const MAX_STATUS_EMOJI_LENGTH = 8;
 
-const StatusEmoji = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_STATUS_EMOJI_LENGTH),
+const StatusEmoji = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_STATUS_EMOJI_LENGTH),
 );
 
 // A status may optionally auto-expire — bounded generously (30 days), the
@@ -270,20 +271,23 @@ export const UpdateStatusBody = Schema.Struct({
   statusText: Schema.NullOr(StatusText),
   statusEmoji: Schema.NullOr(StatusEmoji),
   expiresInMinutes: Schema.optional(
-    Schema.Number.pipe(
-      Schema.int(),
-      Schema.between(1, MAX_STATUS_EXPIRES_IN_MINUTES),
+    Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isBetween({
+        minimum: 1,
+        maximum: MAX_STATUS_EXPIRES_IN_MINUTES,
+      }),
     ),
   ),
 })
-  .pipe(Schema.filter(requireStatusForExpiry))
-  .annotations({ identifier: "UpdateStatusBody" });
+  .check(Schema.makeFilter(requireStatusForExpiry))
+  .annotate({ identifier: "UpdateStatusBody" });
 
 // Privacy-control relationship kind (issue #219): "block" is the stronger
 // action (hides posts, mutes notifications, *and* blocks direct messaging
 // both ways), "mute" the softer one (hides posts + mutes notifications only).
 // See the comment on `userBlocks` in db/schema.ts.
-export const BlockType = Schema.Literal("block", "mute").annotations({
+export const BlockType = Schema.Literals(["block", "mute"]).annotate({
   identifier: "BlockType",
 });
 export type BlockType = typeof BlockType.Type;
@@ -293,15 +297,15 @@ export type BlockType = typeof BlockType.Type;
 // the existing relationship rather than creating a second one.
 export const BlockUserBody = Schema.Struct({
   type: BlockType,
-}).annotations({ identifier: "BlockUserBody" });
+}).annotate({ identifier: "BlockUserBody" });
 
 // One entry in `GET /users/me/blocks` — the blocked/muted user together with
 // which action is in effect and when it was set (epoch ms), newest first.
 export const BlockedUser = Schema.Struct({
   user: User,
   type: BlockType,
-  createdAt: Schema.Number,
-}).annotations({ identifier: "BlockedUser" });
+  createdAt: Schema.Finite,
+}).annotate({ identifier: "BlockedUser" });
 export type BlockedUser = typeof BlockedUser.Type;
 
 // Raised for block/mute domain-rule violations that aren't a 404 — currently
@@ -309,20 +313,27 @@ export type BlockedUser = typeof BlockedUser.Type;
 export class InvalidBlockRequest extends Schema.TaggedError<InvalidBlockRequest>()(
   "InvalidBlockRequest",
   { message: Schema.String },
+  { httpApiStatus: 400 },
 ) {}
 
-export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
-  message: Schema.String,
-}) {}
+export class NotFound extends Schema.TaggedError<NotFound>()(
+  "NotFound",
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {}
 
 export class UsernameTaken extends Schema.TaggedError<UsernameTaken>()(
   "UsernameTaken",
   { message: Schema.String },
+  { httpApiStatus: 409 },
 ) {}
 
 export class InvalidCredentials extends Schema.TaggedError<InvalidCredentials>()(
   "InvalidCredentials",
   { message: Schema.String },
+  { httpApiStatus: 401 },
 ) {}
 
 // Raised when a caller has exceeded an endpoint's rate limit (see
@@ -331,12 +342,17 @@ export class InvalidCredentials extends Schema.TaggedError<InvalidCredentials>()
 // be used to tell them apart.
 export class TooManyRequests extends Schema.TaggedError<TooManyRequests>()(
   "TooManyRequests",
-  { message: Schema.String, retryAfterSeconds: Schema.Number },
+  { message: Schema.String, retryAfterSeconds: Schema.Finite },
+  { httpApiStatus: 429 },
 ) {}
 
-export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
-  message: Schema.String,
-}) {}
+export class Forbidden extends Schema.TaggedError<Forbidden>()(
+  "Forbidden",
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 403 },
+) {}
 
 // Raised for chat domain-rule violations that aren't a 404/403 — messaging
 // yourself, exceeding the group participant cap, editing a direct chat's
@@ -344,6 +360,7 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
 export class InvalidChatRequest extends Schema.TaggedError<InvalidChatRequest>()(
   "InvalidChatRequest",
   { message: Schema.String },
+  { httpApiStatus: 400 },
 ) {}
 
 // Raised for a malformed `listPosts` pagination cursor — mirrors
@@ -351,6 +368,7 @@ export class InvalidChatRequest extends Schema.TaggedError<InvalidChatRequest>()
 export class InvalidPostsRequest extends Schema.TaggedError<InvalidPostsRequest>()(
   "InvalidPostsRequest",
   { message: Schema.String },
+  { httpApiStatus: 400 },
 ) {}
 
 // Raised for comment/reply domain-rule violations that aren't a 404/403 — a
@@ -359,6 +377,7 @@ export class InvalidPostsRequest extends Schema.TaggedError<InvalidPostsRequest>
 export class InvalidCommentRequest extends Schema.TaggedError<InvalidCommentRequest>()(
   "InvalidCommentRequest",
   { message: Schema.String },
+  { httpApiStatus: 400 },
 ) {}
 
 // Raised for a malformed full-text-search pagination cursor (issue #224) —
@@ -369,6 +388,7 @@ export class InvalidCommentRequest extends Schema.TaggedError<InvalidCommentRequ
 export class InvalidSearchRequest extends Schema.TaggedError<InvalidSearchRequest>()(
   "InvalidSearchRequest",
   { message: Schema.String },
+  { httpApiStatus: 400 },
 ) {}
 
 // Uploaded file metadata (issue #221) — attached to a post/message via
@@ -378,18 +398,18 @@ export class InvalidSearchRequest extends Schema.TaggedError<InvalidSearchReques
 // every read, never stored, so it can't go stale or outlive its own access
 // check.
 export const Attachment = Schema.Struct({
-  id: Schema.Number,
+  id: Schema.Finite,
   filename: Schema.String,
   mimeType: Schema.String,
-  size: Schema.Number,
+  size: Schema.Finite,
   url: Schema.String,
   // Set only for image attachments — the dimensions of the scaled-down
   // variant actually stored/served (not the original upload) and a BlurHash
   // string (https://blurha.sh/) the frontend decodes into a low-res
   // placeholder shown while the full image loads (issue #248). Null for
   // non-image attachments and for rows uploaded before this was added.
-  width: Schema.NullOr(Schema.Number),
-  height: Schema.NullOr(Schema.Number),
+  width: Schema.NullOr(Schema.Finite),
+  height: Schema.NullOr(Schema.Finite),
   blurhash: Schema.NullOr(Schema.String),
   // Set only for audio attachments — a precomputed amplitude level (0..100)
   // per equal slice of the clip, and the clip's length in milliseconds,
@@ -397,9 +417,9 @@ export const Attachment = Schema.Struct({
   // AudioProcessing.ts). The player draws these levels as its waveform; a
   // reader that gets `null` (a non-audio attachment, or audio uploaded
   // before this was added) falls back to decoding the clip itself.
-  waveform: Schema.NullOr(Schema.Array(Schema.Number)),
-  durationMs: Schema.NullOr(Schema.Number),
-}).annotations({ identifier: "Attachment" });
+  waveform: Schema.NullOr(Schema.Array(Schema.Finite)),
+  durationMs: Schema.NullOr(Schema.Finite),
+}).annotate({ identifier: "Attachment" });
 export type Attachment = typeof Attachment.Type;
 
 // Mime types `POST /attachments` accepts — deliberately curated rather than
@@ -438,11 +458,13 @@ export const MAX_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024;
 export class UnsupportedAttachmentType extends Schema.TaggedError<UnsupportedAttachmentType>()(
   "UnsupportedAttachmentType",
   { message: Schema.String },
+  { httpApiStatus: 415 },
 ) {}
 
 export class AttachmentTooLarge extends Schema.TaggedError<AttachmentTooLarge>()(
   "AttachmentTooLarge",
   { message: Schema.String },
+  { httpApiStatus: 413 },
 ) {}
 
 // Raised when an upload would push a user's total stored-attachment bytes
@@ -453,6 +475,7 @@ export class AttachmentTooLarge extends Schema.TaggedError<AttachmentTooLarge>()
 export class AttachmentQuotaExceeded extends Schema.TaggedError<AttachmentQuotaExceeded>()(
   "AttachmentQuotaExceeded",
   { message: Schema.String },
+  { httpApiStatus: 413 },
 ) {}
 
 // Raised by `POST /users/me/avatar` (issue #269) for anything wrong with the
@@ -465,20 +488,22 @@ export class AttachmentQuotaExceeded extends Schema.TaggedError<AttachmentQuotaE
 export class InvalidAvatarUpload extends Schema.TaggedError<InvalidAvatarUpload>()(
   "InvalidAvatarUpload",
   { message: Schema.String },
+  { httpApiStatus: 400 },
 ) {}
 
 export class AvatarTooLarge extends Schema.TaggedError<AvatarTooLarge>()(
   "AvatarTooLarge",
   { message: Schema.String },
+  { httpApiStatus: 413 },
 ) {}
 
 // Content types a post's body can hold. Extend this union (and the handler's
 // per-type validation, if any is ever needed) to support new post kinds.
-export const PostContentType = Schema.Literal(
+export const PostContentType = Schema.Literals([
   "text",
   "image_url",
   "attachment",
-).annotations({
+]).annotate({
   identifier: "PostContentType",
 });
 export type PostContentType = typeof PostContentType.Type;
@@ -487,8 +512,8 @@ export type PostContentType = typeof PostContentType.Type;
 // fitting a long-form text post or an image URL.
 const MAX_POST_CONTENT_LENGTH = 10_000;
 
-const PostContent = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_POST_CONTENT_LENGTH),
+const PostContent = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_POST_CONTENT_LENGTH),
 );
 
 // `content` is rendered directly as an `<img src>` (MessageBubble.tsx,
@@ -515,7 +540,7 @@ const requireAllowedImageUrl = (body: {
 // column comment in db/schema.ts for why the DB itself stays unconstrained
 // (so a future custom-emoji set doesn't need a migration to loosen it).
 export const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"] as const;
-export const ReactionEmoji = Schema.Literal(...REACTION_EMOJIS).annotations({
+export const ReactionEmoji = Schema.Literals(REACTION_EMOJIS).annotate({
   identifier: "ReactionEmoji",
 });
 export type ReactionEmoji = typeof ReactionEmoji.Type;
@@ -527,9 +552,9 @@ export type ReactionEmoji = typeof ReactionEmoji.Type;
 // "add a reaction" picker already knows the full set independently).
 export const ReactionSummary = Schema.Struct({
   emoji: Schema.String,
-  count: Schema.Number,
+  count: Schema.Finite,
   reactedByMe: Schema.Boolean,
-}).annotations({ identifier: "ReactionSummary" });
+}).annotate({ identifier: "ReactionSummary" });
 export type ReactionSummary = typeof ReactionSummary.Type;
 
 // Cross-field check shared by post/message create+update bodies:
@@ -547,14 +572,14 @@ const requireAttachmentId = (body: {
 };
 
 export const Post = Schema.Struct({
-  id: Schema.Number,
-  authorId: Schema.Number,
+  id: Schema.Finite,
+  authorId: Schema.Finite,
   contentType: PostContentType,
   content: Schema.String,
   // Set only when contentType is "attachment" — see `Attachment` above.
   attachment: Schema.NullOr(Attachment),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
   // Engagement computed on read (see EngagementHandler.ts / PostsHandler.ts)
   // rather than stored — one entry per emoji this post has at least one
   // reaction from, so the feed can render reaction pills (with the current
@@ -565,8 +590,8 @@ export const Post = Schema.Struct({
   // the feed can surface a "Comments · N" count on each card without having to
   // open the thread (issue #306). Additive/backward-compatible: a client that
   // predates this field simply ignores it.
-  commentCount: Schema.Number,
-}).annotations({ identifier: "Post" });
+  commentCount: Schema.Finite,
+}).annotate({ identifier: "Post" });
 export type Post = typeof Post.Type;
 
 export const CreatePostBody = Schema.Struct({
@@ -574,24 +599,24 @@ export const CreatePostBody = Schema.Struct({
   content: PostContent,
   // Id of a previously-uploaded attachment (`POST /attachments`) owned by
   // the caller — required exactly when contentType is "attachment".
-  attachmentId: Schema.optional(Schema.Number),
+  attachmentId: Schema.optional(Schema.Finite),
 })
-  .pipe(
-    Schema.filter(requireAllowedImageUrl),
-    Schema.filter(requireAttachmentId),
+  .check(
+    Schema.makeFilter(requireAllowedImageUrl),
+    Schema.makeFilter(requireAttachmentId),
   )
-  .annotations({ identifier: "CreatePostBody" });
+  .annotate({ identifier: "CreatePostBody" });
 
 export const UpdatePostBody = Schema.Struct({
   contentType: PostContentType,
   content: PostContent,
-  attachmentId: Schema.optional(Schema.Number),
+  attachmentId: Schema.optional(Schema.Finite),
 })
-  .pipe(
-    Schema.filter(requireAllowedImageUrl),
-    Schema.filter(requireAttachmentId),
+  .check(
+    Schema.makeFilter(requireAllowedImageUrl),
+    Schema.makeFilter(requireAttachmentId),
   )
-  .annotations({ identifier: "UpdatePostBody" });
+  .annotate({ identifier: "UpdatePostBody" });
 
 export const DEFAULT_POSTS_LIMIT = 20;
 export const MAX_POSTS_LIMIT = 100;
@@ -624,22 +649,21 @@ export const MAX_POSTS_LIMIT = 100;
 export const PostsPageQuery = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.NumberFromString.pipe(
-      Schema.int(),
-      Schema.between(1, MAX_POSTS_LIMIT),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_POSTS_LIMIT }),
     ),
   ),
 });
 
 export const PostsPage = Schema.Struct({
   posts: Schema.Array(Post),
-  limit: Schema.Number,
+  limit: Schema.Finite,
   // Opaque cursor for the next page, or null once the current page reaches
   // the end of the list. Derived from fetching one row past `limit` rather
   // than a separate `COUNT(*)` over the full result set — the feed only ever
   // needs to know whether another page exists (issue #51).
   nextCursor: Schema.NullOr(Schema.String),
-}).annotations({ identifier: "PostsPage" });
+}).annotate({ identifier: "PostsPage" });
 
 // Response for `GET /users/:id/posts` (issue #316: the profile page shows a
 // recent-activity feed instead of being a dead end). Same shape/pagination as
@@ -650,16 +674,16 @@ export const PostsPage = Schema.Struct({
 // header.
 export const UserPostsPage = Schema.Struct({
   posts: Schema.Array(Post),
-  limit: Schema.Number,
+  limit: Schema.Finite,
   nextCursor: Schema.NullOr(Schema.String),
-  totalCount: Schema.Number,
-}).annotations({ identifier: "UserPostsPage" });
+  totalCount: Schema.Finite,
+}).annotate({ identifier: "UserPostsPage" });
 
 // Shorter than a post's cap — comments are conversational, not long-form.
 export const MAX_COMMENT_CONTENT_LENGTH = 2_000;
 
-const CommentContent = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_COMMENT_CONTENT_LENGTH),
+const CommentContent = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_COMMENT_CONTENT_LENGTH),
 );
 
 // A comment on a post, or a reply to a comment (a reply is just a comment
@@ -667,37 +691,37 @@ const CommentContent = Schema.NonEmptyTrimmedString.pipe(
 // capped at depth 2, so a reply's parent is always a top-level comment.
 // `reactions` mirrors `Post`'s — computed on read, not stored.
 export const Comment = Schema.Struct({
-  id: Schema.Number,
-  postId: Schema.Number,
-  parentCommentId: Schema.NullOr(Schema.Number),
-  authorId: Schema.Number,
+  id: Schema.Finite,
+  postId: Schema.Finite,
+  parentCommentId: Schema.NullOr(Schema.Finite),
+  authorId: Schema.Finite,
   content: Schema.String,
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
   reactions: Schema.Array(ReactionSummary),
-}).annotations({ identifier: "Comment" });
+}).annotate({ identifier: "Comment" });
 export type Comment = typeof Comment.Type;
 
 export const CreateCommentBody = Schema.Struct({
   content: CommentContent,
-}).annotations({ identifier: "CreateCommentBody" });
+}).annotate({ identifier: "CreateCommentBody" });
 
 export const UpdateCommentBody = Schema.Struct({
   content: CommentContent,
-}).annotations({ identifier: "UpdateCommentBody" });
+}).annotate({ identifier: "UpdateCommentBody" });
 
 // Payload for the add/remove-reaction endpoints (on posts and comments
 // alike): which of the standard emojis this reaction is/was.
 export const ReactionBody = Schema.Struct({
   emoji: ReactionEmoji,
-}).annotations({ identifier: "ReactionBody" });
+}).annotate({ identifier: "ReactionBody" });
 
 // Returned by the add/remove-reaction endpoints: the target's full new set of
 // per-emoji reaction summaries, so the client can reconcile an optimistic
 // toggle without a follow-up read.
 export const ReactionState = Schema.Struct({
   reactions: Schema.Array(ReactionSummary),
-}).annotations({ identifier: "ReactionState" });
+}).annotate({ identifier: "ReactionState" });
 export type ReactionState = typeof ReactionState.Type;
 
 export const DEFAULT_COMMENTS_LIMIT = 20;
@@ -711,25 +735,24 @@ export const MAX_COMMENTS_LIMIT = 100;
 export const CommentsPageQuery = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.NumberFromString.pipe(
-      Schema.int(),
-      Schema.between(1, MAX_COMMENTS_LIMIT),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_COMMENTS_LIMIT }),
     ),
   ),
 });
 
 export const CommentsPage = Schema.Struct({
   comments: Schema.Array(Comment),
-  limit: Schema.Number,
+  limit: Schema.Finite,
   // Opaque cursor for the next page, or null once the thread is exhausted —
   // same fetch-one-past-`limit` trick as `PostsPage.nextCursor`.
   nextCursor: Schema.NullOr(Schema.String),
-}).annotations({ identifier: "CommentsPage" });
+}).annotate({ identifier: "CommentsPage" });
 
 // A chat is either a "direct" (exactly two participants, no title — the UI
 // derives a name from the other participant) or a "group" chat (2-20
 // participants, a title set at creation and changeable by its creator).
-export const ChatType = Schema.Literal("direct", "group").annotations({
+export const ChatType = Schema.Literals(["direct", "group"]).annotate({
   identifier: "ChatType",
 });
 export type ChatType = typeof ChatType.Type;
@@ -738,8 +761,8 @@ export type ChatType = typeof ChatType.Type;
 export const MAX_GROUP_PARTICIPANTS = 20;
 const MAX_GROUP_TITLE_LENGTH = 100;
 
-const GroupTitle = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_GROUP_TITLE_LENGTH),
+const GroupTitle = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_GROUP_TITLE_LENGTH),
 );
 
 // Per-chat role (issue #220) — distinct from `User.role` (site-wide admin).
@@ -748,13 +771,13 @@ const GroupTitle = Schema.NonEmptyTrimmedString.pipe(
 // db/schema.ts); "admin" is granted by the owner via `updateParticipantRole`
 // and, alongside "owner", can rename the group, add/remove participants, and
 // delete any message in it.
-export const ChatRole = Schema.Literal("owner", "admin", "member").annotations({
+export const ChatRole = Schema.Literals(["owner", "admin", "member"]).annotate({
   identifier: "ChatRole",
 });
 export type ChatRole = typeof ChatRole.Type;
 
 export const ChatParticipant = Schema.Struct({
-  userId: Schema.Number,
+  userId: Schema.Finite,
   username: Schema.String,
   displayName: Schema.NullOr(Schema.String),
   // Same avatar fields as `User` above, mirrored here so a chat's participant
@@ -768,25 +791,25 @@ export const ChatParticipant = Schema.Struct({
   // it without a separate per-user lookup.
   statusText: Schema.NullOr(Schema.String),
   statusEmoji: Schema.NullOr(Schema.String),
-  statusExpiresAt: Schema.NullOr(Schema.Number),
-}).annotations({ identifier: "ChatParticipant" });
+  statusExpiresAt: Schema.NullOr(Schema.Finite),
+}).annotate({ identifier: "ChatParticipant" });
 export type ChatParticipant = typeof ChatParticipant.Type;
 
 // Content types a message's body can hold — mirrors `PostContentType` but
 // kept as its own union so messages and posts can diverge later.
-export const MessageContentType = Schema.Literal(
+export const MessageContentType = Schema.Literals([
   "text",
   "image_url",
   "attachment",
-).annotations({ identifier: "MessageContentType" });
+]).annotate({ identifier: "MessageContentType" });
 export type MessageContentType = typeof MessageContentType.Type;
 
 // Shorter than a post's cap — chat messages are conversational, not
 // long-form content, so a generous-but-bounded limit keeps bubbles sane.
 export const MAX_MESSAGE_CONTENT_LENGTH = 4_000;
 
-const MessageContent = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_MESSAGE_CONTENT_LENGTH),
+const MessageContent = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_MESSAGE_CONTENT_LENGTH),
 );
 
 // How much of a quoted parent message's content is echoed in a reply's
@@ -807,18 +830,18 @@ export const PARENT_MESSAGE_PREVIEW_LENGTH = 120;
 // PARENT_MESSAGE_PREVIEW_LENGTH; `contentType` lets the client show "Photo"/
 // "Attachment" instead of a raw URL/filename for non-text parents.
 export const ParentMessagePreview = Schema.Struct({
-  id: Schema.Number,
-  senderId: Schema.Number,
+  id: Schema.Finite,
+  senderId: Schema.Finite,
   senderName: Schema.String,
   contentType: MessageContentType,
   content: Schema.String,
-}).annotations({ identifier: "ParentMessagePreview" });
+}).annotate({ identifier: "ParentMessagePreview" });
 export type ParentMessagePreview = typeof ParentMessagePreview.Type;
 
 export const Message = Schema.Struct({
-  id: Schema.Number,
-  chatId: Schema.Number,
-  senderId: Schema.Number,
+  id: Schema.Finite,
+  chatId: Schema.Finite,
+  senderId: Schema.Finite,
   contentType: MessageContentType,
   content: Schema.String,
   // Set only when contentType is "attachment" — see `Attachment` above.
@@ -827,12 +850,12 @@ export const Message = Schema.Struct({
   // — null for a normal (non-reply) message, or when the quoted message has
   // since been deleted (the FK is `set null`, see db/schema.ts).
   parentMessage: Schema.NullOr(ParentMessagePreview),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
   // Ids of participants (other than the sender) who have read this message —
   // read state is tracked per message/user, not as a single chat-wide flag,
   // so the UI can show WhatsApp/Telegram-style read receipts.
-  readByUserIds: Schema.Array(Schema.Number),
+  readByUserIds: Schema.Array(Schema.Finite),
   // Emoji reactions on this message (issue #216) — computed on read (see
   // reactions.ts) rather than stored, same convention as `Post.reactions`/
   // `Comment.reactions`: one entry per emoji with at least one reaction.
@@ -844,30 +867,30 @@ export const Message = Schema.Struct({
   // (never reflects anyone else's stars). Both default to false.
   pinned: Schema.Boolean,
   starred: Schema.Boolean,
-}).annotations({ identifier: "Message" });
+}).annotate({ identifier: "Message" });
 export type Message = typeof Message.Type;
 
 export const Chat = Schema.Struct({
-  id: Schema.Number,
+  id: Schema.Finite,
   type: ChatType,
   title: Schema.NullOr(Schema.String),
   // Null once the creator's account has been deleted (see db/schema.ts) —
   // the chat and its history survive, but creator-only actions (rename, add
   // participants) become unavailable to everyone.
-  createdBy: Schema.NullOr(Schema.Number),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdBy: Schema.NullOr(Schema.Finite),
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
   // Monotonically increases on every participant-visible change to this chat
   // (see db/schema.ts). Also carried on the `chat_updated` realtime event, so
   // a client can compare the two to tell whether it's missed an update
   // (issue #55) rather than only refetching whenever the next event happens
   // to arrive.
-  version: Schema.Number,
+  version: Schema.Finite,
   participants: Schema.Array(ChatParticipant),
   lastMessage: Schema.NullOr(Message),
   // Messages in this chat sent by someone else that the current user hasn't
   // read yet — computed relative to whoever is making the request.
-  unreadCount: Schema.Number,
+  unreadCount: Schema.Finite,
   // Uploaded-and-cropped group avatar, set via `POST /chats/:id/avatar` and
   // cleared via `DELETE /chats/:id/avatar` — always null for a direct chat
   // (the UI renders the other participant's own avatar instead, same as
@@ -876,47 +899,47 @@ export const Chat = Schema.Struct({
   // those there's no `avatarUrl` counterpart here: a group avatar only ever
   // comes from an upload, not a linked external image.
   avatarVariants: Schema.NullOr(AvatarVariants),
-}).annotations({ identifier: "Chat" });
+}).annotate({ identifier: "Chat" });
 export type Chat = typeof Chat.Type;
 
 export const CreateDirectChatBody = Schema.Struct({
-  userId: Schema.Number,
-}).annotations({ identifier: "CreateDirectChatBody" });
+  userId: Schema.Finite,
+}).annotate({ identifier: "CreateDirectChatBody" });
 
 export const CreateGroupChatBody = Schema.Struct({
   title: GroupTitle,
   // The creator is added automatically — this is everyone *else*, hence one
   // short of the overall cap.
-  participantIds: Schema.Array(Schema.Number).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_GROUP_PARTICIPANTS - 1),
+  participantIds: Schema.Array(Schema.Finite).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_GROUP_PARTICIPANTS - 1),
   ),
-}).annotations({ identifier: "CreateGroupChatBody" });
+}).annotate({ identifier: "CreateGroupChatBody" });
 
 export const UpdateChatBody = Schema.Struct({
   title: GroupTitle,
-}).annotations({ identifier: "UpdateChatBody" });
+}).annotate({ identifier: "UpdateChatBody" });
 
 export const AddParticipantsBody = Schema.Struct({
   // A group can never hold more than MAX_GROUP_PARTICIPANTS total, so a
   // single request can never legitimately add more than that minus the
   // existing creator — mirrors CreateGroupChatBody's cap.
-  participantIds: Schema.Array(Schema.Number).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_GROUP_PARTICIPANTS - 1),
+  participantIds: Schema.Array(Schema.Finite).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_GROUP_PARTICIPANTS - 1),
   ),
-}).annotations({ identifier: "AddParticipantsBody" });
+}).annotate({ identifier: "AddParticipantsBody" });
 
 export const TransferOwnershipBody = Schema.Struct({
-  userId: Schema.Number,
-}).annotations({ identifier: "TransferOwnershipBody" });
+  userId: Schema.Finite,
+}).annotate({ identifier: "TransferOwnershipBody" });
 
 // "owner" is deliberately excluded — appointing an owner goes through
 // `POST /chats/:id/owner` (`TransferOwnershipBody`) instead, since that also
 // has to move `Chat.createdBy` and demote the previous owner.
 export const UpdateParticipantRoleBody = Schema.Struct({
-  role: Schema.Literal("admin", "member"),
-}).annotations({ identifier: "UpdateParticipantRoleBody" });
+  role: Schema.Literals(["admin", "member"]),
+}).annotate({ identifier: "UpdateParticipantRoleBody" });
 
 // Total invites that may exist (active + expired + revoked) for a single
 // chat — bounds the table's per-chat growth from repeated
@@ -926,26 +949,32 @@ export const MAX_INVITES_PER_CHAT = 50;
 export const CreateChatInviteBody = Schema.Struct({
   // Omitted means "never expires".
   expiresInHours: Schema.optional(
-    Schema.Number.pipe(Schema.int(), Schema.between(1, 24 * 30)),
+    Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 1, maximum: 24 * 30 }),
+    ),
   ),
   // Omitted means "unlimited uses" (still bounded by the chat's own
   // MAX_GROUP_PARTICIPANTS cap at redemption time).
   maxUses: Schema.optional(
-    Schema.Number.pipe(Schema.int(), Schema.between(1, MAX_GROUP_PARTICIPANTS)),
+    Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 1, maximum: MAX_GROUP_PARTICIPANTS }),
+    ),
   ),
-}).annotations({ identifier: "CreateChatInviteBody" });
+}).annotate({ identifier: "CreateChatInviteBody" });
 
 export const ChatInvite = Schema.Struct({
-  id: Schema.Number,
-  chatId: Schema.Number,
+  id: Schema.Finite,
+  chatId: Schema.Finite,
   code: Schema.String,
-  createdBy: Schema.Number,
-  createdAt: Schema.Number,
-  expiresAt: Schema.NullOr(Schema.Number),
-  maxUses: Schema.NullOr(Schema.Number),
-  useCount: Schema.Number,
-  revokedAt: Schema.NullOr(Schema.Number),
-}).annotations({ identifier: "ChatInvite" });
+  createdBy: Schema.Finite,
+  createdAt: Schema.Finite,
+  expiresAt: Schema.NullOr(Schema.Finite),
+  maxUses: Schema.NullOr(Schema.Finite),
+  useCount: Schema.Finite,
+  revokedAt: Schema.NullOr(Schema.Finite),
+}).annotate({ identifier: "ChatInvite" });
 export type ChatInvite = typeof ChatInvite.Type;
 
 export const CreateMessageBody = Schema.Struct({
@@ -953,41 +982,41 @@ export const CreateMessageBody = Schema.Struct({
   content: MessageContent,
   // Id of a previously-uploaded attachment (`POST /attachments`) owned by
   // the caller — required exactly when contentType is "attachment".
-  attachmentId: Schema.optional(Schema.Number),
+  attachmentId: Schema.optional(Schema.Finite),
   // Id of the message this one replies to (issue #217). Omitted for a normal
   // message. Validated server-side to reference a message in this same chat —
   // a parent from another chat (or a nonexistent one) 404s (see
   // ChatsHandler.ts).
-  parentMessageId: Schema.optional(Schema.Number),
+  parentMessageId: Schema.optional(Schema.Finite),
 })
-  .pipe(
-    Schema.filter(requireAllowedImageUrl),
-    Schema.filter(requireAttachmentId),
+  .check(
+    Schema.makeFilter(requireAllowedImageUrl),
+    Schema.makeFilter(requireAttachmentId),
   )
-  .annotations({ identifier: "CreateMessageBody" });
+  .annotate({ identifier: "CreateMessageBody" });
 
 export const UpdateMessageBody = Schema.Struct({
   contentType: MessageContentType,
   content: MessageContent,
-  attachmentId: Schema.optional(Schema.Number),
+  attachmentId: Schema.optional(Schema.Finite),
 })
-  .pipe(
-    Schema.filter(requireAllowedImageUrl),
-    Schema.filter(requireAttachmentId),
+  .check(
+    Schema.makeFilter(requireAllowedImageUrl),
+    Schema.makeFilter(requireAttachmentId),
   )
-  .annotations({ identifier: "UpdateMessageBody" });
+  .annotate({ identifier: "UpdateMessageBody" });
 
 export const MarkReadBody = Schema.Struct({
-  messageId: Schema.Number,
-}).annotations({ identifier: "MarkReadBody" });
+  messageId: Schema.Finite,
+}).annotate({ identifier: "MarkReadBody" });
 
 // Which message to pin, for `POST /chats/:id/pins` (issue #223). Unpinning
 // takes the message id in the path (`DELETE /chats/:id/pins/:messageId`)
 // instead, so it needs no body. Validated server-side to reference a message
 // in this same chat (see ChatsHandler.ts).
 export const PinMessageBody = Schema.Struct({
-  messageId: Schema.Number,
-}).annotations({ identifier: "PinMessageBody" });
+  messageId: Schema.Finite,
+}).annotate({ identifier: "PinMessageBody" });
 
 export const DEFAULT_MESSAGES_LIMIT = 30;
 export const MAX_MESSAGES_LIMIT = 100;
@@ -1007,16 +1036,15 @@ export const MessagesPageQuery = Schema.Struct({
   before: Schema.optional(Schema.String),
   after: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.NumberFromString.pipe(
-      Schema.int(),
-      Schema.between(1, MAX_MESSAGES_LIMIT),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_MESSAGES_LIMIT }),
     ),
   ),
 });
 
 export const MessagesPage = Schema.Struct({
   messages: Schema.Array(Message),
-  limit: Schema.Number,
+  limit: Schema.Finite,
   // Whether messages exist before/after the first/last row in this page —
   // derived from fetching one row past `limit` rather than a `COUNT(*)`, same
   // trick as `PostsPage.nextCursor` (issue #51).
@@ -1026,7 +1054,7 @@ export const MessagesPage = Schema.Struct({
   // in that direction to fetch.
   earliestCursor: Schema.NullOr(Schema.String),
   latestCursor: Schema.NullOr(Schema.String),
-}).annotations({ identifier: "MessagesPage" });
+}).annotate({ identifier: "MessagesPage" });
 
 // Below this, a search isn't narrow enough to be worth running for a regular
 // user — keeps the query cost and result size from growing with the user
@@ -1045,7 +1073,7 @@ export const MAX_USER_SEARCH_QUERY_LENGTH = 64;
 // `minLength` here (see `MIN_USER_SEARCH_QUERY_LENGTH` above) — an empty `q`
 // is how an admin lists everyone.
 export const UserSearchQuery = Schema.Struct({
-  q: Schema.Trim.pipe(Schema.maxLength(MAX_USER_SEARCH_QUERY_LENGTH)),
+  q: Schema.Trim.check(Schema.isMaxLength(MAX_USER_SEARCH_QUERY_LENGTH)),
 });
 
 // Raised by `searchUsers` when a non-admin caller's query is shorter than
@@ -1053,6 +1081,7 @@ export const UserSearchQuery = Schema.Struct({
 export class InvalidUserSearchRequest extends Schema.TaggedError<InvalidUserSearchRequest>()(
   "InvalidUserSearchRequest",
   { message: Schema.String },
+  { httpApiStatus: 400 },
 ) {}
 
 // How many usernames one `GET /users/by-username` call may resolve (issue
@@ -1071,7 +1100,7 @@ export const MAX_USERNAME_LOOKUP_LENGTH =
 // bound here. Left un-`identifier`-annotated for the same reason as
 // `UserSearchQuery` above (see CLAUDE.md).
 export const UsernameLookupQuery = Schema.Struct({
-  usernames: Schema.Trim.pipe(Schema.maxLength(MAX_USERNAME_LOOKUP_LENGTH)),
+  usernames: Schema.Trim.check(Schema.isMaxLength(MAX_USERNAME_LOOKUP_LENGTH)),
 });
 
 // Raised by `lookupUsersByUsername` when a caller asks for more than
@@ -1082,6 +1111,7 @@ export const UsernameLookupQuery = Schema.Struct({
 export class InvalidUsernameLookupRequest extends Schema.TaggedError<InvalidUsernameLookupRequest>()(
   "InvalidUsernameLookupRequest",
   { message: Schema.String },
+  { httpApiStatus: 400 },
 ) {}
 
 // Mime types `POST /users/me/avatar` accepts (issue #269) — narrower than
@@ -1107,14 +1137,19 @@ export const MAX_AVATAR_UPLOAD_SIZE_BYTES = 8 * 1024 * 1024;
 // so an ordinary too-large upload trips the handler's precise, typed
 // AvatarTooLarge (413) check instead of a generic 400 from the multipart
 // parser itself.
-const UploadAvatarBody = HttpApiSchema.Multipart(
-  Schema.Struct({
-    file: Multipart.SingleFileSchema,
-    x: Schema.NumberFromString.pipe(Schema.int(), Schema.nonNegative()),
-    y: Schema.NumberFromString.pipe(Schema.int(), Schema.nonNegative()),
-    size: Schema.NumberFromString.pipe(Schema.int(), Schema.positive()),
-  }),
-  { maxFileSize: Option.some(MAX_AVATAR_UPLOAD_SIZE_BYTES * 2) },
+const UploadAvatarBody = Schema.Struct({
+  file: Multipart.SingleFileSchema,
+  x: Schema.FiniteFromString.check(
+    Schema.isInt(),
+    Schema.isGreaterThanOrEqualTo(0),
+  ),
+  y: Schema.FiniteFromString.check(
+    Schema.isInt(),
+    Schema.isGreaterThanOrEqualTo(0),
+  ),
+  size: Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThan(0)),
+}).pipe(
+  HttpApiSchema.asMultipart({ maxFileSize: MAX_AVATAR_UPLOAD_SIZE_BYTES * 2 }),
 );
 
 const UsersGroup = HttpApiGroup.make("users")
@@ -1124,11 +1159,11 @@ const UsersGroup = HttpApiGroup.make("users")
     // only search results for a query of at least
     // `MIN_USER_SEARCH_QUERY_LENGTH` characters — except for admins, who can
     // pass a shorter (including empty) `q` to browse the full directory.
-    HttpApiEndpoint.get("searchUsers", "/users/search")
-      .setUrlParams(UserSearchQuery)
-      .addSuccess(Schema.Array(User))
-      .addError(InvalidUserSearchRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("searchUsers", "/users/search", {
+      query: UserSearchQuery,
+      success: Schema.Array(User),
+      error: InvalidUserSearchRequest,
+    }).middleware(Authentication),
   )
   .add(
     // Resolves a batch of `@username` mentions to the users they refer to
@@ -1139,60 +1174,60 @@ const UsersGroup = HttpApiGroup.make("users")
     // the case-insensitive uniqueness of `username` itself (issue #175).
     // Registered ahead of `getUser` so `/users/by-username` isn't first
     // matched against `/users/:id`.
-    HttpApiEndpoint.get("lookupUsersByUsername", "/users/by-username")
-      .setUrlParams(UsernameLookupQuery)
-      .addSuccess(Schema.Array(User))
-      .addError(InvalidUsernameLookupRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("lookupUsersByUsername", "/users/by-username", {
+      query: UsernameLookupQuery,
+      success: Schema.Array(User),
+      error: InvalidUsernameLookupRequest,
+    }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.get("getUser", "/users/:id")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .addSuccess(User)
-      .addError(NotFound, { status: 404 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("getUser", "/users/:id", {
+      params: { id: Schema.Int },
+      success: User,
+      error: NotFound,
+    }).middleware(Authentication),
   )
   .add(
     // Recent posts by this user, newest-first (issue #316) — the data
     // backing the profile page's activity feed. Same keyset pagination as
     // `listPosts`, but pre-filtered to one author instead of the whole feed.
-    HttpApiEndpoint.get("listUserPosts", "/users/:id/posts")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .setUrlParams(PostsPageQuery)
-      .addSuccess(UserPostsPage)
-      .addError(NotFound, { status: 404 })
-      .addError(InvalidPostsRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listUserPosts", "/users/:id/posts", {
+      params: { id: Schema.Int },
+      query: PostsPageQuery,
+      success: UserPostsPage,
+      error: [NotFound, InvalidPostsRequest],
+    }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.post("register", "/users/register")
-      .setPayload(RegisterBody)
-      .addSuccess(User, { status: 201 })
-      .addError(UsernameTaken, { status: 409 })
-      .addError(TooManyRequests, { status: 429 }),
+    HttpApiEndpoint.post("register", "/users/register", {
+      payload: RegisterBody,
+      success: User.pipe(HttpApiSchema.status(201)),
+      error: [UsernameTaken, TooManyRequests],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("login", "/users/login")
-      .setPayload(LoginBody)
-      .addSuccess(LoginResponse)
-      .addError(InvalidCredentials, { status: 401 })
-      .addError(TooManyRequests, { status: 429 }),
+    HttpApiEndpoint.post("login", "/users/login", {
+      payload: LoginBody,
+      success: LoginResponse,
+      error: [InvalidCredentials, TooManyRequests],
+    }),
   )
   .add(
-    HttpApiEndpoint.post("refresh", "/users/refresh")
-      .setPayload(RefreshBody)
-      .addSuccess(RefreshResponse)
-      .addError(InvalidCredentials, { status: 401 })
-      .addError(TooManyRequests, { status: 429 }),
+    HttpApiEndpoint.post("refresh", "/users/refresh", {
+      payload: RefreshBody,
+      success: RefreshResponse,
+      error: [InvalidCredentials, TooManyRequests],
+    }),
   )
   .add(
     // Revokes the presented refresh token (or, with `allSessions`, every
     // refresh token for its user) by deleting its store row. Idempotent and
     // unauthenticated like `refresh` — an already-invalid/expired token has
     // nothing to revoke, so it still succeeds rather than erroring.
-    HttpApiEndpoint.post("logout", "/users/logout")
-      .setPayload(LogoutBody)
-      .addSuccess(Schema.Void),
+    HttpApiEndpoint.post("logout", "/users/logout", {
+      payload: LogoutBody,
+      success: HttpApiSchema.NoContent,
+    }),
   )
   .add(
     // Changes the current user's own password after verifying the current
@@ -1201,21 +1236,20 @@ const UsersGroup = HttpApiGroup.make("users")
     // `logout`'s `allSessions` option — while reissuing a fresh access +
     // refresh pair for the session making this request, so it isn't logged
     // out by its own password change.
-    HttpApiEndpoint.post("changePassword", "/users/me/password")
-      .setPayload(ChangePasswordBody)
-      .addSuccess(RefreshResponse)
-      .addError(InvalidCredentials, { status: 401 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("changePassword", "/users/me/password", {
+      payload: ChangePasswordBody,
+      success: RefreshResponse,
+      error: [InvalidCredentials, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
     // Updates the current user's own profile — display name and avatar URL
     // (issue #67). Full-replace like `updatePost`/`updateChat`. Username is
     // not editable through this endpoint.
-    HttpApiEndpoint.put("updateProfile", "/users/me")
-      .setPayload(UpdateProfileBody)
-      .addSuccess(User)
-      .middleware(Authentication),
+    HttpApiEndpoint.put("updateProfile", "/users/me", {
+      payload: UpdateProfileBody,
+      success: User,
+    }).middleware(Authentication),
   )
   .add(
     // Uploads and stores a square-cropped avatar (issue #269), overwriting
@@ -1223,38 +1257,34 @@ const UsersGroup = HttpApiGroup.make("users")
     // mutually exclusive (see UsersHandler.ts). `updateProfile` above is the
     // inverse: setting `avatarUrl` (or clearing it) always clears an
     // uploaded avatar back to unset.
-    HttpApiEndpoint.post("uploadAvatar", "/users/me/avatar")
-      .setPayload(UploadAvatarBody)
-      .addSuccess(User)
-      .addError(InvalidAvatarUpload, { status: 400 })
-      .addError(AvatarTooLarge, { status: 413 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("uploadAvatar", "/users/me/avatar", {
+      payload: UploadAvatarBody,
+      success: User,
+      error: [InvalidAvatarUpload, AvatarTooLarge, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
     // Permanently deletes the current user's own account after re-verifying
     // their password (irreversible, so — like `changePassword` — the bearer
     // token alone isn't enough). The `users` row's cascading/`set null` FKs
     // (see db/schema.ts) take care of everything the account owns.
-    HttpApiEndpoint.del("deleteAccount", "/users/me")
-      .setPayload(DeleteAccountBody)
-      .addSuccess(Schema.Void)
-      .addError(InvalidCredentials, { status: 401 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("deleteAccount", "/users/me", {
+      payload: DeleteAccountBody,
+      success: HttpApiSchema.NoContent,
+      error: [InvalidCredentials, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
     // Promotes/demotes another user's role — admin only (issue #67: role
     // changes previously required direct DB access). Bumps the target's
     // token_version so an already-issued token can't keep acting under its
     // old role past this call — mirrors `changePassword`'s reasoning.
-    HttpApiEndpoint.patch("updateUserRole", "/users/:id/role")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .setPayload(UpdateUserRoleBody)
-      .addSuccess(User)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.patch("updateUserRole", "/users/:id/role", {
+      params: { id: Schema.Int },
+      payload: UpdateUserRoleBody,
+      success: User,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Permanently deletes another user's account — admin only. Distinct from
@@ -1265,12 +1295,11 @@ const UsersGroup = HttpApiGroup.make("users")
     // everything the account owns, and — like `deleteAccount` — the target's
     // outstanding tokens are invalidated immediately. An admin can't delete
     // their own account here (that goes through `deleteAccount`).
-    HttpApiEndpoint.del("deleteUser", "/users/:id")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .addSuccess(Schema.Void)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("deleteUser", "/users/:id", {
+      params: { id: Schema.Int },
+      success: HttpApiSchema.NoContent,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Sets or clears the current user's custom status (issue #218) — a short
@@ -1279,220 +1308,204 @@ const UsersGroup = HttpApiGroup.make("users")
     // `statusEmoji` to null clears the status entirely. Broadcasts a
     // `status_changed` realtime event (see Realtime.ts) to every connected
     // user, mirroring how presence updates propagate.
-    HttpApiEndpoint.put("updateStatus", "/users/me/status")
-      .setPayload(UpdateStatusBody)
-      .addSuccess(User)
-      .middleware(Authentication),
+    HttpApiEndpoint.put("updateStatus", "/users/me/status", {
+      payload: UpdateStatusBody,
+      success: User,
+    }).middleware(Authentication),
   )
   .add(
     // Lists everyone the current user has blocked or muted (issue #219),
     // newest first — the data backing the "Blocked & muted users" settings
     // card. Each entry carries the target user, which action is in effect,
     // and when it was set.
-    HttpApiEndpoint.get("listBlocks", "/users/me/blocks")
-      .addSuccess(Schema.Array(BlockedUser))
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listBlocks", "/users/me/blocks", {
+      success: Schema.Array(BlockedUser),
+    }).middleware(Authentication),
   )
   .add(
     // Blocks or mutes another user (issue #219). Idempotent per (caller,
     // target): re-issuing with a different `type` upgrades/downgrades the
     // existing relationship rather than stacking a second one. Returns the
     // resulting relationship. You can't block/mute yourself (400).
-    HttpApiEndpoint.put("setBlock", "/users/:id/block")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .setPayload(BlockUserBody)
-      .addSuccess(BlockedUser)
-      .addError(NotFound, { status: 404 })
-      .addError(InvalidBlockRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.put("setBlock", "/users/:id/block", {
+      params: { id: Schema.Int },
+      payload: BlockUserBody,
+      success: BlockedUser,
+      error: [NotFound, InvalidBlockRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Removes any block/mute the current user has on the target — the
     // unblock/unmute action. Idempotent: succeeds even if no relationship
     // exists (nothing to remove).
-    HttpApiEndpoint.del("removeBlock", "/users/:id/block")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .addSuccess(Schema.Void)
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("removeBlock", "/users/:id/block", {
+      params: { id: Schema.Int },
+      success: HttpApiSchema.NoContent,
+    }).middleware(Authentication),
   );
 
 const PostsGroup = HttpApiGroup.make("posts")
   .add(
-    HttpApiEndpoint.get("getPost", "/posts/:id")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .addSuccess(Post)
-      .addError(NotFound, { status: 404 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("getPost", "/posts/:id", {
+      params: { id: Schema.Int },
+      success: Post,
+      error: NotFound,
+    }).middleware(Authentication),
   )
   .add(
     // Authenticated, paginated view over all posts.
-    HttpApiEndpoint.get("listPosts", "/posts")
-      .setUrlParams(PostsPageQuery)
-      .addSuccess(PostsPage)
-      .addError(InvalidPostsRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listPosts", "/posts", {
+      query: PostsPageQuery,
+      success: PostsPage,
+      error: InvalidPostsRequest,
+    }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.post("createPost", "/posts")
-      .setPayload(CreatePostBody)
-      .addSuccess(Post, { status: 201 })
+    HttpApiEndpoint.post("createPost", "/posts", {
+      payload: CreatePostBody,
+      success: Post.pipe(HttpApiSchema.status(201)),
       // Raised when `attachmentId` doesn't reference an attachment owned by
       // the caller (see getOwnedAttachmentOr404 in attachments.ts).
-      .addError(NotFound, { status: 404 })
-      .middleware(Authentication),
+      error: NotFound,
+    }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.put("updatePost", "/posts/:id")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .setPayload(UpdatePostBody)
-      .addSuccess(Post)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.put("updatePost", "/posts/:id", {
+      params: { id: Schema.Int },
+      payload: UpdatePostBody,
+      success: Post,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.del("deletePost", "/posts/:id")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .addSuccess(Schema.Void)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("deletePost", "/posts/:id", {
+      params: { id: Schema.Int },
+      success: HttpApiSchema.NoContent,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   );
 
 // Comments, replies, and reactions on posts/comments. Kept in its own group
 // (rather than folded into `posts`) since it spans two path roots
 // (`/posts/:id/...` and `/comments/:id/...`) and its own handler — the group
 // name is just an organizational label, it doesn't have to match the path.
-const IdParam = Schema.Struct({ id: Schema.NumberFromString });
+const IdParam = Schema.Struct({ id: Schema.Int });
 
 const CommentsGroup = HttpApiGroup.make("comments")
   .add(
     // Idempotent add-reaction on a post — reacting with an emoji already
     // reacted with is a no-op, returning the current state. Emits a
     // feed-wide `reaction_changed` realtime event.
-    HttpApiEndpoint.post("addPostReaction", "/posts/:id/reactions")
-      .setPath(IdParam)
-      .setPayload(ReactionBody)
-      .addSuccess(ReactionState)
-      .addError(NotFound, { status: 404 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("addPostReaction", "/posts/:id/reactions", {
+      params: IdParam,
+      payload: ReactionBody,
+      success: ReactionState,
+      error: [NotFound, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
     // Removes one specific emoji reaction — a user may have reacted with more
     // than one emoji on the same target, so this only clears the one named in
     // the payload, not every reaction of theirs on it.
-    HttpApiEndpoint.del("removePostReaction", "/posts/:id/reactions")
-      .setPath(IdParam)
-      .setPayload(ReactionBody)
-      .addSuccess(ReactionState)
-      .addError(NotFound, { status: 404 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("removePostReaction", "/posts/:id/reactions", {
+      params: IdParam,
+      payload: ReactionBody,
+      success: ReactionState,
+      error: [NotFound, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
     // Oldest-first page of a post's top-level comments (replies excluded —
     // fetch those per-comment via `listReplies`). Keyset-paginated like
     // `listPosts`.
-    HttpApiEndpoint.get("listComments", "/posts/:id/comments")
-      .setPath(IdParam)
-      .setUrlParams(CommentsPageQuery)
-      .addSuccess(CommentsPage)
-      .addError(NotFound, { status: 404 })
-      .addError(InvalidCommentRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listComments", "/posts/:id/comments", {
+      params: IdParam,
+      query: CommentsPageQuery,
+      success: CommentsPage,
+      error: [NotFound, InvalidCommentRequest],
+    }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.post("createComment", "/posts/:id/comments")
-      .setPath(IdParam)
-      .setPayload(CreateCommentBody)
-      .addSuccess(Comment, { status: 201 })
-      .addError(NotFound, { status: 404 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("createComment", "/posts/:id/comments", {
+      params: IdParam,
+      payload: CreateCommentBody,
+      success: Comment.pipe(HttpApiSchema.status(201)),
+      error: [NotFound, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
     // Oldest-first page of a comment's replies.
-    HttpApiEndpoint.get("listReplies", "/comments/:id/replies")
-      .setPath(IdParam)
-      .setUrlParams(CommentsPageQuery)
-      .addSuccess(CommentsPage)
-      .addError(NotFound, { status: 404 })
-      .addError(InvalidCommentRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listReplies", "/comments/:id/replies", {
+      params: IdParam,
+      query: CommentsPageQuery,
+      success: CommentsPage,
+      error: [NotFound, InvalidCommentRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Creates a reply to a top-level comment. Rejects (400) if the target is
     // itself a reply — the depth-2 nesting cap (see EngagementHandler.ts).
-    HttpApiEndpoint.post("createReply", "/comments/:id/replies")
-      .setPath(IdParam)
-      .setPayload(CreateCommentBody)
-      .addSuccess(Comment, { status: 201 })
-      .addError(NotFound, { status: 404 })
-      .addError(InvalidCommentRequest, { status: 400 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("createReply", "/comments/:id/replies", {
+      params: IdParam,
+      payload: CreateCommentBody,
+      success: Comment.pipe(HttpApiSchema.status(201)),
+      error: [NotFound, InvalidCommentRequest, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
     // Add-reaction on a comment or reply (both live in `comments`, so one
     // endpoint covers both). Emits a `reaction_changed` event scoped to the
     // post's comment-room subscribers rather than broadcast feed-wide.
-    HttpApiEndpoint.post("addCommentReaction", "/comments/:id/reactions")
-      .setPath(IdParam)
-      .setPayload(ReactionBody)
-      .addSuccess(ReactionState)
-      .addError(NotFound, { status: 404 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("addCommentReaction", "/comments/:id/reactions", {
+      params: IdParam,
+      payload: ReactionBody,
+      success: ReactionState,
+      error: [NotFound, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.del("removeCommentReaction", "/comments/:id/reactions")
-      .setPath(IdParam)
-      .setPayload(ReactionBody)
-      .addSuccess(ReactionState)
-      .addError(NotFound, { status: 404 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("removeCommentReaction", "/comments/:id/reactions", {
+      params: IdParam,
+      payload: ReactionBody,
+      success: ReactionState,
+      error: [NotFound, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
     // Edits a comment/reply's content — the author only (or an admin), same
     // `canModify` rule as posts.
-    HttpApiEndpoint.patch("updateComment", "/comments/:id")
-      .setPath(IdParam)
-      .setPayload(UpdateCommentBody)
-      .addSuccess(Comment)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.patch("updateComment", "/comments/:id", {
+      params: IdParam,
+      payload: UpdateCommentBody,
+      success: Comment,
+      error: [NotFound, Forbidden, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
     // Deletes a comment/reply — the author only (or an admin). A top-level
     // comment's replies and every like on it cascade via the FKs.
-    HttpApiEndpoint.del("deleteComment", "/comments/:id")
-      .setPath(IdParam)
-      .addSuccess(Schema.Void)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("deleteComment", "/comments/:id", {
+      params: IdParam,
+      success: HttpApiSchema.NoContent,
+      error: [NotFound, Forbidden, TooManyRequests],
+    }).middleware(Authentication),
   );
 
-const ChatIdPath = Schema.Struct({ id: Schema.NumberFromString });
+const ChatIdPath = Schema.Struct({ id: Schema.Int });
 
 const MessageIdPath = Schema.Struct({
-  id: Schema.NumberFromString,
-  messageId: Schema.NumberFromString,
+  id: Schema.Int,
+  messageId: Schema.Int,
 });
 
 const ChatParticipantPath = Schema.Struct({
-  id: Schema.NumberFromString,
-  userId: Schema.NumberFromString,
+  id: Schema.Int,
+  userId: Schema.Int,
 });
 
 const ChatInvitePath = Schema.Struct({
-  id: Schema.NumberFromString,
-  inviteId: Schema.NumberFromString,
+  id: Schema.Int,
+  inviteId: Schema.Int,
 });
 
 const InviteCodePath = Schema.Struct({
@@ -1518,21 +1531,20 @@ export const MAX_CHATS_LIMIT = 100;
 export const ChatsPageQuery = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.NumberFromString.pipe(
-      Schema.int(),
-      Schema.between(1, MAX_CHATS_LIMIT),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_CHATS_LIMIT }),
     ),
   ),
 });
 
 export const ChatsPage = Schema.Struct({
   chats: Schema.Array(Chat),
-  limit: Schema.Number,
+  limit: Schema.Finite,
   // Opaque cursor for the next page, or null once the current page reaches
   // the end of the list — mirrors `MessagesPage.hasMore` but carries the
   // resume point instead of a boolean, since the next request needs it.
   nextCursor: Schema.NullOr(Schema.String),
-}).annotations({ identifier: "ChatsPage" });
+}).annotate({ identifier: "ChatsPage" });
 
 // ---------------------------------------------------------------------------
 // Search (issue #224, overhauled)
@@ -1597,15 +1609,14 @@ export const MAX_SEARCH_ALL_LIMIT = 10;
 // handler only ever passes it (or tokens derived from it) as bound
 // parameters.
 export const SearchQuery = Schema.Struct({
-  q: Schema.Trim.pipe(
-    Schema.minLength(MIN_SEARCH_QUERY_LENGTH),
-    Schema.maxLength(MAX_SEARCH_QUERY_LENGTH),
+  q: Schema.Trim.check(
+    Schema.isMinLength(MIN_SEARCH_QUERY_LENGTH),
+    Schema.isMaxLength(MAX_SEARCH_QUERY_LENGTH),
   ),
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.NumberFromString.pipe(
-      Schema.int(),
-      Schema.between(1, MAX_SEARCH_LIMIT),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_SEARCH_LIMIT }),
     ),
   ),
 });
@@ -1614,14 +1625,13 @@ export const SearchQuery = Schema.Struct({
 // page of every section (pagination is the per-type endpoints' job), and its
 // `limit` applies per section rather than to a single list.
 export const SearchAllQuery = Schema.Struct({
-  q: Schema.Trim.pipe(
-    Schema.minLength(MIN_SEARCH_QUERY_LENGTH),
-    Schema.maxLength(MAX_SEARCH_QUERY_LENGTH),
+  q: Schema.Trim.check(
+    Schema.isMinLength(MIN_SEARCH_QUERY_LENGTH),
+    Schema.isMaxLength(MAX_SEARCH_QUERY_LENGTH),
   ),
   limit: Schema.optional(
-    Schema.NumberFromString.pipe(
-      Schema.int(),
-      Schema.between(1, MAX_SEARCH_ALL_LIMIT),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_SEARCH_ALL_LIMIT }),
     ),
   ),
 });
@@ -1635,7 +1645,7 @@ export const SearchAllQuery = Schema.Struct({
 export const SearchSnippetSegment = Schema.Struct({
   text: Schema.String,
   match: Schema.Boolean,
-}).annotations({ identifier: "SearchSnippetSegment" });
+}).annotate({ identifier: "SearchSnippetSegment" });
 export type SearchSnippetSegment = typeof SearchSnippetSegment.Type;
 
 // People. The snippet highlights the matched fragment inside whichever name
@@ -1645,48 +1655,48 @@ export type SearchSnippetSegment = typeof SearchSnippetSegment.Type;
 export const UserSearchResult = Schema.Struct({
   user: User,
   snippet: Schema.Array(SearchSnippetSegment),
-}).annotations({ identifier: "UserSearchResult" });
+}).annotate({ identifier: "UserSearchResult" });
 
 export const UserSearchPage = Schema.Struct({
   results: Schema.Array(UserSearchResult),
-  limit: Schema.Number,
+  limit: Schema.Finite,
   nextCursor: Schema.NullOr(Schema.String),
-}).annotations({ identifier: "UserSearchPage" });
+}).annotate({ identifier: "UserSearchPage" });
 
 // Posts. `author` is joined in rather than left for the client to resolve —
 // a results list always renders the name and avatar, and resolving them
 // client-side would mean a second request before the list can paint.
 export const PostSearchResult = Schema.Struct({
-  id: Schema.Number,
+  id: Schema.Finite,
   author: User,
-  createdAt: Schema.Number,
+  createdAt: Schema.Finite,
   snippet: Schema.Array(SearchSnippetSegment),
-}).annotations({ identifier: "PostSearchResult" });
+}).annotate({ identifier: "PostSearchResult" });
 
 export const PostSearchPage = Schema.Struct({
   results: Schema.Array(PostSearchResult),
-  limit: Schema.Number,
+  limit: Schema.Finite,
   nextCursor: Schema.NullOr(Schema.String),
-}).annotations({ identifier: "PostSearchPage" });
+}).annotate({ identifier: "PostSearchPage" });
 
 // Comments and replies (a reply is a comment with a `parentCommentId` — both
 // are searched, and the flag lets the UI label which is which). `postId` is
 // carried so the frontend can deep-link to the thread the match lives in
 // without a second lookup.
 export const CommentSearchResult = Schema.Struct({
-  id: Schema.Number,
-  postId: Schema.Number,
-  parentCommentId: Schema.NullOr(Schema.Number),
+  id: Schema.Finite,
+  postId: Schema.Finite,
+  parentCommentId: Schema.NullOr(Schema.Finite),
   author: User,
-  createdAt: Schema.Number,
+  createdAt: Schema.Finite,
   snippet: Schema.Array(SearchSnippetSegment),
-}).annotations({ identifier: "CommentSearchResult" });
+}).annotate({ identifier: "CommentSearchResult" });
 
 export const CommentSearchPage = Schema.Struct({
   results: Schema.Array(CommentSearchResult),
-  limit: Schema.Number,
+  limit: Schema.Finite,
   nextCursor: Schema.NullOr(Schema.String),
-}).annotations({ identifier: "CommentSearchPage" });
+}).annotate({ identifier: "CommentSearchPage" });
 
 // Lightweight chat context for a message hit — just enough for the results
 // list to render the same name/avatar the chat list does (group title, or the
@@ -1694,21 +1704,21 @@ export const CommentSearchPage = Schema.Struct({
 // full `Chat` (last message, unread count, version) per row. Deduplicated per
 // page into `MessageSearchPage.chats`, keyed by `id`.
 export const MessageSearchChat = Schema.Struct({
-  id: Schema.Number,
+  id: Schema.Finite,
   type: ChatType,
   title: Schema.NullOr(Schema.String),
   participants: Schema.Array(ChatParticipant),
-}).annotations({ identifier: "MessageSearchChat" });
+}).annotate({ identifier: "MessageSearchChat" });
 export type MessageSearchChat = typeof MessageSearchChat.Type;
 
 export const MessageSearchResult = Schema.Struct({
-  id: Schema.Number,
+  id: Schema.Finite,
   // Carries `chatId`; resolve its `MessageSearchChat` from the page's `chats`.
-  chatId: Schema.Number,
+  chatId: Schema.Finite,
   sender: User,
-  createdAt: Schema.Number,
+  createdAt: Schema.Finite,
   snippet: Schema.Array(SearchSnippetSegment),
-}).annotations({ identifier: "MessageSearchResult" });
+}).annotate({ identifier: "MessageSearchResult" });
 
 export const MessageSearchPage = Schema.Struct({
   results: Schema.Array(MessageSearchResult),
@@ -1717,9 +1727,9 @@ export const MessageSearchPage = Schema.Struct({
   // joins on their participant rows), so a hit can never leak a message from a
   // chat they're not in.
   chats: Schema.Array(MessageSearchChat),
-  limit: Schema.Number,
+  limit: Schema.Finite,
   nextCursor: Schema.NullOr(Schema.String),
-}).annotations({ identifier: "MessageSearchPage" });
+}).annotate({ identifier: "MessageSearchPage" });
 
 // The unified response: the first page of every section, each in exactly the
 // shape its own endpoint returns — including `nextCursor`, so switching to a
@@ -1730,7 +1740,7 @@ export const SearchAllPage = Schema.Struct({
   posts: PostSearchPage,
   comments: CommentSearchPage,
   messages: MessageSearchPage,
-}).annotations({ identifier: "SearchAllPage" });
+}).annotate({ identifier: "SearchAllPage" });
 
 const SearchGroup = HttpApiGroup.make("search")
   .add(
@@ -1738,11 +1748,11 @@ const SearchGroup = HttpApiGroup.make("search")
     // caller's messages in a single request. The four queries run
     // concurrently server-side, so the whole thing costs about what its
     // slowest section does.
-    HttpApiEndpoint.get("searchAll", "/search")
-      .setUrlParams(SearchAllQuery)
-      .addSuccess(SearchAllPage)
-      .addError(InvalidSearchRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("searchAll", "/search", {
+      query: SearchAllQuery,
+      success: SearchAllPage,
+      error: InvalidSearchRequest,
+    }).middleware(Authentication),
   )
   .add(
     // People, best match first (see the section comment above). Keeps
@@ -1750,36 +1760,36 @@ const SearchGroup = HttpApiGroup.make("search")
     // be at least `MIN_USER_SEARCH_QUERY_LENGTH` characters, or this section
     // comes back empty — empty rather than a 400, so a two-character search
     // still answers normally for every other section.
-    HttpApiEndpoint.get("searchUsers", "/search/users")
-      .setUrlParams(SearchQuery)
-      .addSuccess(UserSearchPage)
-      .addError(InvalidSearchRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("searchUsers", "/search/users", {
+      query: SearchQuery,
+      success: UserSearchPage,
+      error: InvalidSearchRequest,
+    }).middleware(Authentication),
   )
   .add(
     // Text posts, newest match first.
-    HttpApiEndpoint.get("searchPosts", "/search/posts")
-      .setUrlParams(SearchQuery)
-      .addSuccess(PostSearchPage)
-      .addError(InvalidSearchRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("searchPosts", "/search/posts", {
+      query: SearchQuery,
+      success: PostSearchPage,
+      error: InvalidSearchRequest,
+    }).middleware(Authentication),
   )
   .add(
     // Comments and replies, newest match first.
-    HttpApiEndpoint.get("searchComments", "/search/comments")
-      .setUrlParams(SearchQuery)
-      .addSuccess(CommentSearchPage)
-      .addError(InvalidSearchRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("searchComments", "/search/comments", {
+      query: SearchQuery,
+      success: CommentSearchPage,
+      error: InvalidSearchRequest,
+    }).middleware(Authentication),
   )
   .add(
     // Messages in chats the current user participates in (access-scoped by a
     // join on their participant rows), newest match first.
-    HttpApiEndpoint.get("searchMessages", "/search/messages")
-      .setUrlParams(SearchQuery)
-      .addSuccess(MessageSearchPage)
-      .addError(InvalidSearchRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("searchMessages", "/search/messages", {
+      query: SearchQuery,
+      success: MessageSearchPage,
+      error: InvalidSearchRequest,
+    }).middleware(Authentication),
   );
 
 const ChatsGroup = HttpApiGroup.make("chats")
@@ -1788,89 +1798,82 @@ const ChatsGroup = HttpApiGroup.make("chats")
     // each carrying its own unread count and last-message preview so the
     // chat list never needs a request per row. Cursor-paginated (see
     // `ChatsPageQuery`) rather than returning the full set.
-    HttpApiEndpoint.get("listChats", "/chats")
-      .setUrlParams(ChatsPageQuery)
-      .addSuccess(ChatsPage)
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listChats", "/chats", {
+      query: ChatsPageQuery,
+      success: ChatsPage,
+      error: InvalidChatRequest,
+    }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.get("getChat", "/chats/:id")
-      .setPath(ChatIdPath)
-      .addSuccess(Chat)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("getChat", "/chats/:id", {
+      params: ChatIdPath,
+      success: Chat,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Idempotent: returns the existing direct chat with this user if one
     // already exists rather than creating a duplicate.
-    HttpApiEndpoint.post("createDirectChat", "/chats/direct")
-      .setPayload(CreateDirectChatBody)
-      .addSuccess(Chat)
-      .addError(NotFound, { status: 404 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("createDirectChat", "/chats/direct", {
+      payload: CreateDirectChatBody,
+      success: Chat,
+      error: [NotFound, InvalidChatRequest],
+    }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.post("createGroupChat", "/chats/group")
-      .setPayload(CreateGroupChatBody)
-      .addSuccess(Chat, { status: 201 })
-      .addError(NotFound, { status: 404 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("createGroupChat", "/chats/group", {
+      payload: CreateGroupChatBody,
+      success: Chat.pipe(HttpApiSchema.status(201)),
+      error: [NotFound, InvalidChatRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Renames a group chat — the owner or an admin (per-chat role, issue
     // #220; formerly creator-only).
-    HttpApiEndpoint.put("updateChat", "/chats/:id")
-      .setPath(ChatIdPath)
-      .setPayload(UpdateChatBody)
-      .addSuccess(Chat)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.put("updateChat", "/chats/:id", {
+      params: ChatIdPath,
+      payload: UpdateChatBody,
+      success: Chat,
+      error: [NotFound, Forbidden, InvalidChatRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Uploads and stores a square-cropped group avatar (mirrors
     // `POST /users/me/avatar`) — the owner or an admin. Overwrites any
     // existing group avatar; the old variants are swept from object storage
     // once the row is repointed (see ChatsHandler.ts).
-    HttpApiEndpoint.post("uploadChatAvatar", "/chats/:id/avatar")
-      .setPath(ChatIdPath)
-      .setPayload(UploadAvatarBody)
-      .addSuccess(Chat)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .addError(InvalidAvatarUpload, { status: 400 })
-      .addError(AvatarTooLarge, { status: 413 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("uploadChatAvatar", "/chats/:id/avatar", {
+      params: ChatIdPath,
+      payload: UploadAvatarBody,
+      success: Chat,
+      error: [
+        NotFound,
+        Forbidden,
+        InvalidChatRequest,
+        InvalidAvatarUpload,
+        AvatarTooLarge,
+        TooManyRequests,
+      ],
+    }).middleware(Authentication),
   )
   .add(
     // Clears a group chat's avatar back to unset (initials fallback) — the
     // owner or an admin. Counterpart to `uploadChatAvatar`; a no-op (still
     // succeeds) if the chat has no uploaded avatar.
-    HttpApiEndpoint.del("deleteChatAvatar", "/chats/:id/avatar")
-      .setPath(ChatIdPath)
-      .addSuccess(Chat)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("deleteChatAvatar", "/chats/:id/avatar", {
+      params: ChatIdPath,
+      success: Chat,
+      error: [NotFound, Forbidden, InvalidChatRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Adds participants to a group chat — the owner or an admin.
-    HttpApiEndpoint.post("addParticipants", "/chats/:id/participants")
-      .setPath(ChatIdPath)
-      .setPayload(AddParticipantsBody)
-      .addSuccess(Chat)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("addParticipants", "/chats/:id/participants", {
+      params: ChatIdPath,
+      payload: AddParticipantsBody,
+      success: Chat,
+      error: [NotFound, Forbidden, InvalidChatRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Removes a participant from a group chat — the owner or an admin.
@@ -1879,38 +1882,36 @@ const ChatsGroup = HttpApiGroup.make("chats")
     // participant was the chat's owner, ownership is transferred
     // automatically to the longest-standing remaining participant so the
     // group doesn't become unmanageable (mirrors `leaveChat`).
-    HttpApiEndpoint.del("removeParticipant", "/chats/:id/participants/:userId")
-      .setPath(ChatParticipantPath)
-      .addSuccess(Chat)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete(
+      "removeParticipant",
+      "/chats/:id/participants/:userId",
+      {
+        params: ChatParticipantPath,
+        success: Chat,
+        error: [NotFound, Forbidden, InvalidChatRequest],
+      },
+    ).middleware(Authentication),
   )
   .add(
     // A participant removes themselves from a group chat. If this empties
     // the chat, it's deleted entirely. If the leaver was the creator,
     // ownership transfers automatically to the longest-standing remaining
     // participant — see `removeParticipant`.
-    HttpApiEndpoint.post("leaveChat", "/chats/:id/leave")
-      .setPath(ChatIdPath)
-      .addSuccess(Schema.Void)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("leaveChat", "/chats/:id/leave", {
+      params: ChatIdPath,
+      success: HttpApiSchema.NoContent,
+      error: [NotFound, Forbidden, InvalidChatRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Deletes a group chat outright — the owner or an admin. The
     // `chats` row's cascading foreign keys (see db/schema.ts) take care of
     // its participants, messages, and read receipts.
-    HttpApiEndpoint.del("deleteChat", "/chats/:id")
-      .setPath(ChatIdPath)
-      .addSuccess(Schema.Void)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("deleteChat", "/chats/:id", {
+      params: ChatIdPath,
+      success: HttpApiSchema.NoContent,
+      error: [NotFound, Forbidden, InvalidChatRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Reassigns a group chat's `createdBy` to another current participant —
@@ -1918,14 +1919,12 @@ const ChatsGroup = HttpApiGroup.make("chats")
     // the previous creator's account was deleted, see `Chat.createdBy`),
     // any current participant may call this to appoint a new owner, so the
     // group doesn't stay permanently unmanageable.
-    HttpApiEndpoint.post("transferOwnership", "/chats/:id/owner")
-      .setPath(ChatIdPath)
-      .setPayload(TransferOwnershipBody)
-      .addSuccess(Chat)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("transferOwnership", "/chats/:id/owner", {
+      params: ChatIdPath,
+      payload: TransferOwnershipBody,
+      success: Chat,
+      error: [NotFound, Forbidden, InvalidChatRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Promotes/demotes a participant between "admin" and "member" — the
@@ -1935,34 +1934,30 @@ const ChatsGroup = HttpApiGroup.make("chats")
     HttpApiEndpoint.patch(
       "updateParticipantRole",
       "/chats/:id/participants/:userId/role",
-    )
-      .setPath(ChatParticipantPath)
-      .setPayload(UpdateParticipantRoleBody)
-      .addSuccess(Chat)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+      {
+        params: ChatParticipantPath,
+        payload: UpdateParticipantRoleBody,
+        success: Chat,
+        error: [NotFound, Forbidden, InvalidChatRequest],
+      },
+    ).middleware(Authentication),
   )
   .add(
     // Oldest-first page of a chat's messages — any participant may read.
-    HttpApiEndpoint.get("listMessages", "/chats/:id/messages")
-      .setPath(ChatIdPath)
-      .setUrlParams(MessagesPageQuery)
-      .addSuccess(MessagesPage)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listMessages", "/chats/:id/messages", {
+      params: ChatIdPath,
+      query: MessagesPageQuery,
+      success: MessagesPage,
+      error: [NotFound, Forbidden, InvalidChatRequest],
+    }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.post("createMessage", "/chats/:id/messages")
-      .setPath(ChatIdPath)
-      .setPayload(CreateMessageBody)
-      .addSuccess(Message, { status: 201 })
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("createMessage", "/chats/:id/messages", {
+      params: ChatIdPath,
+      payload: CreateMessageBody,
+      success: Message.pipe(HttpApiSchema.status(201)),
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Fire-and-forget: pushes a `typing` realtime event (see Realtime.ts) to
@@ -1971,44 +1966,40 @@ const ChatsGroup = HttpApiGroup.make("chats")
     // each call is just a transient nudge, and the client-side indicator
     // times itself out (see web/src/lib/typing.ts) rather than waiting for a
     // corresponding "stopped typing" signal.
-    HttpApiEndpoint.post("sendTyping", "/chats/:id/typing")
-      .setPath(ChatIdPath)
-      .addSuccess(Schema.Void)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("sendTyping", "/chats/:id/typing", {
+      params: ChatIdPath,
+      success: HttpApiSchema.NoContent,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Marks every unread message up to and including `messageId` as read by
     // the current user; returns the chat with its recalculated unread count.
-    HttpApiEndpoint.post("markRead", "/chats/:id/read")
-      .setPath(ChatIdPath)
-      .setPayload(MarkReadBody)
-      .addSuccess(Chat)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("markRead", "/chats/:id/read", {
+      params: ChatIdPath,
+      payload: MarkReadBody,
+      success: Chat,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Edits a message's content — the sender only (or an admin).
-    HttpApiEndpoint.put("updateMessage", "/chats/:id/messages/:messageId")
-      .setPath(MessageIdPath)
-      .setPayload(UpdateMessageBody)
-      .addSuccess(Message)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.put("updateMessage", "/chats/:id/messages/:messageId", {
+      params: MessageIdPath,
+      payload: UpdateMessageBody,
+      success: Message,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Deletes a message — the sender, the chat's owner/admin, or a
     // site-wide admin (issue #220 extended this from sender-only). The
     // `message_reads` rows cascade via the FK, so nothing else to clean up.
-    HttpApiEndpoint.del("deleteMessage", "/chats/:id/messages/:messageId")
-      .setPath(MessageIdPath)
-      .addSuccess(Schema.Void)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("deleteMessage", "/chats/:id/messages/:messageId", {
+      params: MessageIdPath,
+      success: HttpApiSchema.NoContent,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Idempotent add-reaction on a chat message (issue #216) — reacting with
@@ -2019,141 +2010,134 @@ const ChatsGroup = HttpApiGroup.make("chats")
     HttpApiEndpoint.post(
       "addMessageReaction",
       "/chats/:id/messages/:messageId/reactions",
-    )
-      .setPath(MessageIdPath)
-      .setPayload(ReactionBody)
-      .addSuccess(ReactionState)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+      {
+        params: MessageIdPath,
+        payload: ReactionBody,
+        success: ReactionState,
+        error: [NotFound, Forbidden],
+      },
+    ).middleware(Authentication),
   )
   .add(
     // Removes one specific emoji reaction from a message — a user may have
     // reacted with more than one emoji, so this only clears the one named in
     // the payload.
-    HttpApiEndpoint.del(
+    HttpApiEndpoint.delete(
       "removeMessageReaction",
       "/chats/:id/messages/:messageId/reactions",
-    )
-      .setPath(MessageIdPath)
-      .setPayload(ReactionBody)
-      .addSuccess(ReactionState)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+      {
+        params: MessageIdPath,
+        payload: ReactionBody,
+        success: ReactionState,
+        error: [NotFound, Forbidden],
+      },
+    ).middleware(Authentication),
   )
   .add(
     // The chat's currently-pinned messages (issue #223), newest pin first —
     // any participant may read. Returns full `Message`s (each with `pinned`
     // true), so the pinned panel renders exactly like the main thread.
-    HttpApiEndpoint.get("listPinnedMessages", "/chats/:id/pins")
-      .setPath(ChatIdPath)
-      .addSuccess(Schema.Array(Message))
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listPinnedMessages", "/chats/:id/pins", {
+      params: ChatIdPath,
+      success: Schema.Array(Message),
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Pins a message chat-wide (issue #223) — idempotent (re-pinning an
     // already-pinned message is a no-op returning the current state). Any
     // participant may pin, mirroring reactions. Emits a `message_pin_changed`
     // realtime event to every participant. Returns the affected message.
-    HttpApiEndpoint.post("pinMessage", "/chats/:id/pins")
-      .setPath(ChatIdPath)
-      .setPayload(PinMessageBody)
-      .addSuccess(Message)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("pinMessage", "/chats/:id/pins", {
+      params: ChatIdPath,
+      payload: PinMessageBody,
+      success: Message,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Unpins a message (issue #223) — idempotent, and open to any participant
     // like pinning. Emits a `message_pin_changed` event. Returns the affected
     // message (now with `pinned` false).
-    HttpApiEndpoint.del("unpinMessage", "/chats/:id/pins/:messageId")
-      .setPath(MessageIdPath)
-      .addSuccess(Message)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("unpinMessage", "/chats/:id/pins/:messageId", {
+      params: MessageIdPath,
+      success: Message,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // The current user's own starred messages in this chat (issue #223),
     // newest star first — private, so this only ever returns the caller's
     // bookmarks, never anyone else's.
-    HttpApiEndpoint.get("listStarredMessages", "/chats/:id/stars")
-      .setPath(ChatIdPath)
-      .addSuccess(Schema.Array(Message))
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listStarredMessages", "/chats/:id/stars", {
+      params: ChatIdPath,
+      success: Schema.Array(Message),
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Stars a message as a private bookmark (issue #223) — idempotent, never
     // broadcast (a star is visible only to the user who created it), so no
     // realtime event. Returns the affected message (with `starred` true).
-    HttpApiEndpoint.post("starMessage", "/chats/:id/messages/:messageId/star")
-      .setPath(MessageIdPath)
-      .addSuccess(Message)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("starMessage", "/chats/:id/messages/:messageId/star", {
+      params: MessageIdPath,
+      success: Message,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Removes a private star (issue #223) — idempotent, no realtime event.
     // Returns the affected message (with `starred` false).
-    HttpApiEndpoint.del("unstarMessage", "/chats/:id/messages/:messageId/star")
-      .setPath(MessageIdPath)
-      .addSuccess(Message)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete(
+      "unstarMessage",
+      "/chats/:id/messages/:messageId/star",
+      {
+        params: MessageIdPath,
+        success: Message,
+        error: [NotFound, Forbidden],
+      },
+    ).middleware(Authentication),
   )
   .add(
     // Mints an invite code for a group chat — the owner or an admin
     // (issue #220). Joining via the code (`joinChatViaInvite`) is open to
     // any authenticated user, so this is the access-control gate: only
     // whoever holds a still-valid code (or link built from it) can join.
-    HttpApiEndpoint.post("createChatInvite", "/chats/:id/invites")
-      .setPath(ChatIdPath)
-      .setPayload(CreateChatInviteBody)
-      .addSuccess(ChatInvite, { status: 201 })
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("createChatInvite", "/chats/:id/invites", {
+      params: ChatIdPath,
+      payload: CreateChatInviteBody,
+      success: ChatInvite.pipe(HttpApiSchema.status(201)),
+      error: [NotFound, Forbidden, InvalidChatRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Lists every invite (active, expired, and revoked) ever created for a
     // group chat — the owner or an admin.
-    HttpApiEndpoint.get("listChatInvites", "/chats/:id/invites")
-      .setPath(ChatIdPath)
-      .addSuccess(Schema.Array(ChatInvite))
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listChatInvites", "/chats/:id/invites", {
+      params: ChatIdPath,
+      success: Schema.Array(ChatInvite),
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Revokes an invite so its code can no longer be redeemed — the owner
     // or an admin.
-    HttpApiEndpoint.del("revokeChatInvite", "/chats/:id/invites/:inviteId")
-      .setPath(ChatInvitePath)
-      .addSuccess(Schema.Void)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("revokeChatInvite", "/chats/:id/invites/:inviteId", {
+      params: ChatInvitePath,
+      success: HttpApiSchema.NoContent,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // Redeems an invite code, adding the current user to its chat as a
     // "member" — any authenticated user (not just existing participants).
     // Idempotent for someone already in the chat: returns the chat as-is
     // rather than erroring.
-    HttpApiEndpoint.post("joinChatViaInvite", "/chats/invites/:code/join")
-      .setPath(InviteCodePath)
-      .addSuccess(Chat)
-      .addError(NotFound, { status: 404 })
-      .addError(InvalidChatRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("joinChatViaInvite", "/chats/invites/:code/join", {
+      params: InviteCodePath,
+      success: Chat,
+      error: [NotFound, InvalidChatRequest],
+    }).middleware(Authentication),
   );
 
 // Multipart upload payload (issue #221) — a single "file" field, persisted
@@ -2167,21 +2151,24 @@ const ChatsGroup = HttpApiGroup.make("chats")
 // coarse limit first and surface as a generic 400 (rejected by the
 // multipart parser itself, before the handler's payload schema even exists
 // to attach a typed error to) instead of the typed 413.
-const UploadAttachmentBody = HttpApiSchema.Multipart(
-  Schema.Struct({ file: Multipart.SingleFileSchema }),
-  { maxFileSize: Option.some(MAX_ATTACHMENT_SIZE_BYTES * 2) },
+const UploadAttachmentBody = Schema.Struct({
+  file: Multipart.SingleFileSchema,
+}).pipe(
+  HttpApiSchema.asMultipart({ maxFileSize: MAX_ATTACHMENT_SIZE_BYTES * 2 }),
 );
 
 const AttachmentsGroup = HttpApiGroup.make("attachments")
   .add(
-    HttpApiEndpoint.post("uploadAttachment", "/attachments")
-      .setPayload(UploadAttachmentBody)
-      .addSuccess(Attachment, { status: 201 })
-      .addError(UnsupportedAttachmentType, { status: 415 })
-      .addError(AttachmentTooLarge, { status: 413 })
-      .addError(AttachmentQuotaExceeded, { status: 413 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("uploadAttachment", "/attachments", {
+      payload: UploadAttachmentBody,
+      success: Attachment.pipe(HttpApiSchema.status(201)),
+      error: [
+        UnsupportedAttachmentType,
+        AttachmentTooLarge,
+        AttachmentQuotaExceeded,
+        TooManyRequests,
+      ],
+    }).middleware(Authentication),
   )
   .add(
     // Scoped to the caller's own uploads (see getOwnedAttachmentOr404 in
@@ -2190,27 +2177,29 @@ const AttachmentsGroup = HttpApiGroup.make("attachments")
     // message/post that already referenced this attachment just loses it
     // (the FK is `set null` on delete — see db/schema.ts), it doesn't block
     // the delete.
-    HttpApiEndpoint.del("deleteAttachment", "/attachments/:id")
-      .setPath(Schema.Struct({ id: Schema.NumberFromString }))
-      .addSuccess(Schema.Void)
-      .addError(NotFound, { status: 404 })
-      .middleware(Authentication),
+    HttpApiEndpoint.delete("deleteAttachment", "/attachments/:id", {
+      params: { id: Schema.Int },
+      success: HttpApiSchema.NoContent,
+      error: NotFound,
+    }).middleware(Authentication),
   );
 
 export const VersionResponse = Schema.Struct({
   version: Schema.String,
-}).annotations({ identifier: "VersionResponse" });
+}).annotate({ identifier: "VersionResponse" });
 export type VersionResponse = typeof VersionResponse.Type;
 
 const MetaGroup = HttpApiGroup.make("meta").add(
   // Unauthenticated on purpose — the frontend displays this in its footer
   // before (and regardless of) login.
-  HttpApiEndpoint.get("getVersion", "/version").addSuccess(VersionResponse),
+  HttpApiEndpoint.get("getVersion", "/version", {
+    success: VersionResponse,
+  }),
 );
 
 export const WsTicketResponse = Schema.Struct({
   ticket: Schema.String,
-}).annotations({ identifier: "WsTicketResponse" });
+}).annotate({ identifier: "WsTicketResponse" });
 export type WsTicketResponse = typeof WsTicketResponse.Type;
 
 const RealtimeGroup = HttpApiGroup.make("realtime").add(
@@ -2219,9 +2208,9 @@ const RealtimeGroup = HttpApiGroup.make("realtime").add(
   // can't carry the normal `Authorization: Bearer` header, so this lets it
   // authenticate without putting the long-lived access token itself in a URL
   // (see issue #26).
-  HttpApiEndpoint.post("createWsTicket", "/realtime/ws-ticket")
-    .addSuccess(WsTicketResponse, { status: 201 })
-    .middleware(Authentication),
+  HttpApiEndpoint.post("createWsTicket", "/realtime/ws-ticket", {
+    success: WsTicketResponse.pipe(HttpApiSchema.status(201)),
+  }).middleware(Authentication),
 );
 
 // ---------------------------------------------------------------------------
@@ -2240,25 +2229,25 @@ const RealtimeGroup = HttpApiGroup.make("realtime").add(
 // Lifetime row counts — the "how big is this deployment" half of the
 // dashboard, as opposed to `AdminActivityWindow` below (which is windowed).
 export const AdminTotals = Schema.Struct({
-  users: Schema.Number,
-  admins: Schema.Number,
-  posts: Schema.Number,
-  comments: Schema.Number,
-  chats: Schema.Number,
-  messages: Schema.Number,
-  reactions: Schema.Number,
-  attachments: Schema.Number,
+  users: Schema.Finite,
+  admins: Schema.Finite,
+  posts: Schema.Finite,
+  comments: Schema.Finite,
+  chats: Schema.Finite,
+  messages: Schema.Finite,
+  reactions: Schema.Finite,
+  attachments: Schema.Finite,
   // Summed `attachments.size`, i.e. bytes held in the object store for
   // attachments still referenced by a row (see AttachmentCleanup.ts).
-  attachmentBytes: Schema.Number,
-}).annotations({ identifier: "AdminTotals" });
+  attachmentBytes: Schema.Finite,
+}).annotate({ identifier: "AdminTotals" });
 export type AdminTotals = typeof AdminTotals.Type;
 
-export const AdminActivityWindowLabel = Schema.Literal(
+export const AdminActivityWindowLabel = Schema.Literals([
   "1d",
   "7d",
   "30d",
-).annotations({ identifier: "AdminActivityWindowLabel" });
+]).annotate({ identifier: "AdminActivityWindowLabel" });
 export type AdminActivityWindowLabel = typeof AdminActivityWindowLabel.Type;
 
 // One trailing window's worth of activity. `activeUsers` is the same
@@ -2268,13 +2257,13 @@ export type AdminActivityWindowLabel = typeof AdminActivityWindowLabel.Type;
 // rather than read off the gauge, which only refreshes hourly.
 export const AdminActivityWindow = Schema.Struct({
   window: AdminActivityWindowLabel,
-  activeUsers: Schema.Number,
-  newUsers: Schema.Number,
-  newPosts: Schema.Number,
-  newComments: Schema.Number,
-  newMessages: Schema.Number,
-  newReactions: Schema.Number,
-}).annotations({ identifier: "AdminActivityWindow" });
+  activeUsers: Schema.Finite,
+  newUsers: Schema.Finite,
+  newPosts: Schema.Finite,
+  newComments: Schema.Finite,
+  newMessages: Schema.Finite,
+  newReactions: Schema.Finite,
+}).annotate({ identifier: "AdminActivityWindow" });
 export type AdminActivityWindow = typeof AdminActivityWindow.Type;
 
 // One UTC day of the trailing timeline, for the dashboard's bar chart. Days
@@ -2284,11 +2273,11 @@ export const AdminTimelinePoint = Schema.Struct({
   // `YYYY-MM-DD`, UTC — the day boundary matches `date_trunc('day', ...)`
   // over the naive-UTC `created_at` columns (see db/schema.ts).
   date: Schema.String,
-  signups: Schema.Number,
-  posts: Schema.Number,
-  comments: Schema.Number,
-  messages: Schema.Number,
-}).annotations({ identifier: "AdminTimelinePoint" });
+  signups: Schema.Finite,
+  posts: Schema.Finite,
+  comments: Schema.Finite,
+  messages: Schema.Finite,
+}).annotate({ identifier: "AdminTimelinePoint" });
 export type AdminTimelinePoint = typeof AdminTimelinePoint.Type;
 
 // A dependency `/ready` (see Health.ts) also checks, but reported with its
@@ -2296,14 +2285,14 @@ export type AdminTimelinePoint = typeof AdminTimelinePoint.Type;
 // dashboard can distinguish "healthy single-process dev box" from "healthy
 // Postgres + Redis deployment" without a second endpoint.
 export const AdminDependencyHealth = Schema.Struct({
-  name: Schema.Literal("database", "pubsub"),
+  name: Schema.Literals(["database", "pubsub"]),
   reachable: Schema.Boolean,
   // Null when the check failed — there's no meaningful latency for a probe
   // that never came back.
-  latencyMs: Schema.NullOr(Schema.Number),
+  latencyMs: Schema.NullOr(Schema.Finite),
   // "pglite"/"postgres" for the database, "memory"/"redis" for pubsub.
   backend: Schema.String,
-}).annotations({ identifier: "AdminDependencyHealth" });
+}).annotate({ identifier: "AdminDependencyHealth" });
 export type AdminDependencyHealth = typeof AdminDependencyHealth.Type;
 
 // Process-local runtime counters, read straight off the same `effect/Metric`
@@ -2315,32 +2304,32 @@ export type AdminDependencyHealth = typeof AdminDependencyHealth.Type;
 // "is anything on fire right now?" without leaving the app.
 export const AdminRuntimeHealth = Schema.Struct({
   // "ok" unless a dependency probe failed — the dashboard's headline badge.
-  status: Schema.Literal("ok", "degraded"),
+  status: Schema.Literals(["ok", "degraded"]),
   version: Schema.String,
-  uptimeSeconds: Schema.Number,
+  uptimeSeconds: Schema.Finite,
   dependencies: Schema.Array(AdminDependencyHealth),
-  websocketConnections: Schema.Number,
-  requestsTotal: Schema.Number,
+  websocketConnections: Schema.Finite,
+  requestsTotal: Schema.Finite,
   // Requests answered with a 5xx, and the share of `requestsTotal` they
   // make up (0..1). Precomputed server-side so every client renders the
   // same number rather than each dividing it differently.
-  serverErrorsTotal: Schema.Number,
-  errorRate: Schema.Number,
-  rateLimitRejectionsTotal: Schema.Number,
-  dbQueryErrorsTotal: Schema.Number,
-}).annotations({ identifier: "AdminRuntimeHealth" });
+  serverErrorsTotal: Schema.Finite,
+  errorRate: Schema.Finite,
+  rateLimitRejectionsTotal: Schema.Finite,
+  dbQueryErrorsTotal: Schema.Finite,
+}).annotate({ identifier: "AdminRuntimeHealth" });
 export type AdminRuntimeHealth = typeof AdminRuntimeHealth.Type;
 
 export const AdminStats = Schema.Struct({
   // Epoch ms the snapshot was taken — nothing here is cached, but the
   // dashboard refetches on an interval and shows how fresh what's on screen
   // is.
-  generatedAt: Schema.Number,
+  generatedAt: Schema.Finite,
   totals: AdminTotals,
   activity: Schema.Array(AdminActivityWindow),
   timeline: Schema.Array(AdminTimelinePoint),
   health: AdminRuntimeHealth,
-}).annotations({ identifier: "AdminStats" });
+}).annotate({ identifier: "AdminStats" });
 export type AdminStats = typeof AdminStats.Type;
 
 export const DEFAULT_ADMIN_TIMELINE_DAYS = 14;
@@ -2354,9 +2343,8 @@ export const MAX_ADMIN_TIMELINE_DAYS = 90;
 // `$ref` would silently drop them from the generated spec.
 export const AdminStatsQuery = Schema.Struct({
   days: Schema.optional(
-    Schema.NumberFromString.pipe(
-      Schema.int(),
-      Schema.between(1, MAX_ADMIN_TIMELINE_DAYS),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_ADMIN_TIMELINE_DAYS }),
     ),
   ),
 });
@@ -2364,11 +2352,11 @@ export const AdminStatsQuery = Schema.Struct({
 const AdminGroup = HttpApiGroup.make("admin").add(
   // Admin-only: a non-admin caller gets a 403 rather than a filtered-down
   // payload, since every field here is deployment-wide operational data.
-  HttpApiEndpoint.get("getAdminStats", "/admin/stats")
-    .setUrlParams(AdminStatsQuery)
-    .addSuccess(AdminStats)
-    .addError(Forbidden, { status: 403 })
-    .middleware(Authentication),
+  HttpApiEndpoint.get("getAdminStats", "/admin/stats", {
+    query: AdminStatsQuery,
+    success: AdminStats,
+    error: Forbidden,
+  }).middleware(Authentication),
 );
 
 // --- Games (see GamesHandler.ts) -------------------------------------------
@@ -2387,7 +2375,7 @@ const AdminGroup = HttpApiGroup.make("admin").add(
 //  - "reflex":  Reflex Rush — rounds of reaction tests (wait for green, dodge
 //               the decoys, match the symbol, the arrow, the target), solo
 //               or head to head (see src/games/reflex.ts).
-export const GameId = Schema.Literal("typing", "drawing", "reflex").annotations(
+export const GameId = Schema.Literals(["typing", "drawing", "reflex"]).annotate(
   {
     identifier: "GameId",
   },
@@ -2408,27 +2396,27 @@ export const MAX_GAME_LOBBY_PLAYERS = 6;
 //  - "racing":    between `startsAt` and `endsAt`, and someone hasn't
 //                 finished yet.
 //  - "finished":  everyone finished or `endsAt` passed; the host can rematch.
-export const GameLobbyPhase = Schema.Literal(
+export const GameLobbyPhase = Schema.Literals([
   "waiting",
   "countdown",
   "racing",
   "finished",
-).annotations({ identifier: "GameLobbyPhase" });
+]).annotate({ identifier: "GameLobbyPhase" });
 export type GameLobbyPhase = typeof GameLobbyPhase.Type;
 
 export const GameLobbyPlayer = Schema.Struct({
   user: User,
-  joinedAt: Schema.Number,
+  joinedAt: Schema.Finite,
   // The four result fields are null until this player finishes the current
   // round. `score` is the game's headline number — words per minute for the
   // typing race, points for Sketchy (where `accuracy` is the share of this
   // player's votes that found the real title, and `durationMs` the length of
   // the whole game).
-  durationMs: Schema.NullOr(Schema.Number),
-  score: Schema.NullOr(Schema.Number),
-  accuracy: Schema.NullOr(Schema.Number),
-  place: Schema.NullOr(Schema.Number),
-}).annotations({ identifier: "GameLobbyPlayer" });
+  durationMs: Schema.NullOr(Schema.Finite),
+  score: Schema.NullOr(Schema.Finite),
+  accuracy: Schema.NullOr(Schema.Finite),
+  place: Schema.NullOr(Schema.Finite),
+}).annotate({ identifier: "GameLobbyPlayer" });
 export type GameLobbyPlayer = typeof GameLobbyPlayer.Type;
 
 // --- Sketchy (the "drawing" game — see src/games/drawing/) -----------------
@@ -2450,7 +2438,7 @@ export const MAX_BLUFF_LENGTH = 60;
 export const MIN_DRAWING_ROUNDS = 1;
 export const MAX_DRAWING_ROUNDS = 3;
 
-export const DrawingBrush = Schema.Literal("thin", "thick").annotations({
+export const DrawingBrush = Schema.Literals(["thin", "thick"]).annotate({
   identifier: "DrawingBrush",
 });
 
@@ -2459,19 +2447,22 @@ export const DrawingBrush = Schema.Literal("thin", "thick").annotations({
 // the drawing-wide point budget are checked by the handler, since a schema
 // can only bound each number on its own.
 export const DrawingStroke = Schema.Struct({
-  color: Schema.Number.pipe(
-    Schema.int(),
-    Schema.between(0, DRAWING_PALETTE_SIZE - 1),
+  color: Schema.Finite.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: 0, maximum: DRAWING_PALETTE_SIZE - 1 }),
   ),
   brush: DrawingBrush,
   points: Schema.Array(
-    Schema.Number.pipe(Schema.int(), Schema.between(0, DRAWING_WIDTH)),
-  ).pipe(Schema.minItems(2), Schema.maxItems(MAX_DRAWING_POINTS * 2)),
-}).annotations({ identifier: "DrawingStroke" });
+    Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 0, maximum: DRAWING_WIDTH }),
+    ),
+  ).check(Schema.isMinLength(2), Schema.isMaxLength(MAX_DRAWING_POINTS * 2)),
+}).annotate({ identifier: "DrawingStroke" });
 export type DrawingStroke = typeof DrawingStroke.Type;
 
-export const DrawingStrokes = Schema.Array(DrawingStroke).pipe(
-  Schema.maxItems(MAX_DRAWING_STROKES),
+export const DrawingStrokes = Schema.Array(DrawingStroke).check(
+  Schema.isMaxLength(MAX_DRAWING_STROKES),
 );
 
 // A theme pack, as the pack picker shows it. Deliberately *not* the prompt
@@ -2484,37 +2475,37 @@ export const DrawingPack = Schema.Struct({
   icon: Schema.String,
   description: Schema.String,
   samples: Schema.Array(Schema.String),
-  promptCount: Schema.Number,
-}).annotations({ identifier: "DrawingPack" });
+  promptCount: Schema.Finite,
+}).annotate({ identifier: "DrawingPack" });
 export type DrawingPack = typeof DrawingPack.Type;
 
 export const DrawingPackList = Schema.Struct({
   packs: Schema.Array(DrawingPack),
-}).annotations({ identifier: "DrawingPackList" });
+}).annotate({ identifier: "DrawingPackList" });
 
 // Where a Sketchy game is inside the "racing" phase. Each round opens with a
 // "draw" stage (everyone at once), then every drawing of that round takes a
 // "bluff" → "vote" → "reveal" turn in the spotlight. Derived from the clock
 // and the submissions at read time, exactly like `GameLobbyPhase`.
-export const DrawingStageKind = Schema.Literal(
+export const DrawingStageKind = Schema.Literals([
   "draw",
   "bluff",
   "vote",
   "reveal",
-).annotations({ identifier: "DrawingStageKind" });
+]).annotate({ identifier: "DrawingStageKind" });
 export type DrawingStageKind = typeof DrawingStageKind.Type;
 
 export const DrawingStage = Schema.Struct({
   kind: DrawingStageKind,
   // 1-based round within this game (see `rounds`).
-  turn: Schema.Number,
+  turn: Schema.Finite,
   // The drawing in the spotlight; null during "draw".
-  drawingId: Schema.NullOr(Schema.Number),
+  drawingId: Schema.NullOr(Schema.Finite),
   // Epoch ms. `endsAt` can move *earlier* (everyone submitted) but never
   // later.
-  startedAt: Schema.Number,
-  endsAt: Schema.Number,
-}).annotations({ identifier: "DrawingStage" });
+  startedAt: Schema.Finite,
+  endsAt: Schema.Finite,
+}).annotate({ identifier: "DrawingStage" });
 export type DrawingStage = typeof DrawingStage.Type;
 
 // One title on the vote ballot. Until the drawing's reveal, only `id`,
@@ -2522,23 +2513,23 @@ export type DrawingStage = typeof DrawingStage.Type;
 // real title from a bluff.
 export const DrawingAnswer = Schema.Struct({
   // Ballot position — what a vote submits.
-  id: Schema.Number,
+  id: Schema.Finite,
   text: Schema.String,
   // The viewer can't vote for this one: it's their own bluff (or, for the
   // artist, their own prompt).
   mine: Schema.Boolean,
   real: Schema.NullOr(Schema.Boolean),
   // Who wrote this bluff; null for the real title.
-  authorId: Schema.NullOr(Schema.Number),
-  voterIds: Schema.NullOr(Schema.Array(Schema.Number)),
+  authorId: Schema.NullOr(Schema.Finite),
+  voterIds: Schema.NullOr(Schema.Array(Schema.Finite)),
   // What this answer earned its author (the artist, for the real one).
-  points: Schema.NullOr(Schema.Number),
+  points: Schema.NullOr(Schema.Finite),
   // Epoch ms at which the live reveal turns this answer over — every client
   // plays the same sequence off the server's clock, the truth landing last.
   // Null for a bluff nobody picked (it isn't given a beat), and once the
   // game is over.
-  revealAt: Schema.NullOr(Schema.Number),
-}).annotations({ identifier: "DrawingAnswer" });
+  revealAt: Schema.NullOr(Schema.Finite),
+}).annotate({ identifier: "DrawingAnswer" });
 export type DrawingAnswer = typeof DrawingAnswer.Type;
 
 // One player's drawing, filtered for the viewer: strokes appear once the
@@ -2546,44 +2537,44 @@ export type DrawingAnswer = typeof DrawingAnswer.Type;
 // prompt only at its reveal (the artist always knows theirs), the ballot
 // from its vote stage on.
 export const DrawingEntry = Schema.Struct({
-  id: Schema.Number,
-  turn: Schema.Number,
+  id: Schema.Finite,
+  turn: Schema.Finite,
   // Order within the round's bluff/vote/reveal turns.
-  position: Schema.Number,
-  artistId: Schema.Number,
+  position: Schema.Finite,
+  artistId: Schema.Finite,
   submitted: Schema.Boolean,
   strokes: Schema.NullOr(DrawingStrokes),
   prompt: Schema.NullOr(Schema.String),
   revealed: Schema.Boolean,
   // How many bluffs/votes are in — the "3 of 5" progress, never who or what.
-  bluffCount: Schema.Number,
-  voteCount: Schema.Number,
+  bluffCount: Schema.Finite,
+  voteCount: Schema.Finite,
   myBluff: Schema.NullOr(Schema.String),
-  myVote: Schema.NullOr(Schema.Number),
+  myVote: Schema.NullOr(Schema.Finite),
   answers: Schema.NullOr(Schema.Array(DrawingAnswer)),
-}).annotations({ identifier: "DrawingEntry" });
+}).annotate({ identifier: "DrawingEntry" });
 export type DrawingEntry = typeof DrawingEntry.Type;
 
 export const DrawingScore = Schema.Struct({
-  userId: Schema.Number,
-  score: Schema.Number,
-}).annotations({ identifier: "DrawingScore" });
+  userId: Schema.Finite,
+  score: Schema.Finite,
+}).annotate({ identifier: "DrawingScore" });
 
 export const DrawingGame = Schema.Struct({
   // The host's picks (see `updateDrawingSettings`).
   packs: Schema.Array(Schema.String),
-  rounds: Schema.Number,
+  rounds: Schema.Finite,
   // Null while waiting, counting down, or finished.
   stage: Schema.NullOr(DrawingStage),
   // The viewer's own secret prompt for the current round's draw stage.
   myPrompt: Schema.NullOr(Schema.String),
   // Everyone dealt into this game — fixed at the start, so a player who
   // leaves mid-game still has their drawing played out.
-  participantIds: Schema.Array(Schema.Number),
+  participantIds: Schema.Array(Schema.Finite),
   drawings: Schema.Array(DrawingEntry),
   // Running totals over every drawing revealed so far, highest first.
   scores: Schema.Array(DrawingScore),
-}).annotations({ identifier: "DrawingGame" });
+}).annotate({ identifier: "DrawingGame" });
 export type DrawingGame = typeof DrawingGame.Type;
 
 // --- Reflex Rush (the "reflex" game — see src/games/reflex.ts) -------------
@@ -2592,39 +2583,39 @@ export type DrawingGame = typeof DrawingGame.Type;
 // seed when the host starts it. Every client plays the same schedule off
 // the (server-corrected) clock, so everyone in a lobby gets each signal at
 // the same instant.
-export const ReflexKind = Schema.Literal(...REFLEX_KINDS).annotations({
+export const ReflexKind = Schema.Literals(REFLEX_KINDS).annotate({
   identifier: "ReflexKind",
 });
 export type ReflexKind = typeof ReflexKind.Type;
 
-export const ReflexDirection = Schema.Literal(...REFLEX_DIRECTIONS).annotations(
-  { identifier: "ReflexDirection" },
-);
+export const ReflexDirection = Schema.Literals(REFLEX_DIRECTIONS).annotate({
+  identifier: "ReflexDirection",
+});
 
 // Something shown before a round's signal: a decoy flash ("decoy", whose
 // `variant` picks its look) or a wrong symbol ("match", whose `variant` is
 // the symbol).
 export const ReflexCue = Schema.Struct({
-  at: Schema.Number,
-  variant: Schema.Number,
-}).annotations({ identifier: "ReflexCue" });
+  at: Schema.Finite,
+  variant: Schema.Finite,
+}).annotate({ identifier: "ReflexCue" });
 
 // One round. All times are epoch ms: the title card shows from `armAt`,
 // presses count as false starts from `armAt + introMs` until `signalAt`,
 // and the round is decided at `closeAt`.
 export const ReflexRound = Schema.Struct({
   kind: ReflexKind,
-  armAt: Schema.Number,
-  signalAt: Schema.Number,
-  closeAt: Schema.Number,
+  armAt: Schema.Finite,
+  signalAt: Schema.Finite,
+  closeAt: Schema.Finite,
   cues: Schema.Array(ReflexCue),
   // "match" only: the symbol to hit on.
-  symbol: Schema.NullOr(Schema.Number),
+  symbol: Schema.NullOr(Schema.Finite),
   // "arrow" only: the direction to press.
   direction: Schema.NullOr(ReflexDirection),
   // "target" only: its center, as fractions of the arena's width/height.
-  target: Schema.NullOr(Schema.Struct({ x: Schema.Number, y: Schema.Number })),
-}).annotations({ identifier: "ReflexRound" });
+  target: Schema.NullOr(Schema.Struct({ x: Schema.Finite, y: Schema.Finite })),
+}).annotate({ identifier: "ReflexRound" });
 export type ReflexRound = typeof ReflexRound.Type;
 
 //  - "hit":   reacted in time (and, for an arrow or a target, correctly).
@@ -2632,55 +2623,55 @@ export type ReflexRound = typeof ReflexRound.Type;
 //             symbol), or within ANTICIPATION_MS of it.
 //  - "miss":  never reacted within the window.
 //  - "wrong": reacted in time, but with the wrong arrow or off the target.
-export const ReflexOutcome = Schema.Literal(
+export const ReflexOutcome = Schema.Literals([
   "hit",
   "early",
   "miss",
   "wrong",
-).annotations({ identifier: "ReflexOutcome" });
+]).annotate({ identifier: "ReflexOutcome" });
 
 export const ReflexRoundResult = Schema.Struct({
   outcome: ReflexOutcome,
-  reactionMs: Schema.NullOr(Schema.Number),
+  reactionMs: Schema.NullOr(Schema.Finite),
   // Negative for a false start.
-  points: Schema.Number,
-}).annotations({ identifier: "ReflexRoundResult" });
+  points: Schema.Finite,
+}).annotate({ identifier: "ReflexRoundResult" });
 export type ReflexRoundResult = typeof ReflexRoundResult.Type;
 
 export const ReflexPlayerResult = Schema.Struct({
-  userId: Schema.Number,
+  userId: Schema.Finite,
   rounds: Schema.Array(ReflexRoundResult),
-}).annotations({ identifier: "ReflexPlayerResult" });
+}).annotate({ identifier: "ReflexPlayerResult" });
 
 export const ReflexGame = Schema.Struct({
   // The title card's length before each round is armed.
-  introMs: Schema.Number,
+  introMs: Schema.Finite,
   // Empty while waiting (the schedule is secret until the start).
   rounds: Schema.Array(ReflexRound),
   // The server-scored breakdown of everyone who has submitted their game.
   results: Schema.Array(ReflexPlayerResult),
-}).annotations({ identifier: "ReflexGame" });
+}).annotate({ identifier: "ReflexGame" });
 export type ReflexGame = typeof ReflexGame.Type;
 
 export const GameLobby = Schema.Struct({
-  id: Schema.Number,
+  id: Schema.Finite,
   game: GameId,
-  hostId: Schema.Number,
+  hostId: Schema.Finite,
   phase: GameLobbyPhase,
-  round: Schema.Number,
+  round: Schema.Finite,
   // Null while "waiting" — the text is only revealed once a race starts, so
   // nobody can rehearse it while the lobby fills. Always null in the lobby
   // browser listing.
   passage: Schema.NullOr(Schema.String),
   // Epoch ms; null while "waiting".
-  startsAt: Schema.NullOr(Schema.Number),
-  endsAt: Schema.NullOr(Schema.Number),
+  startsAt: Schema.NullOr(Schema.Finite),
+  endsAt: Schema.NullOr(Schema.Finite),
   // The server's clock when this response was built, so a client can correct
   // for its own clock skew when it renders the countdown and race timer.
-  serverNow: Schema.Number,
+  serverNow: Schema.Finite,
   // The host can't start with fewer seated players than this.
-  minPlayers: Schema.Number,
-  maxPlayers: Schema.Number,
+  minPlayers: Schema.Finite,
+  maxPlayers: Schema.Finite,
   // Seated players, in join order.
   players: Schema.Array(GameLobbyPlayer),
   // Sketchy's state, filtered for the caller (see DrawingGame); null for
@@ -2693,13 +2684,13 @@ export const GameLobby = Schema.Struct({
   // typing race; closed while a Sketchy game is in play, since a chat line
   // is the easiest way to leak a secret prompt (reactions stay on).
   chatOpen: Schema.Boolean,
-  createdAt: Schema.Number,
-}).annotations({ identifier: "GameLobby" });
+  createdAt: Schema.Finite,
+}).annotate({ identifier: "GameLobby" });
 export type GameLobby = typeof GameLobby.Type;
 
 export const GameLobbyList = Schema.Struct({
   lobbies: Schema.Array(GameLobby),
-}).annotations({ identifier: "GameLobbyList" });
+}).annotate({ identifier: "GameLobbyList" });
 
 // --- Lobby chat -------------------------------------------------------------
 //
@@ -2711,26 +2702,26 @@ export const MAX_GAME_CHAT_LENGTH = 280;
 export const GAME_CHAT_PAGE_SIZE = 50;
 
 export const GameChatMessage = Schema.Struct({
-  id: Schema.Number,
-  lobbyId: Schema.Number,
+  id: Schema.Finite,
+  lobbyId: Schema.Finite,
   user: User,
   text: Schema.String,
-  createdAt: Schema.Number,
-}).annotations({ identifier: "GameChatMessage" });
+  createdAt: Schema.Finite,
+}).annotate({ identifier: "GameChatMessage" });
 export type GameChatMessage = typeof GameChatMessage.Type;
 
 export const GameChat = Schema.Struct({
   // Oldest first, ending with the newest. Leaves out anyone the caller has
   // blocked or muted.
   messages: Schema.Array(GameChatMessage),
-}).annotations({ identifier: "GameChat" });
+}).annotate({ identifier: "GameChat" });
 
 export const GameChatBody = Schema.Struct({
-  text: Schema.Trim.pipe(
-    Schema.minLength(1),
-    Schema.maxLength(MAX_GAME_CHAT_LENGTH),
+  text: Schema.Trim.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_GAME_CHAT_LENGTH),
   ),
-}).annotations({ identifier: "GameChatBody" });
+}).annotate({ identifier: "GameChatBody" });
 
 // A finished race's submission. The server never takes a score from the
 // client: it checks `typed` against the passage and times the finish off its
@@ -2738,9 +2729,12 @@ export const GameChatBody = Schema.Struct({
 // can't observe) is taken on trust — and it can only ever *lower* accuracy.
 export const MAX_TYPED_LENGTH = 2000;
 export const FinishRaceBody = Schema.Struct({
-  typed: Schema.String.pipe(Schema.maxLength(MAX_TYPED_LENGTH)),
-  errors: Schema.Number.pipe(Schema.int(), Schema.between(0, 100_000)),
-}).annotations({ identifier: "FinishRaceBody" });
+  typed: Schema.String.check(Schema.isMaxLength(MAX_TYPED_LENGTH)),
+  errors: Schema.Finite.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: 0, maximum: 100_000 }),
+  ),
+}).annotate({ identifier: "FinishRaceBody" });
 
 // A played Reflex Rush game, one entry per round in order. What's measured
 // on the client — the reaction time — is judged, not trusted: under
@@ -2750,34 +2744,41 @@ export const FinishRaceBody = Schema.Struct({
 export const ReflexTap = Schema.Struct({
   early: Schema.Boolean,
   reactionMs: Schema.NullOr(
-    Schema.Number.pipe(Schema.int(), Schema.between(0, 10_000)),
+    Schema.Finite.check(
+      Schema.isInt(),
+      Schema.isBetween({ minimum: 0, maximum: 10_000 }),
+    ),
   ),
   direction: Schema.NullOr(ReflexDirection),
-  x: Schema.NullOr(Schema.Number.pipe(Schema.between(0, 1))),
-  y: Schema.NullOr(Schema.Number.pipe(Schema.between(0, 1))),
-}).annotations({ identifier: "ReflexTap" });
+  x: Schema.NullOr(
+    Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  ),
+  y: Schema.NullOr(
+    Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  ),
+}).annotate({ identifier: "ReflexTap" });
 
 export const FinishReflexBody = Schema.Struct({
-  taps: Schema.Array(ReflexTap).pipe(Schema.maxItems(REFLEX_ROUNDS)),
-}).annotations({ identifier: "FinishReflexBody" });
+  taps: Schema.Array(ReflexTap).check(Schema.isMaxLength(REFLEX_ROUNDS)),
+}).annotate({ identifier: "FinishReflexBody" });
 
-export const LeaderboardPeriod = Schema.Literal(
+export const LeaderboardPeriod = Schema.Literals([
   "day",
   "week",
   "all",
-).annotations({ identifier: "LeaderboardPeriod" });
+]).annotate({ identifier: "LeaderboardPeriod" });
 export type LeaderboardPeriod = typeof LeaderboardPeriod.Type;
 
 export const LeaderboardEntry = Schema.Struct({
-  rank: Schema.Number,
+  rank: Schema.Finite,
   user: User,
-  bestScore: Schema.Number,
-  averageScore: Schema.Number,
-  averageAccuracy: Schema.Number,
-  races: Schema.Number,
+  bestScore: Schema.Finite,
+  averageScore: Schema.Finite,
+  averageAccuracy: Schema.Finite,
+  races: Schema.Finite,
   // First places in races against at least one opponent.
-  wins: Schema.Number,
-}).annotations({ identifier: "LeaderboardEntry" });
+  wins: Schema.Finite,
+}).annotate({ identifier: "LeaderboardEntry" });
 export type LeaderboardEntry = typeof LeaderboardEntry.Type;
 
 export const Leaderboard = Schema.Struct({
@@ -2787,7 +2788,7 @@ export const Leaderboard = Schema.Struct({
   // The caller's own standing, even when it falls outside `entries` — null
   // when they have no results in the period.
   me: Schema.NullOr(LeaderboardEntry),
-}).annotations({ identifier: "Leaderboard" });
+}).annotate({ identifier: "Leaderboard" });
 export type Leaderboard = typeof Leaderboard.Type;
 
 export const LEADERBOARD_SIZE = 25;
@@ -2795,248 +2796,234 @@ export const LEADERBOARD_SIZE = 25;
 export class InvalidGameRequest extends Schema.TaggedError<InvalidGameRequest>()(
   "InvalidGameRequest",
   { message: Schema.String },
+  { httpApiStatus: 400 },
 ) {}
 
 // Anonymous (no `identifier`) for the reason in CLAUDE.md — a named path or
 // query struct silently loses its parameters in the generated spec.
 const GamePath = Schema.Struct({ game: GameId });
-const GameLobbyIdPath = Schema.Struct({ id: Schema.NumberFromString });
+const GameLobbyIdPath = Schema.Struct({ id: Schema.Int });
 export const LeaderboardQuery = Schema.Struct({
   period: Schema.optional(LeaderboardPeriod),
 });
 
 export const GameInviteBody = Schema.Struct({
-  userId: Schema.Number.pipe(Schema.int(), Schema.positive()),
-}).annotations({ identifier: "GameInviteBody" });
+  userId: Schema.Finite.check(Schema.isInt(), Schema.isGreaterThan(0)),
+}).annotate({ identifier: "GameInviteBody" });
 
 export const DrawingSettingsBody = Schema.Struct({
   // Pack slugs (see `listDrawingPacks`); unknown ones are rejected.
-  packs: Schema.Array(Schema.String.pipe(Schema.maxLength(40))).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(20),
+  packs: Schema.Array(Schema.String.check(Schema.isMaxLength(40))).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(20),
   ),
-  rounds: Schema.Number.pipe(
-    Schema.int(),
-    Schema.between(MIN_DRAWING_ROUNDS, MAX_DRAWING_ROUNDS),
+  rounds: Schema.Finite.check(
+    Schema.isInt(),
+    Schema.isBetween({
+      minimum: MIN_DRAWING_ROUNDS,
+      maximum: MAX_DRAWING_ROUNDS,
+    }),
   ),
-}).annotations({ identifier: "DrawingSettingsBody" });
+}).annotate({ identifier: "DrawingSettingsBody" });
 
 export const SubmitDrawingBody = Schema.Struct({
   strokes: DrawingStrokes,
-}).annotations({ identifier: "SubmitDrawingBody" });
+}).annotate({ identifier: "SubmitDrawingBody" });
 
 export const SubmitBluffBody = Schema.Struct({
-  text: Schema.Trim.pipe(
-    Schema.minLength(1),
-    Schema.maxLength(MAX_BLUFF_LENGTH),
+  text: Schema.Trim.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_BLUFF_LENGTH),
   ),
-}).annotations({ identifier: "SubmitBluffBody" });
+}).annotate({ identifier: "SubmitBluffBody" });
 
 export const SubmitVoteBody = Schema.Struct({
   // A `DrawingAnswer.id` from the current ballot.
-  answer: Schema.Number.pipe(Schema.int(), Schema.nonNegative()),
-}).annotations({ identifier: "SubmitVoteBody" });
+  answer: Schema.Finite.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+}).annotate({ identifier: "SubmitVoteBody" });
 
 const GamesGroup = HttpApiGroup.make("games")
   .add(
     // Lobbies worth showing in the lobby browser: every lobby still
     // gathering players or mid-race, newest first. Abandoned ones (nobody
     // touched them in a while) are left out.
-    HttpApiEndpoint.get("listGameLobbies", "/games/:game/lobbies")
-      .setPath(GamePath)
-      .addSuccess(GameLobbyList)
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listGameLobbies", "/games/:game/lobbies", {
+      params: GamePath,
+      success: GameLobbyList,
+    }).middleware(Authentication),
   )
   .add(
     // Opens a new lobby with the caller as host and only player. Leaves any
     // other lobby the caller was seated in first.
-    HttpApiEndpoint.post("createGameLobby", "/games/:game/lobbies")
-      .setPath(GamePath)
-      .addSuccess(GameLobby, { status: 201 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("createGameLobby", "/games/:game/lobbies", {
+      params: GamePath,
+      success: GameLobby.pipe(HttpApiSchema.status(201)),
+    }).middleware(Authentication),
   )
   .add(
     // Seats the caller in the fullest open lobby that still has room, or
     // opens a new one if there isn't any — the one-click "just let me race".
-    HttpApiEndpoint.post("quickPlay", "/games/:game/quick-play")
-      .setPath(GamePath)
-      .addSuccess(GameLobby)
-      .middleware(Authentication),
+    HttpApiEndpoint.post("quickPlay", "/games/:game/quick-play", {
+      params: GamePath,
+      success: GameLobby,
+    }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.get("getGameLobby", "/games/lobbies/:id")
-      .setPath(GameLobbyIdPath)
-      .addSuccess(GameLobby)
-      .addError(NotFound, { status: 404 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("getGameLobby", "/games/lobbies/:id", {
+      params: GameLobbyIdPath,
+      success: GameLobby,
+      error: NotFound,
+    }).middleware(Authentication),
   )
   .add(
     // Idempotent for a player already seated. Only while "waiting" and not
     // full.
-    HttpApiEndpoint.post("joinGameLobby", "/games/lobbies/:id/join")
-      .setPath(GameLobbyIdPath)
-      .addSuccess(GameLobby)
-      .addError(NotFound, { status: 404 })
-      .addError(InvalidGameRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("joinGameLobby", "/games/lobbies/:id/join", {
+      params: GameLobbyIdPath,
+      success: GameLobby,
+      error: [NotFound, InvalidGameRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Allowed in any phase. The last player out closes the lobby; a leaving
     // host hands the lobby to whoever joined next.
-    HttpApiEndpoint.post("leaveGameLobby", "/games/lobbies/:id/leave")
-      .setPath(GameLobbyIdPath)
-      .addSuccess(Schema.Void)
-      .addError(NotFound, { status: 404 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("leaveGameLobby", "/games/lobbies/:id/leave", {
+      params: GameLobbyIdPath,
+      success: HttpApiSchema.NoContent,
+      error: NotFound,
+    }).middleware(Authentication),
   )
   .add(
     // Host-only, from "waiting": picks the passage and schedules the race a
     // short countdown from now.
-    HttpApiEndpoint.post("startGameLobby", "/games/lobbies/:id/start")
-      .setPath(GameLobbyIdPath)
-      .addSuccess(GameLobby)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidGameRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("startGameLobby", "/games/lobbies/:id/start", {
+      params: GameLobbyIdPath,
+      success: GameLobby,
+      error: [NotFound, Forbidden, InvalidGameRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Submits the caller's finished race — see FinishRaceBody for what is
     // (and isn't) trusted. Records the result for the leaderboard.
-    HttpApiEndpoint.post("finishRace", "/games/lobbies/:id/finish")
-      .setPath(GameLobbyIdPath)
-      .setPayload(FinishRaceBody)
-      .addSuccess(GameLobby)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidGameRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("finishRace", "/games/lobbies/:id/finish", {
+      params: GameLobbyIdPath,
+      payload: FinishRaceBody,
+      success: GameLobby,
+      error: [NotFound, Forbidden, InvalidGameRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Reflex Rush: submits the caller's whole game once its last round has
     // closed — see FinishReflexBody for what is (and isn't) trusted. Places
     // and leaderboard results are settled once everyone is in (or time's
     // up).
-    HttpApiEndpoint.post("finishReflex", "/games/lobbies/:id/reflex")
-      .setPath(GameLobbyIdPath)
-      .setPayload(FinishReflexBody)
-      .addSuccess(GameLobby)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidGameRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("finishReflex", "/games/lobbies/:id/reflex", {
+      params: GameLobbyIdPath,
+      payload: FinishReflexBody,
+      success: GameLobby,
+      error: [NotFound, Forbidden, InvalidGameRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Host-only, from "finished": resets the lobby to "waiting" for another
     // round with the same players.
-    HttpApiEndpoint.post("rematchGameLobby", "/games/lobbies/:id/rematch")
-      .setPath(GameLobbyIdPath)
-      .addSuccess(GameLobby)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidGameRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("rematchGameLobby", "/games/lobbies/:id/rematch", {
+      params: GameLobbyIdPath,
+      success: GameLobby,
+      error: [NotFound, Forbidden, InvalidGameRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Seated-players-only: invites another user into the caller's lobby. The
     // invitee gets a `game_invite` notification linking to it — nothing is
     // reserved for them, so a lobby that fills up or starts in the meantime
     // is simply not joinable when they arrive. Only while "waiting".
-    HttpApiEndpoint.post("inviteToGameLobby", "/games/lobbies/:id/invite")
-      .setPath(GameLobbyIdPath)
-      .setPayload(GameInviteBody)
-      .addSuccess(Schema.Void)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidGameRequest, { status: 400 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("inviteToGameLobby", "/games/lobbies/:id/invite", {
+      params: GameLobbyIdPath,
+      payload: GameInviteBody,
+      success: HttpApiSchema.NoContent,
+      error: [NotFound, Forbidden, InvalidGameRequest, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
     // The lobby chat's newest messages (see GameChat).
-    HttpApiEndpoint.get("listGameChat", "/games/lobbies/:id/chat")
-      .setPath(GameLobbyIdPath)
-      .addSuccess(GameChat)
-      .addError(NotFound, { status: 404 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listGameChat", "/games/lobbies/:id/chat", {
+      params: GameLobbyIdPath,
+      success: GameChat,
+      error: NotFound,
+    }).middleware(Authentication),
   )
   .add(
     // Says something in the lobby chat — anyone looking at the lobby may,
     // seated or spectating, while `chatOpen`. Rate-limited per user.
-    HttpApiEndpoint.post("postGameChat", "/games/lobbies/:id/chat")
-      .setPath(GameLobbyIdPath)
-      .setPayload(GameChatBody)
-      .addSuccess(GameChatMessage, { status: 201 })
-      .addError(NotFound, { status: 404 })
-      .addError(InvalidGameRequest, { status: 400 })
-      .addError(TooManyRequests, { status: 429 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("postGameChat", "/games/lobbies/:id/chat", {
+      params: GameLobbyIdPath,
+      payload: GameChatBody,
+      success: GameChatMessage.pipe(HttpApiSchema.status(201)),
+      error: [NotFound, InvalidGameRequest, TooManyRequests],
+    }).middleware(Authentication),
   )
   .add(
     // Sketchy's theme packs, for the host's pack picker — never the prompts
     // themselves (see DrawingPack).
-    HttpApiEndpoint.get("listDrawingPacks", "/games/drawing/packs")
-      .addSuccess(DrawingPackList)
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listDrawingPacks", "/games/drawing/packs", {
+      success: DrawingPackList,
+    }).middleware(Authentication),
   )
   .add(
     // Host-only, while "waiting", Sketchy only: picks the theme packs and
     // round count. Everyone in the lobby sees the change live.
-    HttpApiEndpoint.put("updateDrawingSettings", "/games/lobbies/:id/settings")
-      .setPath(GameLobbyIdPath)
-      .setPayload(DrawingSettingsBody)
-      .addSuccess(GameLobby)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidGameRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.put(
+      "updateDrawingSettings",
+      "/games/lobbies/:id/settings",
+      {
+        params: GameLobbyIdPath,
+        payload: DrawingSettingsBody,
+        success: GameLobby,
+        error: [NotFound, Forbidden, InvalidGameRequest],
+      },
+    ).middleware(Authentication),
   )
   .add(
     // Sketchy, "draw" stage: submits the caller's drawing for this round.
     // Once per drawing; a submission landing a moment after the timer is
     // still accepted, since the client sends whatever is on the canvas when
     // time runs out.
-    HttpApiEndpoint.post("submitDrawing", "/games/lobbies/:id/drawing")
-      .setPath(GameLobbyIdPath)
-      .setPayload(SubmitDrawingBody)
-      .addSuccess(GameLobby)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidGameRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("submitDrawing", "/games/lobbies/:id/drawing", {
+      params: GameLobbyIdPath,
+      payload: SubmitDrawingBody,
+      success: GameLobby,
+      error: [NotFound, Forbidden, InvalidGameRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Sketchy, "bluff" stage: a fake title for the drawing in the spotlight.
     // Not for its artist; rejected if it's too close to the real prompt or
     // repeats another player's bluff.
-    HttpApiEndpoint.post("submitBluff", "/games/lobbies/:id/bluff")
-      .setPath(GameLobbyIdPath)
-      .setPayload(SubmitBluffBody)
-      .addSuccess(GameLobby)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidGameRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("submitBluff", "/games/lobbies/:id/bluff", {
+      params: GameLobbyIdPath,
+      payload: SubmitBluffBody,
+      success: GameLobby,
+      error: [NotFound, Forbidden, InvalidGameRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Sketchy, "vote" stage: the caller's pick for the real title. Not for
     // the artist, and never for your own bluff.
-    HttpApiEndpoint.post("submitVote", "/games/lobbies/:id/vote")
-      .setPath(GameLobbyIdPath)
-      .setPayload(SubmitVoteBody)
-      .addSuccess(GameLobby)
-      .addError(NotFound, { status: 404 })
-      .addError(Forbidden, { status: 403 })
-      .addError(InvalidGameRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("submitVote", "/games/lobbies/:id/vote", {
+      params: GameLobbyIdPath,
+      payload: SubmitVoteBody,
+      success: GameLobby,
+      error: [NotFound, Forbidden, InvalidGameRequest],
+    }).middleware(Authentication),
   )
   .add(
     // Ranked by each player's best score in the period (default: all time).
-    HttpApiEndpoint.get("getLeaderboard", "/games/:game/leaderboard")
-      .setPath(GamePath)
-      .setUrlParams(LeaderboardQuery)
-      .addSuccess(Leaderboard)
-      .middleware(Authentication),
+    HttpApiEndpoint.get("getLeaderboard", "/games/:game/leaderboard", {
+      params: GamePath,
+      query: LeaderboardQuery,
+      success: Leaderboard,
+    }).middleware(Authentication),
   );
 
 // --- Notifications (issue #317, see NotificationsHandler.ts) ----------------
@@ -3052,32 +3039,32 @@ const GamesGroup = HttpApiGroup.make("games")
 //                   `game`.
 //  - "game_record": `actor` took the caller's #1 spot on `game`'s all-time
 //                   leaderboard.
-export const NotificationType = Schema.Literal(
+export const NotificationType = Schema.Literals([
   "comment",
   "reply",
   "reaction",
   "mention",
   "game_invite",
   "game_record",
-).annotations({ identifier: "NotificationType" });
+]).annotate({ identifier: "NotificationType" });
 export type NotificationType = typeof NotificationType.Type;
 
 export const Notification = Schema.Struct({
-  id: Schema.Number,
+  id: Schema.Finite,
   type: NotificationType,
   actor: User,
-  postId: Schema.NullOr(Schema.Number),
-  commentId: Schema.NullOr(Schema.Number),
+  postId: Schema.NullOr(Schema.Finite),
+  commentId: Schema.NullOr(Schema.Finite),
   emoji: Schema.NullOr(Schema.String),
   game: Schema.NullOr(GameId),
-  lobbyId: Schema.NullOr(Schema.Number),
+  lobbyId: Schema.NullOr(Schema.Finite),
   // A short plain-text slice of the comment (when `commentId` is set) or
   // post the notification is about, read live at request time — so it
   // reflects edits. Null for game notifications and non-text posts.
   excerpt: Schema.NullOr(Schema.String),
   read: Schema.Boolean,
-  createdAt: Schema.Number,
-}).annotations({ identifier: "Notification" });
+  createdAt: Schema.Finite,
+}).annotate({ identifier: "Notification" });
 export type Notification = typeof Notification.Type;
 
 export const DEFAULT_NOTIFICATIONS_LIMIT = 20;
@@ -3087,66 +3074,97 @@ export const MAX_NOTIFICATIONS_LIMIT = 50;
 export const NotificationsPageQuery = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
-    Schema.NumberFromString.pipe(
-      Schema.int(),
-      Schema.between(1, MAX_NOTIFICATIONS_LIMIT),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_NOTIFICATIONS_LIMIT }),
     ),
   ),
 });
 
 export const NotificationsPage = Schema.Struct({
   notifications: Schema.Array(Notification),
-  limit: Schema.Number,
+  limit: Schema.Finite,
   nextCursor: Schema.NullOr(Schema.String),
   // Same number `GET /notifications/unread-count` returns, bundled so the
   // inbox and its badge never disagree after one fetch.
-  unreadCount: Schema.Number,
-}).annotations({ identifier: "NotificationsPage" });
+  unreadCount: Schema.Finite,
+}).annotate({ identifier: "NotificationsPage" });
 
 export const UnreadNotificationCount = Schema.Struct({
-  count: Schema.Number,
-}).annotations({ identifier: "UnreadNotificationCount" });
+  count: Schema.Finite,
+}).annotate({ identifier: "UnreadNotificationCount" });
 
 export class InvalidNotificationRequest extends Schema.TaggedError<InvalidNotificationRequest>()(
   "InvalidNotificationRequest",
   { message: Schema.String },
+  { httpApiStatus: 400 },
 ) {}
 
-const NotificationIdPath = Schema.Struct({ id: Schema.NumberFromString });
+const NotificationIdPath = Schema.Struct({ id: Schema.Int });
 
 const NotificationsGroup = HttpApiGroup.make("notifications")
   .add(
-    HttpApiEndpoint.get("listNotifications", "/notifications")
-      .setUrlParams(NotificationsPageQuery)
-      .addSuccess(NotificationsPage)
-      .addError(InvalidNotificationRequest, { status: 400 })
-      .middleware(Authentication),
+    HttpApiEndpoint.get("listNotifications", "/notifications", {
+      query: NotificationsPageQuery,
+      success: NotificationsPage,
+      error: InvalidNotificationRequest,
+    }).middleware(Authentication),
   )
   .add(
     // The header bell's badge — cheap enough to fetch on every page load.
     HttpApiEndpoint.get(
       "getUnreadNotificationCount",
       "/notifications/unread-count",
-    )
-      .addSuccess(UnreadNotificationCount)
-      .middleware(Authentication),
+      {
+        success: UnreadNotificationCount,
+      },
+    ).middleware(Authentication),
   )
   .add(
     // Registered ahead of `/notifications/:id/read` for the same reason as
     // `/users/by-username` vs `/users/:id`.
-    HttpApiEndpoint.post("markAllNotificationsRead", "/notifications/read-all")
-      .addSuccess(UnreadNotificationCount)
-      .middleware(Authentication),
+    HttpApiEndpoint.post(
+      "markAllNotificationsRead",
+      "/notifications/read-all",
+      {
+        success: UnreadNotificationCount,
+      },
+    ).middleware(Authentication),
   )
   .add(
     // Idempotent. Someone else's notification is a 404, not a 403, so ids
     // can't be probed.
-    HttpApiEndpoint.post("markNotificationRead", "/notifications/:id/read")
-      .setPath(NotificationIdPath)
-      .addSuccess(UnreadNotificationCount)
-      .addError(NotFound, { status: 404 })
-      .middleware(Authentication),
+    HttpApiEndpoint.post("markNotificationRead", "/notifications/:id/read", {
+      params: NotificationIdPath,
+      success: UnreadNotificationCount,
+      error: NotFound,
+    }).middleware(Authentication),
   );
+
+// One failed node of a request decode, as `HttpApiDecodeError` reports it.
+// `_tag` is "Refinement" when a check supplied its own hand-authored message
+// (kept verbatim) and "Type" otherwise (message replaced with a generic one)
+// — see DecodeErrorSanitizer.ts.
+const DecodeIssue = Schema.Struct({
+  _tag: Schema.Literals(["Refinement", "Type"]),
+  path: Schema.Array(Schema.Union([Schema.String, Schema.Finite])),
+  message: Schema.String,
+}).annotate({ identifier: "Issue" });
+
+// The 400 body for a path/query/header/payload that fails to decode. Kept
+// wire-compatible with effect v3's `HttpApiDecodeError` (which v4 dropped in
+// favour of an empty 400): `web/src/lib/errors.ts` reads `issues` from it.
+export class HttpApiDecodeError extends Schema.TaggedError<HttpApiDecodeError>()(
+  "HttpApiDecodeError",
+  { issues: Schema.Array(DecodeIssue), message: Schema.String },
+  { httpApiStatus: 400 },
+) {}
+
+// Turns every request decode failure into a sanitized HttpApiDecodeError —
+// implemented in DecodeErrorSanitizer.ts.
+export class SanitizeDecodeErrors extends HttpApiMiddleware.Service<SanitizeDecodeErrors>()(
+  "SanitizeDecodeErrors",
+  { error: HttpApiDecodeError },
+) {}
 
 export class ChatApi extends HttpApi.make("chat-platform")
   .add(UsersGroup)
@@ -3160,4 +3178,5 @@ export class ChatApi extends HttpApi.make("chat-platform")
   .add(AdminGroup)
   .add(GamesGroup)
   .add(NotificationsGroup)
+  .middleware(SanitizeDecodeErrors)
   .annotate(OpenApi.Version, packageJson.version) {}

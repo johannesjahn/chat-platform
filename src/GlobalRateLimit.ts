@@ -1,10 +1,5 @@
-import {
-  HttpMiddleware,
-  HttpServerRequest,
-  HttpServerResponse,
-  type HttpApp,
-} from "@effect/platform";
-import { Effect, Metric, MetricLabel } from "effect";
+import { HttpServerRequest, HttpServerResponse } from "effect/http";
+import { Effect, Metric } from "effect";
 import { clientIp } from "./ClientIp.ts";
 import { rateLimitRejectionsTotal } from "./Metrics.ts";
 import { RateLimiter } from "./RateLimiter.ts";
@@ -37,31 +32,31 @@ const pathnameOf = (url: string): string => {
   return queryIndex === -1 ? url : url.slice(0, queryIndex);
 };
 
-export const globalRateLimit = HttpMiddleware.make(
-  <E, R>(httpApp: HttpApp.Default<E, R>) =>
-    Effect.gen(function* () {
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      if (EXEMPT_PATHS.has(pathnameOf(request.url))) return yield* httpApp;
+export const globalRateLimit = <E, R>(
+  httpApp: Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>,
+) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    if (EXEMPT_PATHS.has(pathnameOf(request.url))) return yield* httpApp;
 
-      const limiter = yield* RateLimiter;
-      const ip = yield* clientIp;
-      const result = yield* limiter.consume(
-        `global:${ip}`,
-        GLOBAL_MAX_REQUESTS_PER_IP,
-        GLOBAL_WINDOW_SECONDS,
+    const limiter = yield* RateLimiter;
+    const ip = yield* clientIp;
+    const result = yield* limiter.consume(
+      `global:${ip}`,
+      GLOBAL_MAX_REQUESTS_PER_IP,
+      GLOBAL_WINDOW_SECONDS,
+    );
+    if (!result.allowed) {
+      yield* Metric.update(
+        Metric.withAttributes(rateLimitRejectionsTotal, {
+          limiter: "global",
+        }),
+        1,
       );
-      if (!result.allowed) {
-        yield* Metric.update(
-          Metric.taggedWithLabels(rateLimitRejectionsTotal, [
-            MetricLabel.make("limiter", "global"),
-          ]),
-          1,
-        );
-        return yield* HttpServerResponse.text("Too Many Requests", {
-          status: 429,
-          headers: { "retry-after": String(result.retryAfterSeconds) },
-        });
-      }
-      return yield* httpApp;
-    }),
-);
+      return HttpServerResponse.text("Too Many Requests", {
+        status: 429,
+        headers: { "retry-after": String(result.retryAfterSeconds) },
+      });
+    }
+    return yield* httpApp;
+  });

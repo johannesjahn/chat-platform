@@ -1,12 +1,11 @@
 import { afterAll, expect, test } from "bun:test";
-import { HttpServerRequest, HttpServerResponse } from "@effect/platform";
+import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import {
   ConfigProvider,
   Effect,
   Layer,
   ManagedRuntime,
   Metric,
-  MetricLabel,
   Option,
 } from "effect";
 import { globalRateLimit } from "./GlobalRateLimit.ts";
@@ -17,7 +16,7 @@ import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 // off the request, so a minimal stand-in is enough to exercise it without
 // spinning up the full HttpApi/router machinery those fields would otherwise
 // require (see Metrics.test.ts/Health.test.ts for that heavier harness).
-const okApp = HttpServerResponse.text("ok");
+const okApp = Effect.succeed(HttpServerResponse.text("ok"));
 
 // HttpServerRequest.url is host-stripped (path + query only — see
 // ServerRequest.fromWeb's `removeHost`), not an absolute URL, so requests
@@ -60,9 +59,9 @@ test('the ceiling trips after GLOBAL_MAX_REQUESTS_PER_IP requests from the same 
   // worker process, so this asserts the delta produced rather than an
   // absolute value (see Metrics.test.ts's websocketConnectionsActive test
   // for the same reasoning).
-  const rejections = Metric.taggedWithLabels(rateLimitRejectionsTotal, [
-    MetricLabel.make("limiter", "global"),
-  ]);
+  const rejections = Metric.withAttributes(rateLimitRejectionsTotal, {
+    limiter: "global",
+  });
   const before = await runtime.runPromise(Metric.value(rejections));
 
   // GLOBAL_MAX_REQUESTS_PER_IP is 1000 (GlobalRateLimit.ts).
@@ -110,9 +109,9 @@ test("/health, /ready, and /metrics are exempt from the ceiling and never consum
 });
 
 test("respects TRUST_PROXY environment variable for resolving client IP in globalRateLimit", async () => {
-  const testConfigProvider = ConfigProvider.fromMap(
-    new Map([["TRUST_PROXY", "10.0.0.0/8,loopback"]]),
-  );
+  const testConfigProvider = ConfigProvider.fromUnknown({
+    TRUST_PROXY: "10.0.0.0/8,loopback",
+  });
 
   const requestWithXFF = (
     path: string,
@@ -122,7 +121,7 @@ test("respects TRUST_PROXY environment variable for resolving client IP in globa
     runtime.runPromise(
       globalRateLimit(okApp).pipe(
         Effect.provide(requestLive(path, remoteAddress, headers)),
-        Effect.provide(Layer.setConfigProvider(testConfigProvider)),
+        Effect.provide(ConfigProvider.layer(testConfigProvider)),
       ),
     );
 

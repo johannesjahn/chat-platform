@@ -1,6 +1,6 @@
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpApiBuilder } from "effect/http-api";
 import { and, count, desc, eq, inArray, lt, notInArray } from "drizzle-orm";
-import { Effect, Metric, MetricLabel } from "effect";
+import { Effect, Metric } from "effect";
 import {
   type Attachment,
   ChatApi,
@@ -89,9 +89,8 @@ export const decodePostsCursor = (cursor: string): number | null => {
   return Number.isInteger(id) ? id : null;
 };
 
-const getPostOr404 = (id: number) =>
+const getPostOr404 = (db: DrizzleDb, id: number) =>
   Effect.gen(function* () {
-    const db = yield* Db;
     const rows = yield* Effect.tryPromise(() =>
       db.select().from(posts).where(eq(posts.id, id)).limit(1),
     ).pipe(Effect.orDie);
@@ -106,20 +105,24 @@ const getPostOr404 = (id: number) =>
 export const PostsHandlerLive = HttpApiBuilder.group(
   ChatApi,
   "posts",
-  (handlers) =>
-    handlers
-      .handle("getPost", ({ path: { id } }) =>
+  Effect.fn(function* (handlers) {
+    const db = yield* Db;
+    const storage = yield* AttachmentStorage;
+    const connections = yield* RealtimeConnections;
+    return handlers
+      .handle("getPost", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const row = yield* getPostOr404(id);
+          const row = yield* getPostOr404(db, id);
           const reactions = yield* Effect.tryPromise(() =>
             postReactionInfo(db, [row.id], currentUser.id),
           ).pipe(Effect.orDie);
           const commentCounts = yield* Effect.tryPromise(() =>
             postCommentCounts(db, [row.id]),
           ).pipe(Effect.orDie);
-          const attachments = yield* resolveAttachments(db, [row.attachmentId]);
+          const attachments = yield* resolveAttachments(db, storage, [
+            row.attachmentId,
+          ]);
           return toApiPost(
             row,
             reactions.get(row.id),
@@ -130,9 +133,8 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           );
         }),
       )
-      .handle("listPosts", ({ urlParams }) =>
+      .handle("listPosts", ({ query: urlParams }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const limit = urlParams.limit ?? DEFAULT_POSTS_LIMIT;
 
@@ -193,6 +195,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
           const attachments = yield* resolveAttachments(
             db,
+            storage,
             rows.map((r) => r.attachmentId),
           );
           return {
@@ -213,10 +216,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
       )
       .handle("createPost", ({ payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
-          const storage = yield* AttachmentStorage;
 
           let attachment: Attachment | null = null;
           if (payload.attachmentId !== undefined) {
@@ -253,9 +253,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
           yield* Metric.update(
-            Metric.taggedWithLabels(contentCreatedTotal, [
-              MetricLabel.make("type", "post"),
-            ]),
+            Metric.withAttributes(contentCreatedTotal, { type: "post" }),
             1,
           );
           yield* connections.broadcastAll({
@@ -263,22 +261,22 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             postId: row.id,
           });
           if (mentionsApply(row.contentType)) {
-            yield* notifyMentions({
-              actorId: currentUser.id,
-              content: row.content,
-              postId: row.id,
-            });
+            yield* notifyMentions(
+              { db, connections },
+              {
+                actorId: currentUser.id,
+                content: row.content,
+                postId: row.id,
+              },
+            );
           }
           return toApiPost(row, NO_REACTIONS, attachment);
         }),
       )
-      .handle("updatePost", ({ path: { id }, payload }) =>
+      .handle("updatePost", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
-          const storage = yield* AttachmentStorage;
-          const existing = yield* getPostOr404(id);
+          const existing = yield* getPostOr404(db, id);
           if (!canModify(currentUser, existing))
             return yield* Effect.fail(
               new Forbidden({ message: "You can only edit your own posts" }),
@@ -327,14 +325,17 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           });
           // Only names this edit added are pinged (see notifyMentions).
           if (mentionsApply(row.contentType)) {
-            yield* notifyMentions({
-              actorId: row.authorId,
-              content: row.content,
-              previousContent: mentionsApply(existing.contentType)
-                ? existing.content
-                : undefined,
-              postId: row.id,
-            });
+            yield* notifyMentions(
+              { db, connections },
+              {
+                actorId: row.authorId,
+                content: row.content,
+                previousContent: mentionsApply(existing.contentType)
+                  ? existing.content
+                  : undefined,
+                postId: row.id,
+              },
+            );
           }
           return toApiPost(
             row,
@@ -344,12 +345,10 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           );
         }),
       )
-      .handle("deletePost", ({ path: { id } }) =>
+      .handle("deletePost", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
-          const existing = yield* getPostOr404(id);
+          const existing = yield* getPostOr404(db, id);
           if (!canModify(currentUser, existing))
             return yield* Effect.fail(
               new Forbidden({
@@ -362,5 +361,6 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
           yield* connections.broadcastAll({ type: "post_changed", postId: id });
         }),
-      ),
+      );
+  }),
 );

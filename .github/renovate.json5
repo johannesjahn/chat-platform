@@ -64,6 +64,16 @@
       matchUpdateTypes: ["minor", "patch"],
       groupName: "web minor and patch dependencies",
     },
+    // Since v4, every Effect package (`effect`, `@effect/platform-bun`, …)
+    // shares one version number and must be bumped in lockstep — a lone
+    // `effect` major (PR #463) can't even install against the old
+    // `@effect/platform-bun`. Listed after the minor/patch groups above so
+    // it wins for these packages, majors included.
+    {
+      matchManagers: ["bun"],
+      matchPackageNames: ["effect", "@effect/**"],
+      groupName: "effect",
+    },
     // depTypes: ["action"] scopes this to actual `uses: owner/action@...`
     // pins. The github-actions manager also extracts ci.yml's `services:`
     // block images (redis/postgres, depType "service") as its own

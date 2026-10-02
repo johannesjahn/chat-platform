@@ -1,4 +1,4 @@
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpApiBuilder } from "effect/http-api";
 import {
   and,
   asc,
@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { Context, Effect, Metric, MetricLabel } from "effect";
+import { Effect, Metric } from "effect";
 import {
   ChatApi,
   DRAWING_HEIGHT,
@@ -101,7 +101,7 @@ import {
 import { GAME_RULES, type RaceRules } from "./games/rules.ts";
 import { rateLimitRejectionsTotal } from "./Metrics.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
-import { createNotifications } from "./notifications.ts";
+import { createNotifications, type NotificationDeps } from "./notifications.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { gameHubRoom, gameLobbyRoom, RealtimeConnections } from "./Realtime.ts";
 import { publicUserColumns, toPublicUser } from "./UsersHandler.ts";
@@ -467,17 +467,17 @@ const toApiReflex = (
 // included once a race is underway, a Sketchy game filtered down to what
 // the viewer may see. The first read to find a Sketchy game over also
 // settles its results (see `settleDrawingGame`).
-const buildLobby = (db: DrizzleDb, id: number, viewerId: number) =>
+const buildLobby = (deps: NotificationDeps, id: number, viewerId: number) =>
   Effect.gen(function* () {
-    const snapshot = yield* loadSnapshot(db, id, { withStrokes: true });
-    yield* settleIfOver(db, snapshot);
+    const snapshot = yield* loadSnapshot(deps.db, id, { withStrokes: true });
+    yield* settleIfOver(deps, snapshot);
     return toApiLobby(snapshot, viewerId);
   });
 
 // Everyone looking at this lobby refetches it; everyone looking at the
 // game's lobby browser refetches the list.
 const notifyLobbyChanged = (
-  connections: Context.Tag.Service<typeof RealtimeConnections>,
+  connections: RealtimeConnections["Service"],
   lobby: Pick<DbGameLobby, "id" | "game">,
 ) =>
   Effect.all(
@@ -506,7 +506,7 @@ const touchLobby = (db: DrizzleDb, id: number, extra: object = {}) =>
 // a departing host hands it to whoever has been seated longest.
 const leaveLobby = (
   db: DrizzleDb,
-  connections: Context.Tag.Service<typeof RealtimeConnections>,
+  connections: RealtimeConnections["Service"],
   lobbyId: number,
   userId: number,
 ) =>
@@ -550,7 +550,7 @@ const leaveLobby = (
 // else, so a forgotten tab can't leave a ghost seat behind.
 const leaveOtherLobbies = (
   db: DrizzleDb,
-  connections: Context.Tag.Service<typeof RealtimeConnections>,
+  connections: RealtimeConnections["Service"],
   userId: number,
   keepLobbyId: number | null,
 ) =>
@@ -577,7 +577,7 @@ const leaveOtherLobbies = (
 
 const joinLobby = (
   db: DrizzleDb,
-  connections: Context.Tag.Service<typeof RealtimeConnections>,
+  connections: RealtimeConnections["Service"],
   lobbyId: number,
   userId: number,
 ) =>
@@ -585,7 +585,7 @@ const joinLobby = (
     const lobby = yield* loadLobbyOr404(db, lobbyId);
     const players = (yield* loadPlayers(db, [lobbyId])).get(lobbyId) ?? [];
     if (players.some((player) => player.user.id === userId)) {
-      return yield* buildLobby(db, lobbyId, userId);
+      return yield* buildLobby({ db, connections }, lobbyId, userId);
     }
     if (lobby.status !== "waiting") {
       return yield* Effect.fail(
@@ -606,12 +606,12 @@ const joinLobby = (
     ).pipe(Effect.orDie);
     yield* touchLobby(db, lobbyId);
     yield* notifyLobbyChanged(connections, lobby);
-    return yield* buildLobby(db, lobbyId, userId);
+    return yield* buildLobby({ db, connections }, lobbyId, userId);
   });
 
 const createLobby = (
   db: DrizzleDb,
-  connections: Context.Tag.Service<typeof RealtimeConnections>,
+  connections: RealtimeConnections["Service"],
   game: GameId,
   userId: number,
 ) =>
@@ -639,7 +639,7 @@ const createLobby = (
       db.insert(gameLobbyPlayers).values({ lobbyId: lobby!.id, userId }),
     ).pipe(Effect.orDie);
     yield* notifyLobbyChanged(connections, lobby!);
-    return yield* buildLobby(db, lobby!.id, userId);
+    return yield* buildLobby({ db, connections }, lobby!.id, userId);
   });
 
 // createLobby/quickPlay read back a lobby they've only just created or
@@ -723,9 +723,8 @@ const validateStrokes = (strokes: ReadonlyArray<DrawingStroke>) => {
 const GAME_INVITE_MAX_PER_USER = 30;
 const GAME_INVITE_WINDOW_SECONDS = 60;
 
-const enforceInviteLimit = (userId: number) =>
+const enforceInviteLimit = (limiter: RateLimiter["Service"], userId: number) =>
   Effect.gen(function* () {
-    const limiter = yield* RateLimiter;
     const result = yield* limiter.consume(
       `games:invite:user:${userId}`,
       GAME_INVITE_MAX_PER_USER,
@@ -733,9 +732,9 @@ const enforceInviteLimit = (userId: number) =>
     );
     if (!result.allowed) {
       yield* Metric.update(
-        Metric.taggedWithLabels(rateLimitRejectionsTotal, [
-          MetricLabel.make("limiter", "game_invite"),
-        ]),
+        Metric.withAttributes(rateLimitRejectionsTotal, {
+          limiter: "game_invite",
+        }),
         1,
       );
       return yield* Effect.fail(
@@ -752,9 +751,8 @@ const enforceInviteLimit = (userId: number) =>
 const GAME_CHAT_MAX_PER_USER = 10;
 const GAME_CHAT_WINDOW_SECONDS = 15;
 
-const enforceChatLimit = (userId: number) =>
+const enforceChatLimit = (limiter: RateLimiter["Service"], userId: number) =>
   Effect.gen(function* () {
-    const limiter = yield* RateLimiter;
     const result = yield* limiter.consume(
       `games:chat:user:${userId}`,
       GAME_CHAT_MAX_PER_USER,
@@ -762,9 +760,9 @@ const enforceChatLimit = (userId: number) =>
     );
     if (!result.allowed) {
       yield* Metric.update(
-        Metric.taggedWithLabels(rateLimitRejectionsTotal, [
-          MetricLabel.make("limiter", "game_chat"),
-        ]),
+        Metric.withAttributes(rateLimitRejectionsTotal, {
+          limiter: "game_chat",
+        }),
         1,
       );
       return yield* Effect.fail(
@@ -810,6 +808,7 @@ const currentRecordHolder = (db: DrizzleDb, game: string) =>
 // them — the one leaderboard change worth a notification, since it's the
 // one they'd want to win back. Improving your own record is silent.
 const notifyRecordBroken = (
+  deps: NotificationDeps,
   game: string,
   lobbyId: number,
   previous: { readonly userId: number; readonly score: number } | null,
@@ -820,7 +819,7 @@ const notifyRecordBroken = (
     const best = [...results].sort((a, b) => b.score - a.score)[0];
     if (!best || best.userId === previous.userId) return;
     if (best.score <= previous.score) return;
-    yield* createNotifications([
+    yield* createNotifications(deps, [
       {
         userId: previous.userId,
         actorId: best.userId,
@@ -886,8 +885,9 @@ const settledResults = (snapshot: LobbySnapshot, startsAt: Date) => {
 // round in `settled_round` and inserting its `game_results` share one
 // transaction, and the claim is conditional, so a concurrent settle finds
 // nothing left to claim.
-const settleIfOver = (db: DrizzleDb, snapshot: LobbySnapshot) =>
+const settleIfOver = (deps: NotificationDeps, snapshot: LobbySnapshot) =>
   Effect.gen(function* () {
+    const { db } = deps;
     const { lobby, phase } = snapshot;
     if (phase !== "finished" || !lobby.startsAt) return;
     if (lobby.settledRound === lobby.round) return;
@@ -917,7 +917,7 @@ const settleIfOver = (db: DrizzleDb, snapshot: LobbySnapshot) =>
       }),
     ).pipe(Effect.orDie);
     if (settled) {
-      yield* notifyRecordBroken(lobby.game, lobby.id, record, results);
+      yield* notifyRecordBroken(deps, lobby.game, lobby.id, record, results);
     }
   });
 
@@ -1009,11 +1009,13 @@ const leaderboardEntry = (row: {
 export const GamesHandlerLive = HttpApiBuilder.group(
   ChatApi,
   "games",
-  (handlers) =>
-    handlers
-      .handle("listGameLobbies", ({ path: { game } }) =>
+  Effect.fn(function* (handlers) {
+    const limiter = yield* RateLimiter;
+    const db = yield* Db;
+    const connections = yield* RealtimeConnections;
+    return handlers
+      .handle("listGameLobbies", ({ params: { game } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const now = Date.now();
           const lobbies = yield* Effect.tryPromise(() =>
             db
@@ -1038,19 +1040,15 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           };
         }),
       )
-      .handle("createGameLobby", ({ path: { game } }) =>
+      .handle("createGameLobby", ({ params: { game } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           return yield* createLobby(db, connections, game, currentUser.id);
         }).pipe(dieOnVanishedLobby),
       )
-      .handle("quickPlay", ({ path: { game } }) =>
+      .handle("quickPlay", ({ params: { game } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           const now = Date.now();
           const open = yield* Effect.tryPromise(() =>
             db
@@ -1075,7 +1073,12 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               (player) => player.user.id === currentUser.id,
             ),
           );
-          if (seated) return yield* buildLobby(db, seated.id, currentUser.id);
+          if (seated)
+            return yield* buildLobby(
+              { db, connections },
+              seated.id,
+              currentUser.id,
+            );
           // Fullest lobby with room first — gets a race going soonest.
           const candidate = open
             .filter(
@@ -1099,35 +1102,28 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           return yield* createLobby(db, connections, game, currentUser.id);
         }).pipe(dieOnVanishedLobby),
       )
-      .handle("getGameLobby", ({ path: { id } }) =>
+      .handle("getGameLobby", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          return yield* buildLobby(db, id, currentUser.id);
+          return yield* buildLobby({ db, connections }, id, currentUser.id);
         }),
       )
-      .handle("joinGameLobby", ({ path: { id } }) =>
+      .handle("joinGameLobby", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           return yield* joinLobby(db, connections, id, currentUser.id);
         }),
       )
-      .handle("leaveGameLobby", ({ path: { id } }) =>
+      .handle("leaveGameLobby", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           yield* loadLobbyOr404(db, id);
           yield* leaveLobby(db, connections, id, currentUser.id);
         }),
       )
-      .handle("startGameLobby", ({ path: { id } }) =>
+      .handle("startGameLobby", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           const lobby = yield* loadLobbyOr404(db, id);
           yield* requireHost(lobby, currentUser.id, "start the game");
           const rules = GAME_RULES[lobby.game as GameId];
@@ -1219,14 +1215,12 @@ export const GamesHandlerLive = HttpApiBuilder.group(
             if (!started) return yield* invalid("The game already started");
           }
           yield* notifyLobbyChanged(connections, lobby);
-          return yield* buildLobby(db, id, currentUser.id);
+          return yield* buildLobby({ db, connections }, id, currentUser.id);
         }),
       )
-      .handle("finishRace", ({ path: { id }, payload }) =>
+      .handle("finishRace", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           const now = Date.now();
           const lobby = yield* loadLobbyOr404(db, id);
           const rules = yield* requireRace(lobby);
@@ -1337,19 +1331,21 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               playerCount: players.length,
             }),
           ).pipe(Effect.orDie);
-          yield* notifyRecordBroken(lobby.game, id, record, [
-            { userId: currentUser.id, score: result.score },
-          ]);
+          yield* notifyRecordBroken(
+            { db, connections },
+            lobby.game,
+            id,
+            record,
+            [{ userId: currentUser.id, score: result.score }],
+          );
           yield* touchLobby(db, id);
           yield* notifyLobbyChanged(connections, lobby);
-          return yield* buildLobby(db, id, currentUser.id);
+          return yield* buildLobby({ db, connections }, id, currentUser.id);
         }),
       )
-      .handle("finishReflex", ({ path: { id }, payload }) =>
+      .handle("finishReflex", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           const snapshot = yield* loadSnapshot(db, id);
           const { lobby, players, reflex, now } = snapshot;
           if (GAME_RULES[lobby.game as GameId].kind !== "reflex") {
@@ -1407,12 +1403,11 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           }
           yield* touchLobby(db, id);
           yield* notifyLobbyChanged(connections, lobby);
-          return yield* buildLobby(db, id, currentUser.id);
+          return yield* buildLobby({ db, connections }, id, currentUser.id);
         }),
       )
-      .handle("inviteToGameLobby", ({ path: { id }, payload }) =>
+      .handle("inviteToGameLobby", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const lobby = yield* loadLobbyOr404(db, id);
           const players = (yield* loadPlayers(db, [id])).get(id) ?? [];
@@ -1457,7 +1452,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               new NotFound({ message: "User not found" }),
             );
           }
-          yield* enforceInviteLimit(currentUser.id);
+          yield* enforceInviteLimit(limiter, currentUser.id);
           // Re-inviting someone who hasn't opened the last invite to this
           // same lobby yet is a no-op rather than a second inbox entry.
           const pending = yield* Effect.tryPromise(() =>
@@ -1479,7 +1474,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           // A recipient who blocked/muted the caller is silently skipped
           // inside createNotifications — the response is the same either
           // way, so an invite can't be used to probe for a block.
-          yield* createNotifications([
+          yield* createNotifications({ db, connections }, [
             {
               userId: payload.userId,
               actorId: currentUser.id,
@@ -1490,9 +1485,8 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           ]);
         }),
       )
-      .handle("listGameChat", ({ path: { id } }) =>
+      .handle("listGameChat", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           yield* loadLobbyOr404(db, id);
           const hidden = yield* Effect.tryPromise(() =>
@@ -1523,18 +1517,16 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           return { messages: rows.reverse().map(toApiChatMessage) };
         }),
       )
-      .handle("postGameChat", ({ path: { id }, payload }) =>
+      .handle("postGameChat", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           const snapshot = yield* loadSnapshot(db, id);
           if (!chatOpenFor(snapshot)) {
             return yield* invalid(
               "Chat is paused while the game is in play — reactions still work!",
             );
           }
-          yield* enforceChatLimit(currentUser.id);
+          yield* enforceChatLimit(limiter, currentUser.id);
           const [row] = yield* Effect.tryPromise(() =>
             db
               .insert(gameLobbyMessages)
@@ -1559,11 +1551,9 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           return toApiChatMessage({ ...row!, user: author! });
         }),
       )
-      .handle("rematchGameLobby", ({ path: { id } }) =>
+      .handle("rematchGameLobby", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           const snapshot = yield* loadSnapshot(db, id);
           const { lobby, drawing } = snapshot;
           yield* requireHost(lobby, currentUser.id, "start a rematch");
@@ -1572,7 +1562,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           }
           // A rematch wipes the game it replaces, so its results must be
           // on record first — normally a read already did this.
-          yield* settleIfOver(db, snapshot);
+          yield* settleIfOver({ db, connections }, snapshot);
           // The typing race keeps `passage` (hidden while waiting — see
           // toApiLobby) so the next start can avoid repeating it; Sketchy
           // carries its prompts over in its settings for the same reason.
@@ -1622,7 +1612,7 @@ export const GamesHandlerLive = HttpApiBuilder.group(
             ).pipe(Effect.orDie);
             yield* notifyLobbyChanged(connections, lobby);
           }
-          return yield* buildLobby(db, id, currentUser.id);
+          return yield* buildLobby({ db, connections }, id, currentUser.id);
         }),
       )
       .handle("listDrawingPacks", () =>
@@ -1637,11 +1627,9 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           })),
         }),
       )
-      .handle("updateDrawingSettings", ({ path: { id }, payload }) =>
+      .handle("updateDrawingSettings", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           const lobby = yield* loadLobbyOr404(db, id);
           if (GAME_RULES[lobby.game as GameId].kind !== "drawing") {
             return yield* invalid("This game has no settings");
@@ -1682,14 +1670,12 @@ export const GamesHandlerLive = HttpApiBuilder.group(
             );
           }
           yield* notifyLobbyChanged(connections, lobby);
-          return yield* buildLobby(db, id, currentUser.id);
+          return yield* buildLobby({ db, connections }, id, currentUser.id);
         }),
       )
-      .handle("submitDrawing", ({ path: { id }, payload }) =>
+      .handle("submitDrawing", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           yield* validateStrokes(payload.strokes);
           const snapshot = yield* loadSnapshot(db, id);
           const game = yield* requireDrawingGame(snapshot);
@@ -1720,14 +1706,12 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           }
           yield* touchLobby(db, id);
           yield* notifyLobbyChanged(connections, snapshot.lobby);
-          return yield* buildLobby(db, id, currentUser.id);
+          return yield* buildLobby({ db, connections }, id, currentUser.id);
         }),
       )
-      .handle("submitBluff", ({ path: { id }, payload }) =>
+      .handle("submitBluff", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           const snapshot = yield* loadSnapshot(db, id);
           const game = yield* requireDrawingGame(snapshot);
           yield* requireSeatedParticipant(snapshot, game.rows, currentUser.id);
@@ -1791,14 +1775,12 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           }
           yield* touchLobby(db, id);
           yield* notifyLobbyChanged(connections, snapshot.lobby);
-          return yield* buildLobby(db, id, currentUser.id);
+          return yield* buildLobby({ db, connections }, id, currentUser.id);
         }),
       )
-      .handle("submitVote", ({ path: { id }, payload }) =>
+      .handle("submitVote", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
           const snapshot = yield* loadSnapshot(db, id);
           const game = yield* requireDrawingGame(snapshot);
           yield* requireSeatedParticipant(snapshot, game.rows, currentUser.id);
@@ -1831,12 +1813,11 @@ export const GamesHandlerLive = HttpApiBuilder.group(
           }
           yield* touchLobby(db, id);
           yield* notifyLobbyChanged(connections, snapshot.lobby);
-          return yield* buildLobby(db, id, currentUser.id);
+          return yield* buildLobby({ db, connections }, id, currentUser.id);
         }),
       )
-      .handle("getLeaderboard", ({ path: { game }, urlParams }) =>
+      .handle("getLeaderboard", ({ params: { game }, query: urlParams }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const period = urlParams.period ?? "all";
           const windowMs = PERIOD_MS[period];
@@ -1914,5 +1895,6 @@ export const GamesHandlerLive = HttpApiBuilder.group(
               entries.find((entry) => entry.user.id === currentUser.id) ?? null,
           };
         }),
-      ),
+      );
+  }),
 );

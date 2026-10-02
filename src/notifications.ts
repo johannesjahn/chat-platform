@@ -6,7 +6,7 @@ import {
   type NotificationType,
 } from "./Api.ts";
 import { recipientsMutingSender } from "./blocks.ts";
-import { Db, type DrizzleDb } from "./Db.ts";
+import type { DrizzleDb } from "./Db.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { notifications, users } from "./db/schema.ts";
 
@@ -32,12 +32,21 @@ export type NotificationInput = {
   readonly lobbyId?: number | null;
 };
 
+// What writing/retracting notifications needs — the handler calling it
+// passes its own (see e.g. EngagementHandler.ts's group).
+export type NotificationDeps = {
+  readonly db: DrizzleDb;
+  readonly connections: RealtimeConnections["Service"];
+};
+
 // Tells each of `userIds`' open tabs to refetch their inbox/badge.
-export const notifyInboxChanged = (userIds: Iterable<number>) =>
+export const notifyInboxChanged = (
+  connections: RealtimeConnections["Service"],
+  userIds: Iterable<number>,
+) =>
   Effect.gen(function* () {
     const ids = [...new Set(userIds)];
     if (ids.length === 0) return;
-    const connections = yield* RealtimeConnections;
     yield* connections.notifyUsers(ids, { type: "notifications_changed" });
   });
 
@@ -79,10 +88,12 @@ const filterRecipients = async (
 // invite that caused a notification has already been written, and failing
 // that request because its side-notification couldn't be recorded would be
 // worse than a missing inbox entry. Failures are logged, never raised.
-export const createNotifications = (inputs: ReadonlyArray<NotificationInput>) =>
+export const createNotifications = (
+  { db, connections }: NotificationDeps,
+  inputs: ReadonlyArray<NotificationInput>,
+) =>
   Effect.gen(function* () {
     if (inputs.length === 0) return;
-    const db = yield* Db;
     const kept = yield* Effect.tryPromise(() => filterRecipients(db, inputs));
     if (kept.length === 0) return;
     const now = new Date();
@@ -101,9 +112,12 @@ export const createNotifications = (inputs: ReadonlyArray<NotificationInput>) =>
         })),
       ),
     );
-    yield* notifyInboxChanged(kept.map((input) => input.userId));
+    yield* notifyInboxChanged(
+      connections,
+      kept.map((input) => input.userId),
+    );
   }).pipe(
-    Effect.catchAllCause((cause) =>
+    Effect.catchCause((cause) =>
       Effect.logWarning("notifications: failed to record notifications").pipe(
         Effect.annotateLogs({ cause: String(cause) }),
       ),
@@ -113,14 +127,16 @@ export const createNotifications = (inputs: ReadonlyArray<NotificationInput>) =>
 // Undoing a reaction takes its notification back out of the recipient's
 // inbox (read or not), so toggling an emoji on and off doesn't leave a
 // trail — and a re-add later notifies afresh. Best-effort, as above.
-export const retractReactionNotification = (target: {
-  readonly actorId: number;
-  readonly emoji: string;
-  readonly postId?: number;
-  readonly commentId?: number;
-}) =>
+export const retractReactionNotification = (
+  { db, connections }: NotificationDeps,
+  target: {
+    readonly actorId: number;
+    readonly emoji: string;
+    readonly postId?: number;
+    readonly commentId?: number;
+  },
+) =>
   Effect.gen(function* () {
-    const db = yield* Db;
     const deleted = yield* Effect.tryPromise(() =>
       db
         .delete(notifications)
@@ -139,9 +155,12 @@ export const retractReactionNotification = (target: {
         )
         .returning({ userId: notifications.userId }),
     );
-    yield* notifyInboxChanged(deleted.map((row) => row.userId));
+    yield* notifyInboxChanged(
+      connections,
+      deleted.map((row) => row.userId),
+    );
   }).pipe(
-    Effect.catchAllCause((cause) =>
+    Effect.catchCause((cause) =>
       Effect.logWarning(
         "notifications: failed to retract reaction notification",
       ).pipe(Effect.annotateLogs({ cause: String(cause) })),
@@ -190,16 +209,19 @@ const resolveMentionedUserIds = async (
 // in `previousContent` (an edit only pings the newly added names) and anyone
 // in `exclude` (e.g. the post author, who already gets a "comment"
 // notification for the very same comment).
-export const notifyMentions = (args: {
-  readonly actorId: number;
-  readonly content: string;
-  readonly previousContent?: string;
-  readonly postId: number;
-  readonly commentId?: number;
-  readonly exclude?: ReadonlyArray<number>;
-}) =>
+export const notifyMentions = (
+  deps: NotificationDeps,
+  args: {
+    readonly actorId: number;
+    readonly content: string;
+    readonly previousContent?: string;
+    readonly postId: number;
+    readonly commentId?: number;
+    readonly exclude?: ReadonlyArray<number>;
+  },
+) =>
   Effect.gen(function* () {
-    const db = yield* Db;
+    const { db } = deps;
     const mentioned = yield* Effect.tryPromise(() =>
       resolveMentionedUserIds(db, args.content),
     );
@@ -212,6 +234,7 @@ export const notifyMentions = (args: {
       for (const id of before) skip.add(id);
     }
     yield* createNotifications(
+      deps,
       mentioned
         .filter((userId) => !skip.has(userId))
         .map((userId) => ({
@@ -223,7 +246,7 @@ export const notifyMentions = (args: {
         })),
     );
   }).pipe(
-    Effect.catchAllCause((cause) =>
+    Effect.catchCause((cause) =>
       Effect.logWarning("notifications: failed to resolve mentions").pipe(
         Effect.annotateLogs({ cause: String(cause) }),
       ),

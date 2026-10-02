@@ -1,4 +1,4 @@
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpApiBuilder } from "effect/http-api";
 import {
   and,
   desc,
@@ -598,11 +598,11 @@ const searchMessagesPage = (
 export const SearchHandlerLive = HttpApiBuilder.group(
   ChatApi,
   "search",
-  (handlers) =>
-    handlers
-      .handle("searchAll", ({ urlParams }) =>
+  Effect.fn(function* (handlers) {
+    const db = yield* Db;
+    return handlers
+      .handle("searchAll", ({ query: urlParams }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const limit = urlParams.limit ?? DEFAULT_SEARCH_ALL_LIMIT;
           const q = urlParams.q;
@@ -631,9 +631,8 @@ export const SearchHandlerLive = HttpApiBuilder.group(
           };
         }),
       )
-      .handle("searchUsers", ({ urlParams }) =>
+      .handle("searchUsers", ({ query: urlParams }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           return yield* searchUsersPage(
             db,
@@ -644,9 +643,8 @@ export const SearchHandlerLive = HttpApiBuilder.group(
           );
         }),
       )
-      .handle("searchPosts", ({ urlParams }) =>
+      .handle("searchPosts", ({ query: urlParams }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const after = yield* resolveCursor(urlParams.cursor);
           const hidden = yield* hiddenAuthorIds(db, currentUser.id);
@@ -659,9 +657,8 @@ export const SearchHandlerLive = HttpApiBuilder.group(
           );
         }),
       )
-      .handle("searchComments", ({ urlParams }) =>
+      .handle("searchComments", ({ query: urlParams }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const after = yield* resolveCursor(urlParams.cursor);
           const hidden = yield* hiddenAuthorIds(db, currentUser.id);
@@ -674,9 +671,8 @@ export const SearchHandlerLive = HttpApiBuilder.group(
           );
         }),
       )
-      .handle("searchMessages", ({ urlParams }) =>
+      .handle("searchMessages", ({ query: urlParams }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const after = yield* resolveCursor(urlParams.cursor);
           return yield* searchMessagesPage(
@@ -687,5 +683,6 @@ export const SearchHandlerLive = HttpApiBuilder.group(
             after,
           );
         }),
-      ),
+      );
+  }),
 );

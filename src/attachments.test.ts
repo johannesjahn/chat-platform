@@ -2,15 +2,9 @@ import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import {
-  FetchHttpClient,
-  HttpApiBuilder,
-  HttpApiClient,
-  HttpClient,
-  HttpClientRequest,
-} from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
-import { Effect, Layer, Schema } from "effect";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
+import { Effect, Schema } from "effect";
 import sharp from "sharp";
 import {
   ChatApi,
@@ -18,59 +12,12 @@ import {
   CreatePostBody,
   MAX_ATTACHMENT_SIZE_BYTES,
 } from "./Api.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import {
-  ATTACHMENT_QUOTA_MAX_BYTES,
-  AttachmentsHandlerLive,
-} from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
+import { ATTACHMENT_QUOTA_MAX_BYTES } from "./AttachmentsHandler.ts";
 import { Db } from "./Db.ts";
 import { attachments } from "./db/schema.ts";
-import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
-import { JwtLive } from "./Jwt.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive } from "./GamesHandler.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
-import { InMemoryPresenceStoreLive } from "./Presence.ts";
-import { InMemoryPubSubLive } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
+import { makeTestRun } from "./testApi.ts";
 
 process.env.JWT_SECRET ??= "test-secret";
-
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(JwtLive),
-  Layer.provide(SanitizeDecodeErrorsLive),
-  Layer.provide(InMemoryWsTicketLive),
-  Layer.provide(AttachmentStorageLive),
-);
-
-const { getTestDb } = makeTestDbAccessor();
 
 // Unlike the other *.test.ts files' `run`, this also hands the raw
 // `handler` to the callback — `POST /attachments` is a multipart endpoint,
@@ -78,50 +25,7 @@ const { getTestDb } = makeTestDbAccessor();
 // and driving it straight through the web handler exercises the same wire
 // format a browser would use, rather than relying on HttpApiClient's
 // (unclear, for multipart) client-side schema encoding.
-const run = async <A, E>(
-  effect: (ctx: {
-    handler: (request: Request) => Promise<Response>;
-  }) => Effect.Effect<A, E, HttpClient.HttpClient | Db>,
-): Promise<A> => {
-  const db = await getTestDb();
-  await resetTestDb(db);
-  const TestDbLive = Layer.succeed(Db, db);
-
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(
-      ApiLive.pipe(
-        Layer.provide(TestDbLive),
-        Layer.provide(InMemoryPubSubLive),
-      ),
-      BunHttpServer.layerContext,
-    ),
-  );
-
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-
-  try {
-    return await Effect.runPromise(
-      effect({ handler }).pipe(
-        Effect.provide(TestClientLayer),
-        Effect.provide(TestDbLive),
-      ),
-    );
-  } finally {
-    await dispose();
-  }
-};
+const run = makeTestRun();
 
 const makeAuthedClient = (token: string) =>
   HttpApiClient.make(ChatApi, {
@@ -602,7 +506,7 @@ test("createMessage attaches an uploaded file the sender owns", () =>
         payload: { userId: bob.user.id },
       });
       const message = yield* authedAlice.chats.createMessage({
-        path: { id: chat.id },
+        params: { id: chat.id },
         payload: {
           contentType: "attachment",
           content: "report.mp3",
@@ -621,8 +525,8 @@ test("createMessage attaches an uploaded file the sender owns", () =>
       // fresh attachment url rather than replaying a stored one.
       const authedBob = yield* makeAuthedClient(bob.accessToken);
       const page = yield* authedBob.chats.listMessages({
-        path: { id: chat.id },
-        urlParams: {},
+        params: { id: chat.id },
+        query: {},
       });
       const fetched = page.messages.find((m) => m.id === message.id);
       expect(fetched?.attachment?.filename).toBe("report.mp3");
@@ -651,18 +555,15 @@ test("createMessage rejects an attachmentId the sender doesn't own", () =>
       });
       const result = yield* authedBob.chats
         .createMessage({
-          path: { id: chat.id },
+          params: { id: chat.id },
           payload: {
             contentType: "attachment",
             content: "mine.mp3",
             attachmentId,
           },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("NotFound");
-      }
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));
 
@@ -703,29 +604,29 @@ test("createPost attaches an uploaded file", () =>
 // Schema-level checks for the requireAttachmentId cross-field filter — fast,
 // no server needed.
 test("CreateMessageBody rejects contentType attachment without attachmentId", () => {
-  const result = Schema.decodeUnknownEither(CreateMessageBody)({
+  const result = Schema.decodeUnknownResult(CreateMessageBody)({
     contentType: "attachment",
     content: "file.png",
   });
-  expect(result._tag).toBe("Left");
+  expect(result._tag).toBe("Failure");
 });
 
 test("CreateMessageBody rejects attachmentId set alongside contentType text", () => {
-  const result = Schema.decodeUnknownEither(CreateMessageBody)({
+  const result = Schema.decodeUnknownResult(CreateMessageBody)({
     contentType: "text",
     content: "hello",
     attachmentId: 1,
   });
-  expect(result._tag).toBe("Left");
+  expect(result._tag).toBe("Failure");
 });
 
 test("CreatePostBody accepts a well-formed attachment payload", () => {
-  const result = Schema.decodeUnknownEither(CreatePostBody)({
+  const result = Schema.decodeUnknownResult(CreatePostBody)({
     contentType: "attachment",
     content: "file.png",
     attachmentId: 1,
   });
-  expect(result._tag).toBe("Right");
+  expect(result._tag).toBe("Success");
 });
 
 // Quota (issue #256): rather than actually uploading hundreds of megabytes,
@@ -824,7 +725,7 @@ test("deleteAttachment removes an attachment owned by the caller", () =>
 
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.attachments.deleteAttachment({
-        path: { id: attachmentId },
+        params: { id: attachmentId },
       });
 
       const db = yield* Db;
@@ -853,12 +754,9 @@ test("deleteAttachment 404s for an attachment the caller doesn't own", () =>
 
       const authedBob = yield* makeAuthedClient(bob.accessToken);
       const result = yield* authedBob.attachments
-        .deleteAttachment({ path: { id: attachmentId } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("NotFound");
-      }
+        .deleteAttachment({ params: { id: attachmentId } })
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
 
       const db = yield* Db;
       const rows = yield* Effect.promise(() =>
@@ -877,11 +775,8 @@ test("deleteAttachment 404s for a nonexistent attachment id", () =>
       );
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.attachments
-        .deleteAttachment({ path: { id: 999999 } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("NotFound");
-      }
+        .deleteAttachment({ params: { id: 999999 } })
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("NotFound");
     }),
   ));

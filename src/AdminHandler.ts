@@ -1,7 +1,7 @@
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpApiBuilder } from "effect/http-api";
 import { count, eq, gte, sql } from "drizzle-orm";
 import { union, type PgColumn, type PgTable } from "drizzle-orm/pg-core";
-import { Effect, Metric, MetricState } from "effect";
+import { Effect, Metric } from "effect";
 import packageJson from "../package.json" with { type: "json" };
 import {
   ChatApi,
@@ -215,15 +215,15 @@ const probe = (
 ): Effect.Effect<AdminDependencyHealth> =>
   Effect.gen(function* () {
     const start = performance.now();
-    const result = yield* Effect.either(check);
+    const result = yield* Effect.result(check);
     return {
       name,
       backend,
-      reachable: result._tag === "Right",
+      reachable: result._tag === "Success",
       // Tenths of a millisecond: an embedded PGlite `select 1` routinely
       // lands under 1ms, and a flat `0` reads as "not measured".
       latencyMs:
-        result._tag === "Right"
+        result._tag === "Success"
           ? Math.round((performance.now() - start) * 10) / 10
           : null,
     };
@@ -249,15 +249,14 @@ const runtimeCounters: Effect.Effect<RuntimeCounters> = Effect.map(
     let dbQueryErrorsTotal = 0;
     let websocketConnections = 0;
 
-    for (const pair of pairs) {
-      const { name, tags } = pair.metricKey;
-      const state = pair.metricState;
+    for (const metric of pairs) {
+      const { id: name, attributes } = metric;
 
-      if (MetricState.isCounterState(state)) {
-        const value = Number(state.count);
+      if (metric.type === "Counter") {
+        const value = Number(metric.state.count);
         if (name === "http_requests_total") {
           requestsTotal += value;
-          const status = tags.find((tag) => tag.key === "status")?.value;
+          const status = attributes?.["status"];
           if (status !== undefined && Number(status) >= 500)
             serverErrorsTotal += value;
         } else if (name === "rate_limit_rejections_total") {
@@ -266,10 +265,10 @@ const runtimeCounters: Effect.Effect<RuntimeCounters> = Effect.map(
           dbQueryErrorsTotal += value;
         }
       } else if (
-        MetricState.isGaugeState(state) &&
+        metric.type === "Gauge" &&
         name === "websocket_connections_active"
       ) {
-        websocketConnections = Number(state.value);
+        websocketConnections = Number(metric.state.value);
       }
     }
 
@@ -286,8 +285,10 @@ const runtimeCounters: Effect.Effect<RuntimeCounters> = Effect.map(
 export const AdminHandlerLive = HttpApiBuilder.group(
   ChatApi,
   "admin",
-  (handlers) =>
-    handlers.handle("getAdminStats", ({ urlParams }) =>
+  Effect.fn(function* (handlers) {
+    const db = yield* Db;
+    const pubsub = yield* PubSub;
+    return handlers.handle("getAdminStats", ({ query: urlParams }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
         if (currentUser.role !== "admin")
@@ -296,9 +297,6 @@ export const AdminHandlerLive = HttpApiBuilder.group(
               message: "Only admins can view platform statistics",
             }),
           );
-
-        const db = yield* Db;
-        const pubsub = yield* PubSub;
 
         const now = Date.now();
         const since = {
@@ -437,5 +435,6 @@ export const AdminHandlerLive = HttpApiBuilder.group(
           },
         };
       }),
-    ),
+    );
+  }),
 );

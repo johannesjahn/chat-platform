@@ -1,4 +1,4 @@
-import { HttpServerRequest } from "@effect/platform";
+import { HttpServerRequest } from "effect/http";
 import { Config, Effect, Option } from "effect";
 import { isIP } from "net";
 
@@ -145,9 +145,9 @@ export function getClientIp(
  */
 export const clientIp = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
-  const trustProxyEnv = yield* Config.string("TRUST_PROXY").pipe(
+  const trustProxyEnv = yield* Config.String("TRUST_PROXY").pipe(
     Config.option,
-    Effect.catchAll(() => Effect.succeed(Option.none())),
+    Effect.catch(() => Effect.succeed(Option.none())),
     Effect.map(Option.getOrUndefined),
   );
   const remoteAddress = Option.getOrUndefined(request.remoteAddress);

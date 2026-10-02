@@ -119,7 +119,7 @@ export class InvalidToken extends Data.TaggedError("InvalidToken")<{
   readonly reason: string;
 }> {}
 
-export class Jwt extends Context.Tag("Jwt")<
+export class Jwt extends Context.Service<
   Jwt,
   {
     readonly signAccessToken: (user: TokenUser) => Effect.Effect<string>;
@@ -135,12 +135,12 @@ export class Jwt extends Context.Tag("Jwt")<
       token: string,
     ) => Effect.Effect<RefreshTokenUser, InvalidToken>;
   }
->() {}
+>()("Jwt") {}
 
 export const JwtLive = Layer.effect(
   Jwt,
   Effect.gen(function* () {
-    const secret = yield* Config.string("JWT_SECRET");
+    const secret = yield* Config.String("JWT_SECRET");
 
     const sign = (
       user: TokenUser,

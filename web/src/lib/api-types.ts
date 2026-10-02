@@ -1208,853 +1208,35 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        User: {
-            id: number;
-            username: string;
-            displayName: string | null;
-            avatarUrl: string | null;
-            avatarVariants: components["schemas"]["AvatarVariants"] | null;
-            role: components["schemas"]["UserRole"];
-            statusText: string | null;
-            statusEmoji: string | null;
-            statusExpiresAt: number | null;
-        };
-        AvatarVariants: {
-            small: string;
-            medium: string;
-            large: string;
-        };
-        /** @enum {string} */
-        UserRole: "user" | "admin";
-        /** @description The request did not match the expected schema */
-        HttpApiDecodeError: {
-            issues: components["schemas"]["Issue"][];
-            message: string;
+        HttpApiDecodeErrorEncoded: {
             /** @enum {string} */
             _tag: "HttpApiDecodeError";
+            issues: components["schemas"]["Issue"][];
+            message: string;
         };
-        /** @description Represents an error encountered while parsing a value to match the schema */
         Issue: {
-            /**
-             * @description The tag identifying the type of parse issue
-             * @enum {string}
-             */
-            _tag: "Pointer" | "Unexpected" | "Missing" | "Composite" | "Refinement" | "Transformation" | "Type" | "Forbidden";
-            /** @description The path to the property where the issue occurred */
-            path: components["schemas"]["PropertyKey"][];
-            /** @description A descriptive message explaining the issue */
-            message: string;
-        };
-        PropertyKey: string | number | {
             /** @enum {string} */
-            _tag: "symbol";
-            key: string;
-        };
-        InvalidUserSearchRequest: {
+            _tag: "Refinement" | "Type";
+            path: (string | number)[];
             message: string;
-            /** @enum {string} */
-            _tag: "InvalidUserSearchRequest";
         };
-        Unauthorized: {
-            message: string;
+        UnauthorizedEncoded: {
             /** @enum {string} */
             _tag: "Unauthorized";
-        };
-        InvalidUsernameLookupRequest: {
             message: string;
-            /** @enum {string} */
-            _tag: "InvalidUsernameLookupRequest";
         };
-        /** @description a string to be decoded into a number */
-        NumberFromString: string;
-        NotFound: {
-            message: string;
+        NotFoundEncoded: {
             /** @enum {string} */
             _tag: "NotFound";
+            message: string;
         };
-        UserPostsPage: {
-            posts: components["schemas"]["Post"][];
-            limit: number;
-            nextCursor: string | null;
-            totalCount: number;
-        };
-        Post: {
-            id: number;
-            authorId: number;
-            contentType: components["schemas"]["PostContentType"];
-            content: string;
-            attachment: components["schemas"]["Attachment"] | null;
-            createdAt: number;
-            updatedAt: number;
-            reactions: components["schemas"]["ReactionSummary"][];
-            commentCount: number;
-        };
-        /** @enum {string} */
-        PostContentType: "text" | "image_url" | "attachment";
-        Attachment: {
-            id: number;
-            filename: string;
-            mimeType: string;
-            size: number;
-            url: string;
-            width: number | null;
-            height: number | null;
-            blurhash: string | null;
-            waveform: number[] | null;
-            durationMs: number | null;
-        };
-        ReactionSummary: {
-            emoji: string;
+        UnreadNotificationCount: {
             count: number;
-            reactedByMe: boolean;
         };
-        InvalidPostsRequest: {
+        InvalidNotificationRequestEncoded: {
+            /** @enum {string} */
+            _tag: "InvalidNotificationRequest";
             message: string;
-            /** @enum {string} */
-            _tag: "InvalidPostsRequest";
-        };
-        RegisterBody: {
-            /**
-             * maxLength(32)
-             * @description a string at most 32 character(s) long
-             */
-            username: components["schemas"]["NonEmptyTrimmedString"];
-            /**
-             * minLength(8)
-             * @description a string at least 8 character(s) long
-             */
-            password: components["schemas"]["NonEmptyString"];
-        };
-        /**
-         * nonEmptyString
-         * @description a non empty string
-         */
-        NonEmptyTrimmedString: string;
-        /**
-         * nonEmptyString
-         * @description a non empty string
-         */
-        NonEmptyString: string;
-        UsernameTaken: {
-            message: string;
-            /** @enum {string} */
-            _tag: "UsernameTaken";
-        };
-        TooManyRequests: {
-            message: string;
-            retryAfterSeconds: number;
-            /** @enum {string} */
-            _tag: "TooManyRequests";
-        };
-        LoginBody: {
-            /**
-             * maxLength(32)
-             * @description a string at most 32 character(s) long
-             */
-            username: components["schemas"]["NonEmptyTrimmedString"];
-            /**
-             * maxLength(128)
-             * @description a string at most 128 character(s) long
-             */
-            password: components["schemas"]["NonEmptyString"];
-        };
-        LoginResponse: {
-            user: components["schemas"]["User"];
-            accessToken: string;
-            refreshToken: string;
-        };
-        InvalidCredentials: {
-            message: string;
-            /** @enum {string} */
-            _tag: "InvalidCredentials";
-        };
-        RefreshBody: {
-            /**
-             * maxLength(1024)
-             * @description a string at most 1024 character(s) long
-             */
-            refreshToken: string;
-        };
-        RefreshResponse: {
-            accessToken: string;
-            refreshToken: string;
-        };
-        LogoutBody: {
-            /**
-             * maxLength(1024)
-             * @description a string at most 1024 character(s) long
-             */
-            refreshToken: string;
-            allSessions?: boolean;
-        };
-        ChangePasswordBody: {
-            /**
-             * maxLength(128)
-             * @description a string at most 128 character(s) long
-             */
-            currentPassword: components["schemas"]["NonEmptyString"];
-            /**
-             * minLength(8)
-             * @description a string at least 8 character(s) long
-             */
-            newPassword: components["schemas"]["NonEmptyString"];
-        };
-        UpdateProfileBody: {
-            displayName: components["schemas"]["NonEmptyTrimmedString"] | null;
-            avatarUrl: string | null;
-        };
-        /** Format: binary */
-        PersistedFile: string;
-        InvalidAvatarUpload: {
-            message: string;
-            /** @enum {string} */
-            _tag: "InvalidAvatarUpload";
-        };
-        AvatarTooLarge: {
-            message: string;
-            /** @enum {string} */
-            _tag: "AvatarTooLarge";
-        };
-        DeleteAccountBody: {
-            /**
-             * maxLength(128)
-             * @description a string at most 128 character(s) long
-             */
-            password: components["schemas"]["NonEmptyString"];
-        };
-        UpdateUserRoleBody: {
-            role: components["schemas"]["UserRole"];
-        };
-        Forbidden: {
-            message: string;
-            /** @enum {string} */
-            _tag: "Forbidden";
-        };
-        UpdateStatusBody: {
-            statusText: components["schemas"]["NonEmptyTrimmedString"] | null;
-            statusEmoji: components["schemas"]["NonEmptyTrimmedString"] | null;
-            /**
-             * between(1, 43200)
-             * @description a number between 1 and 43200
-             */
-            expiresInMinutes?: number;
-        };
-        BlockedUser: {
-            user: components["schemas"]["User"];
-            type: components["schemas"]["BlockType"];
-            createdAt: number;
-        };
-        /** @enum {string} */
-        BlockType: "block" | "mute";
-        BlockUserBody: {
-            type: components["schemas"]["BlockType"];
-        };
-        InvalidBlockRequest: {
-            message: string;
-            /** @enum {string} */
-            _tag: "InvalidBlockRequest";
-        };
-        PostsPage: {
-            posts: components["schemas"]["Post"][];
-            limit: number;
-            nextCursor: string | null;
-        };
-        CreatePostBody: {
-            contentType: components["schemas"]["PostContentType"];
-            /**
-             * maxLength(10000)
-             * @description a string at most 10000 character(s) long
-             */
-            content: components["schemas"]["NonEmptyTrimmedString"];
-            attachmentId?: number;
-        };
-        UpdatePostBody: {
-            contentType: components["schemas"]["PostContentType"];
-            /**
-             * maxLength(10000)
-             * @description a string at most 10000 character(s) long
-             */
-            content: components["schemas"]["NonEmptyTrimmedString"];
-            attachmentId?: number;
-        };
-        ReactionBody: {
-            emoji: components["schemas"]["ReactionEmoji"];
-        };
-        /** @enum {string} */
-        ReactionEmoji: "👍" | "❤️" | "😂" | "😮" | "😢" | "😡";
-        ReactionState: {
-            reactions: components["schemas"]["ReactionSummary"][];
-        };
-        CommentsPage: {
-            comments: components["schemas"]["Comment"][];
-            limit: number;
-            nextCursor: string | null;
-        };
-        Comment: {
-            id: number;
-            postId: number;
-            parentCommentId: number | null;
-            authorId: number;
-            content: string;
-            createdAt: number;
-            updatedAt: number;
-            reactions: components["schemas"]["ReactionSummary"][];
-        };
-        InvalidCommentRequest: {
-            message: string;
-            /** @enum {string} */
-            _tag: "InvalidCommentRequest";
-        };
-        CreateCommentBody: {
-            /**
-             * maxLength(2000)
-             * @description a string at most 2000 character(s) long
-             */
-            content: components["schemas"]["NonEmptyTrimmedString"];
-        };
-        UpdateCommentBody: {
-            /**
-             * maxLength(2000)
-             * @description a string at most 2000 character(s) long
-             */
-            content: components["schemas"]["NonEmptyTrimmedString"];
-        };
-        ChatsPage: {
-            chats: components["schemas"]["Chat"][];
-            limit: number;
-            nextCursor: string | null;
-        };
-        Chat: {
-            id: number;
-            type: components["schemas"]["ChatType"];
-            title: string | null;
-            createdBy: number | null;
-            createdAt: number;
-            updatedAt: number;
-            version: number;
-            participants: components["schemas"]["ChatParticipant"][];
-            lastMessage: components["schemas"]["Message"] | null;
-            unreadCount: number;
-            avatarVariants: components["schemas"]["AvatarVariants"] | null;
-        };
-        /** @enum {string} */
-        ChatType: "direct" | "group";
-        ChatParticipant: {
-            userId: number;
-            username: string;
-            displayName: string | null;
-            avatarUrl: string | null;
-            avatarVariants: components["schemas"]["AvatarVariants"] | null;
-            role: components["schemas"]["ChatRole"];
-            statusText: string | null;
-            statusEmoji: string | null;
-            statusExpiresAt: number | null;
-        };
-        /** @enum {string} */
-        ChatRole: "owner" | "admin" | "member";
-        Message: {
-            id: number;
-            chatId: number;
-            senderId: number;
-            contentType: components["schemas"]["MessageContentType"];
-            content: string;
-            attachment: components["schemas"]["Attachment"] | null;
-            parentMessage: components["schemas"]["ParentMessagePreview"] | null;
-            createdAt: number;
-            updatedAt: number;
-            readByUserIds: number[];
-            reactions: components["schemas"]["ReactionSummary"][];
-            pinned: boolean;
-            starred: boolean;
-        };
-        /** @enum {string} */
-        MessageContentType: "text" | "image_url" | "attachment";
-        ParentMessagePreview: {
-            id: number;
-            senderId: number;
-            senderName: string;
-            contentType: components["schemas"]["MessageContentType"];
-            content: string;
-        };
-        InvalidChatRequest: {
-            message: string;
-            /** @enum {string} */
-            _tag: "InvalidChatRequest";
-        };
-        CreateDirectChatBody: {
-            userId: number;
-        };
-        CreateGroupChatBody: {
-            /**
-             * maxLength(100)
-             * @description a string at most 100 character(s) long
-             */
-            title: components["schemas"]["NonEmptyTrimmedString"];
-            /**
-             * maxItems(19)
-             * @description an array of at most 19 item(s)
-             */
-            participantIds: number[];
-        };
-        UpdateChatBody: {
-            /**
-             * maxLength(100)
-             * @description a string at most 100 character(s) long
-             */
-            title: components["schemas"]["NonEmptyTrimmedString"];
-        };
-        AddParticipantsBody: {
-            /**
-             * maxItems(19)
-             * @description an array of at most 19 item(s)
-             */
-            participantIds: number[];
-        };
-        TransferOwnershipBody: {
-            userId: number;
-        };
-        UpdateParticipantRoleBody: {
-            /** @enum {string} */
-            role: "admin" | "member";
-        };
-        MessagesPage: {
-            messages: components["schemas"]["Message"][];
-            limit: number;
-            hasEarlier: boolean;
-            hasNewer: boolean;
-            earliestCursor: string | null;
-            latestCursor: string | null;
-        };
-        CreateMessageBody: {
-            contentType: components["schemas"]["MessageContentType"];
-            /**
-             * maxLength(4000)
-             * @description a string at most 4000 character(s) long
-             */
-            content: components["schemas"]["NonEmptyTrimmedString"];
-            attachmentId?: number;
-            parentMessageId?: number;
-        };
-        MarkReadBody: {
-            messageId: number;
-        };
-        UpdateMessageBody: {
-            contentType: components["schemas"]["MessageContentType"];
-            /**
-             * maxLength(4000)
-             * @description a string at most 4000 character(s) long
-             */
-            content: components["schemas"]["NonEmptyTrimmedString"];
-            attachmentId?: number;
-        };
-        PinMessageBody: {
-            messageId: number;
-        };
-        CreateChatInviteBody: {
-            /**
-             * between(1, 720)
-             * @description a number between 1 and 720
-             */
-            expiresInHours?: number;
-            /**
-             * between(1, 20)
-             * @description a number between 1 and 20
-             */
-            maxUses?: number;
-        };
-        ChatInvite: {
-            id: number;
-            chatId: number;
-            code: string;
-            createdBy: number;
-            createdAt: number;
-            expiresAt: number | null;
-            maxUses: number | null;
-            useCount: number;
-            revokedAt: number | null;
-        };
-        SearchAllPage: {
-            users: components["schemas"]["UserSearchPage"];
-            posts: components["schemas"]["PostSearchPage"];
-            comments: components["schemas"]["CommentSearchPage"];
-            messages: components["schemas"]["MessageSearchPage"];
-        };
-        UserSearchPage: {
-            results: components["schemas"]["UserSearchResult"][];
-            limit: number;
-            nextCursor: string | null;
-        };
-        UserSearchResult: {
-            user: components["schemas"]["User"];
-            snippet: components["schemas"]["SearchSnippetSegment"][];
-        };
-        SearchSnippetSegment: {
-            text: string;
-            match: boolean;
-        };
-        PostSearchPage: {
-            results: components["schemas"]["PostSearchResult"][];
-            limit: number;
-            nextCursor: string | null;
-        };
-        PostSearchResult: {
-            id: number;
-            author: components["schemas"]["User"];
-            createdAt: number;
-            snippet: components["schemas"]["SearchSnippetSegment"][];
-        };
-        CommentSearchPage: {
-            results: components["schemas"]["CommentSearchResult"][];
-            limit: number;
-            nextCursor: string | null;
-        };
-        CommentSearchResult: {
-            id: number;
-            postId: number;
-            parentCommentId: number | null;
-            author: components["schemas"]["User"];
-            createdAt: number;
-            snippet: components["schemas"]["SearchSnippetSegment"][];
-        };
-        MessageSearchPage: {
-            results: components["schemas"]["MessageSearchResult"][];
-            chats: components["schemas"]["MessageSearchChat"][];
-            limit: number;
-            nextCursor: string | null;
-        };
-        MessageSearchResult: {
-            id: number;
-            chatId: number;
-            sender: components["schemas"]["User"];
-            createdAt: number;
-            snippet: components["schemas"]["SearchSnippetSegment"][];
-        };
-        MessageSearchChat: {
-            id: number;
-            type: components["schemas"]["ChatType"];
-            title: string | null;
-            participants: components["schemas"]["ChatParticipant"][];
-        };
-        InvalidSearchRequest: {
-            message: string;
-            /** @enum {string} */
-            _tag: "InvalidSearchRequest";
-        };
-        UnsupportedAttachmentType: {
-            message: string;
-            /** @enum {string} */
-            _tag: "UnsupportedAttachmentType";
-        };
-        AttachmentTooLarge: {
-            message: string;
-            /** @enum {string} */
-            _tag: "AttachmentTooLarge";
-        };
-        AttachmentQuotaExceeded: {
-            message: string;
-            /** @enum {string} */
-            _tag: "AttachmentQuotaExceeded";
-        };
-        VersionResponse: {
-            version: string;
-        };
-        AdminStats: {
-            generatedAt: number;
-            totals: components["schemas"]["AdminTotals"];
-            activity: components["schemas"]["AdminActivityWindow"][];
-            timeline: components["schemas"]["AdminTimelinePoint"][];
-            health: components["schemas"]["AdminRuntimeHealth"];
-        };
-        AdminTotals: {
-            users: number;
-            admins: number;
-            posts: number;
-            comments: number;
-            chats: number;
-            messages: number;
-            reactions: number;
-            attachments: number;
-            attachmentBytes: number;
-        };
-        AdminActivityWindow: {
-            window: components["schemas"]["AdminActivityWindowLabel"];
-            activeUsers: number;
-            newUsers: number;
-            newPosts: number;
-            newComments: number;
-            newMessages: number;
-            newReactions: number;
-        };
-        /** @enum {string} */
-        AdminActivityWindowLabel: "1d" | "7d" | "30d";
-        AdminTimelinePoint: {
-            date: string;
-            signups: number;
-            posts: number;
-            comments: number;
-            messages: number;
-        };
-        AdminRuntimeHealth: {
-            /** @enum {string} */
-            status: "ok" | "degraded";
-            version: string;
-            uptimeSeconds: number;
-            dependencies: components["schemas"]["AdminDependencyHealth"][];
-            websocketConnections: number;
-            requestsTotal: number;
-            serverErrorsTotal: number;
-            errorRate: number;
-            rateLimitRejectionsTotal: number;
-            dbQueryErrorsTotal: number;
-        };
-        AdminDependencyHealth: {
-            /** @enum {string} */
-            name: "database" | "pubsub";
-            reachable: boolean;
-            latencyMs: number | null;
-            backend: string;
-        };
-        /** @enum {string} */
-        GameId: "typing" | "drawing" | "reflex";
-        GameLobbyList: {
-            lobbies: components["schemas"]["GameLobby"][];
-        };
-        GameLobby: {
-            id: number;
-            game: components["schemas"]["GameId"];
-            hostId: number;
-            phase: components["schemas"]["GameLobbyPhase"];
-            round: number;
-            passage: string | null;
-            startsAt: number | null;
-            endsAt: number | null;
-            serverNow: number;
-            minPlayers: number;
-            maxPlayers: number;
-            players: components["schemas"]["GameLobbyPlayer"][];
-            drawing: components["schemas"]["DrawingGame"] | null;
-            reflex: components["schemas"]["ReflexGame"] | null;
-            chatOpen: boolean;
-            createdAt: number;
-        };
-        /** @enum {string} */
-        GameLobbyPhase: "waiting" | "countdown" | "racing" | "finished";
-        GameLobbyPlayer: {
-            user: components["schemas"]["User"];
-            joinedAt: number;
-            durationMs: number | null;
-            score: number | null;
-            accuracy: number | null;
-            place: number | null;
-        };
-        DrawingGame: {
-            packs: string[];
-            rounds: number;
-            stage: components["schemas"]["DrawingStage"] | null;
-            myPrompt: string | null;
-            participantIds: number[];
-            drawings: components["schemas"]["DrawingEntry"][];
-            scores: components["schemas"]["DrawingScore"][];
-        };
-        DrawingStage: {
-            kind: components["schemas"]["DrawingStageKind"];
-            turn: number;
-            drawingId: number | null;
-            startedAt: number;
-            endsAt: number;
-        };
-        /** @enum {string} */
-        DrawingStageKind: "draw" | "bluff" | "vote" | "reveal";
-        DrawingEntry: {
-            id: number;
-            turn: number;
-            position: number;
-            artistId: number;
-            submitted: boolean;
-            strokes: components["schemas"]["DrawingStroke"][] | null;
-            prompt: string | null;
-            revealed: boolean;
-            bluffCount: number;
-            voteCount: number;
-            myBluff: string | null;
-            myVote: number | null;
-            answers: components["schemas"]["DrawingAnswer"][] | null;
-        };
-        DrawingStroke: {
-            /**
-             * between(0, 9)
-             * @description a number between 0 and 9
-             */
-            color: number;
-            brush: components["schemas"]["DrawingBrush"];
-            /**
-             * maxItems(12000)
-             * @description an array of at most 12000 item(s)
-             */
-            points: number[];
-        };
-        /** @enum {string} */
-        DrawingBrush: "thin" | "thick";
-        DrawingAnswer: {
-            id: number;
-            text: string;
-            mine: boolean;
-            real: boolean | null;
-            authorId: number | null;
-            voterIds: number[] | null;
-            points: number | null;
-            revealAt: number | null;
-        };
-        DrawingScore: {
-            userId: number;
-            score: number;
-        };
-        ReflexGame: {
-            introMs: number;
-            rounds: components["schemas"]["ReflexRound"][];
-            results: components["schemas"]["ReflexPlayerResult"][];
-        };
-        ReflexRound: {
-            kind: components["schemas"]["ReflexKind"];
-            armAt: number;
-            signalAt: number;
-            closeAt: number;
-            cues: components["schemas"]["ReflexCue"][];
-            symbol: number | null;
-            direction: components["schemas"]["ReflexDirection"] | null;
-            target: {
-                x: number;
-                y: number;
-            } | null;
-        };
-        /** @enum {string} */
-        ReflexKind: "go" | "decoy" | "match" | "arrow" | "target";
-        ReflexCue: {
-            at: number;
-            variant: number;
-        };
-        /** @enum {string} */
-        ReflexDirection: "up" | "down" | "left" | "right";
-        ReflexPlayerResult: {
-            userId: number;
-            rounds: components["schemas"]["ReflexRoundResult"][];
-        };
-        ReflexRoundResult: {
-            outcome: components["schemas"]["ReflexOutcome"];
-            reactionMs: number | null;
-            points: number;
-        };
-        /** @enum {string} */
-        ReflexOutcome: "hit" | "early" | "miss" | "wrong";
-        InvalidGameRequest: {
-            message: string;
-            /** @enum {string} */
-            _tag: "InvalidGameRequest";
-        };
-        FinishRaceBody: {
-            /**
-             * maxLength(2000)
-             * @description a string at most 2000 character(s) long
-             */
-            typed: string;
-            /**
-             * between(0, 100000)
-             * @description a number between 0 and 100000
-             */
-            errors: number;
-        };
-        FinishReflexBody: {
-            /**
-             * maxItems(8)
-             * @description an array of at most 8 item(s)
-             */
-            taps: components["schemas"]["ReflexTap"][];
-        };
-        ReflexTap: {
-            early: boolean;
-            reactionMs: number | null;
-            direction: components["schemas"]["ReflexDirection"] | null;
-            x: number | null;
-            y: number | null;
-        };
-        GameInviteBody: {
-            /**
-             * positive
-             * @description a positive number
-             */
-            userId: number;
-        };
-        GameChat: {
-            messages: components["schemas"]["GameChatMessage"][];
-        };
-        GameChatMessage: {
-            id: number;
-            lobbyId: number;
-            user: components["schemas"]["User"];
-            text: string;
-            createdAt: number;
-        };
-        GameChatBody: {
-            /** @description a string that will be trimmed */
-            text: string;
-        };
-        DrawingPackList: {
-            packs: components["schemas"]["DrawingPack"][];
-        };
-        DrawingPack: {
-            slug: string;
-            name: string;
-            icon: string;
-            description: string;
-            samples: string[];
-            promptCount: number;
-        };
-        DrawingSettingsBody: {
-            /**
-             * maxItems(20)
-             * @description an array of at most 20 item(s)
-             */
-            packs: string[];
-            /**
-             * between(1, 3)
-             * @description a number between 1 and 3
-             */
-            rounds: number;
-        };
-        SubmitDrawingBody: {
-            /**
-             * maxItems(400)
-             * @description an array of at most 400 item(s)
-             */
-            strokes: components["schemas"]["DrawingStroke"][];
-        };
-        SubmitBluffBody: {
-            /** @description a string that will be trimmed */
-            text: string;
-        };
-        SubmitVoteBody: {
-            /**
-             * nonNegative
-             * @description a non-negative number
-             */
-            answer: number;
-        };
-        /** @enum {string} */
-        LeaderboardPeriod: "day" | "week" | "all";
-        Leaderboard: {
-            game: components["schemas"]["GameId"];
-            period: components["schemas"]["LeaderboardPeriod"];
-            entries: components["schemas"]["LeaderboardEntry"][];
-            me: components["schemas"]["LeaderboardEntry"] | null;
-        };
-        LeaderboardEntry: {
-            rank: number;
-            user: components["schemas"]["User"];
-            bestScore: number;
-            averageScore: number;
-            averageAccuracy: number;
-            races: number;
-            wins: number;
         };
         NotificationsPage: {
             notifications: components["schemas"]["Notification"][];
@@ -2076,14 +1258,797 @@ export interface components {
             createdAt: number;
         };
         /** @enum {string} */
-        NotificationType: "comment" | "reply" | "reaction" | "mention" | "game_invite" | "game_record";
-        InvalidNotificationRequest: {
-            message: string;
-            /** @enum {string} */
-            _tag: "InvalidNotificationRequest";
+        GameId: "typing" | "drawing" | "reflex";
+        User: {
+            id: number;
+            username: string;
+            displayName: string | null;
+            avatarUrl: string | null;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
+            role: components["schemas"]["UserRole"];
+            statusText: string | null;
+            statusEmoji: string | null;
+            statusExpiresAt: number | null;
         };
-        UnreadNotificationCount: {
+        /** @enum {string} */
+        UserRole: "user" | "admin";
+        AvatarVariants: {
+            small: string;
+            medium: string;
+            large: string;
+        };
+        /** @enum {string} */
+        NotificationType: "comment" | "reply" | "reaction" | "mention" | "game_invite" | "game_record";
+        Leaderboard: {
+            game: components["schemas"]["GameId"];
+            period: components["schemas"]["LeaderboardPeriod"];
+            entries: components["schemas"]["LeaderboardEntry"][];
+            me: components["schemas"]["LeaderboardEntry"] | null;
+        };
+        LeaderboardEntry: {
+            rank: number;
+            user: components["schemas"]["User"];
+            bestScore: number;
+            averageScore: number;
+            averageAccuracy: number;
+            races: number;
+            wins: number;
+        };
+        /** @enum {string} */
+        LeaderboardPeriod: "day" | "week" | "all";
+        InvalidGameRequestEncoded: {
+            /** @enum {string} */
+            _tag: "InvalidGameRequest";
+            message: string;
+        };
+        ForbiddenEncoded: {
+            /** @enum {string} */
+            _tag: "Forbidden";
+            message: string;
+        };
+        GameLobby: {
+            id: number;
+            game: components["schemas"]["GameId"];
+            hostId: number;
+            phase: components["schemas"]["GameLobbyPhase"];
+            round: number;
+            passage: string | null;
+            startsAt: number | null;
+            endsAt: number | null;
+            serverNow: number;
+            minPlayers: number;
+            maxPlayers: number;
+            players: components["schemas"]["GameLobbyPlayer"][];
+            drawing: components["schemas"]["DrawingGame"] | null;
+            reflex: components["schemas"]["ReflexGame"] | null;
+            chatOpen: boolean;
+            createdAt: number;
+        };
+        ReflexGame: {
+            introMs: number;
+            rounds: components["schemas"]["ReflexRound"][];
+            results: components["schemas"]["ReflexPlayerResult"][];
+        };
+        ReflexPlayerResult: {
+            userId: number;
+            rounds: components["schemas"]["ReflexRoundResult"][];
+        };
+        ReflexRoundResult: {
+            outcome: components["schemas"]["ReflexOutcome"];
+            reactionMs: number | null;
+            points: number;
+        };
+        /** @enum {string} */
+        ReflexOutcome: "hit" | "early" | "miss" | "wrong";
+        ReflexRound: {
+            kind: components["schemas"]["ReflexKind"];
+            armAt: number;
+            signalAt: number;
+            closeAt: number;
+            cues: components["schemas"]["ReflexCue"][];
+            symbol: number | null;
+            direction: components["schemas"]["ReflexDirection"] | null;
+            target: {
+                x: number;
+                y: number;
+            } | null;
+        };
+        /** @enum {string} */
+        ReflexDirection: "up" | "down" | "left" | "right";
+        ReflexCue: {
+            at: number;
+            variant: number;
+        };
+        /** @enum {string} */
+        ReflexKind: "go" | "decoy" | "match" | "arrow" | "target";
+        DrawingGame: {
+            packs: string[];
+            rounds: number;
+            stage: components["schemas"]["DrawingStage"] | null;
+            myPrompt: string | null;
+            participantIds: number[];
+            drawings: components["schemas"]["DrawingEntry"][];
+            scores: components["schemas"]["DrawingScore"][];
+        };
+        DrawingScore: {
+            userId: number;
+            score: number;
+        };
+        DrawingEntry: {
+            id: number;
+            turn: number;
+            position: number;
+            artistId: number;
+            submitted: boolean;
+            strokes: components["schemas"]["DrawingStroke"][] | null;
+            prompt: string | null;
+            revealed: boolean;
+            bluffCount: number;
+            voteCount: number;
+            myBluff: string | null;
+            myVote: number | null;
+            answers: components["schemas"]["DrawingAnswer"][] | null;
+        };
+        DrawingAnswer: {
+            id: number;
+            text: string;
+            mine: boolean;
+            real: boolean | null;
+            authorId: number | null;
+            voterIds: number[] | null;
+            points: number | null;
+            revealAt: number | null;
+        };
+        DrawingStroke: {
+            color: number;
+            brush: components["schemas"]["DrawingBrush"];
+            points: number[];
+        };
+        /** @enum {string} */
+        DrawingBrush: "thin" | "thick";
+        DrawingStage: {
+            kind: components["schemas"]["DrawingStageKind"];
+            turn: number;
+            drawingId: number | null;
+            startedAt: number;
+            endsAt: number;
+        };
+        /** @enum {string} */
+        DrawingStageKind: "draw" | "bluff" | "vote" | "reveal";
+        GameLobbyPlayer: {
+            user: components["schemas"]["User"];
+            joinedAt: number;
+            durationMs: number | null;
+            score: number | null;
+            accuracy: number | null;
+            place: number | null;
+        };
+        /** @enum {string} */
+        GameLobbyPhase: "waiting" | "countdown" | "racing" | "finished";
+        SubmitVoteBody: {
+            answer: number;
+        };
+        SubmitBluffBody: {
+            text: string;
+        };
+        SubmitDrawingBody: {
+            strokes: components["schemas"]["DrawingStroke"][];
+        };
+        DrawingSettingsBody: {
+            packs: string[];
+            rounds: number;
+        };
+        DrawingPackList: {
+            packs: components["schemas"]["DrawingPack"][];
+        };
+        DrawingPack: {
+            slug: string;
+            name: string;
+            icon: string;
+            description: string;
+            samples: string[];
+            promptCount: number;
+        };
+        TooManyRequestsEncoded: {
+            /** @enum {string} */
+            _tag: "TooManyRequests";
+            message: string;
+            retryAfterSeconds: number;
+        };
+        GameChatMessage_1: {
+            id: number;
+            lobbyId: number;
+            user: components["schemas"]["User"];
+            text: string;
+            createdAt: number;
+        };
+        GameChatBody: {
+            text: string;
+        };
+        GameChat: {
+            messages: components["schemas"]["GameChatMessage"][];
+        };
+        GameChatMessage: {
+            id: number;
+            lobbyId: number;
+            user: components["schemas"]["User"];
+            text: string;
+            createdAt: number;
+        };
+        GameInviteBody: {
+            userId: number;
+        };
+        FinishReflexBody: {
+            taps: components["schemas"]["ReflexTap"][];
+        };
+        ReflexTap: {
+            early: boolean;
+            reactionMs: number | null;
+            direction: components["schemas"]["ReflexDirection"] | null;
+            x: number | null;
+            y: number | null;
+        };
+        FinishRaceBody: {
+            typed: string;
+            errors: number;
+        };
+        GameLobby_1: {
+            id: number;
+            game: components["schemas"]["GameId"];
+            hostId: number;
+            phase: components["schemas"]["GameLobbyPhase"];
+            round: number;
+            passage: string | null;
+            startsAt: number | null;
+            endsAt: number | null;
+            serverNow: number;
+            minPlayers: number;
+            maxPlayers: number;
+            players: components["schemas"]["GameLobbyPlayer"][];
+            drawing: components["schemas"]["DrawingGame"] | null;
+            reflex: components["schemas"]["ReflexGame"] | null;
+            chatOpen: boolean;
+            createdAt: number;
+        };
+        GameLobbyList: {
+            lobbies: components["schemas"]["GameLobby"][];
+        };
+        AdminStats: {
+            generatedAt: number;
+            totals: components["schemas"]["AdminTotals"];
+            activity: components["schemas"]["AdminActivityWindow"][];
+            timeline: components["schemas"]["AdminTimelinePoint"][];
+            health: components["schemas"]["AdminRuntimeHealth"];
+        };
+        AdminRuntimeHealth: {
+            /** @enum {string} */
+            status: "ok" | "degraded";
+            version: string;
+            uptimeSeconds: number;
+            dependencies: components["schemas"]["AdminDependencyHealth"][];
+            websocketConnections: number;
+            requestsTotal: number;
+            serverErrorsTotal: number;
+            errorRate: number;
+            rateLimitRejectionsTotal: number;
+            dbQueryErrorsTotal: number;
+        };
+        AdminDependencyHealth: {
+            /** @enum {string} */
+            name: "database" | "pubsub";
+            reachable: boolean;
+            latencyMs: number | null;
+            backend: string;
+        };
+        AdminTimelinePoint: {
+            date: string;
+            signups: number;
+            posts: number;
+            comments: number;
+            messages: number;
+        };
+        AdminActivityWindow: {
+            window: components["schemas"]["AdminActivityWindowLabel"];
+            activeUsers: number;
+            newUsers: number;
+            newPosts: number;
+            newComments: number;
+            newMessages: number;
+            newReactions: number;
+        };
+        /** @enum {string} */
+        AdminActivityWindowLabel: "1d" | "7d" | "30d";
+        AdminTotals: {
+            users: number;
+            admins: number;
+            posts: number;
+            comments: number;
+            chats: number;
+            messages: number;
+            reactions: number;
+            attachments: number;
+            attachmentBytes: number;
+        };
+        WsTicketResponse: {
+            ticket: string;
+        };
+        VersionResponse: {
+            version: string;
+        };
+        AttachmentQuotaExceededEncoded: {
+            /** @enum {string} */
+            _tag: "AttachmentQuotaExceeded";
+            message: string;
+        };
+        AttachmentTooLargeEncoded: {
+            /** @enum {string} */
+            _tag: "AttachmentTooLarge";
+            message: string;
+        };
+        UnsupportedAttachmentTypeEncoded: {
+            /** @enum {string} */
+            _tag: "UnsupportedAttachmentType";
+            message: string;
+        };
+        Attachment_1: {
+            id: number;
+            filename: string;
+            mimeType: string;
+            size: number;
+            url: string;
+            width: number | null;
+            height: number | null;
+            blurhash: string | null;
+            waveform: number[] | null;
+            durationMs: number | null;
+        };
+        InvalidSearchRequestEncoded: {
+            /** @enum {string} */
+            _tag: "InvalidSearchRequest";
+            message: string;
+        };
+        MessageSearchPage: {
+            results: components["schemas"]["MessageSearchResult"][];
+            chats: components["schemas"]["MessageSearchChat"][];
+            limit: number;
+            nextCursor: string | null;
+        };
+        MessageSearchChat: {
+            id: number;
+            type: components["schemas"]["ChatType"];
+            title: string | null;
+            participants: components["schemas"]["ChatParticipant"][];
+        };
+        ChatParticipant: {
+            userId: number;
+            username: string;
+            displayName: string | null;
+            avatarUrl: string | null;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
+            role: components["schemas"]["ChatRole"];
+            statusText: string | null;
+            statusEmoji: string | null;
+            statusExpiresAt: number | null;
+        };
+        /** @enum {string} */
+        ChatRole: "owner" | "admin" | "member";
+        /** @enum {string} */
+        ChatType: "direct" | "group";
+        MessageSearchResult: {
+            id: number;
+            chatId: number;
+            sender: components["schemas"]["User"];
+            createdAt: number;
+            snippet: components["schemas"]["SearchSnippetSegment"][];
+        };
+        SearchSnippetSegment: {
+            text: string;
+            match: boolean;
+        };
+        CommentSearchPage: {
+            results: components["schemas"]["CommentSearchResult"][];
+            limit: number;
+            nextCursor: string | null;
+        };
+        CommentSearchResult: {
+            id: number;
+            postId: number;
+            parentCommentId: number | null;
+            author: components["schemas"]["User"];
+            createdAt: number;
+            snippet: components["schemas"]["SearchSnippetSegment"][];
+        };
+        PostSearchPage: {
+            results: components["schemas"]["PostSearchResult"][];
+            limit: number;
+            nextCursor: string | null;
+        };
+        PostSearchResult: {
+            id: number;
+            author: components["schemas"]["User"];
+            createdAt: number;
+            snippet: components["schemas"]["SearchSnippetSegment"][];
+        };
+        UserSearchPage: {
+            results: components["schemas"]["UserSearchResult"][];
+            limit: number;
+            nextCursor: string | null;
+        };
+        UserSearchResult: {
+            user: components["schemas"]["User"];
+            snippet: components["schemas"]["SearchSnippetSegment"][];
+        };
+        SearchAllPage: {
+            users: components["schemas"]["UserSearchPage"];
+            posts: components["schemas"]["PostSearchPage"];
+            comments: components["schemas"]["CommentSearchPage"];
+            messages: components["schemas"]["MessageSearchPage"];
+        };
+        InvalidChatRequestEncoded: {
+            /** @enum {string} */
+            _tag: "InvalidChatRequest";
+            message: string;
+        };
+        Chat: {
+            id: number;
+            type: components["schemas"]["ChatType"];
+            title: string | null;
+            createdBy: number | null;
+            createdAt: number;
+            updatedAt: number;
+            version: number;
+            participants: components["schemas"]["ChatParticipant"][];
+            lastMessage: components["schemas"]["Message"] | null;
+            unreadCount: number;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
+        };
+        Message: {
+            id: number;
+            chatId: number;
+            senderId: number;
+            contentType: components["schemas"]["MessageContentType"];
+            content: string;
+            attachment: components["schemas"]["Attachment"] | null;
+            parentMessage: components["schemas"]["ParentMessagePreview"] | null;
+            createdAt: number;
+            updatedAt: number;
+            readByUserIds: number[];
+            reactions: components["schemas"]["ReactionSummary"][];
+            pinned: boolean;
+            starred: boolean;
+        };
+        ReactionSummary: {
+            emoji: string;
             count: number;
+            reactedByMe: boolean;
+        };
+        ParentMessagePreview: {
+            id: number;
+            senderId: number;
+            senderName: string;
+            contentType: components["schemas"]["MessageContentType"];
+            content: string;
+        };
+        /** @enum {string} */
+        MessageContentType: "text" | "image_url" | "attachment";
+        Attachment: {
+            id: number;
+            filename: string;
+            mimeType: string;
+            size: number;
+            url: string;
+            width: number | null;
+            height: number | null;
+            blurhash: string | null;
+            waveform: number[] | null;
+            durationMs: number | null;
+        };
+        ChatInvite_1: {
+            id: number;
+            chatId: number;
+            code: string;
+            createdBy: number;
+            createdAt: number;
+            expiresAt: number | null;
+            maxUses: number | null;
+            useCount: number;
+            revokedAt: number | null;
+        };
+        ChatInvite: {
+            id: number;
+            chatId: number;
+            code: string;
+            createdBy: number;
+            createdAt: number;
+            expiresAt: number | null;
+            maxUses: number | null;
+            useCount: number;
+            revokedAt: number | null;
+        };
+        CreateChatInviteBody: {
+            expiresInHours?: number | null;
+            maxUses?: number | null;
+        };
+        PinMessageBody: {
+            messageId: number;
+        };
+        ReactionState: {
+            reactions: components["schemas"]["ReactionSummary"][];
+        };
+        ReactionBody: {
+            emoji: components["schemas"]["ReactionEmoji"];
+        };
+        /** @enum {string} */
+        ReactionEmoji: "👍" | "❤️" | "😂" | "😮" | "😢" | "😡";
+        UpdateMessageBody: {
+            contentType: components["schemas"]["MessageContentType"];
+            content: string;
+            attachmentId?: number | null;
+        };
+        MarkReadBody: {
+            messageId: number;
+        };
+        Message_1: {
+            id: number;
+            chatId: number;
+            senderId: number;
+            contentType: components["schemas"]["MessageContentType"];
+            content: string;
+            attachment: components["schemas"]["Attachment"] | null;
+            parentMessage: components["schemas"]["ParentMessagePreview"] | null;
+            createdAt: number;
+            updatedAt: number;
+            readByUserIds: number[];
+            reactions: components["schemas"]["ReactionSummary"][];
+            pinned: boolean;
+            starred: boolean;
+        };
+        CreateMessageBody: {
+            contentType: components["schemas"]["MessageContentType"];
+            content: string;
+            attachmentId?: number | null;
+            parentMessageId?: number | null;
+        };
+        MessagesPage: {
+            messages: components["schemas"]["Message"][];
+            limit: number;
+            hasEarlier: boolean;
+            hasNewer: boolean;
+            earliestCursor: string | null;
+            latestCursor: string | null;
+        };
+        UpdateParticipantRoleBody: {
+            /** @enum {string} */
+            role: "admin" | "member";
+        };
+        TransferOwnershipBody: {
+            userId: number;
+        };
+        AddParticipantsBody: {
+            participantIds: number[];
+        };
+        AvatarTooLargeEncoded: {
+            /** @enum {string} */
+            _tag: "AvatarTooLarge";
+            message: string;
+        };
+        InvalidAvatarUploadEncoded: {
+            /** @enum {string} */
+            _tag: "InvalidAvatarUpload";
+            message: string;
+        };
+        UpdateChatBody: {
+            title: string;
+        };
+        Chat_1: {
+            id: number;
+            type: components["schemas"]["ChatType"];
+            title: string | null;
+            createdBy: number | null;
+            createdAt: number;
+            updatedAt: number;
+            version: number;
+            participants: components["schemas"]["ChatParticipant"][];
+            lastMessage: components["schemas"]["Message"] | null;
+            unreadCount: number;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
+        };
+        CreateGroupChatBody: {
+            title: string;
+            participantIds: number[];
+        };
+        CreateDirectChatBody: {
+            userId: number;
+        };
+        ChatsPage: {
+            chats: components["schemas"]["Chat"][];
+            limit: number;
+            nextCursor: string | null;
+        };
+        Comment: {
+            id: number;
+            postId: number;
+            parentCommentId: number | null;
+            authorId: number;
+            content: string;
+            createdAt: number;
+            updatedAt: number;
+            reactions: components["schemas"]["ReactionSummary"][];
+        };
+        UpdateCommentBody: {
+            content: string;
+        };
+        InvalidCommentRequestEncoded: {
+            /** @enum {string} */
+            _tag: "InvalidCommentRequest";
+            message: string;
+        };
+        Comment_2: {
+            id: number;
+            postId: number;
+            parentCommentId: number | null;
+            authorId: number;
+            content: string;
+            createdAt: number;
+            updatedAt: number;
+            reactions: components["schemas"]["ReactionSummary"][];
+        };
+        CreateCommentBody: {
+            content: string;
+        };
+        CommentsPage: {
+            comments: components["schemas"]["Comment"][];
+            limit: number;
+            nextCursor: string | null;
+        };
+        Comment_1: {
+            id: number;
+            postId: number;
+            parentCommentId: number | null;
+            authorId: number;
+            content: string;
+            createdAt: number;
+            updatedAt: number;
+            reactions: components["schemas"]["ReactionSummary"][];
+        };
+        Post: {
+            id: number;
+            authorId: number;
+            contentType: components["schemas"]["PostContentType"];
+            content: string;
+            attachment: components["schemas"]["Attachment"] | null;
+            createdAt: number;
+            updatedAt: number;
+            reactions: components["schemas"]["ReactionSummary"][];
+            commentCount: number;
+        };
+        /** @enum {string} */
+        PostContentType: "text" | "image_url" | "attachment";
+        UpdatePostBody: {
+            contentType: components["schemas"]["PostContentType"];
+            content: string;
+            attachmentId?: number | null;
+        };
+        Post_1: {
+            id: number;
+            authorId: number;
+            contentType: components["schemas"]["PostContentType"];
+            content: string;
+            attachment: components["schemas"]["Attachment"] | null;
+            createdAt: number;
+            updatedAt: number;
+            reactions: components["schemas"]["ReactionSummary"][];
+            commentCount: number;
+        };
+        CreatePostBody: {
+            contentType: components["schemas"]["PostContentType"];
+            content: string;
+            attachmentId?: number | null;
+        };
+        InvalidPostsRequestEncoded: {
+            /** @enum {string} */
+            _tag: "InvalidPostsRequest";
+            message: string;
+        };
+        PostsPage: {
+            posts: components["schemas"]["Post"][];
+            limit: number;
+            nextCursor: string | null;
+        };
+        InvalidBlockRequestEncoded: {
+            /** @enum {string} */
+            _tag: "InvalidBlockRequest";
+            message: string;
+        };
+        BlockedUser: {
+            user: components["schemas"]["User"];
+            type: components["schemas"]["BlockType"];
+            createdAt: number;
+        };
+        /** @enum {string} */
+        BlockType: "block" | "mute";
+        BlockUserBody: {
+            type: components["schemas"]["BlockType"];
+        };
+        UpdateStatusBody: {
+            statusText: string | null;
+            statusEmoji: string | null;
+            expiresInMinutes?: number | null;
+        };
+        UpdateUserRoleBody: {
+            role: components["schemas"]["UserRole"];
+        };
+        InvalidCredentialsEncoded: {
+            /** @enum {string} */
+            _tag: "InvalidCredentials";
+            message: string;
+        };
+        DeleteAccountBody: {
+            password: string;
+        };
+        UpdateProfileBody: {
+            displayName: string | null;
+            avatarUrl: string | null;
+        };
+        RefreshResponse: {
+            accessToken: string;
+            refreshToken: string;
+        };
+        ChangePasswordBody: {
+            currentPassword: string;
+            newPassword: string & unknown;
+        };
+        LogoutBody: {
+            refreshToken: string;
+            allSessions?: boolean | null;
+        };
+        RefreshBody: {
+            refreshToken: string;
+        };
+        LoginResponse: {
+            user: components["schemas"]["User"];
+            accessToken: string;
+            refreshToken: string;
+        };
+        LoginBody: {
+            username: string;
+            password: string;
+        };
+        UsernameTakenEncoded: {
+            /** @enum {string} */
+            _tag: "UsernameTaken";
+            message: string;
+        };
+        User_1: {
+            id: number;
+            username: string;
+            displayName: string | null;
+            avatarUrl: string | null;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
+            role: components["schemas"]["UserRole"];
+            statusText: string | null;
+            statusEmoji: string | null;
+            statusExpiresAt: number | null;
+        };
+        RegisterBody: {
+            username: string;
+            password: string & unknown;
+        };
+        UserPostsPage: {
+            posts: components["schemas"]["Post"][];
+            limit: number;
+            nextCursor: string | null;
+            totalCount: number;
+        };
+        InvalidUsernameLookupRequestEncoded: {
+            /** @enum {string} */
+            _tag: "InvalidUsernameLookupRequest";
+            message: string;
+        };
+        InvalidUserSearchRequestEncoded: {
+            /** @enum {string} */
+            _tag: "InvalidUserSearchRequest";
+            message: string;
         };
     };
     responses: never;
@@ -2097,7 +2062,6 @@ export interface operations {
     "users.searchUsers": {
         parameters: {
             query: {
-                /** @description a string that will be trimmed */
                 q: string;
             };
             header?: never;
@@ -2115,13 +2079,13 @@ export interface operations {
                     "application/json": components["schemas"]["User"][];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidUserSearchRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidUserSearchRequest"];
+                    "application/json": components["schemas"]["InvalidUserSearchRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2130,7 +2094,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -2138,7 +2102,6 @@ export interface operations {
     "users.lookupUsersByUsername": {
         parameters: {
             query: {
-                /** @description a string that will be trimmed */
                 usernames: string;
             };
             header?: never;
@@ -2156,13 +2119,13 @@ export interface operations {
                     "application/json": components["schemas"]["User"][];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidUsernameLookupRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidUsernameLookupRequest"];
+                    "application/json": components["schemas"]["InvalidUsernameLookupRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2171,7 +2134,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -2181,7 +2144,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -2196,13 +2159,13 @@ export interface operations {
                     "application/json": components["schemas"]["User"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2211,7 +2174,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -2220,7 +2183,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -2230,26 +2193,26 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2258,7 +2221,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -2267,7 +2230,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -2276,7 +2239,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -2284,13 +2247,12 @@ export interface operations {
     "users.listUserPosts": {
         parameters: {
             query?: {
-                cursor?: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                cursor?: string | null;
+                limit?: string | null;
             };
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -2305,13 +2267,13 @@ export interface operations {
                     "application/json": components["schemas"]["UserPostsPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidPostsRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidPostsRequest"];
+                    "application/json": components["schemas"]["InvalidPostsRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2320,7 +2282,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -2329,7 +2291,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -2347,32 +2309,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Success */
+            /** @description User */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: number;
-                        username: string;
-                        displayName: string | null;
-                        avatarUrl: string | null;
-                        avatarVariants: components["schemas"]["AvatarVariants"] | null;
-                        role: components["schemas"]["UserRole"];
-                        statusText: string | null;
-                        statusEmoji: string | null;
-                        statusExpiresAt: number | null;
-                    };
+                    "application/json": components["schemas"]["User_1"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description UsernameTaken */
@@ -2381,7 +2333,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UsernameTaken"];
+                    "application/json": components["schemas"]["UsernameTakenEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -2390,7 +2342,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -2417,13 +2369,13 @@ export interface operations {
                     "application/json": components["schemas"]["LoginResponse"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description InvalidCredentials */
@@ -2432,7 +2384,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvalidCredentials"];
+                    "application/json": components["schemas"]["InvalidCredentialsEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -2441,7 +2393,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -2468,13 +2420,13 @@ export interface operations {
                     "application/json": components["schemas"]["RefreshResponse"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description InvalidCredentials */
@@ -2483,7 +2435,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvalidCredentials"];
+                    "application/json": components["schemas"]["InvalidCredentialsEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -2492,7 +2444,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -2510,20 +2462,20 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
         };
@@ -2550,22 +2502,22 @@ export interface operations {
                     "application/json": components["schemas"]["RefreshResponse"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
-            /** @description InvalidCredentials */
+            /** @description InvalidCredentials | Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvalidCredentials"] | components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["InvalidCredentialsEncoded"] | components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -2574,7 +2526,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -2601,13 +2553,13 @@ export interface operations {
                     "application/json": components["schemas"]["User"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2616,7 +2568,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -2634,29 +2586,29 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
-            /** @description InvalidCredentials */
+            /** @description InvalidCredentials | Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvalidCredentials"] | components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["InvalidCredentialsEncoded"] | components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -2665,7 +2617,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -2680,16 +2632,10 @@ export interface operations {
         requestBody: {
             content: {
                 "multipart/form-data": {
-                    /**
-                     * itemsCount(1)
-                     * @description an array of exactly 1 item(s)
-                     */
-                    file: components["schemas"]["PersistedFile"][];
-                    /** @description a string to be decoded into a number */
+                    /** Format: binary */
+                    file: string;
                     x: string;
-                    /** @description a string to be decoded into a number */
                     y: string;
-                    /** @description a string to be decoded into a number */
                     size: string;
                 };
             };
@@ -2704,13 +2650,13 @@ export interface operations {
                     "application/json": components["schemas"]["User"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidAvatarUpload | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidAvatarUpload"];
+                    "application/json": components["schemas"]["InvalidAvatarUploadEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2719,7 +2665,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description AvatarTooLarge */
@@ -2728,7 +2674,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AvatarTooLarge"];
+                    "application/json": components["schemas"]["AvatarTooLargeEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -2737,7 +2683,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -2747,7 +2693,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -2766,13 +2712,13 @@ export interface operations {
                     "application/json": components["schemas"]["User"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2781,7 +2727,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -2790,7 +2736,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -2799,7 +2745,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -2826,13 +2772,13 @@ export interface operations {
                     "application/json": components["schemas"]["User"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2841,7 +2787,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -2864,13 +2810,13 @@ export interface operations {
                     "application/json": components["schemas"]["BlockedUser"][];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2879,7 +2825,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -2889,7 +2835,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -2908,13 +2854,13 @@ export interface operations {
                     "application/json": components["schemas"]["BlockedUser"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidBlockRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidBlockRequest"];
+                    "application/json": components["schemas"]["InvalidBlockRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2923,7 +2869,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -2932,7 +2878,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -2942,26 +2888,26 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -2970,7 +2916,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -2980,7 +2926,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -2995,13 +2941,13 @@ export interface operations {
                     "application/json": components["schemas"]["Post"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3010,7 +2956,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3019,7 +2965,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -3029,7 +2975,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -3048,13 +2994,13 @@ export interface operations {
                     "application/json": components["schemas"]["Post"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3063,7 +3009,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -3072,7 +3018,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3081,7 +3027,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -3091,26 +3037,26 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3119,7 +3065,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -3128,7 +3074,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3137,7 +3083,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -3145,9 +3091,8 @@ export interface operations {
     "posts.listPosts": {
         parameters: {
             query?: {
-                cursor?: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                cursor?: string | null;
+                limit?: string | null;
             };
             header?: never;
             path?: never;
@@ -3164,13 +3109,13 @@ export interface operations {
                     "application/json": components["schemas"]["PostsPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidPostsRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidPostsRequest"];
+                    "application/json": components["schemas"]["InvalidPostsRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3179,7 +3124,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -3197,32 +3142,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Success */
+            /** @description Post */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: number;
-                        authorId: number;
-                        contentType: components["schemas"]["PostContentType"];
-                        content: string;
-                        attachment: components["schemas"]["Attachment"] | null;
-                        createdAt: number;
-                        updatedAt: number;
-                        reactions: components["schemas"]["ReactionSummary"][];
-                        commentCount: number;
-                    };
+                    "application/json": components["schemas"]["Post_1"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3231,7 +3166,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3240,7 +3175,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -3250,7 +3185,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -3269,13 +3204,13 @@ export interface operations {
                     "application/json": components["schemas"]["ReactionState"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3284,7 +3219,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3293,7 +3228,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -3302,7 +3237,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -3312,7 +3247,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -3331,13 +3266,13 @@ export interface operations {
                     "application/json": components["schemas"]["ReactionState"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3346,7 +3281,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3355,7 +3290,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -3364,7 +3299,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -3372,13 +3307,12 @@ export interface operations {
     "comments.listComments": {
         parameters: {
             query?: {
-                cursor?: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                cursor?: string | null;
+                limit?: string | null;
             };
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -3393,13 +3327,13 @@ export interface operations {
                     "application/json": components["schemas"]["CommentsPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidCommentRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidCommentRequest"];
+                    "application/json": components["schemas"]["InvalidCommentRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3408,7 +3342,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3417,7 +3351,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -3427,7 +3361,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -3437,31 +3371,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Success */
+            /** @description Comment */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: number;
-                        postId: number;
-                        parentCommentId: number | null;
-                        authorId: number;
-                        content: string;
-                        createdAt: number;
-                        updatedAt: number;
-                        reactions: components["schemas"]["ReactionSummary"][];
-                    };
+                    "application/json": components["schemas"]["Comment_1"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3470,7 +3395,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3479,7 +3404,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -3488,7 +3413,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -3496,13 +3421,12 @@ export interface operations {
     "comments.listReplies": {
         parameters: {
             query?: {
-                cursor?: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                cursor?: string | null;
+                limit?: string | null;
             };
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -3517,13 +3441,13 @@ export interface operations {
                     "application/json": components["schemas"]["CommentsPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidCommentRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidCommentRequest"];
+                    "application/json": components["schemas"]["InvalidCommentRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3532,7 +3456,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3541,7 +3465,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -3551,7 +3475,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -3561,31 +3485,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Success */
+            /** @description Comment */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: number;
-                        postId: number;
-                        parentCommentId: number | null;
-                        authorId: number;
-                        content: string;
-                        createdAt: number;
-                        updatedAt: number;
-                        reactions: components["schemas"]["ReactionSummary"][];
-                    };
+                    "application/json": components["schemas"]["Comment_2"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidCommentRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidCommentRequest"];
+                    "application/json": components["schemas"]["InvalidCommentRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3594,7 +3509,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3603,7 +3518,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -3612,7 +3527,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -3622,7 +3537,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -3641,13 +3556,13 @@ export interface operations {
                     "application/json": components["schemas"]["ReactionState"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3656,7 +3571,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3665,7 +3580,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -3674,7 +3589,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -3684,7 +3599,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -3703,13 +3618,13 @@ export interface operations {
                     "application/json": components["schemas"]["ReactionState"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3718,7 +3633,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3727,7 +3642,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -3736,7 +3651,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -3746,26 +3661,26 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3774,7 +3689,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -3783,7 +3698,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3792,7 +3707,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -3801,7 +3716,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -3811,7 +3726,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -3830,13 +3745,13 @@ export interface operations {
                     "application/json": components["schemas"]["Comment"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3845,7 +3760,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -3854,7 +3769,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3863,7 +3778,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -3872,7 +3787,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -3880,9 +3795,8 @@ export interface operations {
     "chats.listChats": {
         parameters: {
             query?: {
-                cursor?: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                cursor?: string | null;
+                limit?: string | null;
             };
             header?: never;
             path?: never;
@@ -3899,13 +3813,13 @@ export interface operations {
                     "application/json": components["schemas"]["ChatsPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3914,7 +3828,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -3924,7 +3838,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -3939,13 +3853,13 @@ export interface operations {
                     "application/json": components["schemas"]["Chat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -3954,7 +3868,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -3963,7 +3877,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -3972,7 +3886,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -3982,7 +3896,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -4001,13 +3915,13 @@ export interface operations {
                     "application/json": components["schemas"]["Chat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4016,7 +3930,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4025,7 +3939,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4034,7 +3948,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4044,26 +3958,26 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4072,7 +3986,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4081,7 +3995,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4090,7 +4004,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4117,13 +4031,13 @@ export interface operations {
                     "application/json": components["schemas"]["Chat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4132,7 +4046,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4141,7 +4055,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4159,34 +4073,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Success */
+            /** @description Chat */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: number;
-                        type: components["schemas"]["ChatType"];
-                        title: string | null;
-                        createdBy: number | null;
-                        createdAt: number;
-                        updatedAt: number;
-                        version: number;
-                        participants: components["schemas"]["ChatParticipant"][];
-                        lastMessage: components["schemas"]["Message"] | null;
-                        unreadCount: number;
-                        avatarVariants: components["schemas"]["AvatarVariants"] | null;
-                    };
+                    "application/json": components["schemas"]["Chat_1"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4195,7 +4097,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4204,7 +4106,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4214,23 +4116,17 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
                 "multipart/form-data": {
-                    /**
-                     * itemsCount(1)
-                     * @description an array of exactly 1 item(s)
-                     */
-                    file: components["schemas"]["PersistedFile"][];
-                    /** @description a string to be decoded into a number */
+                    /** Format: binary */
+                    file: string;
                     x: string;
-                    /** @description a string to be decoded into a number */
                     y: string;
-                    /** @description a string to be decoded into a number */
                     size: string;
                 };
             };
@@ -4245,13 +4141,13 @@ export interface operations {
                     "application/json": components["schemas"]["Chat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | InvalidAvatarUpload | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"] | components["schemas"]["InvalidAvatarUpload"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["InvalidAvatarUploadEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4260,7 +4156,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4269,7 +4165,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4278,7 +4174,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
             /** @description AvatarTooLarge */
@@ -4287,7 +4183,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AvatarTooLarge"];
+                    "application/json": components["schemas"]["AvatarTooLargeEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -4296,7 +4192,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -4306,7 +4202,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -4321,13 +4217,13 @@ export interface operations {
                     "application/json": components["schemas"]["Chat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4336,7 +4232,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4345,7 +4241,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4354,7 +4250,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4364,7 +4260,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -4383,13 +4279,13 @@ export interface operations {
                     "application/json": components["schemas"]["Chat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4398,7 +4294,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4407,7 +4303,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4416,7 +4312,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4426,8 +4322,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
-                userId: components["schemas"]["NumberFromString"];
+                id: string;
+                userId: string;
             };
             cookie?: never;
         };
@@ -4442,13 +4338,13 @@ export interface operations {
                     "application/json": components["schemas"]["Chat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4457,7 +4353,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4466,7 +4362,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4475,7 +4371,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4485,26 +4381,26 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4513,7 +4409,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4522,7 +4418,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4531,7 +4427,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4541,7 +4437,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -4560,13 +4456,13 @@ export interface operations {
                     "application/json": components["schemas"]["Chat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4575,7 +4471,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4584,7 +4480,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4593,7 +4489,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4603,8 +4499,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
-                userId: components["schemas"]["NumberFromString"];
+                id: string;
+                userId: string;
             };
             cookie?: never;
         };
@@ -4623,13 +4519,13 @@ export interface operations {
                     "application/json": components["schemas"]["Chat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4638,7 +4534,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4647,7 +4543,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4656,7 +4552,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4664,14 +4560,13 @@ export interface operations {
     "chats.listMessages": {
         parameters: {
             query?: {
-                before?: string;
-                after?: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                before?: string | null;
+                after?: string | null;
+                limit?: string | null;
             };
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -4686,13 +4581,13 @@ export interface operations {
                     "application/json": components["schemas"]["MessagesPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4701,7 +4596,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4710,7 +4605,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4719,7 +4614,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4729,7 +4624,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -4739,36 +4634,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Success */
+            /** @description Message */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: number;
-                        chatId: number;
-                        senderId: number;
-                        contentType: components["schemas"]["MessageContentType"];
-                        content: string;
-                        attachment: components["schemas"]["Attachment"] | null;
-                        parentMessage: components["schemas"]["ParentMessagePreview"] | null;
-                        createdAt: number;
-                        updatedAt: number;
-                        readByUserIds: number[];
-                        reactions: components["schemas"]["ReactionSummary"][];
-                        pinned: boolean;
-                        starred: boolean;
-                    };
+                    "application/json": components["schemas"]["Message_1"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4777,7 +4658,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4786,7 +4667,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4795,7 +4676,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4805,26 +4686,26 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4833,7 +4714,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4842,7 +4723,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4851,7 +4732,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4861,7 +4742,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -4880,13 +4761,13 @@ export interface operations {
                     "application/json": components["schemas"]["Chat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4895,7 +4776,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4904,7 +4785,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4913,7 +4794,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4923,8 +4804,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
-                messageId: components["schemas"]["NumberFromString"];
+                id: string;
+                messageId: string;
             };
             cookie?: never;
         };
@@ -4943,13 +4824,13 @@ export interface operations {
                     "application/json": components["schemas"]["Message"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -4958,7 +4839,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -4967,7 +4848,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -4976,7 +4857,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -4986,27 +4867,27 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
-                messageId: components["schemas"]["NumberFromString"];
+                id: string;
+                messageId: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5015,7 +4896,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5024,7 +4905,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5033,7 +4914,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5043,8 +4924,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
-                messageId: components["schemas"]["NumberFromString"];
+                id: string;
+                messageId: string;
             };
             cookie?: never;
         };
@@ -5063,13 +4944,13 @@ export interface operations {
                     "application/json": components["schemas"]["ReactionState"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5078,7 +4959,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5087,7 +4968,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5096,7 +4977,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5106,8 +4987,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
-                messageId: components["schemas"]["NumberFromString"];
+                id: string;
+                messageId: string;
             };
             cookie?: never;
         };
@@ -5126,13 +5007,13 @@ export interface operations {
                     "application/json": components["schemas"]["ReactionState"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5141,7 +5022,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5150,7 +5031,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5159,7 +5040,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5169,7 +5050,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -5184,13 +5065,13 @@ export interface operations {
                     "application/json": components["schemas"]["Message"][];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5199,7 +5080,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5208,7 +5089,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5217,7 +5098,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5227,7 +5108,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -5246,13 +5127,13 @@ export interface operations {
                     "application/json": components["schemas"]["Message"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5261,7 +5142,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5270,7 +5151,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5279,7 +5160,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5289,8 +5170,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
-                messageId: components["schemas"]["NumberFromString"];
+                id: string;
+                messageId: string;
             };
             cookie?: never;
         };
@@ -5305,13 +5186,13 @@ export interface operations {
                     "application/json": components["schemas"]["Message"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5320,7 +5201,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5329,7 +5210,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5338,7 +5219,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5348,7 +5229,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -5363,13 +5244,13 @@ export interface operations {
                     "application/json": components["schemas"]["Message"][];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5378,7 +5259,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5387,7 +5268,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5396,7 +5277,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5406,8 +5287,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
-                messageId: components["schemas"]["NumberFromString"];
+                id: string;
+                messageId: string;
             };
             cookie?: never;
         };
@@ -5422,13 +5303,13 @@ export interface operations {
                     "application/json": components["schemas"]["Message"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5437,7 +5318,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5446,7 +5327,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5455,7 +5336,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5465,8 +5346,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
-                messageId: components["schemas"]["NumberFromString"];
+                id: string;
+                messageId: string;
             };
             cookie?: never;
         };
@@ -5481,13 +5362,13 @@ export interface operations {
                     "application/json": components["schemas"]["Message"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5496,7 +5377,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5505,7 +5386,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5514,7 +5395,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5524,7 +5405,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -5536,16 +5417,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChatInvite"][];
+                    "application/json": components["schemas"]["ChatInvite_1"][];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5554,7 +5435,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5563,7 +5444,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5572,7 +5453,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5582,7 +5463,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -5592,32 +5473,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Success */
+            /** @description ChatInvite */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: number;
-                        chatId: number;
-                        code: string;
-                        createdBy: number;
-                        createdAt: number;
-                        expiresAt: number | null;
-                        maxUses: number | null;
-                        useCount: number;
-                        revokedAt: number | null;
-                    };
+                    "application/json": components["schemas"]["ChatInvite"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5626,7 +5497,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5635,7 +5506,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5644,7 +5515,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5654,27 +5525,27 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
-                inviteId: components["schemas"]["NumberFromString"];
+                id: string;
+                inviteId: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5683,7 +5554,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -5692,7 +5563,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5701,7 +5572,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5726,13 +5597,13 @@ export interface operations {
                     "application/json": components["schemas"]["Chat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidChatRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidChatRequest"];
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5741,7 +5612,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -5750,7 +5621,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -5758,10 +5629,8 @@ export interface operations {
     "search.searchAll": {
         parameters: {
             query: {
-                /** @description a string that will be trimmed */
                 q: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                limit?: string | null;
             };
             header?: never;
             path?: never;
@@ -5778,13 +5647,13 @@ export interface operations {
                     "application/json": components["schemas"]["SearchAllPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidSearchRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidSearchRequest"];
+                    "application/json": components["schemas"]["InvalidSearchRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5793,7 +5662,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -5801,11 +5670,9 @@ export interface operations {
     "search.searchUsers": {
         parameters: {
             query: {
-                /** @description a string that will be trimmed */
                 q: string;
-                cursor?: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                cursor?: string | null;
+                limit?: string | null;
             };
             header?: never;
             path?: never;
@@ -5822,13 +5689,13 @@ export interface operations {
                     "application/json": components["schemas"]["UserSearchPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidSearchRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidSearchRequest"];
+                    "application/json": components["schemas"]["InvalidSearchRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5837,7 +5704,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -5845,11 +5712,9 @@ export interface operations {
     "search.searchPosts": {
         parameters: {
             query: {
-                /** @description a string that will be trimmed */
                 q: string;
-                cursor?: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                cursor?: string | null;
+                limit?: string | null;
             };
             header?: never;
             path?: never;
@@ -5866,13 +5731,13 @@ export interface operations {
                     "application/json": components["schemas"]["PostSearchPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidSearchRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidSearchRequest"];
+                    "application/json": components["schemas"]["InvalidSearchRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5881,7 +5746,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -5889,11 +5754,9 @@ export interface operations {
     "search.searchComments": {
         parameters: {
             query: {
-                /** @description a string that will be trimmed */
                 q: string;
-                cursor?: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                cursor?: string | null;
+                limit?: string | null;
             };
             header?: never;
             path?: never;
@@ -5910,13 +5773,13 @@ export interface operations {
                     "application/json": components["schemas"]["CommentSearchPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidSearchRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidSearchRequest"];
+                    "application/json": components["schemas"]["InvalidSearchRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5925,7 +5788,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -5933,11 +5796,9 @@ export interface operations {
     "search.searchMessages": {
         parameters: {
             query: {
-                /** @description a string that will be trimmed */
                 q: string;
-                cursor?: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                cursor?: string | null;
+                limit?: string | null;
             };
             header?: never;
             path?: never;
@@ -5954,13 +5815,13 @@ export interface operations {
                     "application/json": components["schemas"]["MessageSearchPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidSearchRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidSearchRequest"];
+                    "application/json": components["schemas"]["InvalidSearchRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -5969,7 +5830,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -5984,42 +5845,28 @@ export interface operations {
         requestBody: {
             content: {
                 "multipart/form-data": {
-                    /**
-                     * itemsCount(1)
-                     * @description an array of exactly 1 item(s)
-                     */
-                    file: components["schemas"]["PersistedFile"][];
+                    /** Format: binary */
+                    file: string;
                 };
             };
         };
         responses: {
-            /** @description Success */
+            /** @description Attachment */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: number;
-                        filename: string;
-                        mimeType: string;
-                        size: number;
-                        url: string;
-                        width: number | null;
-                        height: number | null;
-                        blurhash: string | null;
-                        waveform: number[] | null;
-                        durationMs: number | null;
-                    };
+                    "application/json": components["schemas"]["Attachment_1"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6028,16 +5875,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
-            /** @description AttachmentTooLarge */
+            /** @description AttachmentTooLarge | AttachmentQuotaExceeded */
             413: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AttachmentTooLarge"] | components["schemas"]["AttachmentQuotaExceeded"];
+                    "application/json": components["schemas"]["AttachmentTooLargeEncoded"] | components["schemas"]["AttachmentQuotaExceededEncoded"];
                 };
             };
             /** @description UnsupportedAttachmentType */
@@ -6046,7 +5893,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UnsupportedAttachmentType"];
+                    "application/json": components["schemas"]["UnsupportedAttachmentTypeEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -6055,7 +5902,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -6065,26 +5912,26 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6093,7 +5940,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -6102,7 +5949,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -6125,13 +5972,13 @@ export interface operations {
                     "application/json": components["schemas"]["VersionResponse"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
         };
@@ -6145,24 +5992,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description WsTicketResponse */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        ticket: string;
-                    };
+                    "application/json": components["schemas"]["WsTicketResponse"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6171,7 +6016,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -6179,8 +6024,7 @@ export interface operations {
     "admin.getAdminStats": {
         parameters: {
             query?: {
-                /** @description a string to be decoded into a number */
-                days?: string;
+                days?: string | null;
             };
             header?: never;
             path?: never;
@@ -6197,13 +6041,13 @@ export interface operations {
                     "application/json": components["schemas"]["AdminStats"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6212,7 +6056,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -6221,7 +6065,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
         };
@@ -6246,13 +6090,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobbyList"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6261,7 +6105,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -6277,39 +6121,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description GameLobby */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: number;
-                        game: components["schemas"]["GameId"];
-                        hostId: number;
-                        phase: components["schemas"]["GameLobbyPhase"];
-                        round: number;
-                        passage: string | null;
-                        startsAt: number | null;
-                        endsAt: number | null;
-                        serverNow: number;
-                        minPlayers: number;
-                        maxPlayers: number;
-                        players: components["schemas"]["GameLobbyPlayer"][];
-                        drawing: components["schemas"]["DrawingGame"] | null;
-                        reflex: components["schemas"]["ReflexGame"] | null;
-                        chatOpen: boolean;
-                        createdAt: number;
-                    };
+                    "application/json": components["schemas"]["GameLobby_1"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6318,7 +6145,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -6343,13 +6170,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobby"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6358,7 +6185,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -6368,7 +6195,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -6383,13 +6210,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobby"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6398,7 +6225,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -6407,7 +6234,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -6417,7 +6244,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -6432,13 +6259,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobby"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidGameRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                    "application/json": components["schemas"]["InvalidGameRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6447,7 +6274,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -6456,7 +6283,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -6466,26 +6293,26 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6494,7 +6321,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -6503,7 +6330,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -6513,7 +6340,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -6528,13 +6355,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobby"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidGameRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                    "application/json": components["schemas"]["InvalidGameRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6543,7 +6370,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -6552,7 +6379,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -6561,7 +6388,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -6571,7 +6398,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -6590,13 +6417,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobby"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidGameRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                    "application/json": components["schemas"]["InvalidGameRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6605,7 +6432,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -6614,7 +6441,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -6623,7 +6450,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -6633,7 +6460,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -6652,13 +6479,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobby"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidGameRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                    "application/json": components["schemas"]["InvalidGameRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6667,7 +6494,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -6676,7 +6503,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -6685,7 +6512,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -6695,7 +6522,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -6710,13 +6537,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobby"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidGameRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                    "application/json": components["schemas"]["InvalidGameRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6725,7 +6552,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -6734,7 +6561,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -6743,7 +6570,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -6753,7 +6580,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -6763,20 +6590,20 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Success */
+            /** @description <No Content> */
             204: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidGameRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                    "application/json": components["schemas"]["InvalidGameRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6785,7 +6612,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -6794,7 +6621,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -6803,7 +6630,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -6812,7 +6639,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -6822,7 +6649,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -6837,13 +6664,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameChat"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6852,7 +6679,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -6861,7 +6688,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -6871,7 +6698,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -6881,28 +6708,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Success */
+            /** @description GameChatMessage */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: number;
-                        lobbyId: number;
-                        user: components["schemas"]["User"];
-                        text: string;
-                        createdAt: number;
-                    };
+                    "application/json": components["schemas"]["GameChatMessage_1"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidGameRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                    "application/json": components["schemas"]["InvalidGameRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6911,7 +6732,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -6920,7 +6741,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
             /** @description TooManyRequests */
@@ -6929,7 +6750,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TooManyRequests"];
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
@@ -6952,13 +6773,13 @@ export interface operations {
                     "application/json": components["schemas"]["DrawingPackList"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -6967,7 +6788,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -6977,7 +6798,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -6996,13 +6817,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobby"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidGameRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                    "application/json": components["schemas"]["InvalidGameRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -7011,7 +6832,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -7020,7 +6841,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -7029,7 +6850,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -7039,7 +6860,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -7058,13 +6879,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobby"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidGameRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                    "application/json": components["schemas"]["InvalidGameRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -7073,7 +6894,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -7082,7 +6903,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -7091,7 +6912,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -7101,7 +6922,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -7120,13 +6941,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobby"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidGameRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                    "application/json": components["schemas"]["InvalidGameRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -7135,7 +6956,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -7144,7 +6965,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -7153,7 +6974,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -7163,7 +6984,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -7182,13 +7003,13 @@ export interface operations {
                     "application/json": components["schemas"]["GameLobby"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidGameRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidGameRequest"];
+                    "application/json": components["schemas"]["InvalidGameRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -7197,7 +7018,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description Forbidden */
@@ -7206,7 +7027,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Forbidden"];
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description NotFound */
@@ -7215,7 +7036,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };
@@ -7223,7 +7044,7 @@ export interface operations {
     "games.getLeaderboard": {
         parameters: {
             query?: {
-                period?: components["schemas"]["LeaderboardPeriod"];
+                period?: components["schemas"]["LeaderboardPeriod"] | null;
             };
             header?: never;
             path: {
@@ -7242,13 +7063,13 @@ export interface operations {
                     "application/json": components["schemas"]["Leaderboard"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -7257,7 +7078,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -7265,9 +7086,8 @@ export interface operations {
     "notifications.listNotifications": {
         parameters: {
             query?: {
-                cursor?: string;
-                /** @description a string to be decoded into a number */
-                limit?: string;
+                cursor?: string | null;
+                limit?: string | null;
             };
             header?: never;
             path?: never;
@@ -7284,13 +7104,13 @@ export interface operations {
                     "application/json": components["schemas"]["NotificationsPage"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description InvalidNotificationRequest | HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"] | components["schemas"]["InvalidNotificationRequest"];
+                    "application/json": components["schemas"]["InvalidNotificationRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -7299,7 +7119,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -7322,13 +7142,13 @@ export interface operations {
                     "application/json": components["schemas"]["UnreadNotificationCount"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -7337,7 +7157,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -7360,13 +7180,13 @@ export interface operations {
                     "application/json": components["schemas"]["UnreadNotificationCount"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -7375,7 +7195,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
         };
@@ -7385,7 +7205,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: components["schemas"]["NumberFromString"];
+                id: string;
             };
             cookie?: never;
         };
@@ -7400,13 +7220,13 @@ export interface operations {
                     "application/json": components["schemas"]["UnreadNotificationCount"];
                 };
             };
-            /** @description The request did not match the expected schema */
+            /** @description HttpApiDecodeError */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HttpApiDecodeError"];
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */
@@ -7415,7 +7235,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Unauthorized"];
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
                 };
             };
             /** @description NotFound */
@@ -7424,7 +7244,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NotFound"];
+                    "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
         };

@@ -1,6 +1,7 @@
-import { HttpApiBuilder, HttpApiSwagger } from "@effect/platform";
+import { HttpRouter } from "effect/http";
+import { HttpApiBuilder, HttpApiSwagger } from "effect/http-api";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
-import { Config, Effect, Layer } from "effect";
+import { Config, Effect, Layer, Metric } from "effect";
 import { ChatApi } from "./Api.ts";
 import { ActiveUsersMetricsLive } from "./ActiveUsersMetrics.ts";
 import { AdminHandlerLive } from "./AdminHandler.ts";
@@ -34,7 +35,7 @@ import { VersionHandlerLive } from "./VersionHandler.ts";
 import { allowedOrigins } from "./WebOrigin.ts";
 import { WsTicketLive } from "./WsTicket.ts";
 
-const CorsLive = HttpApiBuilder.middlewareCors({
+const CorsLive = HttpRouter.cors({
   allowedOrigins,
   // PATCH is used by updateUserRole (/users/:id/role) and updateComment
   // (/comments/:id) — omitting it here fails preflight for both, since
@@ -44,37 +45,31 @@ const CorsLive = HttpApiBuilder.middlewareCors({
   allowedHeaders: ["Content-Type", "Authorization"],
 });
 
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(JwtLive),
-  Layer.provide(CorsLive),
-  Layer.provide(SanitizeDecodeErrorsLive),
-  Layer.provide(RateLimiterLive),
-  Layer.provide(WsTicketLive),
-  Layer.provide(PubSubLive),
-  Layer.provide(AttachmentStorageLive),
+const ApiLive = HttpApiBuilder.layer(ChatApi).pipe(
+  Layer.provide([
+    UsersHandlerLive,
+    PostsHandlerLive,
+    EngagementHandlerLive,
+    ChatsHandlerLive,
+    SearchHandlerLive,
+    AttachmentsHandlerLive,
+    VersionHandlerLive,
+    RealtimeHandlerLive,
+    AdminHandlerLive,
+    GamesHandlerLive,
+    NotificationsHandlerLive,
+  ]),
+  // provideMerge, not provide: the request pipeline resolves the API's
+  // middleware again when the routes are served, not just here.
+  Layer.provideMerge(
+    Layer.mergeAll(AuthenticationLive, SanitizeDecodeErrorsLive),
+  ),
 );
 
-const ServerLive = Layer.mergeAll(
-  // globalRateLimit sits innermost (closest to the actual router) so a
-  // request it rejects still gets logged and counted in `/metrics` like any
-  // other response, rather than disappearing before either wrapper sees it.
-  HttpApiBuilder.serve((httpApp) =>
-    redactedLogger(recordHttpMetrics(globalRateLimit(httpApp))),
-  ),
-  HttpApiSwagger.layer({ path: "/docs" }),
+const RoutesLive = Layer.mergeAll(
+  ApiLive,
+  HttpApiSwagger.layer(ChatApi, { path: "/docs" }),
+  CorsLive,
   // Raw `/ws` route, attached to the same shared router as `ChatApi` — see
   // RealtimeSocket.ts for why this can't be a typed HttpApiEndpoint.
   RealtimeSocketRouteLive,
@@ -88,31 +83,56 @@ const ServerLive = Layer.mergeAll(
   HealthRouteLive,
   ReadyRouteLive,
   MetricsRouteLive,
+);
+
+const HttpServerLive = HttpRouter.serve(RoutesLive, {
+  // Replaced by redactedLogger below.
+  disableLogger: true,
+  // globalRateLimit sits innermost (closest to the actual router) so a
+  // request it rejects still gets logged and counted in `/metrics` like any
+  // other response, rather than disappearing before either wrapper sees it.
+  middleware: (httpApp) =>
+    redactedLogger(recordHttpMetrics(globalRateLimit(httpApp))),
+}).pipe(
+  Layer.provide(
+    Layer.unwrap(
+      Effect.gen(function* () {
+        const port = yield* Config.Int("PORT").pipe(Config.withDefault(3000));
+        return BunHttpServer.layer({ port });
+      }),
+    ),
+  ),
+);
+
+// Every shared service, built once and handed to the server, its routes and
+// handlers, and the background jobs alike.
+const ServicesLive = Layer.mergeAll(
+  RealtimeConnectionsLive,
+  TokenVersionCacheLive,
+).pipe(
+  Layer.provideMerge(
+    Layer.mergeAll(
+      DbLive,
+      PubSubLive,
+      PresenceStoreLive,
+      JwtLive,
+      RateLimiterLive,
+      WsTicketLive,
+      AttachmentStorageLive,
+    ),
+  ),
+);
+
+const ServerLive = Layer.mergeAll(
+  HttpServerLive,
   RefreshTokenCleanupLive,
   AttachmentCleanupLive,
   ActiveUsersMetricsLive,
 ).pipe(
-  Layer.provide(ApiLive),
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(PubSubLive),
-  Layer.provide(PresenceStoreLive),
-  Layer.provide(JwtLive),
-  Layer.provide(RateLimiterLive),
-  Layer.provide(WsTicketLive),
-  Layer.provide(DbLive),
-  // AttachmentCleanupLive (a sibling of ApiLive in the mergeAll above, not
-  // nested under it) needs its own AttachmentStorage — ApiLive's internal
-  // Layer.provide(AttachmentStorageLive) only satisfies layers within
-  // ApiLive itself.
-  Layer.provide(AttachmentStorageLive),
-  Layer.provide(
-    Layer.unwrapEffect(
-      Config.integer("PORT").pipe(
-        Config.withDefault(3000),
-        Effect.map((port) => BunHttpServer.layer({ port })),
-      ),
-    ),
-  ),
+  Layer.provide(ServicesLive),
+  // Effect's fiber counters (child_fibers_*), off by default since v4 —
+  // rendered on `/metrics` alongside the app's own (see Metrics.ts).
+  Layer.provide(Metric.enableRuntimeMetricsLayer),
 );
 
 BunRuntime.runMain(Layer.launch(ServerLive));

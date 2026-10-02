@@ -1,12 +1,8 @@
-import {
-  HttpApiBuilder,
-  HttpMiddleware,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "@effect/platform";
-import { Context, Effect, type Scope } from "effect";
+import { HttpRouter, HttpServerResponse } from "effect/http";
+import { Effect } from "effect";
 import { Db } from "./Db.ts";
 import { PubSub } from "./PubSub.ts";
+import { withLoggerDisabled } from "./RedactedLogger.ts";
 
 // Raw routes (not part of the typed `ChatApi`) — orchestrators (compose
 // `depends_on`, k8s probes, load balancers) poll these, they aren't part of
@@ -22,11 +18,10 @@ import { PubSub } from "./PubSub.ts";
 // dependency checks on purpose — this only answers "should the orchestrator
 // restart the container?", which a stuck DB/Redis connection doesn't imply
 // on its own (that's what /ready, below, is for).
-export const HealthRouteLive = HttpApiBuilder.Router.use((router) =>
-  router.get(
-    "/health",
-    HttpMiddleware.withLoggerDisabled(HttpServerResponse.text("ok")),
-  ),
+export const HealthRouteLive = HttpRouter.add(
+  "GET",
+  "/health",
+  withLoggerDisabled(Effect.succeed(HttpServerResponse.text("ok"))),
 );
 
 // Readiness: the process has finished booting (DbLive's migrations, see
@@ -34,32 +29,19 @@ export const HealthRouteLive = HttpApiBuilder.Router.use((router) =>
 // too when PubSubLive is backed by it (REDIS_URL set; see PubSub.ts). A
 // process that's up but has lost one of these looks healthy at the TCP
 // level and would otherwise keep receiving traffic.
-export const ReadyRouteLive = HttpApiBuilder.Router.use((router) =>
+export const ReadyRouteLive = HttpRouter.add(
+  "GET",
+  "/ready",
   Effect.gen(function* () {
-    const context = yield* Effect.context<Db | PubSub>();
-    yield* router.get(
-      "/ready",
-      Effect.gen(function* () {
-        const db = yield* Db;
-        const pubsub = yield* PubSub;
-        const checks = yield* Effect.all(
-          [Effect.tryPromise(() => db.execute("select 1")), pubsub.ping],
-          { concurrency: "unbounded" },
-        ).pipe(Effect.either);
+    const db = yield* Db;
+    const pubsub = yield* PubSub;
+    const checks = yield* Effect.all(
+      [Effect.tryPromise(() => db.execute("select 1")), pubsub.ping],
+      { concurrency: "unbounded" },
+    ).pipe(Effect.result);
 
-        return checks._tag === "Right"
-          ? HttpServerResponse.text("ok")
-          : HttpServerResponse.text("not ready", { status: 503 });
-      }).pipe(
-        HttpMiddleware.withLoggerDisabled,
-        Effect.mapInputContext(
-          (
-            input: Context.Context<
-              HttpServerRequest.HttpServerRequest | Scope.Scope
-            >,
-          ) => Context.merge(context, input),
-        ),
-      ),
-    );
-  }),
+    return checks._tag === "Success"
+      ? HttpServerResponse.text("ok")
+      : HttpServerResponse.text("not ready", { status: 503 });
+  }).pipe(withLoggerDisabled),
 );

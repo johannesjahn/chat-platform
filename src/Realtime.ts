@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Metric, MetricLabel } from "effect";
+import { Context, Effect, Layer, Metric } from "effect";
 import {
   websocketConnectionsActive,
   websocketConnectionsTotal,
@@ -230,7 +230,7 @@ type Writer = (chunk: string) => Effect.Effect<void, unknown>;
 //    (`notifyUsers`);
 //  - post mutations can notify every connected user, since the feed is
 //    public to any signed-in user (`broadcastAll`).
-export class RealtimeConnections extends Context.Tag("RealtimeConnections")<
+export class RealtimeConnections extends Context.Service<
   RealtimeConnections,
   {
     readonly register: (
@@ -295,7 +295,7 @@ export class RealtimeConnections extends Context.Tag("RealtimeConnections")<
       event: RealtimeEvent,
     ) => Effect.Effect<void>;
   }
->() {}
+>()("RealtimeConnections") {}
 
 // Room names a client may subscribe to over `/ws`. An allowlist rather than
 // "any string", so a client can't grow the room map without bound with
@@ -406,7 +406,7 @@ export const RealtimeConnectionsLive = Layer.effect(
       Effect.gen(function* () {
         for (const write of writers) {
           yield* write(payload).pipe(
-            Effect.catchAll((error) => logDroppedWrite(context, error)),
+            Effect.catch((error) => logDroppedWrite(context, error)),
           );
         }
       });
@@ -459,9 +459,10 @@ export const RealtimeConnectionsLive = Layer.effect(
         "RealtimeConnections: failed to publish realtime event, delivery dropped",
       ).pipe(Effect.annotateLogs({ envelope, error: String(error) }));
 
-    const notifyUsers: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["notifyUsers"] = (userIds, event) => {
+    const notifyUsers: RealtimeConnections["Service"]["notifyUsers"] = (
+      userIds,
+      event,
+    ) => {
       const envelope = {
         scope: "users",
         userIds: [...userIds],
@@ -469,30 +470,32 @@ export const RealtimeConnectionsLive = Layer.effect(
       } satisfies Envelope;
       return pubsub
         .publish(CHANNEL, JSON.stringify(envelope))
-        .pipe(Effect.catchAll((error) => logPublishFailure(envelope, error)));
+        .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
     };
 
-    const broadcastAll: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["broadcastAll"] = (event) => {
+    const broadcastAll: RealtimeConnections["Service"]["broadcastAll"] = (
+      event,
+    ) => {
       const envelope = { scope: "all", event } satisfies Envelope;
       return pubsub
         .publish(CHANNEL, JSON.stringify(envelope))
-        .pipe(Effect.catchAll((error) => logPublishFailure(envelope, error)));
+        .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
     };
 
-    const notifyPostRoom: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["notifyPostRoom"] = (postId, event) => {
+    const notifyPostRoom: RealtimeConnections["Service"]["notifyPostRoom"] = (
+      postId,
+      event,
+    ) => {
       const envelope = { scope: "post", postId, event } satisfies Envelope;
       return pubsub
         .publish(CHANNEL, JSON.stringify(envelope))
-        .pipe(Effect.catchAll((error) => logPublishFailure(envelope, error)));
+        .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
     };
 
-    const subscribePost: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["subscribePost"] = (postId, write) =>
+    const subscribePost: RealtimeConnections["Service"]["subscribePost"] = (
+      postId,
+      write,
+    ) =>
       Effect.sync(() => {
         const mine = joinedBy(write).posts;
         if (!mine.has(postId) && mine.size >= MAX_POST_ROOMS_PER_CONNECTION) {
@@ -504,9 +507,10 @@ export const RealtimeConnectionsLive = Layer.effect(
         byPost.set(postId, set);
       });
 
-    const unsubscribePost: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["unsubscribePost"] = (postId, write) =>
+    const unsubscribePost: RealtimeConnections["Service"]["unsubscribePost"] = (
+      postId,
+      write,
+    ) =>
       Effect.sync(() => {
         joined.get(write)?.posts.delete(postId);
         const set = byPost.get(postId);
@@ -515,18 +519,20 @@ export const RealtimeConnectionsLive = Layer.effect(
         if (set.size === 0) byPost.delete(postId);
       });
 
-    const notifyRoom: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["notifyRoom"] = (room, event) => {
+    const notifyRoom: RealtimeConnections["Service"]["notifyRoom"] = (
+      room,
+      event,
+    ) => {
       const envelope = { scope: "room", room, event } satisfies Envelope;
       return pubsub
         .publish(CHANNEL, JSON.stringify(envelope))
-        .pipe(Effect.catchAll((error) => logPublishFailure(envelope, error)));
+        .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
     };
 
-    const subscribeRoom: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["subscribeRoom"] = (room, write) =>
+    const subscribeRoom: RealtimeConnections["Service"]["subscribeRoom"] = (
+      room,
+      write,
+    ) =>
       Effect.sync(() => {
         const mine = joinedBy(write).rooms;
         if (!mine.has(room) && mine.size >= MAX_ROOMS_PER_CONNECTION) return;
@@ -536,9 +542,10 @@ export const RealtimeConnectionsLive = Layer.effect(
         byRoom.set(room, set);
       });
 
-    const unsubscribeRoom: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["unsubscribeRoom"] = (room, write) =>
+    const unsubscribeRoom: RealtimeConnections["Service"]["unsubscribeRoom"] = (
+      room,
+      write,
+    ) =>
       Effect.sync(() => {
         joined.get(write)?.rooms.delete(room);
         const set = byRoom.get(room);
@@ -547,14 +554,15 @@ export const RealtimeConnectionsLive = Layer.effect(
         if (set.size === 0) byRoom.delete(room);
       });
 
-    const isInRoom: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["isInRoom"] = (room, write) =>
-      Effect.sync(() => byRoom.get(room)?.has(write) ?? false);
+    const isInRoom: RealtimeConnections["Service"]["isInRoom"] = (
+      room,
+      write,
+    ) => Effect.sync(() => byRoom.get(room)?.has(write) ?? false);
 
-    const register: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["register"] = (userId, write) =>
+    const register: RealtimeConnections["Service"]["register"] = (
+      userId,
+      write,
+    ) =>
       Effect.gen(function* () {
         const set = byUser.get(userId) ?? new Set();
         set.add(write);
@@ -563,14 +571,14 @@ export const RealtimeConnectionsLive = Layer.effect(
         // `websocket_connections_active` gauge (see Metrics.ts) — a count of
         // *connections*, not of online *users* (PresenceStore, below, is the
         // latter): a user with two tabs open holds two of these.
-        yield* Metric.increment(websocketConnectionsActive);
+        yield* Metric.modify(websocketConnectionsActive, 1);
         // Churn counterpart to the gauge above — websocketConnectionsActive
         // only shows the current count, not how often connections open and
         // close.
         yield* Metric.update(
-          Metric.taggedWithLabels(websocketConnectionsTotal, [
-            MetricLabel.make("event", "connect"),
-          ]),
+          Metric.withAttributes(websocketConnectionsTotal, {
+            event: "connect",
+          }),
           1,
         );
         // PresenceStore.connect reports whether this was the *global*
@@ -606,12 +614,12 @@ export const RealtimeConnectionsLive = Layer.effect(
               byRoom.delete(room);
             }
           }
-          Effect.runFork(Metric.incrementBy(websocketConnectionsActive, -1));
+          Effect.runFork(Metric.modify(websocketConnectionsActive, -1));
           Effect.runFork(
             Metric.update(
-              Metric.taggedWithLabels(websocketConnectionsTotal, [
-                MetricLabel.make("event", "disconnect"),
-              ]),
+              Metric.withAttributes(websocketConnectionsTotal, {
+                event: "disconnect",
+              }),
               1,
             ),
           );
@@ -637,9 +645,8 @@ export const RealtimeConnectionsLive = Layer.effect(
         };
       });
 
-    const onlineUserIds: Context.Tag.Service<
-      typeof RealtimeConnections
-    >["onlineUserIds"] = presenceStore.onlineUserIds;
+    const onlineUserIds: RealtimeConnections["Service"]["onlineUserIds"] =
+      presenceStore.onlineUserIds;
 
     return {
       register,

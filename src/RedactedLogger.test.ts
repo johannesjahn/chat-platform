@@ -1,15 +1,19 @@
 import { expect, test } from "bun:test";
-import { HttpServerRequest, HttpServerResponse } from "@effect/platform";
+import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import {
   ConfigProvider,
   Effect,
-  HashMap,
-  FiberRef,
-  Layer,
+  type Fiber,
   Logger,
   Option,
+  References,
 } from "effect";
-import { redactedLogger, redactUrl, currentLogUser } from "./RedactedLogger.ts";
+import { redactedLogger, redactUrl, setLogUser } from "./RedactedLogger.ts";
+
+const annotation = (
+  fiber: Fiber.Fiber<unknown, unknown>,
+  key: string,
+): unknown => fiber.getRef(References.CurrentLogAnnotations)[key];
 
 test("redactUrl masks credential query params but leaves the rest untouched", () => {
   expect(redactUrl("/ws?token=secret123")).toBe("/ws?token=REDACTED");
@@ -24,9 +28,9 @@ test("redactUrl masks credential query params but leaves the rest untouched", ()
 // regardless of which query param a future auth mechanism uses for it.
 test("redactedLogger logs a redacted URL while the handler still sees the real one", async () => {
   const loggedUrls: string[] = [];
-  const captureLogger = Logger.make(({ annotations }) => {
-    const url = HashMap.get(annotations, "http.url");
-    if (url._tag === "Some") loggedUrls.push(url.value as string);
+  const captureLogger = Logger.make(({ fiber }) => {
+    const url = annotation(fiber, "http.url");
+    if (url !== undefined) loggedUrls.push(url as string);
   });
 
   const mockRequest = {
@@ -45,7 +49,7 @@ test("redactedLogger logs a redacted URL while the handler still sees the real o
   await Effect.runPromise(
     redactedLogger(handler).pipe(
       Effect.provideService(HttpServerRequest.HttpServerRequest, mockRequest),
-      Effect.provide(Logger.replace(Logger.defaultLogger, captureLogger)),
+      Effect.provide(Logger.layer([captureLogger])),
     ),
   );
 
@@ -54,9 +58,9 @@ test("redactedLogger logs a redacted URL while the handler still sees the real o
 
 test("redactedLogger appends a hashed representation of the resolved client IP", async () => {
   const loggedIpHashes: string[] = [];
-  const captureLogger = Logger.make(({ annotations }) => {
-    const hash = HashMap.get(annotations, "http.client_ip_hash");
-    if (hash._tag === "Some") loggedIpHashes.push(hash.value as string);
+  const captureLogger = Logger.make(({ fiber }) => {
+    const hash = annotation(fiber, "http.client_ip_hash");
+    if (hash !== undefined) loggedIpHashes.push(hash as string);
   });
 
   const mockRequest = {
@@ -71,15 +75,15 @@ test("redactedLogger appends a hashed representation of the resolved client IP",
   const handler = Effect.succeed(HttpServerResponse.text("ok"));
 
   // Use ConfigProvider to mock TRUST_PROXY
-  const testConfigProvider = ConfigProvider.fromMap(
-    new Map([["TRUST_PROXY", "10.0.0.0/8"]]),
-  );
+  const testConfigProvider = ConfigProvider.fromUnknown({
+    TRUST_PROXY: "10.0.0.0/8",
+  });
 
   await Effect.runPromise(
     redactedLogger(handler).pipe(
       Effect.provideService(HttpServerRequest.HttpServerRequest, mockRequest),
-      Effect.provide(Logger.replace(Logger.defaultLogger, captureLogger)),
-      Effect.provide(Layer.setConfigProvider(testConfigProvider)),
+      Effect.provide(Logger.layer([captureLogger])),
+      Effect.provide(ConfigProvider.layer(testConfigProvider)),
     ),
   );
 
@@ -92,12 +96,11 @@ test("redactedLogger appends a hashed representation of the resolved client IP",
   expect(resolvedHash).toMatch(/^[0-9a-f]{16}$/); // 16-character hex
 });
 
-test("redactedLogger appends the authenticated username if available in currentLogUser FiberRef", async () => {
+test("redactedLogger appends the authenticated username once the request sets it", async () => {
   const loggedUsernames: string[] = [];
-  const captureLogger = Logger.make(({ annotations }) => {
-    const username = HashMap.get(annotations, "http.username");
-    if (username._tag === "Some")
-      loggedUsernames.push(username.value as string);
+  const captureLogger = Logger.make(({ fiber }) => {
+    const username = annotation(fiber, "http.username");
+    if (username !== undefined) loggedUsernames.push(username as string);
   });
 
   const mockRequest = {
@@ -107,16 +110,16 @@ test("redactedLogger appends the authenticated username if available in currentL
     headers: {},
   } as unknown as HttpServerRequest.HttpServerRequest;
 
-  // Set the currentLogUser FiberRef to "testuser"
+  // Authentication (or login/refresh) sets the username further in.
   const handler = Effect.gen(function* () {
-    yield* FiberRef.set(currentLogUser, "testuser");
+    yield* setLogUser("testuser");
     return HttpServerResponse.text("ok");
   });
 
   await Effect.runPromise(
     redactedLogger(handler).pipe(
       Effect.provideService(HttpServerRequest.HttpServerRequest, mockRequest),
-      Effect.provide(Logger.replace(Logger.defaultLogger, captureLogger)),
+      Effect.provide(Logger.layer([captureLogger])),
     ),
   );
 

@@ -1,108 +1,17 @@
 import { expect, test } from "bun:test";
-import { FetchHttpClient, HttpApiBuilder, HttpClient } from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
-import { Effect, Layer } from "effect";
-import { ChatApi } from "./Api.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
-import { Db } from "./Db.ts";
-import { JwtLive } from "./Jwt.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive } from "./GamesHandler.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
-import { InMemoryPresenceStoreLive } from "./Presence.ts";
-import { InMemoryPubSubLive } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
+import { HttpClient } from "effect/http";
+import { Effect } from "effect";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
-import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
-
-// JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
-process.env.JWT_SECRET ??= "test-secret";
+import { makeTestRun } from "./testApi.ts";
 
 // These only exercise the pre-upgrade auth checks in RealtimeSocket.ts (the
 // paths that return a plain 401 without ever calling
 // `HttpServerRequest.upgrade`). The actual WebSocket upgrade needs a real
-// `Bun.serve()` request behind it — `HttpApiBuilder.toWebHandler`'s fake
+// `Bun.serve()` request behind it — the shared test harness's fake
 // fetch handler used here doesn't provide one — so the full connect/push
 // behavior is covered by a real-server test instead (see
 // RealtimeSocket.integration.test.ts).
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(AttachmentStorageLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(JwtLive),
-  Layer.provide(InMemoryWsTicketLive),
-);
-
-const ServerLive = Layer.mergeAll(ApiLive, RealtimeSocketRouteLive).pipe(
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(InMemoryPubSubLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(JwtLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(InMemoryWsTicketLive),
-);
-
-const { getTestDb } = makeTestDbAccessor();
-
-const run = async <A, E>(
-  effect: Effect.Effect<A, E, HttpClient.HttpClient>,
-): Promise<A> => {
-  const db = await getTestDb();
-  await resetTestDb(db);
-  const TestDbLive = Layer.succeed(Db, db);
-
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(
-      ServerLive.pipe(Layer.provide(TestDbLive)),
-      BunHttpServer.layerContext,
-    ),
-  );
-
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-
-  try {
-    return await Effect.runPromise(
-      effect.pipe(Effect.provide(TestClientLayer)),
-    );
-  } finally {
-    await dispose();
-  }
-};
+const run = makeTestRun({ routes: RealtimeSocketRouteLive });
 
 test("GET /ws with no ticket is rejected before any upgrade is attempted", async () => {
   await run(

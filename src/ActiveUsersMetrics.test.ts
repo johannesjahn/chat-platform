@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { Effect, Layer, Metric, MetricLabel } from "effect";
+import { Effect, Layer, Metric } from "effect";
 import { updateActiveUserGauges } from "./ActiveUsersMetrics.ts";
 import { Db } from "./Db.ts";
 import { activeUsers } from "./Metrics.ts";
@@ -22,11 +22,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Db>): Promise<A> => {
 
 const gaugeValue = (window: string) =>
   Effect.map(
-    Metric.value(
-      Metric.taggedWithLabels(activeUsers, [
-        MetricLabel.make("window", window),
-      ]),
-    ),
+    Metric.value(Metric.withAttributes(activeUsers, { window: window })),
     (state) => state.value,
   );
 
