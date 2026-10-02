@@ -1,64 +1,64 @@
 import { expect, test } from "bun:test";
+import { Result, Schema } from "effect";
 import { sanitizeIssues } from "./DecodeErrorSanitizer.ts";
 
-test("sanitizeIssues keeps a Refinement issue's hand-authored message", () => {
+const issuesFor = <S extends Schema.Decoder<unknown>>(
+  schema: S,
+  input: unknown,
+) => {
+  const result = Schema.decodeUnknownResult(schema)(input, {
+    errors: "all",
+  });
+  if (Result.isSuccess(result)) throw new Error("expected a decode failure");
+  return sanitizeIssues(result.failure.issue);
+};
+
+test("sanitizeIssues keeps a filter's hand-authored message", () => {
+  const Content = Schema.String.check(
+    Schema.makeFilter(() => "content must be an https:// URL"),
+  );
   expect(
-    sanitizeIssues([
-      {
-        _tag: "Refinement",
-        path: [],
-        message:
-          "content must be an https:// URL from an allowed image-hosting domain",
-      },
-    ]),
+    issuesFor(Schema.Struct({ content: Content }), { content: "x" }),
   ).toEqual([
     {
       _tag: "Refinement",
-      path: [],
-      message:
-        "content must be an https:// URL from an allowed image-hosting domain",
-    },
-  ]);
-});
-
-test("sanitizeIssues replaces a Type issue's structural message with a generic fallback", () => {
-  expect(
-    sanitizeIssues([
-      {
-        _tag: "Type",
-        path: ["content"],
-        message: "Expected string, received number",
-      },
-    ]),
-  ).toEqual([
-    {
-      _tag: "Type",
       path: ["content"],
-      message: "Invalid request",
+      message: "content must be an https:// URL",
     },
   ]);
 });
 
-test("sanitizeIssues sanitizes each issue independently in a mixed array", () => {
+test("sanitizeIssues replaces a structural type mismatch with a generic message", () => {
+  const issues = issuesFor(Schema.Struct({ content: Schema.String }), {
+    content: 12345,
+  });
+  expect(issues).toEqual([
+    { _tag: "Type", path: ["content"], message: "Invalid request" },
+  ]);
+  expect(JSON.stringify(issues)).not.toContain("Expected");
+});
+
+test("sanitizeIssues replaces a built-in check's message too", () => {
   expect(
-    sanitizeIssues([
-      { _tag: "Missing", path: ["username"], message: "is missing" },
-      {
-        _tag: "Refinement",
-        path: ["password"],
-        message: "must be at least 8 characters",
-      },
-    ]),
-  ).toEqual([
-    { _tag: "Missing", path: ["username"], message: "Invalid request" },
+    issuesFor(Schema.String.check(Schema.isMaxLength(2)), "too long"),
+  ).toEqual([{ _tag: "Type", path: [], message: "Invalid request" }]);
+});
+
+test("sanitizeIssues sanitizes each issue independently", () => {
+  const Body = Schema.Struct({
+    username: Schema.String,
+    password: Schema.String.check(
+      Schema.makeFilter((s) =>
+        s.length >= 8 ? undefined : "must be at least 8 characters",
+      ),
+    ),
+  });
+  expect(issuesFor(Body, { password: "short" })).toEqual([
+    { _tag: "Type", path: ["username"], message: "Invalid request" },
     {
       _tag: "Refinement",
       path: ["password"],
       message: "must be at least 8 characters",
     },
   ]);
-});
-
-test("sanitizeIssues returns an empty array for no issues", () => {
-  expect(sanitizeIssues([])).toEqual([]);
 });

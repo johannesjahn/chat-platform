@@ -1,10 +1,9 @@
 import { expect, test } from "bun:test";
-import { OpenApi } from "@effect/platform";
-import { Option } from "effect";
+import { OpenApi } from "effect/http-api";
 import { ChatApi } from "./Api.ts";
 
-// Regression guard for a real footgun in @effect/platform's OpenApi generator:
-// giving a `setPath`/`setUrlParams`/`setHeaders` struct an `identifier`
+// Regression guard for a real footgun in effect's OpenApi generator:
+// giving a `params`/`query`/`headers` struct an `identifier`
 // annotation turns its JSON Schema into a `$ref`, which the generator's
 // parameter-extraction pass silently ignores (it only inlines `properties`).
 // The endpoint still works at runtime, but the generated openapi.json (and
@@ -25,7 +24,7 @@ test("every endpoint with path/query/header params produces matching OpenAPI par
     >;
   };
 
-  const groups = Object.values(ChatApi.groups) as ReadonlyArray<{
+  const groups = Object.values(ChatApi.groups) as unknown as ReadonlyArray<{
     endpoints: Record<string, HttpApiEndpointLike>;
   }>;
 
@@ -33,12 +32,12 @@ test("every endpoint with path/query/header params produces matching OpenAPI par
     for (const endpoint of Object.values(group.endpoints)) {
       const expectedKinds = (
         [
-          ["path", endpoint.pathSchema],
-          ["query", endpoint.urlParamsSchema],
-          ["header", endpoint.headersSchema],
+          ["path", endpoint.params],
+          ["query", endpoint.query],
+          ["header", endpoint.headers],
         ] as const
       )
-        .filter(([, schema]) => Option.isSome(schema))
+        .filter(([, schema]) => schema !== undefined)
         .map(([kind]) => kind);
       if (expectedKinds.length === 0) continue;
 
@@ -50,7 +49,7 @@ test("every endpoint with path/query/header params produces matching OpenAPI par
         const matching = parameters.filter((p) => p.in === kind);
         expect(
           matching.length,
-          `${method.toUpperCase()} ${path} declares a ${kind} schema but produced no OpenAPI "${kind}" parameters — check for an .annotations({ identifier }) on that schema (see CLAUDE.md).`,
+          `${method.toUpperCase()} ${path} declares a ${kind} schema but produced no OpenAPI "${kind}" parameters — check for an .annotate({ identifier }) on that schema (see CLAUDE.md).`,
         ).toBeGreaterThan(0);
       }
     }
@@ -60,7 +59,7 @@ test("every endpoint with path/query/header params produces matching OpenAPI par
 type HttpApiEndpointLike = {
   readonly path: string;
   readonly method: string;
-  readonly pathSchema: Option.Option<unknown>;
-  readonly urlParamsSchema: Option.Option<unknown>;
-  readonly headersSchema: Option.Option<unknown>;
+  readonly params: unknown;
+  readonly query: unknown;
+  readonly headers: unknown;
 };

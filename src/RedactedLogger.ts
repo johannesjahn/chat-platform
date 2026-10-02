@@ -2,9 +2,9 @@ import {
   HttpMiddleware,
   HttpServerError,
   HttpServerRequest,
-  type HttpApp,
-} from "@effect/platform";
-import { Context, Effect, FiberRef } from "effect";
+  type HttpServerResponse,
+} from "effect/http";
+import { type Cause, Context, Effect, Option } from "effect";
 import crypto from "crypto";
 import { clientIp } from "./ClientIp.ts";
 
@@ -59,64 +59,97 @@ export const hashIp = (ip: string): string => {
     .slice(0, 16);
 };
 
-// FiberRef used to store the authenticated username for logging in redactedLogger.
-export const currentLogUser = FiberRef.unsafeMake<string | undefined>(
-  undefined,
+// Per-request holder for the authenticated username, logged by
+// redactedLogger. A mutable box rather than a plain value because the logger
+// wraps the whole request: authentication runs further in (Auth.ts's
+// middleware, UsersHandler.ts's login/refresh) and only scopes services to
+// what it wraps, so the logger couldn't see a value provided there — it can
+// see a write into the box it provided itself. The default box (outside any
+// request) just absorbs writes.
+export const LogUser = Context.Reference<{ username: string | undefined }>(
+  "LogUser",
+  { defaultValue: () => ({ username: undefined }) },
 );
+
+export const setLogUser = (username: string): Effect.Effect<void> =>
+  Effect.map(Effect.service(LogUser), (box) => {
+    box.username = username;
+  });
+
+// `HttpMiddleware.withLoggerDisabled` only silences effect's own logger
+// middleware (its flag isn't exported), so raw routes mark themselves here
+// for redactedLogger instead.
+const loggerDisabledRequests = new WeakSet<object>();
+
+export const withLoggerDisabled = <A, E, R>(
+  self: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R | HttpServerRequest.HttpServerRequest> =>
+  Effect.flatMap(
+    Effect.service(HttpServerRequest.HttpServerRequest),
+    (request) => {
+      loggerDisabledRequests.add(request.source);
+      return self;
+    },
+  );
+
+// Numbers each request's log span, process-wide.
+let spanCounter = 0;
 
 // A drop-in replacement for `HttpMiddleware.logger` that redacts credential
 // query params (see SENSITIVE_PARAMS) from the logged URL, appends a hashed
 // representation of the resolved client IP, and appends the authenticated username if available.
 // Only the log annotation is redacted — the request passed to `httpApp` is untouched.
 export const redactedLogger = HttpMiddleware.make(
-  <E, R>(httpApp: HttpApp.Default<E, R>): HttpApp.Default<E, R> => {
-    let counter = 0;
-    return Effect.flatMap(clientIp, (ip) => {
-      const clientIpHash = hashIp(ip);
-      return Effect.withFiberRuntime((fiber) => {
-        const request = Context.unsafeGet(
-          fiber.currentContext,
-          HttpServerRequest.HttpServerRequest,
-        );
-        const url = redactUrl(request.url);
-        return Effect.withLogSpan(
-          Effect.flatMap(Effect.exit(httpApp), (exit) => {
-            if (fiber.getFiberRef(HttpMiddleware.loggerDisabled)) {
-              return exit;
-            }
+  <E, R>(
+    httpApp: Effect.Effect<
+      HttpServerResponse.HttpServerResponse,
+      E,
+      R | HttpServerRequest.HttpServerRequest
+    >,
+  ): Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    E,
+    R | HttpServerRequest.HttpServerRequest
+  > => {
+    const logged = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const clientIpHash = hashIp(yield* clientIp);
+      const url = redactUrl(request.url);
+      const logUser: { username: string | undefined } = {
+        username: undefined,
+      };
+      const exit = yield* Effect.exit(
+        Effect.provideService(httpApp, LogUser, logUser),
+      );
+      if (loggerDisabledRequests.has(request.source)) return yield* exit;
 
-            return Effect.flatMap(FiberRef.get(currentLogUser), (username) => {
-              const [response, cause] =
-                exit._tag === "Failure"
-                  ? HttpServerError.causeResponseStripped(exit.cause)
-                  : [exit.value, undefined];
+      const [response, cause] =
+        exit._tag === "Failure"
+          ? HttpServerError.causeResponseStripped(exit.cause)
+          : [exit.value, Option.none<Cause.Cause<unknown>>()];
 
-              const annotations: Record<string, string | number> = {
-                "http.method": request.method,
-                "http.url": url,
-                "http.status": response.status,
-                "http.client_ip_hash": clientIpHash,
-              };
-              if (username !== undefined) {
-                annotations["http.username"] = username;
-              }
+      const annotations: Record<string, string | number> = {
+        "http.method": request.method,
+        "http.url": url,
+        "http.status": response.status,
+        "http.client_ip_hash": clientIpHash,
+      };
+      if (logUser.username !== undefined) {
+        annotations["http.username"] = logUser.username;
+      }
 
-              const logMsg =
-                exit._tag === "Failure"
-                  ? cause?._tag === "Some"
-                    ? cause.value
-                    : "Sent HTTP Response"
-                  : "Sent HTTP response";
+      const logMsg =
+        exit._tag === "Failure"
+          ? Option.isSome(cause)
+            ? cause.value
+            : "Sent HTTP Response"
+          : "Sent HTTP response";
 
-              return Effect.zipRight(
-                Effect.annotateLogs(Effect.log(logMsg), annotations),
-                exit,
-              );
-            });
-          }),
-          `http.span.${++counter}`,
-        );
-      });
+      yield* Effect.annotateLogs(Effect.log(logMsg), annotations);
+      return yield* exit;
     });
+    return Effect.suspend(() =>
+      Effect.withLogSpan(logged, `http.span.${++spanCounter}`),
+    );
   },
 );

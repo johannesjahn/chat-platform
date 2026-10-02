@@ -16,7 +16,7 @@ import * as schema from "./db/schema.ts";
 // to merge each driver's overloads across a union.
 export type DrizzleDb = PgDatabase<PgQueryResultHKT, typeof schema>;
 
-export class Db extends Context.Tag("Db")<Db, DrizzleDb>() {}
+export class Db extends Context.Service<Db, DrizzleDb>()("Db") {}
 
 // PGlite ships contrib extensions as separate WASM bundles that have to be
 // registered when the instance is created — `CREATE EXTENSION pg_trgm` in

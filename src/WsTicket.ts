@@ -15,7 +15,7 @@ const TICKET_TTL_SECONDS = 30;
 // can't set on the handshake anyway). A client authenticates over normal
 // REST with its access token to mint a ticket (see RealtimeHandler.ts), then
 // passes *that* on the `/ws` URL instead.
-export class WsTicket extends Context.Tag("WsTicket")<
+export class WsTicket extends Context.Service<
   WsTicket,
   {
     readonly issue: (userId: number) => Effect.Effect<string>;
@@ -25,7 +25,7 @@ export class WsTicket extends Context.Tag("WsTicket")<
     // `/ws` upgrades presenting the same one — can succeed at most once.
     readonly consume: (ticket: string) => Effect.Effect<number | null>;
   }
->() {}
+>()("WsTicket") {}
 
 // Single-process ticket store. Like InMemoryPubSubLive (see PubSub.ts), only
 // correct when there's a single app instance — a ticket minted on one

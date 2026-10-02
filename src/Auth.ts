@@ -1,15 +1,10 @@
-import {
-  HttpApiMiddleware,
-  HttpApiSchema,
-  HttpApiSecurity,
-} from "@effect/platform";
+import { HttpApiMiddleware, HttpApiSecurity } from "effect/http-api";
 import { eq } from "drizzle-orm";
 import {
   Cache,
   Context,
   Duration,
   Effect,
-  FiberRef,
   Layer,
   Redacted,
   Schema,
@@ -18,37 +13,35 @@ import { Db } from "./Db.ts";
 import { PubSub } from "./PubSub.ts";
 import { users } from "./db/schema.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
-import { currentLogUser } from "./RedactedLogger.ts";
+import { setLogUser } from "./RedactedLogger.ts";
 
 // Returned (401) when a protected endpoint is called without a valid access
 // token. Deliberately generic so it doesn't reveal why the token was rejected.
 export class Unauthorized extends Schema.TaggedError<Unauthorized>()(
   "Unauthorized",
   { message: Schema.String },
-  HttpApiSchema.annotations({ status: 401 }),
+  { httpApiStatus: 401 },
 ) {}
 
 // The authenticated user, made available to handlers behind the middleware.
-export class CurrentUser extends Context.Tag("CurrentUser")<
-  CurrentUser,
-  TokenUser
->() {}
+export class CurrentUser extends Context.Service<CurrentUser, TokenUser>()(
+  "CurrentUser",
+) {}
 
 // Bearer-token authentication middleware. Endpoints tagged with `.middleware`
 // require a valid `Authorization: Bearer <accessToken>` header.
-export class Authentication extends HttpApiMiddleware.Tag<Authentication>()(
-  "Authentication",
-  {
-    failure: Unauthorized,
-    provides: CurrentUser,
-    security: { bearer: HttpApiSecurity.bearer },
-  },
-) {}
+export class Authentication extends HttpApiMiddleware.Service<
+  Authentication,
+  { provides: CurrentUser }
+>()("Authentication", {
+  error: Unauthorized,
+  security: { bearer: HttpApiSecurity.bearer },
+}) {}
 
-export class TokenVersionCache extends Context.Tag("TokenVersionCache")<
+export class TokenVersionCache extends Context.Service<
   TokenVersionCache,
   Cache.Cache<number, number, never>
->() {}
+>()("TokenVersionCache") {}
 
 export const TokenVersionCacheLive = Layer.effect(
   TokenVersionCache,
@@ -75,7 +68,7 @@ export const TokenVersionCacheLive = Layer.effect(
       Effect.gen(function* () {
         const userId = Number(userIdStr);
         if (!isNaN(userId)) {
-          yield* cache.invalidate(userId);
+          yield* Cache.invalidate(cache, userId);
         }
       }),
     );
@@ -90,24 +83,28 @@ export const AuthenticationLive = Layer.effect(
     const jwt = yield* Jwt;
     const cache = yield* TokenVersionCache;
     const invalid = new Unauthorized({ message: "Invalid or expired token" });
-    return {
-      bearer: (token) =>
+    return Authentication.of({
+      bearer: (httpEffect, { credential }) =>
         Effect.gen(function* () {
           const tokenUser = yield* jwt
-            .verifyAccessToken(Redacted.value(token))
+            .verifyAccessToken(Redacted.value(credential))
             .pipe(Effect.mapError(() => invalid));
 
           // Reject a token signed before the user's token_version was last
           // bumped (forced logout, future password change) — otherwise it
           // would keep working up to its own TTL despite the bump.
-          const currentVersion = yield* cache.get(tokenUser.id);
+          const currentVersion = yield* Cache.get(cache, tokenUser.id);
           if (currentVersion !== tokenUser.tokenVersion)
             return yield* Effect.fail(invalid);
 
-          yield* FiberRef.set(currentLogUser, tokenUser.username);
+          yield* setLogUser(tokenUser.username);
 
-          return tokenUser;
+          return yield* Effect.provideService(
+            httpEffect,
+            CurrentUser,
+            tokenUser,
+          );
         }),
-    };
+    });
   }),
 );

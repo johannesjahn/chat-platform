@@ -1,37 +1,11 @@
 import { expect, test } from "bun:test";
-import {
-  FetchHttpClient,
-  HttpApiBuilder,
-  HttpApiClient,
-  HttpClient,
-  HttpClientRequest,
-} from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import { eq, sql } from "drizzle-orm";
 import { Effect, Layer } from "effect";
 import { ChatApi, type DrawingStroke, type GameLobby } from "./Api.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
-import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive } from "./GamesHandler.ts";
-import { JwtLive } from "./Jwt.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
-import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { PubSub } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
-import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
 import {
   gameBluffs,
   gameDrawings,
@@ -41,6 +15,7 @@ import {
 } from "./db/schema.ts";
 import { DRAWING_COUNTDOWN_MS } from "./games/drawing/rules.ts";
 import { revealDurationMs } from "./games/drawing/timeline.ts";
+import { makeTestRun } from "./testApi.ts";
 
 // Sketchy (issue #440) end to end through the real HTTP API. Same harness as
 // games.test.ts, with one addition: the PubSub every realtime event fans
@@ -48,31 +23,6 @@ import { revealDurationMs } from "./games/drawing/timeline.ts";
 // ever carries anything secret.
 
 process.env.JWT_SECRET ??= "test-secret";
-
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(JwtLive),
-  Layer.provide(SanitizeDecodeErrorsLive),
-  Layer.provide(InMemoryWsTicketLive),
-  Layer.provide(AttachmentStorageLive),
-);
-
-const { getTestDb } = makeTestDbAccessor();
 
 // Every message published during the current test.
 let published: string[] = [];
@@ -85,42 +35,12 @@ const RecordingPubSubLive = Layer.succeed(PubSub, {
   ping: Effect.void,
 });
 
-const run = async <A, E>(
-  effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
-): Promise<A> => {
-  const db = await getTestDb();
-  await resetTestDb(db);
-  published = [];
-  const TestDbLive = Layer.succeed(Db, db);
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(
-      ApiLive.pipe(
-        Layer.provide(TestDbLive),
-        Layer.provide(RecordingPubSubLive),
-      ),
-      BunHttpServer.layerContext,
-    ),
-  );
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-  try {
-    return await Effect.runPromise(
-      effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
-    );
-  } finally {
-    await dispose();
-  }
-};
+const run = makeTestRun({
+  pubSub: RecordingPubSubLive,
+  beforeEach: () => {
+    published = [];
+  },
+});
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
@@ -134,7 +54,7 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-type Client = Effect.Effect.Success<ReturnType<typeof makeAuthedClient>>;
+type Client = Effect.Success<ReturnType<typeof makeAuthedClient>>;
 type Player = {
   readonly id: number;
   readonly name: string;
@@ -163,17 +83,17 @@ const expectFailure = <A, E>(
   message?: string,
 ) =>
   Effect.gen(function* () {
-    const result = yield* effect.pipe(Effect.either);
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      const error = result.left as { _tag: string; message?: string };
+    const result = yield* effect.pipe(Effect.result);
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      const error = result.failure as { _tag: string; message?: string };
       expect(error._tag).toBe(tag);
       if (message !== undefined) expect(error.message).toBe(message);
     }
   });
 
-const drawingGame = { path: { game: "drawing" as const } };
-const at = (id: number) => ({ path: { id } });
+const drawingGame = { params: { game: "drawing" as const } };
+const at = (id: number) => ({ params: { id } });
 const SCRIBBLE: DrawingStroke[] = [
   { color: 1, brush: "thick", points: [10, 10, 200, 150, 400, 300] },
 ];
@@ -296,7 +216,7 @@ test("the host picks theme packs and rounds; everyone sees them", () =>
           ...at(lobby.id),
           payload: { packs: [], rounds: 2 },
         }),
-        "ParseError",
+        "SchemaError",
       );
 
       published = [];
@@ -323,7 +243,7 @@ test("the host picks theme packs and rounds; everyone sees them", () =>
 
       // Settings are Sketchy's alone.
       const typing = yield* alice.c.games.createGameLobby({
-        path: { game: "typing" },
+        params: { game: "typing" },
       });
       yield* expectFailure(
         alice.c.games.updateDrawingSettings({
@@ -641,7 +561,7 @@ test("a full round plays draw → bluff → vote → reveal → results, scored 
 
       const board = yield* alice.c.games.getLeaderboard({
         ...drawingGame,
-        urlParams: {},
+        query: {},
       });
       expect(board.entries[0]).toMatchObject({
         user: { id: fooler!.id },

@@ -1,9 +1,6 @@
-import {
-  HttpApiBuilder,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "@effect/platform";
-import { Context, Effect, type Scope } from "effect";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { Socket } from "effect/socket";
+import { Effect } from "effect";
 import { clientIp } from "./ClientIp.ts";
 import { isGameReaction } from "./games/reactions.ts";
 import { RateLimiter } from "./RateLimiter.ts";
@@ -80,7 +77,7 @@ const isInteger = (value: unknown): value is number =>
 // per-connection state. Exported so the control-message handling can be
 // unit-tested without a real socket upgrade (see Realtime.test.ts).
 export const makeIncomingHandler = (
-  connections: Context.Tag.Service<typeof RealtimeConnections>,
+  connections: RealtimeConnections["Service"],
   userId: number,
   write: (chunk: string) => Effect.Effect<void, unknown>,
 ) => {
@@ -232,8 +229,11 @@ const wsHandler = Effect.gen(function* () {
     });
   }
 
-  const socket = yield* HttpServerRequest.upgrade;
-  const write = yield* socket.writer;
+  const socket = yield* request.upgrade;
+  const writer = yield* socket.writer;
+  // One stable function per connection — RealtimeConnections keys its
+  // per-room/per-user membership on this exact reference.
+  const write = (chunk: string) => writer.write(chunk);
   const unregister = yield* connections.register(userId, write);
 
   // `register` only pushes a `presence` event for a state *transition* (see
@@ -257,15 +257,22 @@ const wsHandler = Effect.gen(function* () {
   // Realtime.ts), so comment/reply and per-comment-like events reach it
   // without flooding every connected client. The games feature does the same
   // with named rooms (`subscribe_room`/`unsubscribe_room`) and additionally
-  // streams `game_progress` and `game_reaction` frames up the socket. `runRaw` (rather than
-  // `run`) preserves text frames as strings; anything that isn't one of these
-  // JSON control messages is dropped. No per-post authorization: the feed is
+  // streams `game_progress` and `game_reaction` frames up the socket.
+  // Anything that isn't one of these JSON control messages is dropped. No per-post authorization: the feed is
   // public to any signed-in user, so any of them may watch any post's room.
   const handleIncoming = makeIncomingHandler(connections, userId, write);
 
-  yield* socket
-    .runRaw((data) => handleIncoming(data))
-    .pipe(Effect.ensuring(Effect.sync(unregister)));
+  // Reads until the socket closes or errors — either way the connection is
+  // over, so the error itself carries nothing to act on.
+  const pull = yield* Socket.readerString(socket);
+  yield* pull.pipe(
+    Effect.flatMap((frames) =>
+      Effect.forEach(frames, handleIncoming, { discard: true }),
+    ),
+    Effect.forever,
+    Effect.ignore,
+    Effect.ensuring(Effect.sync(unregister)),
+  );
 
   return HttpServerResponse.empty();
 });
@@ -276,37 +283,8 @@ const wsHandler = Effect.gen(function* () {
 // access token used for other calls), and registers the connection so chat
 // and post mutations can push `chat_updated`/`post_changed` events — to
 // exactly the affected chat's participants, or to every connected user for
-// posts (see Realtime.ts). Added directly to `HttpApiBuilder.Router` — the
-// same shared router `ChatApi`'s endpoints are attached to — so it's served
-// alongside them by the one Bun server.
-//
-// `router.get` requires its handler's requirements to already be resolved
-// down to what the router provides on every request (`HttpServerRequest`,
-// `Scope`, …) — it can't itself carry extra services like `WsTicket` or
-// `RealtimeConnections` through to the caller. So, the same way
-// `HttpApiBuilder.group` wires up endpoint handlers, this captures the
-// ambient context (which does include `WsTicket`/`RealtimeConnections`/
-// `RateLimiter`, supplied by whoever builds this layer — see main.ts) and
-// merges it back into the handler via `mapInputContext`, turning "needs
-// WsTicket | RealtimeConnections | RateLimiter" into "needs nothing more",
-// while still leaving those three as this Layer's own unresolved
-// requirements for main.ts to provide.
-export const RealtimeSocketRouteLive = HttpApiBuilder.Router.use((router) =>
-  Effect.gen(function* () {
-    const context = yield* Effect.context<
-      WsTicket | RealtimeConnections | RateLimiter
-    >();
-    yield* router.get(
-      "/ws",
-      wsHandler.pipe(
-        Effect.mapInputContext(
-          (
-            input: Context.Context<
-              HttpServerRequest.HttpServerRequest | Scope.Scope
-            >,
-          ) => Context.merge(context, input),
-        ),
-      ),
-    );
-  }),
-);
+// posts (see Realtime.ts). Added to the same `HttpRouter` `ChatApi`'s
+// endpoints are attached to, so it's served alongside them by the one Bun
+// server. Its `WsTicket`/`RealtimeConnections`/`RateLimiter` requirements
+// stay the route's own, for main.ts to provide.
+export const RealtimeSocketRouteLive = HttpRouter.add("GET", "/ws", wsHandler);

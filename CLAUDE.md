@@ -439,22 +439,15 @@ is gitignored and rebuilt on every dev/build.
   without Vite (e.g. before a standalone `typecheck`) run
   `cd web && bun run gen:routes` (`tsr generate`).
 
-### Pitfall: `identifier`-annotated path/query/header schemas lose their params
+### Guard: every path/query/header schema must produce OpenAPI params
 
-Don't add `.annotations({ identifier: "..." })` to a `Schema.Struct` passed to
-`.setPath(...)`, `.setUrlParams(...)`, or `.setHeaders(...)` on an
-`HttpApiEndpoint`. Doing so makes `OpenApi.fromApi` emit that struct as a
-`$ref` to a named component schema instead of inlining it — and its
-parameter-extraction pass only reads inline `properties`, so it silently
-drops the parameters instead of erroring. The endpoint still works at
-runtime (Effect decodes the params fine); only the generated `openapi.json`
-— and therefore the typed frontend client generated from it via
-`gen:types` — ends up with zero documented/typed params for that endpoint.
-Leave those structs anonymous (see `PostsPageQuery` in [src/Api.ts](src/Api.ts)
-for the pattern). `src/openapi.test.ts` guards against a regression by
-asserting every endpoint with a path/query/header schema produces matching
-OpenAPI parameters — run it (`bun test ./src`) after touching any endpoint
-signature.
+Under effect v3, giving a `Schema.Struct` passed as an endpoint's
+path/query/header schema an `identifier` annotation made `OpenApi.fromApi`
+emit it as a `$ref` and silently drop its parameters from `openapi.json`
+(and so from the typed frontend client). effect v4's generator no longer
+does this, but `src/openapi.test.ts` still asserts that every endpoint
+declaring `params`/`query`/`headers` produces matching OpenAPI parameters —
+run it (`bun test ./src`) after touching any endpoint signature.
 
 ## CI
 

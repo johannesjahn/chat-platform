@@ -1,37 +1,10 @@
 import { expect, test } from "bun:test";
-import {
-  FetchHttpClient,
-  HttpApiBuilder,
-  HttpApiClient,
-  HttpClient,
-  HttpClientRequest,
-} from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import { eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { ChatApi, type GameLobby } from "./Api.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
 import { Db } from "./Db.ts";
-import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
-import { JwtLive } from "./Jwt.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive } from "./GamesHandler.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
-import { InMemoryPresenceStoreLive } from "./Presence.ts";
-import { InMemoryPubSubLive } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
 import { gameLobbies, gameResults } from "./db/schema.ts";
 import {
   ANTICIPATION_MS,
@@ -54,81 +27,16 @@ import {
   type ReflexPlanRound,
   type ReflexTap,
 } from "./games/reflex.ts";
+import { makeTestRun } from "./testApi.ts";
 
 // Reflex Rush end to end: the pure schedule/scoring module first, then the
 // game through the real HTTP API on the same harness as games.test.ts.
-
-// JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
-process.env.JWT_SECRET ??= "test-secret";
-
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(JwtLive),
-  Layer.provide(SanitizeDecodeErrorsLive),
-  Layer.provide(InMemoryWsTicketLive),
-  Layer.provide(AttachmentStorageLive),
-);
-
-const { getTestDb } = makeTestDbAccessor();
 
 // Same shape as admin.test.ts's harness: `effect` also gets `Db` directly,
 // sharing the API layer's in-memory instance, so a test can fast-forward a
 // race's clock (move `startsAt` into the past — no endpoint lets it) and seed
 // back-dated results for the leaderboard.
-const run = async <A, E>(
-  effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
-): Promise<A> => {
-  const db = await getTestDb();
-  await resetTestDb(db);
-  const TestDbLive = Layer.succeed(Db, db);
-
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(
-      ApiLive.pipe(
-        Layer.provide(TestDbLive),
-        Layer.provide(InMemoryPubSubLive),
-      ),
-      BunHttpServer.layerContext,
-    ),
-  );
-
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-
-  try {
-    return await Effect.runPromise(
-      effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
-    );
-  } finally {
-    await dispose();
-  }
-};
+const run = makeTestRun();
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
@@ -158,10 +66,10 @@ const expectFailure = <A, E>(
   message?: string,
 ) =>
   Effect.gen(function* () {
-    const result = yield* effect.pipe(Effect.either);
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      const error = result.left as { _tag: string; message?: string };
+    const result = yield* effect.pipe(Effect.result);
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      const error = result.failure as { _tag: string; message?: string };
       expect(error._tag).toBe(tag);
       if (message !== undefined) expect(error.message).toBe(message);
     }
@@ -379,8 +287,8 @@ const fastForward = (lobbyId: number, elapsedMs: number) =>
     );
   });
 
-const game = { path: { game: "reflex" as const } };
-const lobbyPath = (id: number) => ({ path: { id } });
+const game = { params: { game: "reflex" as const } };
+const lobbyPath = (id: number) => ({ params: { id } });
 
 // The plan as the API hands it out, back on offsets from the start.
 const planOf = (lobby: GameLobby): ReflexPlan => {
@@ -464,7 +372,7 @@ test("a solo game runs start → finish, scored server-side and settled onto the
       ).toEqual([["reflex", alice.user.id, expected.score, 1, 1]]);
       const board = yield* a.games.getLeaderboard({
         ...game,
-        urlParams: {},
+        query: {},
       });
       expect(board.me?.bestScore).toBe(expected.score);
       expect(board.me?.wins).toBe(0);
@@ -536,7 +444,7 @@ test("a duel places by score once everyone is in, and a no-show is left off", ()
         [bob.user.id, 1, 3],
         [alice.user.id, 2, 3],
       ]);
-      const board = yield* b.games.getLeaderboard({ ...game, urlParams: {} });
+      const board = yield* b.games.getLeaderboard({ ...game, query: {} });
       expect(board.me?.wins).toBe(1);
     }),
   ));
@@ -563,7 +471,7 @@ test("finishing is only for seated players of a started Reflex Rush game", () =>
       );
       // A typing lobby has no reaction rounds to report.
       const typing = yield* b.games.createGameLobby({
-        path: { game: "typing" },
+        params: { game: "typing" },
       });
       yield* expectFailure(
         b.games.finishReflex({ ...lobbyPath(typing.id), payload: { taps } }),

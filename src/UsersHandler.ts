@@ -1,4 +1,4 @@
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpApiBuilder } from "effect/http-api";
 import {
   and,
   count,
@@ -11,8 +11,8 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { Context, Effect, FiberRef, Metric, MetricLabel } from "effect";
-import { currentLogUser } from "./RedactedLogger.ts";
+import { Cache, Effect, Metric } from "effect";
+import { setLogUser } from "./RedactedLogger.ts";
 import {
   ALLOWED_AVATAR_MIME_TYPES,
   AvatarTooLarge,
@@ -110,7 +110,7 @@ const AVATAR_UPLOAD_WINDOW_SECONDS = 60 * 60;
 // Exported — shared with ChatsHandler.ts's group-avatar upload, which needs
 // the same per-account bucketing/rejection-metric behavior.
 export const enforceRateLimit = (
-  limiter: Context.Tag.Service<typeof RateLimiter>,
+  limiter: RateLimiter["Service"],
   key: string,
   limit: number,
   windowSeconds: number,
@@ -119,9 +119,9 @@ export const enforceRateLimit = (
     const result = yield* limiter.consume(key, limit, windowSeconds);
     if (!result.allowed) {
       yield* Metric.update(
-        Metric.taggedWithLabels(rateLimitRejectionsTotal, [
-          MetricLabel.make("limiter", key.split(":")[0] ?? key),
-        ]),
+        Metric.withAttributes(rateLimitRejectionsTotal, {
+          limiter: key.split(":")[0] ?? key,
+        }),
         1,
       );
       return yield* Effect.fail(
@@ -179,7 +179,7 @@ export const toAvatarVariants = (row: {
 // shared with ChatsHandler.ts's group-avatar upload/clear, which sweeps a
 // chat's old avatar objects the same way.
 export const deleteAvatarObjects = (
-  storage: Context.Tag.Service<typeof AttachmentStorage>,
+  storage: AttachmentStorage["Service"],
   tokens: ReadonlyArray<string | null>,
 ): Effect.Effect<void> =>
   Effect.forEach(
@@ -252,10 +252,7 @@ const recordAuthEvent = (
   outcome: "success" | "failure",
 ) =>
   Metric.update(
-    Metric.taggedWithLabels(authEventsTotal, [
-      MetricLabel.make("event", event),
-      MetricLabel.make("outcome", outcome),
-    ]),
+    Metric.withAttributes(authEventsTotal, { event: event, outcome: outcome }),
     1,
   );
 
@@ -273,7 +270,7 @@ type Rotating = { readonly oldJti: string; readonly familyId: string };
 // still being available for reuse detection later.
 const issueRefreshToken = (
   db: DrizzleDb,
-  jwt: Context.Tag.Service<typeof Jwt>,
+  jwt: Jwt["Service"],
   user: TokenUser,
   rotating?: Rotating,
 ): Effect.Effect<string> =>
@@ -344,9 +341,16 @@ const dummyHash = (): Effect.Effect<string> =>
 export const UsersHandlerLive = HttpApiBuilder.group(
   ChatApi,
   "users",
-  (handlers) =>
-    handlers
-      .handle("searchUsers", ({ urlParams: { q } }) =>
+  Effect.fn(function* (handlers) {
+    const db = yield* Db;
+    const storage = yield* AttachmentStorage;
+    const limiter = yield* RateLimiter;
+    const connections = yield* RealtimeConnections;
+    const pubsub = yield* PubSub;
+    const jwt = yield* Jwt;
+    const tokenVersionCache = yield* TokenVersionCache;
+    return handlers
+      .handle("searchUsers", ({ query: { q } }) =>
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           // Only admins may browse the full directory — a query shorter
@@ -362,7 +366,6 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          const db = yield* Db;
           const pattern = containsPattern(q);
           const rows = yield* Effect.tryPromise(() =>
             db
@@ -396,7 +399,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           return rows.map(toPublicUser);
         }),
       )
-      .handle("lookupUsersByUsername", ({ urlParams: { usernames } }) =>
+      .handle("lookupUsersByUsername", ({ query: { usernames } }) =>
         Effect.gen(function* () {
           // The parameter is one comma-separated batch (see
           // `UsernameLookupQuery`); blanks and duplicates are dropped
@@ -418,7 +421,6 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             );
           if (names.length === 0) return [];
 
-          const db = yield* Db;
           const rows = yield* Effect.tryPromise(() =>
             db
               .select(publicUserColumns)
@@ -434,9 +436,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           return rows.map(toPublicUser);
         }),
       )
-      .handle("getUser", ({ path: { id } }) =>
+      .handle("getUser", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const rows = yield* Effect.tryPromise(() =>
             db
               .select({
@@ -463,9 +464,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           return toPublicUser(rows[0]);
         }),
       )
-      .handle("listUserPosts", ({ path: { id }, urlParams }) =>
+      .handle("listUserPosts", ({ params: { id }, query: urlParams }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const limit = urlParams.limit ?? DEFAULT_POSTS_LIMIT;
 
@@ -529,6 +529,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
           const attachments = yield* resolveAttachments(
             db,
+            storage,
             rows.map((r) => r.attachmentId),
           );
           const totalRows = yield* Effect.tryPromise(() =>
@@ -557,8 +558,6 @@ export const UsersHandlerLive = HttpApiBuilder.group(
       )
       .handle("register", ({ payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
-          const limiter = yield* RateLimiter;
           const ip = yield* clientIp;
           yield* enforceRateLimit(
             limiter,
@@ -617,15 +616,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           if (!rows[0])
             return yield* Effect.die(new Error("INSERT returned no rows"));
           yield* recordAuthEvent("signup", "success");
-          yield* FiberRef.set(currentLogUser, rows[0].username);
+          yield* setLogUser(rows[0].username);
           return toPublicUser(rows[0]);
         }),
       )
       .handle("login", ({ payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
-          const jwt = yield* Jwt;
-          const limiter = yield* RateLimiter;
           const ip = yield* clientIp;
           yield* enforceRateLimit(
             limiter,
@@ -676,15 +672,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const accessToken = yield* jwt.signAccessToken(tokenUser);
           const refreshToken = yield* issueRefreshToken(db, jwt, tokenUser);
           yield* recordAuthEvent("login", "success");
-          yield* FiberRef.set(currentLogUser, user.username);
+          yield* setLogUser(user.username);
           return { user: publicUser, accessToken, refreshToken };
         }),
       )
       .handle("refresh", ({ payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
-          const jwt = yield* Jwt;
-          const limiter = yield* RateLimiter;
           const ip = yield* clientIp;
           yield* enforceRateLimit(
             limiter,
@@ -795,11 +788,6 @@ export const UsersHandlerLive = HttpApiBuilder.group(
       )
       .handle("logout", ({ payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
-          const jwt = yield* Jwt;
-          const tokenVersionCache = yield* TokenVersionCache;
-          const pubsub = yield* PubSub;
-
           // A token that's already invalid, expired, or unrecognized has
           // nothing to revoke — treat logout as a no-op success rather than
           // erroring, so the client can always clear its session cleanly.
@@ -829,7 +817,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                   .where(eq(refreshTokens.jti, tokenUser.jti)),
           ).pipe(Effect.orDie);
 
-          yield* tokenVersionCache.invalidate(tokenUser.id);
+          yield* Cache.invalidate(tokenVersionCache, tokenUser.id);
           yield* pubsub
             .publish("auth:invalidation", String(tokenUser.id))
             .pipe(Effect.ignore);
@@ -837,12 +825,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
       )
       .handle("changePassword", ({ payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
-          const jwt = yield* Jwt;
-          const limiter = yield* RateLimiter;
           const currentUser = yield* CurrentUser;
-          const tokenVersionCache = yield* TokenVersionCache;
-          const pubsub = yield* PubSub;
 
           yield* enforceRateLimit(
             limiter,
@@ -900,7 +883,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           if (!updated)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
 
-          yield* tokenVersionCache.invalidate(currentUser.id);
+          yield* Cache.invalidate(tokenVersionCache, currentUser.id);
           yield* pubsub
             .publish("auth:invalidation", String(currentUser.id))
             .pipe(Effect.ignore);
@@ -922,9 +905,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
       )
       .handle("updateProfile", ({ payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const storage = yield* AttachmentStorage;
 
           // Full-replace (see UpdateProfileBody's comment in Api.ts) also
           // clears any uploaded avatar — `avatarUrl` and the uploaded avatar
@@ -990,9 +971,6 @@ export const UsersHandlerLive = HttpApiBuilder.group(
       .handle("uploadAvatar", ({ payload }) =>
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
-          const db = yield* Db;
-          const limiter = yield* RateLimiter;
-          const storage = yield* AttachmentStorage;
 
           yield* enforceRateLimit(
             limiter,
@@ -1125,12 +1103,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
       )
       .handle("deleteAccount", ({ payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
-          const limiter = yield* RateLimiter;
           const currentUser = yield* CurrentUser;
-          const tokenVersionCache = yield* TokenVersionCache;
-          const pubsub = yield* PubSub;
-          const storage = yield* AttachmentStorage;
 
           yield* enforceRateLimit(
             limiter,
@@ -1178,18 +1151,15 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             dbUser.avatarLargeKey,
           ]);
 
-          yield* tokenVersionCache.invalidate(currentUser.id);
+          yield* Cache.invalidate(tokenVersionCache, currentUser.id);
           yield* pubsub
             .publish("auth:invalidation", String(currentUser.id))
             .pipe(Effect.ignore);
         }),
       )
-      .handle("updateUserRole", ({ path: { id }, payload }) =>
+      .handle("updateUserRole", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const tokenVersionCache = yield* TokenVersionCache;
-          const pubsub = yield* PubSub;
 
           if (currentUser.role !== "admin")
             return yield* Effect.fail(
@@ -1228,7 +1198,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               new NotFound({ message: `User ${id} not found` }),
             );
 
-          yield* tokenVersionCache.invalidate(id);
+          yield* Cache.invalidate(tokenVersionCache, id);
           yield* pubsub
             .publish("auth:invalidation", String(id))
             .pipe(Effect.ignore);
@@ -1236,13 +1206,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           return toPublicUser(updated);
         }),
       )
-      .handle("deleteUser", ({ path: { id } }) =>
+      .handle("deleteUser", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const tokenVersionCache = yield* TokenVersionCache;
-          const pubsub = yield* PubSub;
-          const storage = yield* AttachmentStorage;
 
           if (currentUser.role !== "admin")
             return yield* Effect.fail(
@@ -1298,7 +1264,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           // Cut off the deleted user's outstanding access/refresh tokens
           // immediately rather than letting them live out their TTL — mirrors
           // `deleteAccount`.
-          yield* tokenVersionCache.invalidate(id);
+          yield* Cache.invalidate(tokenVersionCache, id);
           yield* pubsub
             .publish("auth:invalidation", String(id))
             .pipe(Effect.ignore);
@@ -1306,9 +1272,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
       )
       .handle("updateStatus", ({ payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
 
           // Omitted entirely means "never expires"; `requireStatusForExpiry`
           // in Api.ts already rejects it alongside a fully-cleared status.
@@ -1357,7 +1321,6 @@ export const UsersHandlerLive = HttpApiBuilder.group(
       )
       .handle("listBlocks", () =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const rows = yield* Effect.tryPromise(() =>
             db
@@ -1381,9 +1344,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           }));
         }),
       )
-      .handle("setBlock", ({ path: { id }, payload }) =>
+      .handle("setBlock", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
 
           if (id === currentUser.id)
@@ -1440,9 +1402,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           };
         }),
       )
-      .handle("removeBlock", ({ path: { id } }) =>
+      .handle("removeBlock", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           // Idempotent — deleting a non-existent relationship is a no-op that
           // still succeeds, so unblocking/unmuting never 404s.
@@ -1457,5 +1418,6 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               ),
           ).pipe(Effect.orDie);
         }),
-      ),
+      );
+  }),
 );

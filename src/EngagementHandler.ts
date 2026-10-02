@@ -1,6 +1,6 @@
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpApiBuilder } from "effect/http-api";
 import { and, asc, eq, gt, isNull } from "drizzle-orm";
-import { Effect, Metric, MetricLabel } from "effect";
+import { Effect, Metric } from "effect";
 import {
   ChatApi,
   DEFAULT_COMMENTS_LIMIT,
@@ -10,7 +10,7 @@ import {
   TooManyRequests,
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
-import { Db } from "./Db.ts";
+import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import {
   commentReactionInfo,
@@ -46,9 +46,11 @@ const toReactionCounts = (reactions: ReadonlyArray<ReactionSummary>) =>
 const ENGAGEMENT_WRITE_MAX_PER_USER = 120;
 const ENGAGEMENT_WRITE_WINDOW_SECONDS = 60;
 
-const enforceEngagementLimit = (userId: number) =>
+const enforceEngagementLimit = (
+  limiter: RateLimiter["Service"],
+  userId: number,
+) =>
   Effect.gen(function* () {
-    const limiter = yield* RateLimiter;
     const result = yield* limiter.consume(
       `engagement:write:user:${userId}`,
       ENGAGEMENT_WRITE_MAX_PER_USER,
@@ -56,9 +58,9 @@ const enforceEngagementLimit = (userId: number) =>
     );
     if (!result.allowed) {
       yield* Metric.update(
-        Metric.taggedWithLabels(rateLimitRejectionsTotal, [
-          MetricLabel.make("limiter", "engagement"),
-        ]),
+        Metric.withAttributes(rateLimitRejectionsTotal, {
+          limiter: "engagement",
+        }),
         1,
       );
       return yield* Effect.fail(
@@ -71,12 +73,7 @@ const enforceEngagementLimit = (userId: number) =>
   });
 
 const recordContentCreated = (type: "comment" | "reaction") =>
-  Metric.update(
-    Metric.taggedWithLabels(contentCreatedTotal, [
-      MetricLabel.make("type", type),
-    ]),
-    1,
-  );
+  Metric.update(Metric.withAttributes(contentCreatedTotal, { type: type }), 1);
 
 const toApiComment = (
   row: typeof comments.$inferSelect,
@@ -110,9 +107,8 @@ const decodeCommentsCursor = (cursor: string): number | null => {
   return Number.isInteger(id) ? id : null;
 };
 
-const getPostOr404 = (id: number) =>
+const getPostOr404 = (db: DrizzleDb, id: number) =>
   Effect.gen(function* () {
-    const db = yield* Db;
     const rows = yield* Effect.tryPromise(() =>
       db.select().from(posts).where(eq(posts.id, id)).limit(1),
     ).pipe(Effect.orDie);
@@ -124,9 +120,8 @@ const getPostOr404 = (id: number) =>
     return row;
   });
 
-const getCommentOr404 = (id: number) =>
+const getCommentOr404 = (db: DrizzleDb, id: number) =>
   Effect.gen(function* () {
-    const db = yield* Db;
     const rows = yield* Effect.tryPromise(() =>
       db.select().from(comments).where(eq(comments.id, id)).limit(1),
     ).pipe(Effect.orDie);
@@ -142,12 +137,12 @@ const getCommentOr404 = (id: number) =>
 // `listReplies` (a comment's children): a keyset page over `comments` in
 // `id asc` order, decorated with per-row like info for the current user.
 const listThread = (
+  db: DrizzleDb,
   where: ReturnType<typeof and>,
   cursor: string | undefined,
   limit: number,
 ) =>
   Effect.gen(function* () {
-    const db = yield* Db;
     const currentUser = yield* CurrentUser;
 
     let after: number | null = null;
@@ -193,15 +188,16 @@ const listThread = (
 export const EngagementHandlerLive = HttpApiBuilder.group(
   ChatApi,
   "comments",
-  (handlers) =>
-    handlers
-      .handle("addPostReaction", ({ path: { id }, payload }) =>
+  Effect.fn(function* (handlers) {
+    const limiter = yield* RateLimiter;
+    const db = yield* Db;
+    const connections = yield* RealtimeConnections;
+    return handlers
+      .handle("addPostReaction", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
-          yield* enforceEngagementLimit(currentUser.id);
-          const post = yield* getPostOr404(id);
+          yield* enforceEngagementLimit(limiter, currentUser.id);
+          const post = yield* getPostOr404(db, id);
           // Idempotent: the (userId, postId, emoji) unique constraint turns a
           // repeat reaction with the same emoji into a no-op rather than a
           // duplicate row or an error. `.returning()` lets us tell an actual
@@ -229,7 +225,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               targetId: id,
               reactions: toReactionCounts(reactions),
             });
-            yield* createNotifications([
+            yield* createNotifications({ db, connections }, [
               {
                 userId: post.authorId,
                 actorId: currentUser.id,
@@ -242,13 +238,11 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           return { reactions };
         }),
       )
-      .handle("removePostReaction", ({ path: { id }, payload }) =>
+      .handle("removePostReaction", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
-          yield* enforceEngagementLimit(currentUser.id);
-          yield* getPostOr404(id);
+          yield* enforceEngagementLimit(limiter, currentUser.id);
+          yield* getPostOr404(db, id);
           const deleted = yield* Effect.tryPromise(() =>
             db
               .delete(likes)
@@ -274,32 +268,34 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               targetId: id,
               reactions: toReactionCounts(reactions),
             });
-            yield* retractReactionNotification({
-              actorId: currentUser.id,
-              emoji: payload.emoji,
-              postId: id,
-            });
+            yield* retractReactionNotification(
+              { db, connections },
+              {
+                actorId: currentUser.id,
+                emoji: payload.emoji,
+                postId: id,
+              },
+            );
           }
           return { reactions };
         }),
       )
-      .handle("listComments", ({ path: { id }, urlParams }) =>
+      .handle("listComments", ({ params: { id }, query: urlParams }) =>
         Effect.gen(function* () {
-          yield* getPostOr404(id);
+          yield* getPostOr404(db, id);
           return yield* listThread(
+            db,
             and(eq(comments.postId, id), isNull(comments.parentCommentId)),
             urlParams.cursor,
             urlParams.limit ?? DEFAULT_COMMENTS_LIMIT,
           );
         }),
       )
-      .handle("createComment", ({ path: { id }, payload }) =>
+      .handle("createComment", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
-          yield* enforceEngagementLimit(currentUser.id);
-          const post = yield* getPostOr404(id);
+          yield* enforceEngagementLimit(limiter, currentUser.id);
+          const post = yield* getPostOr404(db, id);
           const now = new Date();
           const rows = yield* Effect.tryPromise(() =>
             db
@@ -323,7 +319,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             postId: id,
             commentId: row.id,
           });
-          yield* createNotifications([
+          yield* createNotifications({ db, connections }, [
             {
               userId: post.authorId,
               actorId: currentUser.id,
@@ -334,33 +330,35 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           ]);
           // The post's author already hears about this comment above; a
           // mention of them in it would only notify them twice.
-          yield* notifyMentions({
-            actorId: currentUser.id,
-            content: row.content,
-            postId: id,
-            commentId: row.id,
-            exclude: [post.authorId],
-          });
+          yield* notifyMentions(
+            { db, connections },
+            {
+              actorId: currentUser.id,
+              content: row.content,
+              postId: id,
+              commentId: row.id,
+              exclude: [post.authorId],
+            },
+          );
           return toApiComment(row);
         }),
       )
-      .handle("listReplies", ({ path: { id }, urlParams }) =>
+      .handle("listReplies", ({ params: { id }, query: urlParams }) =>
         Effect.gen(function* () {
-          yield* getCommentOr404(id);
+          yield* getCommentOr404(db, id);
           return yield* listThread(
+            db,
             eq(comments.parentCommentId, id),
             urlParams.cursor,
             urlParams.limit ?? DEFAULT_COMMENTS_LIMIT,
           );
         }),
       )
-      .handle("createReply", ({ path: { id }, payload }) =>
+      .handle("createReply", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
-          yield* enforceEngagementLimit(currentUser.id);
-          const parent = yield* getCommentOr404(id);
+          yield* enforceEngagementLimit(limiter, currentUser.id);
+          const parent = yield* getCommentOr404(db, id);
           // Depth-2 cap: the target must itself be a top-level comment. A
           // parent that already has its own parent is a reply, and replies
           // can't be replied to (see the `comments` schema comment).
@@ -393,7 +391,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             postId: parent.postId,
             commentId: row.id,
           });
-          yield* createNotifications([
+          yield* createNotifications({ db, connections }, [
             {
               userId: parent.authorId,
               actorId: currentUser.id,
@@ -402,23 +400,24 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               commentId: row.id,
             },
           ]);
-          yield* notifyMentions({
-            actorId: currentUser.id,
-            content: row.content,
-            postId: parent.postId,
-            commentId: row.id,
-            exclude: [parent.authorId],
-          });
+          yield* notifyMentions(
+            { db, connections },
+            {
+              actorId: currentUser.id,
+              content: row.content,
+              postId: parent.postId,
+              commentId: row.id,
+              exclude: [parent.authorId],
+            },
+          );
           return toApiComment(row);
         }),
       )
-      .handle("addCommentReaction", ({ path: { id }, payload }) =>
+      .handle("addCommentReaction", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
-          yield* enforceEngagementLimit(currentUser.id);
-          const comment = yield* getCommentOr404(id);
+          yield* enforceEngagementLimit(limiter, currentUser.id);
+          const comment = yield* getCommentOr404(db, id);
           const inserted = yield* Effect.tryPromise(() =>
             db
               .insert(likes)
@@ -444,7 +443,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               targetId: id,
               reactions: toReactionCounts(reactions),
             });
-            yield* createNotifications([
+            yield* createNotifications({ db, connections }, [
               {
                 userId: comment.authorId,
                 actorId: currentUser.id,
@@ -458,13 +457,11 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           return { reactions };
         }),
       )
-      .handle("removeCommentReaction", ({ path: { id }, payload }) =>
+      .handle("removeCommentReaction", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
-          yield* enforceEngagementLimit(currentUser.id);
-          const comment = yield* getCommentOr404(id);
+          yield* enforceEngagementLimit(limiter, currentUser.id);
+          const comment = yield* getCommentOr404(db, id);
           const deleted = yield* Effect.tryPromise(() =>
             db
               .delete(likes)
@@ -487,22 +484,23 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               targetId: id,
               reactions: toReactionCounts(reactions),
             });
-            yield* retractReactionNotification({
-              actorId: currentUser.id,
-              emoji: payload.emoji,
-              commentId: id,
-            });
+            yield* retractReactionNotification(
+              { db, connections },
+              {
+                actorId: currentUser.id,
+                emoji: payload.emoji,
+                commentId: id,
+              },
+            );
           }
           return { reactions };
         }),
       )
-      .handle("updateComment", ({ path: { id }, payload }) =>
+      .handle("updateComment", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
-          yield* enforceEngagementLimit(currentUser.id);
-          const existing = yield* getCommentOr404(id);
+          yield* enforceEngagementLimit(limiter, currentUser.id);
+          const existing = yield* getCommentOr404(db, id);
           if (!canModify(currentUser, existing))
             return yield* Effect.fail(
               new Forbidden({
@@ -530,23 +528,24 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           // Only names added by this edit are pinged. Attributed to the
           // comment's author even when an admin made the edit — it's their
           // words the mention sits in.
-          yield* notifyMentions({
-            actorId: row.authorId,
-            content: row.content,
-            previousContent: existing.content,
-            postId: row.postId,
-            commentId: row.id,
-          });
+          yield* notifyMentions(
+            { db, connections },
+            {
+              actorId: row.authorId,
+              content: row.content,
+              previousContent: existing.content,
+              postId: row.postId,
+              commentId: row.id,
+            },
+          );
           return toApiComment(row, reactions);
         }),
       )
-      .handle("deleteComment", ({ path: { id } }) =>
+      .handle("deleteComment", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
-          const connections = yield* RealtimeConnections;
-          yield* enforceEngagementLimit(currentUser.id);
-          const existing = yield* getCommentOr404(id);
+          yield* enforceEngagementLimit(limiter, currentUser.id);
+          const existing = yield* getCommentOr404(db, id);
           if (!canModify(currentUser, existing))
             return yield* Effect.fail(
               new Forbidden({
@@ -565,5 +564,6 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             commentId: id,
           });
         }),
-      ),
+      );
+  }),
 );

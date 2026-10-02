@@ -1,41 +1,14 @@
 import { expect, test } from "bun:test";
-import {
-  FetchHttpClient,
-  HttpApiBuilder,
-  HttpApiClient,
-  HttpClient,
-  HttpClientRequest,
-} from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import { eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import {
   ChatApi,
   MAX_ADMIN_TIMELINE_DAYS,
   type AdminActivityWindow,
 } from "./Api.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
 import { Db } from "./Db.ts";
-import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
-import { JwtLive } from "./Jwt.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive } from "./GamesHandler.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
-import { InMemoryPresenceStoreLive } from "./Presence.ts";
-import { InMemoryPubSubLive } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
 import {
   attachments,
   chats,
@@ -45,78 +18,13 @@ import {
   posts,
   users,
 } from "./db/schema.ts";
-
-// JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
-process.env.JWT_SECRET ??= "test-secret";
-
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(JwtLive),
-  Layer.provide(SanitizeDecodeErrorsLive),
-  Layer.provide(InMemoryWsTicketLive),
-  Layer.provide(AttachmentStorageLive),
-);
-
-const { getTestDb } = makeTestDbAccessor();
+import { makeTestRun } from "./testApi.ts";
 
 // Same shape as posts.test.ts's harness: `effect` also gets `Db` directly,
 // sharing the API layer's in-memory instance, so a test can seed rows with
 // back-dated timestamps (which no endpoint lets it do) and promote a user to
 // admin out-of-band the way production does.
-const run = async <A, E>(
-  effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
-): Promise<A> => {
-  const db = await getTestDb();
-  await resetTestDb(db);
-  const TestDbLive = Layer.succeed(Db, db);
-
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(
-      ApiLive.pipe(
-        Layer.provide(TestDbLive),
-        Layer.provide(InMemoryPubSubLive),
-      ),
-      BunHttpServer.layerContext,
-    ),
-  );
-
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-
-  try {
-    return await Effect.runPromise(
-      effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
-    );
-  } finally {
-    await dispose();
-  }
-};
+const run = makeTestRun();
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
@@ -265,11 +173,11 @@ test("getAdminStats rejects an unauthenticated request", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       const result = yield* c.admin
-        .getAdminStats({ urlParams: {} })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+        .getAdminStats({ query: {} })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
       }
     }),
   ));
@@ -280,11 +188,11 @@ test("getAdminStats rejects a non-admin caller with 403 Forbidden", () =>
       const { accessToken } = yield* registerAndLogin("regular", "s3cret-pw");
       const c = yield* makeAuthedClient(accessToken);
       const result = yield* c.admin
-        .getAdminStats({ urlParams: {} })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("Forbidden");
+        .getAdminStats({ query: {} })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
       }
     }),
   ));
@@ -296,7 +204,7 @@ test("getAdminStats reports lifetime totals across every content type", () =>
       const { accessToken } = yield* registerAdmin("root", "s3cret-pw");
       const c = yield* makeAuthedClient(accessToken);
 
-      const stats = yield* c.admin.getAdminStats({ urlParams: {} });
+      const stats = yield* c.admin.getAdminStats({ query: {} });
 
       // 3 seeded + the admin itself.
       expect(stats.totals.users).toBe(4);
@@ -319,7 +227,7 @@ test("getAdminStats counts new content per trailing window, and active users ded
       const { accessToken } = yield* registerAdmin("root", "s3cret-pw");
       const c = yield* makeAuthedClient(accessToken);
 
-      const { activity } = yield* c.admin.getAdminStats({ urlParams: {} });
+      const { activity } = yield* c.admin.getAdminStats({ query: {} });
       expect(activity.map((entry) => entry.window)).toEqual([
         "1d",
         "7d",
@@ -360,7 +268,7 @@ test("getAdminStats returns a zero-filled daily timeline ending today", () =>
       const c = yield* makeAuthedClient(accessToken);
 
       const { timeline } = yield* c.admin.getAdminStats({
-        urlParams: { days: 7 },
+        query: { days: 7 },
       });
 
       expect(timeline).toHaveLength(7);
@@ -388,26 +296,26 @@ test("getAdminStats defaults the timeline to 14 days and rejects an out-of-range
       const { accessToken } = yield* registerAdmin("root", "s3cret-pw");
       const c = yield* makeAuthedClient(accessToken);
 
-      const stats = yield* c.admin.getAdminStats({ urlParams: {} });
+      const stats = yield* c.admin.getAdminStats({ query: {} });
       expect(stats.timeline).toHaveLength(14);
 
-      const single = yield* c.admin.getAdminStats({ urlParams: { days: 1 } });
+      const single = yield* c.admin.getAdminStats({ query: { days: 1 } });
       expect(single.timeline).toHaveLength(1);
 
       const max = yield* c.admin.getAdminStats({
-        urlParams: { days: MAX_ADMIN_TIMELINE_DAYS },
+        query: { days: MAX_ADMIN_TIMELINE_DAYS },
       });
       expect(max.timeline).toHaveLength(MAX_ADMIN_TIMELINE_DAYS);
 
       const tooMany = yield* c.admin
-        .getAdminStats({ urlParams: { days: MAX_ADMIN_TIMELINE_DAYS + 1 } })
-        .pipe(Effect.either);
-      expect(tooMany._tag).toBe("Left");
+        .getAdminStats({ query: { days: MAX_ADMIN_TIMELINE_DAYS + 1 } })
+        .pipe(Effect.result);
+      expect(tooMany._tag).toBe("Failure");
 
       const zero = yield* c.admin
-        .getAdminStats({ urlParams: { days: 0 } })
-        .pipe(Effect.either);
-      expect(zero._tag).toBe("Left");
+        .getAdminStats({ query: { days: 0 } })
+        .pipe(Effect.result);
+      expect(zero._tag).toBe("Failure");
     }),
   ));
 
@@ -417,7 +325,7 @@ test("getAdminStats reports healthy dependencies and this process's runtime coun
       const { accessToken } = yield* registerAdmin("root", "s3cret-pw");
       const c = yield* makeAuthedClient(accessToken);
 
-      const { health } = yield* c.admin.getAdminStats({ urlParams: {} });
+      const { health } = yield* c.admin.getAdminStats({ query: {} });
 
       expect(health.status).toBe("ok");
       expect(health.version).toMatch(/^\d+\.\d+\.\d+/);
@@ -457,7 +365,7 @@ test("getAdminStats reports an empty deployment as all zeroes rather than failin
       const { accessToken } = yield* registerAdmin("root", "s3cret-pw");
       const c = yield* makeAuthedClient(accessToken);
 
-      const stats = yield* c.admin.getAdminStats({ urlParams: {} });
+      const stats = yield* c.admin.getAdminStats({ query: {} });
 
       expect(stats.totals.posts).toBe(0);
       expect(stats.totals.messages).toBe(0);

@@ -33,11 +33,11 @@ export const toApiAttachment = (
 // dangling id momentarily).
 export const resolveAttachment = (
   db: DrizzleDb,
+  storage: AttachmentStorage["Service"],
   attachmentId: number | null,
-): Effect.Effect<Attachment | null, never, AttachmentStorage> =>
+): Effect.Effect<Attachment | null> =>
   Effect.gen(function* () {
     if (attachmentId === null) return null;
-    const storage = yield* AttachmentStorage;
     const rows = yield* Effect.tryPromise(() =>
       db
         .select()
@@ -56,15 +56,15 @@ export const resolveAttachment = (
 // postReactionInfo/commentReactionInfo.
 export const resolveAttachments = (
   db: DrizzleDb,
+  storage: AttachmentStorage["Service"],
   attachmentIds: ReadonlyArray<number | null>,
-): Effect.Effect<Map<number, Attachment>, never, AttachmentStorage> =>
+): Effect.Effect<Map<number, Attachment>> =>
   Effect.gen(function* () {
     const result = new Map<number, Attachment>();
     const ids = [
       ...new Set(attachmentIds.filter((id): id is number => id !== null)),
     ];
     if (ids.length === 0) return result;
-    const storage = yield* AttachmentStorage;
     const rows = yield* Effect.tryPromise(() =>
       db.select().from(attachments).where(inArray(attachments.id, ids)),
     ).pipe(Effect.orDie);

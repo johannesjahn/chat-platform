@@ -1,37 +1,11 @@
 import { expect, test } from "bun:test";
-import {
-  FetchHttpClient,
-  HttpApiBuilder,
-  HttpApiClient,
-  HttpClient,
-  HttpClientRequest,
-} from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import { eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { ChatApi, MAX_GAME_LOBBY_PLAYERS } from "./Api.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
 import { Db } from "./Db.ts";
-import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
-import { JwtLive } from "./Jwt.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive, lobbyPhase } from "./GamesHandler.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
-import { InMemoryPresenceStoreLive } from "./Presence.ts";
-import { InMemoryPubSubLive } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
+import { lobbyPhase } from "./GamesHandler.ts";
 import {
   gameLobbies,
   gameLobbyMessages,
@@ -39,78 +13,13 @@ import {
   users,
 } from "./db/schema.ts";
 import { MAX_PLAUSIBLE_WPM, TYPING_COUNTDOWN_MS } from "./games/typing.ts";
-
-// JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
-process.env.JWT_SECRET ??= "test-secret";
-
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(JwtLive),
-  Layer.provide(SanitizeDecodeErrorsLive),
-  Layer.provide(InMemoryWsTicketLive),
-  Layer.provide(AttachmentStorageLive),
-);
-
-const { getTestDb } = makeTestDbAccessor();
+import { makeTestRun } from "./testApi.ts";
 
 // Same shape as admin.test.ts's harness: `effect` also gets `Db` directly,
 // sharing the API layer's in-memory instance, so a test can fast-forward a
 // race's clock (move `startsAt` into the past — no endpoint lets it) and seed
 // back-dated results for the leaderboard.
-const run = async <A, E>(
-  effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
-): Promise<A> => {
-  const db = await getTestDb();
-  await resetTestDb(db);
-  const TestDbLive = Layer.succeed(Db, db);
-
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(
-      ApiLive.pipe(
-        Layer.provide(TestDbLive),
-        Layer.provide(InMemoryPubSubLive),
-      ),
-      BunHttpServer.layerContext,
-    ),
-  );
-
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-
-  try {
-    return await Effect.runPromise(
-      effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
-    );
-  } finally {
-    await dispose();
-  }
-};
+const run = makeTestRun();
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
@@ -140,10 +49,10 @@ const expectFailure = <A, E>(
   message?: string,
 ) =>
   Effect.gen(function* () {
-    const result = yield* effect.pipe(Effect.either);
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      const error = result.left as { _tag: string; message?: string };
+    const result = yield* effect.pipe(Effect.result);
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      const error = result.failure as { _tag: string; message?: string };
       expect(error._tag).toBe(tag);
       if (message !== undefined) expect(error.message).toBe(message);
     }
@@ -163,8 +72,8 @@ const fastForward = (lobbyId: number, elapsedMs: number) =>
     );
   });
 
-const game = { path: { game: "typing" as const } };
-const lobbyPath = (id: number) => ({ path: { id } });
+const game = { params: { game: "typing" as const } };
+const lobbyPath = (id: number) => ({ params: { id } });
 
 test("lobbyPhase walks waiting → countdown → racing → finished off the clock", () => {
   const startsAt = new Date(10_000);
@@ -331,7 +240,7 @@ test("finishing implausibly fast is rejected and never reaches the leaderboard",
       );
       const board = yield* a.games.getLeaderboard({
         ...game,
-        urlParams: {},
+        query: {},
       });
       expect(board.entries).toEqual([]);
       expect(board.me).toBeNull();
@@ -567,7 +476,7 @@ test("the leaderboard ranks by best score, counts wins, and always includes me",
       );
       const a = yield* makeAuthedClient(alice.accessToken);
 
-      const all = yield* a.games.getLeaderboard({ ...game, urlParams: {} });
+      const all = yield* a.games.getLeaderboard({ ...game, query: {} });
       expect(all.period).toBe("all");
       expect(
         all.entries.map((e) => [e.rank, e.user.username, e.bestScore]),
@@ -585,7 +494,7 @@ test("the leaderboard ranks by best score, counts wins, and always includes me",
 
       const week = yield* a.games.getLeaderboard({
         ...game,
-        urlParams: { period: "week" },
+        query: { period: "week" },
       });
       expect(week.entries.map((e) => [e.user.username, e.bestScore])).toEqual([
         ["steady", 80],
@@ -595,7 +504,7 @@ test("the leaderboard ranks by best score, counts wins, and always includes me",
 
       const day = yield* a.games.getLeaderboard({
         ...game,
-        urlParams: { period: "day" },
+        query: { period: "day" },
       });
       expect(day.entries.map((e) => e.user.username)).toEqual([
         "speedy",
@@ -662,7 +571,7 @@ test("the lobby chat hides blocked authors and is rate-limited", () =>
         payload: { text: "hi from bob" },
       });
       yield* a.users.setBlock({
-        path: { id: bob.user.id },
+        params: { id: bob.user.id },
         payload: { type: "mute" },
       });
       expect(

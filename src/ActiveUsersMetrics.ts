@@ -1,5 +1,5 @@
 import { gte } from "drizzle-orm";
-import { Duration, Effect, Layer, Metric, MetricLabel, Schedule } from "effect";
+import { Duration, Effect, Layer, Metric, Schedule } from "effect";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { activeUsers } from "./Metrics.ts";
 import { comments, likes, messages, posts } from "./db/schema.ts";
@@ -68,10 +68,8 @@ export const updateActiveUserGauges: Effect.Effect<void, never, Db> =
     for (const window of WINDOWS) {
       const since = new Date(now - window.ms);
       const activeCount = yield* countActiveUsersSince(db, since);
-      yield* Metric.set(
-        Metric.taggedWithLabels(activeUsers, [
-          MetricLabel.make("window", window.label),
-        ]),
+      yield* Metric.update(
+        Metric.withAttributes(activeUsers, { window: window.label }),
         activeCount,
       );
     }
@@ -87,7 +85,7 @@ const REFRESH_INTERVAL = Duration.hours(1);
 // REFRESH_INTERVAL for as long as the layer stays built, as a background
 // fiber tied to the layer's scope (interrupted on shutdown) — same pattern
 // as RefreshTokenCleanupLive.
-export const ActiveUsersMetricsLive = Layer.scopedDiscard(
+export const ActiveUsersMetricsLive = Layer.effectDiscard(
   Effect.forkScoped(
     updateActiveUserGauges.pipe(
       Effect.repeat(Schedule.spaced(REFRESH_INTERVAL)),

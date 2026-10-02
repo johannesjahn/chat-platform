@@ -14,7 +14,7 @@ export interface RateLimitResult {
 // Fixed-window rate limiting: `key` identifies a bucket that allows up to
 // `limit` calls within any `windowSeconds` period before further calls are
 // rejected until the window rolls over.
-export class RateLimiter extends Context.Tag("RateLimiter")<
+export class RateLimiter extends Context.Service<
   RateLimiter,
   {
     readonly consume: (
@@ -23,7 +23,7 @@ export class RateLimiter extends Context.Tag("RateLimiter")<
       windowSeconds: number,
     ) => Effect.Effect<RateLimitResult>;
   }
->() {}
+>()("RateLimiter") {}
 
 // Single-process fixed-window counters. Like InMemoryPubSubLive (see
 // PubSub.ts), this is fully correct only when there's a single app instance —

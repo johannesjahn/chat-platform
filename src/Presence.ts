@@ -17,7 +17,7 @@ import { Context, Duration, Effect, Layer, Schedule } from "effect";
 // when *either* tab closed, since whichever instance's local count hit zero
 // broadcast offline with no idea the user was still connected elsewhere.
 // Moving the count itself into shared storage fixes both.
-export class PresenceStore extends Context.Tag("PresenceStore")<
+export class PresenceStore extends Context.Service<
   PresenceStore,
   {
     // Registers one more live connection for `userId`. Returns `true` only
@@ -32,7 +32,7 @@ export class PresenceStore extends Context.Tag("PresenceStore")<
     // Every user with at least one live connection anywhere right now.
     readonly onlineUserIds: Effect.Effect<ReadonlyArray<number>>;
   }
->() {}
+>()("PresenceStore") {}
 
 // Single-process fan-out has nothing "other instances" could mean, so the
 // local count *is* the global count — same reasoning as PubSub.ts's
@@ -94,7 +94,7 @@ const KEY = "chat-platform:presence:counts";
 const FIELD_TTL_SECONDS = 60;
 const HEARTBEAT_INTERVAL = Duration.seconds(20);
 
-export const RedisPresenceStoreLive = Layer.scoped(
+export const RedisPresenceStoreLive = Layer.effect(
   PresenceStore,
   Effect.gen(function* () {
     const redis = new RedisClient(process.env.REDIS_URL);
@@ -125,7 +125,7 @@ export const RedisPresenceStoreLive = Layer.scoped(
         redis.hexpire(KEY, FIELD_TTL_SECONDS, "FIELDS", 1, String(userId)),
       ).pipe(
         Effect.asVoid,
-        Effect.catchAll((error) => logFallback("heartbeat", error)),
+        Effect.catch((error) => logFallback("heartbeat", error)),
       );
 
     // Best-effort, like the realtime push itself (see Realtime.ts's
@@ -134,23 +134,19 @@ export const RedisPresenceStoreLive = Layer.scoped(
     // conservatively *not* claim a transition happened (suppressing a
     // presence broadcast) rather than crash connection setup or, worse,
     // report a wrong transition.
-    const connect: Context.Tag.Service<typeof PresenceStore>["connect"] = (
-      userId,
-    ) =>
+    const connect: PresenceStore["Service"]["connect"] = (userId) =>
       Effect.tryPromise(() => redis.hincrby(KEY, String(userId), 1)).pipe(
         Effect.tap(() => {
           localCounts.set(userId, (localCounts.get(userId) ?? 0) + 1);
           return refreshTtl(userId);
         }),
         Effect.map((count) => count === 1),
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logFallback("connect", error).pipe(Effect.as(false)),
         ),
       );
 
-    const disconnect: Context.Tag.Service<
-      typeof PresenceStore
-    >["disconnect"] = (userId) =>
+    const disconnect: PresenceStore["Service"]["disconnect"] = (userId) =>
       Effect.tryPromise(() => redis.hincrby(KEY, String(userId), -1)).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
@@ -179,7 +175,7 @@ export const RedisPresenceStoreLive = Layer.scoped(
             Effect.orElseSucceed(() => true),
           );
         }),
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logFallback("disconnect", error).pipe(Effect.as(false)),
         ),
       );
@@ -187,7 +183,7 @@ export const RedisPresenceStoreLive = Layer.scoped(
     const onlineUserIds: Effect.Effect<ReadonlyArray<number>> =
       Effect.tryPromise(() => redis.hkeys(KEY)).pipe(
         Effect.map((fields) => fields.map(Number)),
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           logFallback("onlineUserIds", error).pipe(
             Effect.as([] as ReadonlyArray<number>),
           ),

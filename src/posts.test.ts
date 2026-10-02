@@ -1,110 +1,18 @@
 import { expect, test } from "bun:test";
-import {
-  FetchHttpClient,
-  HttpApiBuilder,
-  HttpApiClient,
-  HttpClient,
-  HttpClientRequest,
-} from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import { eq } from "drizzle-orm";
-import { Effect, Layer, Metric, MetricLabel } from "effect";
+import { Effect, Metric } from "effect";
 import { ChatApi } from "./Api.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
 import { Db } from "./Db.ts";
-import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
-import { JwtLive } from "./Jwt.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive } from "./GamesHandler.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
-import { InMemoryPresenceStoreLive } from "./Presence.ts";
-import { InMemoryPubSubLive } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
 import { users } from "./db/schema.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
-
-// JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
-process.env.JWT_SECRET ??= "test-secret";
-
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(JwtLive),
-  Layer.provide(SanitizeDecodeErrorsLive),
-  Layer.provide(InMemoryWsTicketLive),
-  Layer.provide(AttachmentStorageLive),
-);
-
-const { getTestDb } = makeTestDbAccessor();
+import { makeTestRun } from "./testApi.ts";
 
 // `effect` may also require `Db` directly (e.g. to promote a user to admin
 // out-of-band, the way it'd happen in production) — it shares the exact same
 // in-memory database instance as the API layer built below.
-const run = async <A, E>(
-  effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
-): Promise<A> => {
-  const db = await getTestDb();
-  await resetTestDb(db);
-  const TestDbLive = Layer.succeed(Db, db);
-
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(
-      ApiLive.pipe(
-        Layer.provide(TestDbLive),
-        Layer.provide(InMemoryPubSubLive),
-      ),
-      BunHttpServer.layerContext,
-    ),
-  );
-
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-
-  try {
-    return await Effect.runPromise(
-      effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
-    );
-  } finally {
-    await dispose();
-  }
-};
+const run = makeTestRun();
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
@@ -151,10 +59,10 @@ test("createPost rejects an unauthenticated request", () =>
       const c = yield* makeClient;
       const result = yield* c.posts
         .createPost({ payload: { contentType: "text", content: "hello" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
       }
     }),
   ));
@@ -187,9 +95,9 @@ test('createPost increments content_created_total{type="post"}', () =>
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("dana", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
-      const postsCreated = Metric.taggedWithLabels(contentCreatedTotal, [
-        MetricLabel.make("type", "post"),
-      ]);
+      const postsCreated = Metric.withAttributes(contentCreatedTotal, {
+        type: "post",
+      });
       const before = yield* Metric.value(postsCreated);
       yield* authed.posts.createPost({
         payload: { contentType: "text", content: "counted" },
@@ -227,8 +135,8 @@ test("createPost rejects an image_url from a non-allowlisted host", () =>
             content: "https://evil.example.com/cat.png",
           },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
     }),
   ));
 
@@ -244,8 +152,8 @@ test("createPost rejects a non-https image_url", () =>
             content: "http://picsum.photos/200",
           },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
     }),
   ));
 
@@ -261,8 +169,8 @@ test("createPost rejects a javascript: image_url", () =>
             content: "javascript:alert(1)",
           },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
     }),
   ));
 
@@ -285,7 +193,7 @@ test("HttpApiDecodeError response keeps a Schema.filter refinement's own message
       const request = HttpClientRequest.post("http://localhost/posts", {
         headers: { Authorization: `Bearer ${accessToken}` },
       }).pipe(
-        HttpClientRequest.bodyUnsafeJson({
+        HttpClientRequest.bodyJsonUnsafe({
           contentType: "image_url",
           content: "https://evil.example.com/cat.png",
         }),
@@ -312,7 +220,7 @@ test("HttpApiDecodeError response replaces a structural type mismatch with a gen
       const request = HttpClientRequest.post("http://localhost/posts", {
         headers: { Authorization: `Bearer ${accessToken}` },
       }).pipe(
-        HttpClientRequest.bodyUnsafeJson({
+        HttpClientRequest.bodyJsonUnsafe({
           contentType: "text",
           // Wrong type entirely (not a filter/refinement violation) — no
           // hand-authored message exists for this, so the sanitized
@@ -345,8 +253,8 @@ test("createPost rejects content over the max length", () =>
         .createPost({
           payload: { contentType: "text", content: "x".repeat(10_001) },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
     }),
   ));
 
@@ -357,8 +265,8 @@ test("createPost rejects an empty content string", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
         .createPost({ payload: { contentType: "text", content: "" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
     }),
   ));
 
@@ -374,8 +282,8 @@ test("createPost rejects an invalid content type", () =>
             content: "hello",
           },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
     }),
   ));
 
@@ -390,11 +298,11 @@ test("getPost rejects an unauthenticated request", () =>
 
       const c = yield* makeClient;
       const result = yield* c.posts
-        .getPost({ path: { id: created.id } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+        .getPost({ params: { id: created.id } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
       }
     }),
   ));
@@ -409,7 +317,7 @@ test("getPost returns the post for an authenticated request", () =>
       });
 
       const fetched = yield* authed.posts.getPost({
-        path: { id: created.id },
+        params: { id: created.id },
       });
       expect(fetched).toEqual(created);
     }),
@@ -420,11 +328,11 @@ test("listPosts rejects an unauthenticated request", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       const result = yield* c.posts
-        .listPosts({ urlParams: {} })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+        .listPosts({ query: {} })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
       }
     }),
   ));
@@ -440,7 +348,7 @@ test("listPosts returns a default first page with a null nextCursor", () =>
         });
       }
 
-      const result = yield* authed.posts.listPosts({ urlParams: {} });
+      const result = yield* authed.posts.listPosts({ query: {} });
       expect(result.limit).toBe(20);
       expect(result.nextCursor).toBeNull();
       expect(result.posts).toHaveLength(3);
@@ -464,7 +372,7 @@ test("listPosts paginates newest-first with a keyset cursor, without gaps or dup
       const newestFirst = [...created].reverse();
 
       const firstPage = yield* authed.posts.listPosts({
-        urlParams: { limit: 2 },
+        query: { limit: 2 },
       });
       expect(firstPage.nextCursor).not.toBeNull();
       expect(firstPage.posts.map((p) => p.id)).toEqual(
@@ -472,7 +380,7 @@ test("listPosts paginates newest-first with a keyset cursor, without gaps or dup
       );
 
       const secondPage = yield* authed.posts.listPosts({
-        urlParams: { limit: 2, cursor: firstPage.nextCursor! },
+        query: { limit: 2, cursor: firstPage.nextCursor! },
       });
       expect(secondPage.nextCursor).not.toBeNull();
       expect(secondPage.posts.map((p) => p.id)).toEqual(
@@ -480,7 +388,7 @@ test("listPosts paginates newest-first with a keyset cursor, without gaps or dup
       );
 
       const thirdPage = yield* authed.posts.listPosts({
-        urlParams: { limit: 2, cursor: secondPage.nextCursor! },
+        query: { limit: 2, cursor: secondPage.nextCursor! },
       });
       expect(thirdPage.nextCursor).toBeNull();
       expect(thirdPage.posts.map((p) => p.id)).toEqual(
@@ -495,9 +403,9 @@ test("listPosts rejects a limit above the max", () =>
       const { accessToken } = yield* registerAndLogin("quinn", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
-        .listPosts({ urlParams: { limit: 101 } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
+        .listPosts({ query: { limit: 101 } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
     }),
   ));
 
@@ -507,11 +415,11 @@ test("listPosts rejects a malformed cursor", () =>
       const { accessToken } = yield* registerAndLogin("ruth", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
-        .listPosts({ urlParams: { cursor: "not-a-real-cursor" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe(
+        .listPosts({ query: { cursor: "not-a-real-cursor" } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe(
           "InvalidPostsRequest",
         );
       }
@@ -524,11 +432,13 @@ test("getPost returns 404 for a missing id", () =>
       const { accessToken } = yield* registerAndLogin("sam", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
-        .getPost({ path: { id: 9999 } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { message: string }).message).toContain("9999");
+        .getPost({ params: { id: 9999 } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { message: string }).message).toContain(
+          "9999",
+        );
       }
     }),
   ));
@@ -543,7 +453,7 @@ test("updatePost allows the author to edit their post", () =>
       });
 
       const updated = yield* authed.posts.updatePost({
-        path: { id: created.id },
+        params: { id: created.id },
         payload: {
           contentType: "image_url",
           content: "https://picsum.photos/id/1/200",
@@ -569,13 +479,13 @@ test("updatePost rejects edits from a user who doesn't own the post", () =>
       const intruderClient = yield* makeAuthedClient(intruder.accessToken);
       const result = yield* intruderClient.posts
         .updatePost({
-          path: { id: created.id },
+          params: { id: created.id },
           payload: { contentType: "text", content: "hijacked" },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("Forbidden");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
       }
     }),
   ));
@@ -598,7 +508,7 @@ test("updatePost allows an admin to edit another user's post", () =>
       const adminClient = yield* makeAuthedClient(adminToken);
 
       const updated = yield* adminClient.posts.updatePost({
-        path: { id: created.id },
+        params: { id: created.id },
         payload: { contentType: "text", content: "edited by admin" },
       });
       expect(updated.content).toBe("edited by admin");
@@ -613,13 +523,13 @@ test("updatePost returns 404 for a missing post", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
         .updatePost({
-          path: { id: 9999 },
+          params: { id: 9999 },
           payload: { contentType: "text", content: "nope" },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
       }
     }),
   ));
@@ -633,14 +543,14 @@ test("deletePost allows the author to delete their post", () =>
         payload: { contentType: "text", content: "to delete" },
       });
 
-      yield* authed.posts.deletePost({ path: { id: created.id } });
+      yield* authed.posts.deletePost({ params: { id: created.id } });
 
       const result = yield* authed.posts
-        .getPost({ path: { id: created.id } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+        .getPost({ params: { id: created.id } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
       }
     }),
   ));
@@ -657,11 +567,11 @@ test("deletePost rejects deletes from a user who doesn't own the post", () =>
       const intruder = yield* registerAndLogin("mona", "pw-testpass");
       const intruderClient = yield* makeAuthedClient(intruder.accessToken);
       const result = yield* intruderClient.posts
-        .deletePost({ path: { id: created.id } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("Forbidden");
+        .deletePost({ params: { id: created.id } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
       }
     }),
   ));
@@ -683,14 +593,14 @@ test("deletePost allows an admin to delete another user's post", () =>
       });
       const adminClient = yield* makeAuthedClient(adminToken);
 
-      yield* adminClient.posts.deletePost({ path: { id: created.id } });
+      yield* adminClient.posts.deletePost({ params: { id: created.id } });
 
       const result = yield* authorClient.posts
-        .getPost({ path: { id: created.id } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+        .getPost({ params: { id: created.id } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
       }
     }),
   ));
@@ -706,11 +616,11 @@ test("deletePost rejects an unauthenticated request", () =>
 
       const c = yield* makeClient;
       const result = yield* c.posts
-        .deletePost({ path: { id: created.id } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left") {
-        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+        .deletePost({ params: { id: created.id } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
       }
     }),
   ));

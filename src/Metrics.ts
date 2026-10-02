@@ -1,28 +1,19 @@
 import {
-  HttpApiBuilder,
-  HttpMiddleware,
+  HttpRouter,
   HttpServerError,
   HttpServerRequest,
   HttpServerResponse,
-  type HttpApp,
-} from "@effect/platform";
-import {
-  Cause,
-  Context,
-  Effect,
-  Metric,
-  MetricBoundaries,
-  MetricLabel,
-  MetricPair,
-  MetricState,
-  Option,
-} from "effect";
+} from "effect/http";
+import { PrometheusMetrics } from "effect/observability";
+import { Cause, Effect, Layer, Metric } from "effect";
+import { withLoggerDisabled } from "./RedactedLogger.ts";
 
 // Application-level metrics for VictoriaMetrics/vmagent to scrape (issue
 // #124, sub-task of #121) — a Prometheus-format `/metrics` route, same "raw
 // route, not part of the typed `ChatApi`" pattern as `/health`/`/ready` (see
 // Health.ts). Built on `effect/Metric` (counters/gauges/histograms) plus a
-// small hand-rolled exposition-format renderer below, rather than pulling in
+// effect's own Prometheus exposition-format renderer
+// (`effect/observability/PrometheusMetrics`), rather than pulling in
 // `prom-client` — Effect's metric registry already gives us everything a
 // Node-oriented client library would, without a dependency this Bun-first
 // repo (see CLAUDE.md) doesn't otherwise need.
@@ -32,31 +23,48 @@ export const httpRequestsTotal = Metric.counter("http_requests_total", {
 });
 
 // Seconds (Prometheus convention), exponential from 5ms up to ~40s;
-// MetricBoundaries.exponential appends a final +Inf bucket automatically.
+// Metric.exponentialBoundaries appends a final +Inf bucket automatically.
 export const httpRequestDurationSeconds = Metric.histogram(
   "http_request_duration_seconds",
-  MetricBoundaries.exponential({ start: 0.005, factor: 2, count: 14 }),
-  "HTTP request duration in seconds.",
+  {
+    description: "HTTP request duration in seconds.",
+    boundaries: Metric.exponentialBoundaries({
+      start: 0.005,
+      factor: 2,
+      count: 14,
+    }),
+  },
 );
 
-// `.register()`d eagerly (unlike the metrics below, which are always
-// accessed through `Metric.tagged`/`taggedWithLabels` and so only ever get
+// A metric only shows up in the registry (and so in `/metrics`) once
+// something has touched it; reading it is enough. See the two eagerly
+// registered metrics below for why that matters.
+const register = <M extends Metric.Metric<never, unknown>>(metric: M): M => {
+  Effect.runSync(Metric.value(metric));
+  return metric;
+};
+
+// `register`ed eagerly (unlike the metrics below, which are always
+// accessed through `Metric.withAttributes` and so only ever get
 // created lazily, on demand, with whatever tags that call used) — this one
 // is never tagged, so registering it up front means `/metrics` reports an
 // honest `0` from process start rather than omitting the series entirely
 // until the first `/ws` connection (a missing series and a `0` mean very
 // different things to a scrape-gap alert).
-export const websocketConnectionsActive = Metric.gauge(
-  "websocket_connections_active",
-  { description: "Live /ws connections currently held open by this instance." },
-).register();
+export const websocketConnectionsActive = register(
+  Metric.gauge("websocket_connections_active", {
+    description: "Live /ws connections currently held open by this instance.",
+  }),
+);
 
 // See recordHttpMetrics below for why this counts request-level defects
 // rather than instrumenting every `db.*` call site individually. Eagerly
-// `.register()`d for the same reason as websocketConnectionsActive above.
-export const dbQueryErrorsTotal = Metric.counter("db_query_errors_total", {
-  description: "DB failures observed while handling HTTP requests.",
-}).register();
+// `register`ed for the same reason as websocketConnectionsActive above.
+export const dbQueryErrorsTotal = register(
+  Metric.counter("db_query_errors_total", {
+    description: "DB failures observed while handling HTTP requests.",
+  }),
+);
 
 export const pubsubPublishTotal = Metric.counter("pubsub_publish_total", {
   description: "PubSub publish attempts, labeled by outcome.",
@@ -124,18 +132,20 @@ const pathnameOf = (url: string): string => {
 };
 
 // Every dynamic path segment in `ChatApi` is a numeric id (see Api.ts's
-// `NumberFromString` path schemas — chat/message/user ids). Collapsing runs
+// `FiniteFromString` path schemas — chat/message/user ids). Collapsing runs
 // of digits keeps the "route" label's cardinality bounded to the handful of
 // route templates rather than growing with every distinct id ever
 // requested — the standard pitfall of labeling HTTP metrics by raw path.
 const normalizeRoute = (pathname: string): string =>
   pathname.replace(/\/\d+(?=\/|$)/g, "/:id");
 
-const isRouteNotFound = (failure: Option.Option<unknown>): boolean =>
-  Option.isSome(failure) &&
-  typeof failure.value === "object" &&
-  failure.value !== null &&
-  (failure.value as { _tag?: unknown })._tag === "RouteNotFound";
+const isRouteNotFound = (cause: Cause.Cause<unknown>): boolean =>
+  cause.reasons.some(
+    (reason) =>
+      Cause.isFailReason(reason) &&
+      HttpServerError.isHttpServerError(reason.error) &&
+      reason.error.reason._tag === "RouteNotFound",
+  );
 
 // Wraps the whole server (same attachment point as RedactedLogger.ts's
 // `redactedLogger`) to record HTTP request count + duration, labeled by
@@ -144,151 +154,56 @@ const isRouteNotFound = (failure: Option.Option<unknown>): boolean =>
 // probing for `/wp-admin`, scanners, ...) collapses its route label to a
 // fixed "unmatched" instead of the raw path, so a scan can't blow up this
 // metric's cardinality the way echoing arbitrary 404 paths would.
-export const recordHttpMetrics = HttpMiddleware.make(
-  <E, R>(httpApp: HttpApp.Default<E, R>): HttpApp.Default<E, R> =>
-    Effect.withFiberRuntime((fiber) => {
-      const request = Context.unsafeGet(
-        fiber.currentContext,
-        HttpServerRequest.HttpServerRequest,
-      );
-      const start = performance.now();
+export const recordHttpMetrics = <E, R>(
+  httpApp: Effect.Effect<
+    HttpServerResponse.HttpServerResponse,
+    E,
+    R | HttpServerRequest.HttpServerRequest
+  >,
+): Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  E,
+  R | HttpServerRequest.HttpServerRequest
+> =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const start = performance.now();
+    const exit = yield* Effect.exit(httpApp);
 
-      return Effect.flatMap(Effect.exit(httpApp), (exit) => {
-        const durationSeconds = (performance.now() - start) / 1000;
-        const status =
-          exit._tag === "Success"
-            ? exit.value.status
-            : HttpServerError.causeResponseStripped(exit.cause)[0].status;
-        const route =
-          exit._tag === "Failure" &&
-          isRouteNotFound(Cause.failureOption(exit.cause))
-            ? "unmatched"
-            : normalizeRoute(pathnameOf(request.url));
-        const tags = [
-          MetricLabel.make("method", request.method),
-          MetricLabel.make("route", route),
-          MetricLabel.make("status", String(status)),
-        ];
+    const durationSeconds = (performance.now() - start) / 1000;
+    const status =
+      exit._tag === "Success"
+        ? exit.value.status
+        : HttpServerError.causeResponseStripped(exit.cause)[0].status;
+    const route =
+      exit._tag === "Failure" && isRouteNotFound(exit.cause)
+        ? "unmatched"
+        : normalizeRoute(pathnameOf(request.url));
+    const attributes = {
+      method: request.method,
+      route,
+      status: String(status),
+    };
 
-        return Effect.zipRight(
-          Effect.all(
-            [
-              Metric.update(
-                Metric.taggedWithLabels(httpRequestsTotal, tags),
-                1,
-              ),
-              Metric.update(
-                Metric.taggedWithLabels(httpRequestDurationSeconds, tags),
-                durationSeconds,
-              ),
-              exit._tag === "Failure" && Cause.isDie(exit.cause)
-                ? Metric.increment(dbQueryErrorsTotal)
-                : Effect.void,
-            ],
-            { discard: true },
-          ),
-          exit,
-        );
-      });
-    }),
-);
+    yield* Metric.update(
+      Metric.withAttributes(httpRequestsTotal, attributes),
+      1,
+    );
+    yield* Metric.update(
+      Metric.withAttributes(httpRequestDurationSeconds, attributes),
+      durationSeconds,
+    );
+    if (exit._tag === "Failure" && Cause.hasDies(exit.cause))
+      yield* Metric.update(dbQueryErrorsTotal, 1);
 
-const escapeLabelValue = (value: string): string =>
-  value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
-
-const formatLabels = (
-  labels: ReadonlyArray<readonly [string, string]>,
-): string =>
-  labels.length === 0
-    ? ""
-    : `{${labels.map(([key, value]) => `${key}="${escapeLabelValue(value)}"`).join(",")}}`;
-
-const formatSample = (
-  name: string,
-  labels: ReadonlyArray<readonly [string, string]>,
-  value: number | bigint,
-): string => `${name}${formatLabels(labels)} ${value}\n`;
+    return yield* exit;
+  });
 
 // Renders every metric captured via `effect/Metric` (the definitions above,
-// plus Effect's own built-in fiber metrics — fiberStarted/fiberSuccesses/
-// fiberFailures/fiberLifetimes) in Prometheus text exposition format.
-export const renderPrometheusExposition: Effect.Effect<string> = Effect.map(
-  Metric.snapshot,
-  (pairs) => {
-    // Prometheus wants one HELP/TYPE header per metric *name*, followed by
-    // every tagged sample for it — but each distinct tag combination is its
-    // own MetricPair in the snapshot, so group by name first.
-    const byName = new Map<string, Array<MetricPair.MetricPair.Untyped>>();
-    for (const pair of pairs) {
-      const group = byName.get(pair.metricKey.name) ?? [];
-      group.push(pair);
-      byName.set(pair.metricKey.name, group);
-    }
-
-    let output = "";
-    for (const [name, group] of byName) {
-      const [first] = group;
-      if (!first) continue;
-
-      const description = Option.getOrUndefined(first.metricKey.description);
-      if (description) output += `# HELP ${name} ${description}\n`;
-
-      if (MetricState.isCounterState(first.metricState)) {
-        output += `# TYPE ${name} counter\n`;
-        for (const pair of group) {
-          if (!MetricState.isCounterState(pair.metricState)) continue;
-          output += formatSample(
-            name,
-            pair.metricKey.tags.map((tag) => [tag.key, tag.value] as const),
-            pair.metricState.count,
-          );
-        }
-      } else if (MetricState.isGaugeState(first.metricState)) {
-        output += `# TYPE ${name} gauge\n`;
-        for (const pair of group) {
-          if (!MetricState.isGaugeState(pair.metricState)) continue;
-          output += formatSample(
-            name,
-            pair.metricKey.tags.map((tag) => [tag.key, tag.value] as const),
-            pair.metricState.value,
-          );
-        }
-      } else if (MetricState.isHistogramState(first.metricState)) {
-        output += `# TYPE ${name} histogram\n`;
-        for (const pair of group) {
-          if (!MetricState.isHistogramState(pair.metricState)) continue;
-          const baseLabels = pair.metricKey.tags.map(
-            (tag) => [tag.key, tag.value] as const,
-          );
-          for (const [boundary, cumulativeCount] of pair.metricState.buckets) {
-            output += formatSample(
-              `${name}_bucket`,
-              [
-                ...baseLabels,
-                ["le", boundary === Infinity ? "+Inf" : String(boundary)],
-              ],
-              cumulativeCount,
-            );
-          }
-          output += formatSample(
-            `${name}_sum`,
-            baseLabels,
-            pair.metricState.sum,
-          );
-          output += formatSample(
-            `${name}_count`,
-            baseLabels,
-            pair.metricState.count,
-          );
-        }
-      }
-      // Frequency/Summary metrics aren't used by this app (see the
-      // definitions above), so they're intentionally left unrendered rather
-      // than guessing at an exposition-format mapping nothing exercises.
-    }
-    return output;
-  },
-);
+// plus any of Effect's own built-in runtime metrics, when enabled) in
+// Prometheus text exposition format.
+export const renderPrometheusExposition: Effect.Effect<string> =
+  PrometheusMetrics.format();
 
 // Raw route (not part of the typed `ChatApi`) — see Health.ts's header
 // comment for why: scraper-only, so it's excluded from openapi.json and the
@@ -298,15 +213,18 @@ export const renderPrometheusExposition: Effect.Effect<string> = Effect.map(
 // own short interval for the app's whole lifetime). Also exempt from the
 // global rate-limit ceiling (see GlobalRateLimit.ts), which hardcodes this
 // path for the same reason.
-export const MetricsRouteLive = HttpApiBuilder.Router.use((router) =>
-  router.get(
-    "/metrics",
-    HttpMiddleware.withLoggerDisabled(
-      Effect.map(renderPrometheusExposition, (body) =>
-        HttpServerResponse.text(body, {
-          contentType: "text/plain; version=0.0.4; charset=utf-8",
-        }),
-      ),
+export const MetricsRouteLive: Layer.Layer<
+  never,
+  never,
+  HttpRouter.HttpRouter
+> = HttpRouter.add(
+  "GET",
+  "/metrics",
+  withLoggerDisabled(
+    Effect.map(renderPrometheusExposition, (body) =>
+      HttpServerResponse.text(body, {
+        contentType: "text/plain; version=0.0.4; charset=utf-8",
+      }),
     ),
   ),
 );

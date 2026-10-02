@@ -5,7 +5,7 @@ import { Context, Effect, Layer } from "effect";
 // `storageKey` (see `attachments.storageKey` in db/schema.ts) — filenames,
 // mime types, and sizes are tracked in Postgres, not derived from the
 // bucket.
-export class AttachmentStorage extends Context.Tag("AttachmentStorage")<
+export class AttachmentStorage extends Context.Service<
   AttachmentStorage,
   {
     // `Uint8Array` in addition to `BunFile` so callers that re-encode an
@@ -34,7 +34,7 @@ export class AttachmentStorage extends Context.Tag("AttachmentStorage")<
     // doesn't exist is not an error in either backend.
     readonly delete: (key: string) => Effect.Effect<void, unknown>;
   }
->() {}
+>()("AttachmentStorage") {}
 
 // A presigned GET URL is only ever handed to a caller the corresponding
 // message/post/chat read already authorized (see resolveAttachment(s) in

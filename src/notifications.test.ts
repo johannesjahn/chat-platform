@@ -1,110 +1,18 @@
 import { expect, test } from "bun:test";
-import {
-  FetchHttpClient,
-  HttpApiBuilder,
-  HttpApiClient,
-  HttpClient,
-  HttpClientRequest,
-} from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import { eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { ChatApi } from "./Api.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
 import { Db } from "./Db.ts";
-import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
-import { JwtLive } from "./Jwt.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive } from "./GamesHandler.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
-import { InMemoryPresenceStoreLive } from "./Presence.ts";
-import { InMemoryPubSubLive } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
 import { gameLobbies, gameResults } from "./db/schema.ts";
-
-// JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
-process.env.JWT_SECRET ??= "test-secret";
-
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(JwtLive),
-  Layer.provide(SanitizeDecodeErrorsLive),
-  Layer.provide(InMemoryWsTicketLive),
-  Layer.provide(AttachmentStorageLive),
-);
-
-const { getTestDb } = makeTestDbAccessor();
+import { makeTestRun } from "./testApi.ts";
 
 // Same shape as games.test.ts's harness: `effect` also gets `Db` directly,
 // sharing the API layer's in-memory instance, so a test can fast-forward a
 // race's clock (move `startsAt` into the past — no endpoint lets it) and seed
 // back-dated results for the leaderboard.
-const run = async <A, E>(
-  effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
-): Promise<A> => {
-  const db = await getTestDb();
-  await resetTestDb(db);
-  const TestDbLive = Layer.succeed(Db, db);
-
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(
-      ApiLive.pipe(
-        Layer.provide(TestDbLive),
-        Layer.provide(InMemoryPubSubLive),
-      ),
-      BunHttpServer.layerContext,
-    ),
-  );
-
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-
-  try {
-    return await Effect.runPromise(
-      effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
-    );
-  } finally {
-    await dispose();
-  }
-};
+const run = makeTestRun();
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
@@ -134,10 +42,10 @@ const expectFailure = <A, E>(
   message?: string,
 ) =>
   Effect.gen(function* () {
-    const result = yield* effect.pipe(Effect.either);
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      const error = result.left as { _tag: string; message?: string };
+    const result = yield* effect.pipe(Effect.result);
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      const error = result.failure as { _tag: string; message?: string };
       expect(error._tag).toBe(tag);
       if (message !== undefined) expect(error.message).toBe(message);
     }
@@ -153,10 +61,10 @@ const setup = (username: string) =>
     return { user, client };
   });
 
-type Client = Effect.Effect.Success<ReturnType<typeof makeAuthedClient>>;
+type Client = Effect.Success<ReturnType<typeof makeAuthedClient>>;
 
 const inbox = (client: Client) =>
-  client.notifications.listNotifications({ urlParams: {} });
+  client.notifications.listNotifications({ query: {} });
 
 // --- Posts & comments -------------------------------------------------------
 
@@ -169,7 +77,7 @@ test("commenting on someone's post notifies its author, with an excerpt", () =>
         payload: { contentType: "text", content: "hello world" },
       });
       const comment = yield* bob.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "nice   post\n\nreally" },
       });
 
@@ -197,7 +105,7 @@ test("commenting on your own post doesn't notify you", () =>
         payload: { contentType: "text", content: "mine" },
       });
       yield* alice.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "talking to myself" },
       });
       expect((yield* inbox(alice.client)).unreadCount).toBe(0);
@@ -214,11 +122,11 @@ test("a reply notifies the parent comment's author (and the post author only via
         payload: { contentType: "text", content: "post" },
       });
       const comment = yield* bob.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "first" },
       });
       const reply = yield* carol.client.comments.createReply({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { content: "a reply" },
       });
 
@@ -242,21 +150,21 @@ test("reacting notifies the author, and un-reacting takes it back", () =>
         payload: { contentType: "text", content: "react to me" },
       });
       const comment = yield* alice.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "and to me" },
       });
 
       yield* bob.client.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "❤️" },
       });
       // A repeat of the same reaction is a no-op, not a second notification.
       yield* bob.client.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "❤️" },
       });
       yield* bob.client.comments.addCommentReaction({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { emoji: "👍" },
       });
 
@@ -271,7 +179,7 @@ test("reacting notifies the author, and un-reacting takes it back", () =>
       expect(page.notifications[1]!.excerpt).toBe("react to me");
 
       yield* bob.client.comments.removePostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "❤️" },
       });
       const after = yield* inbox(alice.client);
@@ -300,7 +208,7 @@ test("@mentions in posts and comments notify the named users, case-insensitively
       // Mentioning the post's author in a comment on their post doesn't
       // double up on the "comment" notification they already get.
       const comment = yield* carol.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "@alice @Bob." },
       });
       expect(
@@ -325,18 +233,18 @@ test("editing only pings names the edit added", () =>
         payload: { contentType: "text", content: "hi @bob" },
       });
       yield* alice.client.posts.updatePost({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { contentType: "text", content: "hi @bob and @carol" },
       });
       expect((yield* inbox(bob.client)).notifications).toHaveLength(1);
       expect((yield* inbox(carol.client)).notifications).toHaveLength(1);
 
       const comment = yield* alice.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "no one" },
       });
       yield* alice.client.comments.updateComment({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { content: "now @carol" },
       });
       const carolInbox = yield* inbox(carol.client);
@@ -354,11 +262,11 @@ test("deleting a comment takes its notifications with it", () =>
         payload: { contentType: "text", content: "post" },
       });
       const comment = yield* bob.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "oops" },
       });
       expect((yield* inbox(alice.client)).unreadCount).toBe(1);
-      yield* bob.client.comments.deleteComment({ path: { id: comment.id } });
+      yield* bob.client.comments.deleteComment({ params: { id: comment.id } });
       const page = yield* inbox(alice.client);
       expect(page.notifications).toHaveLength(0);
       expect(page.unreadCount).toBe(0);
@@ -374,11 +282,11 @@ test("blocking or muting someone silences their notifications, past and future",
         payload: { contentType: "text", content: "post" },
       });
       yield* bob.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "before" },
       });
       yield* alice.client.users.setBlock({
-        path: { id: bob.user.id },
+        params: { id: bob.user.id },
         payload: { type: "mute" },
       });
       // The earlier notification is hidden too.
@@ -387,10 +295,10 @@ test("blocking or muting someone silences their notifications, past and future",
       expect(page.unreadCount).toBe(0);
 
       yield* bob.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "after" },
       });
-      yield* alice.client.users.removeBlock({ path: { id: bob.user.id } });
+      yield* alice.client.users.removeBlock({ params: { id: bob.user.id } });
       // Unmuting brings back the old one, but nothing was recorded while
       // muted.
       page = yield* inbox(alice.client);
@@ -410,7 +318,7 @@ test("mark one / mark all read, and someone else's id is a 404", () =>
       });
       for (const content of ["one", "two", "three"]) {
         yield* bob.client.comments.createComment({
-          path: { id: post.id },
+          params: { id: post.id },
           payload: { content },
         });
       }
@@ -420,13 +328,13 @@ test("mark one / mark all read, and someone else's id is a 404", () =>
       const first = page.notifications[0]!;
       expect(
         yield* alice.client.notifications.markNotificationRead({
-          path: { id: first.id },
+          params: { id: first.id },
         }),
       ).toEqual({ count: 2 });
       // Idempotent.
       expect(
         yield* alice.client.notifications.markNotificationRead({
-          path: { id: first.id },
+          params: { id: first.id },
         }),
       ).toEqual({ count: 2 });
       expect(
@@ -435,7 +343,7 @@ test("mark one / mark all read, and someone else's id is a 404", () =>
 
       yield* expectFailure(
         bob.client.notifications.markNotificationRead({
-          path: { id: first.id },
+          params: { id: first.id },
         }),
         "NotFound",
       );
@@ -458,28 +366,28 @@ test("the inbox pages newest-first with a keyset cursor", () =>
       });
       for (let i = 1; i <= 5; i++) {
         yield* bob.client.comments.createComment({
-          path: { id: post.id },
+          params: { id: post.id },
           payload: { content: `c${i}` },
         });
       }
       const first = yield* alice.client.notifications.listNotifications({
-        urlParams: { limit: 2 },
+        query: { limit: 2 },
       });
       expect(first.notifications.map((n) => n.excerpt)).toEqual(["c5", "c4"]);
       expect(first.nextCursor).not.toBeNull();
       const second = yield* alice.client.notifications.listNotifications({
-        urlParams: { limit: 2, cursor: first.nextCursor! },
+        query: { limit: 2, cursor: first.nextCursor! },
       });
       expect(second.notifications.map((n) => n.excerpt)).toEqual(["c3", "c2"]);
       const third = yield* alice.client.notifications.listNotifications({
-        urlParams: { limit: 2, cursor: second.nextCursor! },
+        query: { limit: 2, cursor: second.nextCursor! },
       });
       expect(third.notifications.map((n) => n.excerpt)).toEqual(["c1"]);
       expect(third.nextCursor).toBeNull();
 
       yield* expectFailure(
         alice.client.notifications.listNotifications({
-          urlParams: { cursor: "not-a-cursor" },
+          query: { cursor: "not-a-cursor" },
         }),
         "InvalidNotificationRequest",
       );
@@ -488,8 +396,8 @@ test("the inbox pages newest-first with a keyset cursor", () =>
 
 // --- Games ------------------------------------------------------------------
 
-const game = { path: { game: "typing" as const } };
-const lobbyPath = (id: number) => ({ path: { id } });
+const game = { params: { game: "typing" as const } };
+const lobbyPath = (id: number) => ({ params: { id } });
 
 test("inviting a user to a lobby notifies them once, linking to the lobby", () =>
   run(

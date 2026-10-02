@@ -12,17 +12,17 @@ const trackOutcome = <A, E>(
 ): Effect.Effect<A, E> =>
   effect.pipe(
     Effect.tap(() =>
-      Metric.update(Metric.tagged(metric, "outcome", "success"), 1),
+      Metric.update(Metric.withAttributes(metric, { outcome: "success" }), 1),
     ),
     Effect.tapError(() =>
-      Metric.update(Metric.tagged(metric, "outcome", "failure"), 1),
+      Metric.update(Metric.withAttributes(metric, { outcome: "failure" }), 1),
     ),
   );
 
 // A minimal cross-process publish/subscribe abstraction — just enough for
 // RealtimeConnectionsLive (see Realtime.ts) to fan a realtime event out to
 // every app instance, not a general Redis client wrapper.
-export class PubSub extends Context.Tag("PubSub")<
+export class PubSub extends Context.Service<
   PubSub,
   {
     // `unknown` error channel (same idiom as Realtime.ts's `Writer`) — a
@@ -42,7 +42,7 @@ export class PubSub extends Context.Tag("PubSub")<
     // not just configured.
     readonly ping: Effect.Effect<void, unknown>;
   }
->() {}
+>()("PubSub") {}
 
 // Single-process fan-out. This isn't a test stand-in for the real thing — a
 // single process has nothing to distribute to *besides* its own local
@@ -163,12 +163,12 @@ export const RedisPubSubLive = Layer.effect(
                       subscriber.unsubscribe(channel),
                     ).pipe(
                       Effect.ignore,
-                      Effect.zipRight(
+                      Effect.andThen(
                         Effect.tryPromise(() =>
                           subscriber.subscribe(channel, handleMessage),
                         ),
                       ),
-                      Effect.catchAll((error) =>
+                      Effect.catch((error) =>
                         Effect.logWarning(
                           "PubSub: failed to resubscribe after Redis reconnect",
                         ).pipe(

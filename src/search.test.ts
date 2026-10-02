@@ -1,104 +1,14 @@
 import { expect, test } from "bun:test";
-import {
-  FetchHttpClient,
-  HttpApiBuilder,
-  HttpApiClient,
-  HttpClient,
-  HttpClientRequest,
-} from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
-import { Effect, Layer } from "effect";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
+import { Effect } from "effect";
 import { ChatApi } from "./Api.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
-import { Db } from "./Db.ts";
-import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
-import { JwtLive } from "./Jwt.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive } from "./GamesHandler.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
-import { InMemoryPresenceStoreLive } from "./Presence.ts";
-import { InMemoryPubSubLive } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
 import { buildSnippet } from "./search.ts";
-import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
+import { makeTestRun } from "./testApi.ts";
 
 process.env.JWT_SECRET ??= "test-secret";
 
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(JwtLive),
-  Layer.provide(SanitizeDecodeErrorsLive),
-  Layer.provide(InMemoryWsTicketLive),
-  Layer.provide(AttachmentStorageLive),
-);
-
-const { getTestDb } = makeTestDbAccessor();
-
-const run = async <A, E>(
-  effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
-): Promise<A> => {
-  const db = await getTestDb();
-  await resetTestDb(db);
-  const TestDbLive = Layer.succeed(Db, db);
-
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(
-      ApiLive.pipe(
-        Layer.provide(TestDbLive),
-        Layer.provide(InMemoryPubSubLive),
-      ),
-      BunHttpServer.layerContext,
-    ),
-  );
-
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-
-  try {
-    return await Effect.runPromise(
-      effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
-    );
-  } finally {
-    await dispose();
-  }
-};
+const run = makeTestRun();
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
@@ -185,11 +95,11 @@ test("searchPosts rejects an unauthenticated request", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       const result = yield* c.search
-        .searchPosts({ urlParams: { q: "hello" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+        .searchPosts({ query: { q: "hello" } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -205,7 +115,7 @@ test("searchPosts finds a matching text post and highlights the match", () =>
       });
 
       const page = yield* alice.client.search.searchPosts({
-        urlParams: { q: "fox" },
+        query: { q: "fox" },
       });
       expect(page.results.length).toBe(1);
       const result = page.results[0]!;
@@ -228,7 +138,7 @@ test("searchPosts matches a fragment inside a word (contains, not whole-word)", 
       // "ragmen" is a whole word nowhere — only the trigram/substring branch
       // can find it.
       const page = yield* alice.client.search.searchPosts({
-        urlParams: { q: "ragmen" },
+        query: { q: "ragmen" },
       });
       expect(page.results.length).toBe(1);
       expect(matchedText(page.results[0]!.snippet)).toContain("ragmen");
@@ -243,7 +153,7 @@ test("searchPosts matches a half-typed word as a prefix", () =>
         payload: { contentType: "text", content: "deployment notes for today" },
       });
       const page = yield* alice.client.search.searchPosts({
-        urlParams: { q: "depl" },
+        query: { q: "depl" },
       });
       expect(page.results.length).toBe(1);
     }),
@@ -260,7 +170,7 @@ test("searchPosts requires every token of a multi-word query to match", () =>
         payload: { contentType: "text", content: "a quick note" },
       });
       const page = yield* alice.client.search.searchPosts({
-        urlParams: { q: "quick fox" },
+        query: { q: "quick fox" },
       });
       expect(page.results.length).toBe(1);
       expect(snippetText(page.results[0]!.snippet)).toContain("brown fox");
@@ -276,7 +186,7 @@ test("searchPosts matches stemmed terms (english config)", () =>
       });
       // "run" should match "running" once both are stemmed.
       const page = yield* alice.client.search.searchPosts({
-        urlParams: { q: "run" },
+        query: { q: "run" },
       });
       expect(page.results.length).toBe(1);
       expect(snippetText(page.results[0]!.snippet)).toContain("running");
@@ -294,7 +204,7 @@ test("searchPosts ignores non-text posts (image URLs aren't searched)", () =>
         },
       });
       const page = yield* alice.client.search.searchPosts({
-        urlParams: { q: "quickfox" },
+        query: { q: "quickfox" },
       });
       expect(page.results.length).toBe(0);
     }),
@@ -310,17 +220,17 @@ test("searchPosts hides posts by a blocked or muted author", () =>
       });
 
       const before = yield* alice.client.search.searchPosts({
-        urlParams: { q: "pineapple" },
+        query: { q: "pineapple" },
       });
       expect(before.results.length).toBe(1);
 
       yield* alice.client.users.setBlock({
-        path: { id: bob.user.id },
+        params: { id: bob.user.id },
         payload: { type: "block" },
       });
 
       const after = yield* alice.client.search.searchPosts({
-        urlParams: { q: "pineapple" },
+        query: { q: "pineapple" },
       });
       expect(after.results.length).toBe(0);
     }),
@@ -336,12 +246,12 @@ test("searchPosts does not interpret query text as SQL or tsquery operators", ()
       // A malformed tsquery / injection attempt must not error — the
       // tokenizer strips every operator, so it just finds nothing.
       const page = yield* alice.client.search.searchPosts({
-        urlParams: { q: `') ; drop table posts; --  "(&^ -unbalanced` },
+        query: { q: `') ; drop table posts; --  "(&^ -unbalanced` },
       });
       expect(page.results.length).toBe(0);
       // …and the table is still there.
       const still = yield* alice.client.search.searchPosts({
-        urlParams: { q: "harmless" },
+        query: { q: "harmless" },
       });
       expect(still.results.length).toBe(1);
     }),
@@ -360,7 +270,7 @@ test("searchPosts tokenizes away wildcards instead of matching everything", () =
       // "%" is not a token character, so it never reaches a LIKE pattern —
       // this searches for "alp" and "abet", not for "anything".
       const page = yield* alice.client.search.searchPosts({
-        urlParams: { q: "alp%abet" },
+        query: { q: "alp%abet" },
       });
       expect(page.results.length).toBe(1);
       expect(snippetText(page.results[0]!.snippet)).toContain("alphabet");
@@ -375,11 +285,11 @@ test("users.searchUsers matches wildcards literally, not as patterns", () =>
       // The directory search passes `q` through as an ILIKE pattern, so its
       // wildcards must be escaped: "%a%" must find nobody, not everybody.
       const escaped = yield* alice.client.users.searchUsers({
-        urlParams: { q: "%a%" },
+        query: { q: "%a%" },
       });
       expect(escaped.length).toBe(0);
       const real = yield* alice.client.users.searchUsers({
-        urlParams: { q: "ali" },
+        query: { q: "ali" },
       });
       expect(real.map((u) => u.username)).toEqual(["alice"]);
     }),
@@ -394,7 +304,7 @@ test("searchPosts snippet keeps HTML-like content inert (no raw markup)", () =>
         payload: { contentType: "text", content },
       });
       const page = yield* alice.client.search.searchPosts({
-        urlParams: { q: "danger" },
+        query: { q: "danger" },
       });
       expect(page.results.length).toBe(1);
       // The snippet is delivered as structured plain-text runs, never HTML:
@@ -421,7 +331,7 @@ test("searchPosts paginates newest-match-first with an opaque cursor", () =>
       }
 
       const first = yield* alice.client.search.searchPosts({
-        urlParams: { q: "apple", limit: 2 },
+        query: { q: "apple", limit: 2 },
       });
       expect(first.results.map((r) => r.id)).toEqual([
         created[2]!,
@@ -430,7 +340,7 @@ test("searchPosts paginates newest-match-first with an opaque cursor", () =>
       expect(first.nextCursor).not.toBeNull();
 
       const second = yield* alice.client.search.searchPosts({
-        urlParams: { q: "apple", limit: 2, cursor: first.nextCursor! },
+        query: { q: "apple", limit: 2, cursor: first.nextCursor! },
       });
       expect(second.results.map((r) => r.id)).toEqual([created[0]!]);
       expect(second.nextCursor).toBeNull();
@@ -442,11 +352,11 @@ test("searchPosts rejects a malformed cursor", () =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const result = yield* alice.client.search
-        .searchPosts({ urlParams: { q: "apple", cursor: "!!!not-base64!!!" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe(
+        .searchPosts({ query: { q: "apple", cursor: "!!!not-base64!!!" } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe(
           "InvalidSearchRequest",
         );
     }),
@@ -464,11 +374,11 @@ test("searchComments finds a matching comment", () =>
         payload: { contentType: "text", content: "a post to comment on" },
       });
       yield* alice.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "what a wonderful pineapple observation" },
       });
       const page = yield* alice.client.search.searchComments({
-        urlParams: { q: "pineapple" },
+        query: { q: "pineapple" },
       });
       expect(page.results.length).toBe(1);
       expect(page.results[0]!.postId).toBe(post.id);
@@ -486,17 +396,17 @@ test("searchComments finds a matching reply and flags its parent", () =>
         payload: { contentType: "text", content: "a post to comment on" },
       });
       const comment = yield* alice.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "top level" },
       });
       yield* alice.client.comments.createReply({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { content: "replying about kumquats" },
       });
 
       // A fragment, again — "umquat" is a whole word nowhere.
       const page = yield* alice.client.search.searchComments({
-        urlParams: { q: "umquat" },
+        query: { q: "umquat" },
       });
       expect(page.results.length).toBe(1);
       expect(page.results[0]!.parentCommentId).toBe(comment.id);
@@ -520,7 +430,7 @@ test("searchMessages only returns messages from the caller's own chats", () =>
         payload: { userId: bob.user.id },
       });
       yield* alice.client.chats.createMessage({
-        path: { id: aliceBob.id },
+        params: { id: aliceBob.id },
         payload: { contentType: "text", content: "let's meet at the harbor" },
       });
 
@@ -529,12 +439,12 @@ test("searchMessages only returns messages from the caller's own chats", () =>
         payload: { userId: carol.user.id },
       });
       yield* bob.client.chats.createMessage({
-        path: { id: bobCarol.id },
+        params: { id: bobCarol.id },
         payload: { contentType: "text", content: "secret harbor plans" },
       });
 
       const page = yield* alice.client.search.searchMessages({
-        urlParams: { q: "harbor" },
+        query: { q: "harbor" },
       });
       // Alice sees only her own chat's message, never Bob<->Carol's.
       expect(page.results.length).toBe(1);
@@ -560,11 +470,11 @@ test("searchMessages finds a fragment inside a word", () =>
         payload: { userId: bob.user.id },
       });
       yield* bob.client.chats.createMessage({
-        path: { id: chat.id },
+        params: { id: chat.id },
         payload: { contentType: "text", content: "see you at the airport" },
       });
       const page = yield* alice.client.search.searchMessages({
-        urlParams: { q: "irpor" },
+        query: { q: "irpor" },
       });
       expect(page.results.length).toBe(1);
       expect(page.results[0]!.sender.id).toBe(bob.user.id);
@@ -582,11 +492,11 @@ test("searchMessages finds nothing for a term only in someone else's chat", () =
         payload: { userId: carol.user.id },
       });
       yield* bob.client.chats.createMessage({
-        path: { id: bobCarol.id },
+        params: { id: bobCarol.id },
         payload: { contentType: "text", content: "confidential zebra intel" },
       });
       const page = yield* alice.client.search.searchMessages({
-        urlParams: { q: "zebra" },
+        query: { q: "zebra" },
       });
       expect(page.results.length).toBe(0);
       expect(page.chats.length).toBe(0);
@@ -609,13 +519,13 @@ test("searchUsers matches a fragment of a username or display name", () =>
 
       // Mid-word fragment of a username.
       const byUsername = yield* alice.client.search.searchUsers({
-        urlParams: { q: "obb" },
+        query: { q: "obb" },
       });
       expect(byUsername.results.map((r) => r.user.username)).toEqual(["bobby"]);
 
       // Mid-word fragment of a display name, highlighted in that name.
       const byDisplayName = yield* alice.client.search.searchUsers({
-        urlParams: { q: "zgeral" },
+        query: { q: "zgeral" },
       });
       expect(byDisplayName.results.map((r) => r.user.username)).toEqual([
         "carol",
@@ -638,7 +548,7 @@ test("searchUsers ranks an exact username, then a prefix, then a fragment", () =
       yield* registerAndLogin("man", "pw-testpass"); // exact
 
       const page = yield* alice.client.search.searchUsers({
-        urlParams: { q: "man" },
+        query: { q: "man" },
       });
       expect(page.results.map((r) => r.user.username)).toEqual([
         "man",
@@ -656,7 +566,7 @@ test("searchUsers paginates with an opaque cursor", () =>
         yield* registerAndLogin(name, "pw-testpass");
 
       const first = yield* alice.client.search.searchUsers({
-        urlParams: { q: "searcher", limit: 2 },
+        query: { q: "searcher", limit: 2 },
       });
       expect(first.results.map((r) => r.user.username)).toEqual([
         "searcher1",
@@ -665,7 +575,7 @@ test("searchUsers paginates with an opaque cursor", () =>
       expect(first.nextCursor).not.toBeNull();
 
       const second = yield* alice.client.search.searchUsers({
-        urlParams: { q: "searcher", limit: 2, cursor: first.nextCursor! },
+        query: { q: "searcher", limit: 2, cursor: first.nextCursor! },
       });
       expect(second.results.map((r) => r.user.username)).toEqual(["searcher3"]);
       expect(second.nextCursor).toBeNull();
@@ -682,19 +592,19 @@ test("searchUsers keeps the directory's narrowness floor for non-admins", () =>
       // people (issue #48) — the section comes back empty rather than
       // failing, so the rest of a two-character search still answers.
       const page = yield* alice.client.search.searchUsers({
-        urlParams: { q: "bo" },
+        query: { q: "bo" },
       });
       expect(page.results.length).toBe(0);
       expect(page.nextCursor).toBeNull();
 
       const all = yield* alice.client.search.searchAll({
-        urlParams: { q: "bo" },
+        query: { q: "bo" },
       });
       expect(all.users.results.length).toBe(0);
 
       // Three characters searches people as usual.
       const wide = yield* alice.client.search.searchUsers({
-        urlParams: { q: "ali" },
+        query: { q: "ali" },
       });
       expect(wide.results.map((r) => r.user.username)).toEqual(["alice"]);
     }),
@@ -705,11 +615,11 @@ test("searchUsers rejects a malformed cursor", () =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const result = yield* alice.client.search
-        .searchUsers({ urlParams: { q: "alice", cursor: "not-a-cursor" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe(
+        .searchUsers({ query: { q: "alice", cursor: "not-a-cursor" } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe(
           "InvalidSearchRequest",
         );
     }),
@@ -729,19 +639,19 @@ test("searchAll returns people, posts, comments and messages in one request", ()
         payload: { contentType: "text", content: "kumquat harvest is early" },
       });
       yield* alice.client.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "my favourite kumquat variety" },
       });
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
       yield* alice.client.chats.createMessage({
-        path: { id: chat.id },
+        params: { id: chat.id },
         payload: { contentType: "text", content: "bringing kumquats tonight" },
       });
 
       const page = yield* alice.client.search.searchAll({
-        urlParams: { q: "kumquat" },
+        query: { q: "kumquat" },
       });
       expect(page.users.results.map((r) => r.user.username)).toEqual([
         "kumquatfan",
@@ -766,7 +676,7 @@ test("searchAll previews each section and hands over a cursor to continue", () =
       }
 
       const all = yield* alice.client.search.searchAll({
-        urlParams: { q: "apricot", limit: 2 },
+        query: { q: "apricot", limit: 2 },
       });
       expect(all.posts.results.map((r) => r.id)).toEqual([
         created[3]!,
@@ -776,7 +686,7 @@ test("searchAll previews each section and hands over a cursor to continue", () =
 
       // The per-type endpoint resumes exactly where the preview stopped.
       const rest = yield* alice.client.search.searchPosts({
-        urlParams: { q: "apricot", cursor: all.posts.nextCursor! },
+        query: { q: "apricot", cursor: all.posts.nextCursor! },
       });
       expect(rest.results.map((r) => r.id)).toEqual([created[1]!, created[0]!]);
     }),
@@ -796,16 +706,16 @@ test("searchAll scopes messages to the caller and hides blocked authors", () =>
         payload: { userId: carol.user.id },
       });
       yield* bob.client.chats.createMessage({
-        path: { id: bobCarol.id },
+        params: { id: bobCarol.id },
         payload: { contentType: "text", content: "private tangerine chatter" },
       });
       yield* alice.client.users.setBlock({
-        path: { id: bob.user.id },
+        params: { id: bob.user.id },
         payload: { type: "block" },
       });
 
       const page = yield* alice.client.search.searchAll({
-        urlParams: { q: "tangerine" },
+        query: { q: "tangerine" },
       });
       expect(page.posts.results.length).toBe(0);
       expect(page.messages.results.length).toBe(0);
@@ -817,10 +727,10 @@ test("searchAll rejects an unauthenticated request", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       const result = yield* c.search
-        .searchAll({ urlParams: { q: "hello" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+        .searchAll({ query: { q: "hello" } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
     }),
   ));

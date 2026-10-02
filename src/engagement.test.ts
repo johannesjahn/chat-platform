@@ -1,107 +1,15 @@
 import { expect, test } from "bun:test";
-import {
-  FetchHttpClient,
-  HttpApiBuilder,
-  HttpApiClient,
-  HttpClient,
-  HttpClientRequest,
-} from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import { eq } from "drizzle-orm";
-import { Effect, Layer, Metric, MetricLabel } from "effect";
+import { Effect, Metric } from "effect";
 import { ChatApi } from "./Api.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
 import { Db } from "./Db.ts";
-import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive } from "./GamesHandler.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
-import { JwtLive } from "./Jwt.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
-import { InMemoryPresenceStoreLive } from "./Presence.ts";
-import { InMemoryPubSubLive } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
 import { users } from "./db/schema.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
+import { makeTestRun } from "./testApi.ts";
 
-// JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
-process.env.JWT_SECRET ??= "test-secret";
-
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(AttachmentStorageLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(JwtLive),
-  Layer.provide(SanitizeDecodeErrorsLive),
-  Layer.provide(InMemoryWsTicketLive),
-);
-
-const { getTestDb } = makeTestDbAccessor();
-
-const run = async <A, E>(
-  effect: Effect.Effect<A, E, HttpClient.HttpClient | Db>,
-): Promise<A> => {
-  const db = await getTestDb();
-  await resetTestDb(db);
-  const TestDbLive = Layer.succeed(Db, db);
-
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(
-      ApiLive.pipe(
-        Layer.provide(TestDbLive),
-        Layer.provide(InMemoryPubSubLive),
-      ),
-      BunHttpServer.layerContext,
-    ),
-  );
-
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-
-  try {
-    return await Effect.runPromise(
-      effect.pipe(Effect.provide(TestClientLayer), Effect.provide(TestDbLive)),
-    );
-  } finally {
-    await dispose();
-  }
-};
+const run = makeTestRun();
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
@@ -183,7 +91,7 @@ test("addPostReaction increments the count and marks reactedByMe", () =>
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("bob");
       const state = yield* authed.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "👍" },
       });
       expect(reactionOf(state.reactions, "👍")).toEqual({
@@ -192,7 +100,7 @@ test("addPostReaction increments the count and marks reactedByMe", () =>
         reactedByMe: true,
       });
 
-      const fetched = yield* authed.posts.getPost({ path: { id: post.id } });
+      const fetched = yield* authed.posts.getPost({ params: { id: post.id } });
       expect(reactionOf(fetched.reactions, "👍")).toEqual({
         emoji: "👍",
         count: 1,
@@ -209,13 +117,13 @@ test('addPostReaction increments content_created_total{type="reaction"} only on 
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("faye");
-      const reactionsCreated = Metric.taggedWithLabels(contentCreatedTotal, [
-        MetricLabel.make("type", "reaction"),
-      ]);
+      const reactionsCreated = Metric.withAttributes(contentCreatedTotal, {
+        type: "reaction",
+      });
       const before = yield* Metric.value(reactionsCreated);
 
       yield* authed.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "👍" },
       });
       const afterFirst = yield* Metric.value(reactionsCreated);
@@ -224,7 +132,7 @@ test('addPostReaction increments content_created_total{type="reaction"} only on 
       // A repeat reaction with the same emoji is a no-op (see
       // addPostReaction's onConflictDoNothing) and must not double-count.
       yield* authed.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "👍" },
       });
       const afterSecond = yield* Metric.value(reactionsCreated);
@@ -237,11 +145,11 @@ test("addPostReaction is idempotent — reacting twice with the same emoji still
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("carol");
       yield* authed.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "❤️" },
       });
       const state = yield* authed.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "❤️" },
       });
       expect(reactionOf(state.reactions, "❤️")).toEqual({
@@ -257,11 +165,11 @@ test("a user can react to the same post with more than one distinct emoji", () =
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("iris");
       yield* authed.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "👍" },
       });
       const state = yield* authed.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "😂" },
       });
       expect(reactionOf(state.reactions, "👍")).toEqual({
@@ -282,14 +190,14 @@ test("reactions from different users accumulate; reactedByMe is per-user", () =>
     Effect.gen(function* () {
       const { authed: aliceClient, post } = yield* setupPostBy("dave");
       yield* aliceClient.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "👍" },
       });
 
       const bob = yield* registerAndLogin("erin", "pw-testpass");
       const bobClient = yield* makeAuthedClient(bob.accessToken);
       const state = yield* bobClient.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "👍" },
       });
       expect(reactionOf(state.reactions, "👍").count).toBe(2);
@@ -298,7 +206,7 @@ test("reactions from different users accumulate; reactedByMe is per-user", () =>
       // From the author's perspective, the count is 2 but they only reacted
       // themselves.
       const fromAuthor = yield* aliceClient.posts.getPost({
-        path: { id: post.id },
+        params: { id: post.id },
       });
       expect(reactionOf(fromAuthor.reactions, "👍")).toEqual({
         emoji: "👍",
@@ -309,7 +217,9 @@ test("reactions from different users accumulate; reactedByMe is per-user", () =>
       // A third user who hasn't reacted sees the count but reactedByMe false.
       const carol = yield* registerAndLogin("frank", "pw-testpass");
       const carolClient = yield* makeAuthedClient(carol.accessToken);
-      const seen = yield* carolClient.posts.getPost({ path: { id: post.id } });
+      const seen = yield* carolClient.posts.getPost({
+        params: { id: post.id },
+      });
       expect(reactionOf(seen.reactions, "👍")).toEqual({
         emoji: "👍",
         count: 2,
@@ -323,15 +233,15 @@ test("removePostReaction removes only that emoji; removing again is a no-op", ()
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("grace");
       yield* authed.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "👍" },
       });
       yield* authed.comments.addPostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "😢" },
       });
       const afterRemove = yield* authed.comments.removePostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "👍" },
       });
       expect(reactionOf(afterRemove.reactions, "👍")).toEqual({
@@ -347,7 +257,7 @@ test("removePostReaction removes only that emoji; removing again is a no-op", ()
       });
 
       const again = yield* authed.comments.removePostReaction({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { emoji: "👍" },
       });
       expect(reactionOf(again.reactions, "👍").count).toBe(0);
@@ -360,11 +270,11 @@ test("addPostReaction rejects an emoji outside the standard set", () =>
       const { authed, post } = yield* setupPostBy("kelly");
       const result = yield* authed.comments
         .addPostReaction({
-          path: { id: post.id },
+          params: { id: post.id },
           payload: { emoji: "🚀" as never },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
     }),
   ));
 
@@ -374,11 +284,11 @@ test("addPostReaction returns 404 for a missing post", () =>
       const { accessToken } = yield* registerAndLogin("heidi", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
-        .addPostReaction({ path: { id: 9999 }, payload: { emoji: "👍" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+        .addPostReaction({ params: { id: 9999 }, payload: { emoji: "👍" } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
     }),
   ));
 
@@ -388,11 +298,11 @@ test("addPostReaction rejects an unauthenticated request", () =>
       const { post } = yield* setupPostBy("ivan");
       const c = yield* makeClient;
       const result = yield* c.comments
-        .addPostReaction({ path: { id: post.id }, payload: { emoji: "👍" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe("Unauthorized");
+        .addPostReaction({ params: { id: post.id }, payload: { emoji: "👍" } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe("Unauthorized");
     }),
   ));
 
@@ -400,9 +310,9 @@ test('engagement mutations are rate-limited per user, incrementing rate_limit_re
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("limiter");
-      const rejections = Metric.taggedWithLabels(rateLimitRejectionsTotal, [
-        MetricLabel.make("limiter", "engagement"),
-      ]);
+      const rejections = Metric.withAttributes(rateLimitRejectionsTotal, {
+        limiter: "engagement",
+      });
       const before = yield* Metric.value(rejections);
       // ENGAGEMENT_WRITE_MAX_PER_USER = 120 (EngagementHandler.ts). Creating
       // the post above isn't an engagement write (it's the posts group, no
@@ -414,12 +324,15 @@ test('engagement mutations are rate-limited per user, incrementing rate_limit_re
       let lastTag = "";
       for (let i = 0; i < 130; i++) {
         const result = yield* authed.comments
-          .addPostReaction({ path: { id: post.id }, payload: { emoji: "👍" } })
-          .pipe(Effect.either);
-        if (result._tag === "Right") {
+          .addPostReaction({
+            params: { id: post.id },
+            payload: { emoji: "👍" },
+          })
+          .pipe(Effect.result);
+        if (result._tag === "Success") {
           allowed++;
         } else {
-          lastTag = (result.left as { _tag: string })._tag;
+          lastTag = (result.failure as { _tag: string })._tag;
           break;
         }
       }
@@ -437,7 +350,7 @@ test("createComment creates a top-level comment owned by the author", () =>
     Effect.gen(function* () {
       const { user, authed, post } = yield* setupPostBy("judy");
       const comment = yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "nice post" },
       });
       expect(comment.postId).toBe(post.id);
@@ -461,24 +374,24 @@ test("commentCount counts top-level comments and replies on getPost/listPosts", 
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("pam");
       const comment = yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "top-level" },
       });
       yield* authed.comments.createReply({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { content: "a reply" },
       });
       yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "another top-level" },
       });
 
       // getPost reflects all three (two top-level + one reply).
-      const fetched = yield* authed.posts.getPost({ path: { id: post.id } });
+      const fetched = yield* authed.posts.getPost({ params: { id: post.id } });
       expect(fetched.commentCount).toBe(3);
 
       // listPosts carries the same count on the feed card.
-      const page = yield* authed.posts.listPosts({ urlParams: {} });
+      const page = yield* authed.posts.listPosts({ query: {} });
       const listed = page.posts.find((p) => p.id === post.id);
       expect(listed?.commentCount).toBe(3);
     }),
@@ -489,23 +402,23 @@ test("deleting a top-level comment cascades to its replies in commentCount", () 
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("quinn");
       const comment = yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "top-level" },
       });
       yield* authed.comments.createReply({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { content: "a reply" },
       });
       const withComments = yield* authed.posts.getPost({
-        path: { id: post.id },
+        params: { id: post.id },
       });
       expect(withComments.commentCount).toBe(2);
 
       // Deleting the top-level comment cascades to its reply (FK in schema),
       // so the count drops back to 0.
-      yield* authed.comments.deleteComment({ path: { id: comment.id } });
+      yield* authed.comments.deleteComment({ params: { id: comment.id } });
       const afterDelete = yield* authed.posts.getPost({
-        path: { id: post.id },
+        params: { id: post.id },
       });
       expect(afterDelete.commentCount).toBe(0);
     }),
@@ -515,12 +428,12 @@ test('createComment increments content_created_total{type="comment"}', () =>
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("nadia");
-      const commentsCreated = Metric.taggedWithLabels(contentCreatedTotal, [
-        MetricLabel.make("type", "comment"),
-      ]);
+      const commentsCreated = Metric.withAttributes(contentCreatedTotal, {
+        type: "comment",
+      });
       const before = yield* Metric.value(commentsCreated);
       yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "nice post" },
       });
       const after = yield* Metric.value(commentsCreated);
@@ -535,13 +448,13 @@ test("createComment returns 404 for a missing post", () =>
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
         .createComment({
-          path: { id: 9999 },
+          params: { id: 9999 },
           payload: { content: "hi" },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
     }),
   ));
 
@@ -550,9 +463,9 @@ test("createComment rejects empty content", () =>
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("niaj");
       const result = yield* authed.comments
-        .createComment({ path: { id: post.id }, payload: { content: "" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
+        .createComment({ params: { id: post.id }, payload: { content: "" } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
     }),
   ));
 
@@ -564,15 +477,15 @@ test("listComments paginates oldest-first with a keyset cursor", () =>
       for (let i = 0; i < 5; i++) {
         created.push(
           yield* authed.comments.createComment({
-            path: { id: post.id },
+            params: { id: post.id },
             payload: { content: `comment ${i}` },
           }),
         );
       }
 
       const firstPage = yield* authed.comments.listComments({
-        path: { id: post.id },
-        urlParams: { limit: 2 },
+        params: { id: post.id },
+        query: { limit: 2 },
       });
       expect(firstPage.nextCursor).not.toBeNull();
       expect(firstPage.comments.map((c) => c.id)).toEqual([
@@ -581,8 +494,8 @@ test("listComments paginates oldest-first with a keyset cursor", () =>
       ]);
 
       const secondPage = yield* authed.comments.listComments({
-        path: { id: post.id },
-        urlParams: { limit: 2, cursor: firstPage.nextCursor! },
+        params: { id: post.id },
+        query: { limit: 2, cursor: firstPage.nextCursor! },
       });
       expect(secondPage.comments.map((c) => c.id)).toEqual([
         created[2]!.id,
@@ -590,8 +503,8 @@ test("listComments paginates oldest-first with a keyset cursor", () =>
       ]);
 
       const thirdPage = yield* authed.comments.listComments({
-        path: { id: post.id },
-        urlParams: { limit: 2, cursor: secondPage.nextCursor! },
+        params: { id: post.id },
+        query: { limit: 2, cursor: secondPage.nextCursor! },
       });
       expect(thirdPage.nextCursor).toBeNull();
       expect(thirdPage.comments.map((c) => c.id)).toEqual([created[4]!.id]);
@@ -603,17 +516,17 @@ test("listComments excludes replies (only top-level comments)", () =>
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("peggy");
       const comment = yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "top-level" },
       });
       yield* authed.comments.createReply({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { content: "a reply" },
       });
 
       const page = yield* authed.comments.listComments({
-        path: { id: post.id },
-        urlParams: {},
+        params: { id: post.id },
+        query: {},
       });
       expect(page.comments).toHaveLength(1);
       expect(page.comments[0]!.id).toBe(comment.id);
@@ -626,13 +539,13 @@ test("listComments rejects a malformed cursor", () =>
       const { authed, post } = yield* setupPostBy("sybil");
       const result = yield* authed.comments
         .listComments({
-          path: { id: post.id },
-          urlParams: { cursor: "not-a-real-cursor" },
+          params: { id: post.id },
+          query: { cursor: "not-a-real-cursor" },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe(
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe(
           "InvalidCommentRequest",
         );
     }),
@@ -645,19 +558,19 @@ test("createReply creates a reply with parentCommentId set", () =>
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("trent");
       const comment = yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "parent" },
       });
       const reply = yield* authed.comments.createReply({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { content: "child" },
       });
       expect(reply.parentCommentId).toBe(comment.id);
       expect(reply.postId).toBe(post.id);
 
       const replies = yield* authed.comments.listReplies({
-        path: { id: comment.id },
-        urlParams: {},
+        params: { id: comment.id },
+        query: {},
       });
       expect(replies.comments.map((c) => c.id)).toEqual([reply.id]);
     }),
@@ -668,22 +581,22 @@ test("createReply rejects replying to a reply (depth cap)", () =>
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("victor");
       const comment = yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "parent" },
       });
       const reply = yield* authed.comments.createReply({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { content: "child" },
       });
       const result = yield* authed.comments
         .createReply({
-          path: { id: reply.id },
+          params: { id: reply.id },
           payload: { content: "grandchild" },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe(
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe(
           "InvalidCommentRequest",
         );
     }),
@@ -695,11 +608,11 @@ test("createReply returns 404 for a missing parent comment", () =>
       const { accessToken } = yield* registerAndLogin("walter", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
-        .createReply({ path: { id: 9999 }, payload: { content: "x" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+        .createReply({ params: { id: 9999 }, payload: { content: "x" } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
     }),
   ));
 
@@ -710,11 +623,11 @@ test("addCommentReaction/removeCommentReaction toggle reaction state on a commen
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("wendy");
       const comment = yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "react to me" },
       });
       const reacted = yield* authed.comments.addCommentReaction({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { emoji: "👍" },
       });
       expect(reactionOf(reacted.reactions, "👍")).toEqual({
@@ -724,8 +637,8 @@ test("addCommentReaction/removeCommentReaction toggle reaction state on a commen
       });
 
       const listed = yield* authed.comments.listComments({
-        path: { id: post.id },
-        urlParams: {},
+        params: { id: post.id },
+        query: {},
       });
       expect(reactionOf(listed.comments[0]!.reactions, "👍")).toEqual({
         emoji: "👍",
@@ -734,7 +647,7 @@ test("addCommentReaction/removeCommentReaction toggle reaction state on a commen
       });
 
       const removed = yield* authed.comments.removeCommentReaction({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { emoji: "👍" },
       });
       expect(reactionOf(removed.reactions, "👍").count).toBe(0);
@@ -747,11 +660,11 @@ test("addCommentReaction returns 404 for a missing comment", () =>
       const { accessToken } = yield* registerAndLogin("yvonne", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
-        .addCommentReaction({ path: { id: 9999 }, payload: { emoji: "👍" } })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+        .addCommentReaction({ params: { id: 9999 }, payload: { emoji: "👍" } })
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
     }),
   ));
 
@@ -762,11 +675,11 @@ test("updateComment lets the author edit their comment", () =>
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("zoe");
       const comment = yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "original" },
       });
       const updated = yield* authed.comments.updateComment({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { content: "edited" },
       });
       expect(updated.content).toBe("edited");
@@ -779,20 +692,20 @@ test("updateComment rejects edits from a non-owner", () =>
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("aaron");
       const comment = yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "mine" },
       });
       const intruder = yield* registerAndLogin("bianca", "pw-testpass");
       const intruderClient = yield* makeAuthedClient(intruder.accessToken);
       const result = yield* intruderClient.comments
         .updateComment({
-          path: { id: comment.id },
+          params: { id: comment.id },
           payload: { content: "hijacked" },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe("Forbidden");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe("Forbidden");
     }),
   ));
 
@@ -801,7 +714,7 @@ test("deleteComment lets the author delete; an admin can delete anyone's", () =>
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("caleb");
       const comment = yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "to delete by admin" },
       });
 
@@ -812,11 +725,11 @@ test("deleteComment lets the author delete; an admin can delete anyone's", () =>
         payload: { username: "diana", password: "pw-testpass" },
       });
       const adminClient = yield* makeAuthedClient(adminToken);
-      yield* adminClient.comments.deleteComment({ path: { id: comment.id } });
+      yield* adminClient.comments.deleteComment({ params: { id: comment.id } });
 
       const listed = yield* authed.comments.listComments({
-        path: { id: post.id },
-        urlParams: {},
+        params: { id: post.id },
+        query: {},
       });
       expect(listed.comments).toHaveLength(0);
     }),
@@ -827,25 +740,25 @@ test("deleteComment cascades to its replies", () =>
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("evan");
       const comment = yield* authed.comments.createComment({
-        path: { id: post.id },
+        params: { id: post.id },
         payload: { content: "parent" },
       });
       const reply = yield* authed.comments.createReply({
-        path: { id: comment.id },
+        params: { id: comment.id },
         payload: { content: "child" },
       });
 
-      yield* authed.comments.deleteComment({ path: { id: comment.id } });
+      yield* authed.comments.deleteComment({ params: { id: comment.id } });
 
       // The reply is gone with its parent — reacting to it now 404s.
       const result = yield* authed.comments
         .addCommentReaction({
-          path: { id: reply.id },
+          params: { id: reply.id },
           payload: { emoji: "👍" },
         })
-        .pipe(Effect.either);
-      expect(result._tag).toBe("Left");
-      if (result._tag === "Left")
-        expect((result.left as { _tag: string })._tag).toBe("NotFound");
+        .pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure")
+        expect((result.failure as { _tag: string })._tag).toBe("NotFound");
     }),
   ));

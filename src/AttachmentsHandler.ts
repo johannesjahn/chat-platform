@@ -1,7 +1,7 @@
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpApiBuilder } from "effect/http-api";
 import type { BunFile } from "bun";
 import { eq, sql } from "drizzle-orm";
-import { Effect, Metric, MetricLabel } from "effect";
+import { Effect, Metric } from "effect";
 import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
   AttachmentQuotaExceeded,
@@ -28,9 +28,8 @@ import { processVideo } from "./VideoProcessing.ts";
 const UPLOAD_MAX_PER_USER = 20;
 const UPLOAD_WINDOW_SECONDS = 60;
 
-const enforceUploadLimit = (userId: number) =>
+const enforceUploadLimit = (limiter: RateLimiter["Service"], userId: number) =>
   Effect.gen(function* () {
-    const limiter = yield* RateLimiter;
     const result = yield* limiter.consume(
       `attachments:upload:user:${userId}`,
       UPLOAD_MAX_PER_USER,
@@ -38,9 +37,9 @@ const enforceUploadLimit = (userId: number) =>
     );
     if (!result.allowed) {
       yield* Metric.update(
-        Metric.taggedWithLabels(rateLimitRejectionsTotal, [
-          MetricLabel.make("limiter", "attachments"),
-        ]),
+        Metric.withAttributes(rateLimitRejectionsTotal, {
+          limiter: "attachments",
+        }),
         1,
       );
       return yield* Effect.fail(
@@ -86,15 +85,16 @@ const enforceUploadQuota = (
 export const AttachmentsHandlerLive = HttpApiBuilder.group(
   ChatApi,
   "attachments",
-  (handlers) =>
-    handlers
+  Effect.fn(function* (handlers) {
+    const limiter = yield* RateLimiter;
+    const db = yield* Db;
+    const storage = yield* AttachmentStorage;
+    return handlers
       .handle("uploadAttachment", ({ payload }) =>
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
-          yield* enforceUploadLimit(currentUser.id);
+          yield* enforceUploadLimit(limiter, currentUser.id);
 
-          const db = yield* Db;
-          const storage = yield* AttachmentStorage;
           const file = payload.file;
 
           if (
@@ -209,20 +209,16 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
             return yield* Effect.die(new Error("INSERT returned no rows"));
 
           yield* Metric.update(
-            Metric.taggedWithLabels(contentCreatedTotal, [
-              MetricLabel.make("type", "attachment"),
-            ]),
+            Metric.withAttributes(contentCreatedTotal, { type: "attachment" }),
             1,
           );
 
           return toApiAttachment(row, storage.presignGetUrl(row.storageKey));
         }),
       )
-      .handle("deleteAttachment", ({ path }) =>
+      .handle("deleteAttachment", ({ params: path }) =>
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
-          const db = yield* Db;
-          const storage = yield* AttachmentStorage;
 
           const row = yield* getOwnedAttachmentOr404(
             db,
@@ -235,5 +231,6 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
             db.delete(attachments).where(eq(attachments.id, row.id)),
           ).pipe(Effect.orDie);
         }),
-      ),
+      );
+  }),
 );

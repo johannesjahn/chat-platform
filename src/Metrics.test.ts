@@ -1,103 +1,27 @@
 import { expect, test } from "bun:test";
-import { FetchHttpClient, HttpApiBuilder, HttpClient } from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
-import { Effect, Layer, Metric, MetricLabel } from "effect";
-import { ChatApi } from "./Api.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
+import { HttpClient } from "effect/http";
+import { Effect, Layer, Metric } from "effect";
 import { Db, type DrizzleDb } from "./Db.ts";
-import { JwtLive } from "./Jwt.ts";
 import {
   MetricsRouteLive,
   recordHttpMetrics,
   websocketConnectionsActive,
   websocketConnectionsTotal,
 } from "./Metrics.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive } from "./GamesHandler.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
-
-// JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
-process.env.JWT_SECRET ??= "test-secret";
+import { makeTestRun } from "./testApi.ts";
 
 // `/metrics` is a raw route attached to the same shared router as `ChatApi`
-// (see Metrics.ts), so — same as Health.test.ts — an `HttpApi.Api` layer
-// must be present for `HttpApiBuilder.toWebHandler` to build a handler at
-// all, even though these tests never call any of its endpoints.
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(AttachmentStorageLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(JwtLive),
-  Layer.provide(InMemoryWsTicketLive),
-);
-
-// Never actually queried by these tests (no endpoint under test touches the
-// DB) — just enough to satisfy ApiLive's requirements.
-const unusedDbLive = Layer.succeed(Db, {} as unknown as DrizzleDb);
-
-const run = async <A, E>(
-  effect: Effect.Effect<A, E, HttpClient.HttpClient>,
-): Promise<A> => {
-  const ServerLive = Layer.mergeAll(ApiLive, MetricsRouteLive).pipe(
-    Layer.provide(RealtimeConnectionsLive),
-    Layer.provide(InMemoryPubSubLive),
-    Layer.provide(InMemoryPresenceStoreLive),
-    Layer.provide(unusedDbLive),
-  );
-
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(ServerLive, BunHttpServer.layerContext),
-    { middleware: recordHttpMetrics },
-  );
-
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-
-  try {
-    return await Effect.runPromise(
-      effect.pipe(Effect.provide(TestClientLayer)),
-    );
-  } finally {
-    await dispose();
-  }
-};
+// (see Metrics.ts), served here through the shared test harness with the
+// same recordHttpMetrics middleware main.ts wraps the server in. Never
+// touches the DB, so the test database stays unbooted.
+const run = makeTestRun({
+  routes: MetricsRouteLive,
+  db: Layer.succeed(Db, {} as unknown as DrizzleDb),
+  middleware: recordHttpMetrics,
+});
 
 test("GET /metrics returns Prometheus text exposition format", async () => {
   await run(
@@ -110,10 +34,10 @@ test("GET /metrics returns Prometheus text exposition format", async () => {
       );
 
       const body = yield* response.text;
-      // Effect's built-in fiber metrics are always present once any fiber
-      // has run, so the response is never empty even before this route sees
-      // any application-defined metric activity.
-      expect(body).toContain("# TYPE effect_fiber_started counter");
+      // websocketConnectionsActive is registered eagerly (see Metrics.ts),
+      // so the response is never empty even before this route sees any
+      // other application-defined metric activity.
+      expect(body).toContain("# TYPE websocket_connections_active gauge");
     }),
   );
 });
@@ -171,12 +95,12 @@ test("RealtimeConnections.register/unregister increment websocket_connections_to
     Layer.provide(InMemoryPubSubLive),
     Layer.provide(InMemoryPresenceStoreLive),
   );
-  const connects = Metric.taggedWithLabels(websocketConnectionsTotal, [
-    MetricLabel.make("event", "connect"),
-  ]);
-  const disconnects = Metric.taggedWithLabels(websocketConnectionsTotal, [
-    MetricLabel.make("event", "disconnect"),
-  ]);
+  const connects = Metric.withAttributes(websocketConnectionsTotal, {
+    event: "connect",
+  });
+  const disconnects = Metric.withAttributes(websocketConnectionsTotal, {
+    event: "disconnect",
+  });
 
   await Effect.runPromise(
     Effect.gen(function* () {

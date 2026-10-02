@@ -1,120 +1,19 @@
 import { expect, test } from "bun:test";
-import {
-  FetchHttpClient,
-  HttpApiBuilder,
-  HttpApiClient,
-  HttpClient,
-  HttpClientRequest,
-} from "@effect/platform";
-import { BunHttpServer } from "@effect/platform-bun";
-import { Effect, Layer } from "effect";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
+import { Effect } from "effect";
 import sharp from "sharp";
 import { ChatApi, MAX_AVATAR_UPLOAD_SIZE_BYTES } from "./Api.ts";
-import { AdminHandlerLive } from "./AdminHandler.ts";
-import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
-import { AttachmentStorageLive } from "./AttachmentStorage.ts";
 import { AvatarRouteLive } from "./AvatarRoute.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
-import { ChatsHandlerLive } from "./ChatsHandler.ts";
-import { SearchHandlerLive } from "./SearchHandler.ts";
-import { Db } from "./Db.ts";
-import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
-import { JwtLive } from "./Jwt.ts";
-import { EngagementHandlerLive } from "./EngagementHandler.ts";
-import { GamesHandlerLive } from "./GamesHandler.ts";
-import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
 import { AVATAR_VARIANT_PX, MIN_AVATAR_SOURCE_PX } from "./ImageProcessing.ts";
-import { PostsHandlerLive } from "./PostsHandler.ts";
-import { InMemoryPresenceStoreLive } from "./Presence.ts";
-import { InMemoryPubSubLive } from "./PubSub.ts";
-import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
-import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
-import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
-import { UsersHandlerLive } from "./UsersHandler.ts";
-import { VersionHandlerLive } from "./VersionHandler.ts";
-import { InMemoryWsTicketLive } from "./WsTicket.ts";
+import { makeTestRun } from "./testApi.ts";
 
 process.env.JWT_SECRET ??= "test-secret";
-
-const ApiLive = HttpApiBuilder.api(ChatApi).pipe(
-  Layer.provide(UsersHandlerLive),
-  Layer.provide(PostsHandlerLive),
-  Layer.provide(EngagementHandlerLive),
-  Layer.provide(ChatsHandlerLive),
-  Layer.provide(SearchHandlerLive),
-  Layer.provide(AttachmentsHandlerLive),
-  Layer.provide(VersionHandlerLive),
-  Layer.provide(AdminHandlerLive),
-  Layer.provide(GamesHandlerLive),
-  Layer.provide(NotificationsHandlerLive),
-  Layer.provide(RealtimeHandlerLive),
-  Layer.provide(RealtimeConnectionsLive),
-  Layer.provide(AuthenticationLive),
-  Layer.provide(TokenVersionCacheLive),
-  Layer.provide(InMemoryPresenceStoreLive),
-  Layer.provide(InMemoryRateLimiterLive),
-  Layer.provide(JwtLive),
-  Layer.provide(SanitizeDecodeErrorsLive),
-  Layer.provide(InMemoryWsTicketLive),
-  Layer.provide(AttachmentStorageLive),
-);
-
-const { getTestDb } = makeTestDbAccessor();
 
 // Mirrors attachments.test.ts's `run`: `POST /users/me/avatar` is a
 // multipart endpoint, so this hands back the raw web `handler` too, for
 // driving it with a real `multipart/form-data` body the way a browser would.
-const run = async <A, E>(
-  effect: (ctx: {
-    handler: (request: Request) => Promise<Response>;
-  }) => Effect.Effect<A, E, HttpClient.HttpClient | Db>,
-): Promise<A> => {
-  const db = await getTestDb();
-  await resetTestDb(db);
-  const TestDbLive = Layer.succeed(Db, db);
-
-  const { handler, dispose } = HttpApiBuilder.toWebHandler(
-    Layer.mergeAll(
-      ApiLive.pipe(
-        Layer.provide(TestDbLive),
-        Layer.provide(InMemoryPubSubLive),
-      ),
-      // The avatar proxy route shares the same router as `ChatApi` (see
-      // main.ts) — include it here so a test can fetch a stored avatar back the
-      // way a browser would. Its in-memory AttachmentStorage is a process-wide
-      // singleton (see AttachmentStorage.ts), so it reads the very bytes the
-      // upload handler wrote through ApiLive's own storage instance.
-      AvatarRouteLive.pipe(Layer.provide(AttachmentStorageLive)),
-      BunHttpServer.layerContext,
-    ),
-  );
-
-  const mockFetch = (
-    input: string | URL | Request,
-    init?: RequestInit,
-  ): Promise<Response> =>
-    handler(
-      input instanceof Request ? input : new Request(input.toString(), init),
-    );
-
-  const TestClientLayer = FetchHttpClient.layer.pipe(
-    Layer.provide(
-      Layer.succeed(FetchHttpClient.Fetch, mockFetch as typeof fetch),
-    ),
-  );
-
-  try {
-    return await Effect.runPromise(
-      effect({ handler }).pipe(
-        Effect.provide(TestClientLayer),
-        Effect.provide(TestDbLive),
-      ),
-    );
-  } finally {
-    await dispose();
-  }
-};
+const run = makeTestRun({ routes: AvatarRouteLive });
 
 const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
@@ -362,7 +261,7 @@ test("uploadAvatar stores 3 fixed-size variants, clears avatarUrl, and is reflec
       expect(smallMeta.width).toBe(AVATAR_VARIANT_PX.small);
       expect(smallMeta.height).toBe(AVATAR_VARIANT_PX.small);
 
-      const fetched = yield* authed.users.getUser({ path: { id: user.id } });
+      const fetched = yield* authed.users.getUser({ params: { id: user.id } });
       expect(fetched.avatarUrl).toBeNull();
       expect(fetched.avatarVariants).toEqual(body.avatarVariants);
     }),
@@ -529,10 +428,10 @@ test("uploadChatAvatar stores 3 fixed-size variants and is reflected by getChat 
       expect(smallResponse.status).toBe(200);
       expect(smallResponse.headers.get("content-type")).toBe("image/webp");
 
-      const fetched = yield* authed.chats.getChat({ path: { id: chat.id } });
+      const fetched = yield* authed.chats.getChat({ params: { id: chat.id } });
       expect(fetched.avatarVariants).toEqual(body.avatarVariants);
 
-      const listed = yield* authed.chats.listChats({ urlParams: {} });
+      const listed = yield* authed.chats.listChats({ query: {} });
       const listedChat = listed.chats.find((c) => c.id === chat.id);
       expect(listedChat?.avatarVariants).toEqual(body.avatarVariants);
     }),
@@ -562,15 +461,15 @@ test("deleteChatAvatar clears an uploaded group avatar and is forbidden for a pl
       );
 
       const forbidden = yield* memberClient.chats
-        .deleteChatAvatar({ path: { id: chat.id } })
-        .pipe(Effect.either);
-      expect(forbidden._tag).toBe("Left");
-      if (forbidden._tag === "Left") {
-        expect((forbidden.left as { _tag: string })._tag).toBe("Forbidden");
+        .deleteChatAvatar({ params: { id: chat.id } })
+        .pipe(Effect.result);
+      expect(forbidden._tag).toBe("Failure");
+      if (forbidden._tag === "Failure") {
+        expect((forbidden.failure as { _tag: string })._tag).toBe("Forbidden");
       }
 
       const cleared = yield* ownerClient.chats.deleteChatAvatar({
-        path: { id: chat.id },
+        params: { id: chat.id },
       });
       expect(cleared.avatarVariants).toBeNull();
     }),

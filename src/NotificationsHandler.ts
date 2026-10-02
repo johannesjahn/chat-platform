@@ -1,4 +1,4 @@
-import { HttpApiBuilder } from "@effect/platform";
+import { HttpApiBuilder } from "effect/http-api";
 import { alias } from "drizzle-orm/pg-core";
 import {
   and,
@@ -25,6 +25,7 @@ import { blockedOrMutedUserIds } from "./blocks.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { comments, notifications, posts, users } from "./db/schema.ts";
 import { notifyInboxChanged } from "./notifications.ts";
+import { RealtimeConnections } from "./Realtime.ts";
 import { publicUserColumns, toPublicUser } from "./UsersHandler.ts";
 
 // Read side of the notification inbox (issue #317). Rows are written by the
@@ -76,11 +77,12 @@ const actors = alias(users, "actor");
 export const NotificationsHandlerLive = HttpApiBuilder.group(
   ChatApi,
   "notifications",
-  (handlers) =>
-    handlers
-      .handle("listNotifications", ({ urlParams }) =>
+  Effect.fn(function* (handlers) {
+    const connections = yield* RealtimeConnections;
+    const db = yield* Db;
+    return handlers
+      .handle("listNotifications", ({ query: urlParams }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const limit = urlParams.limit ?? DEFAULT_NOTIFICATIONS_LIMIT;
 
@@ -170,14 +172,12 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
       )
       .handle("getUnreadNotificationCount", () =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           return { count: yield* unreadCount(db, currentUser.id) };
         }),
       )
       .handle("markAllNotificationsRead", () =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const updated = yield* Effect.tryPromise(() =>
             db
@@ -192,13 +192,13 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
               .returning({ id: notifications.id }),
           ).pipe(Effect.orDie);
           // The caller's other tabs clear their badge too.
-          if (updated.length > 0) yield* notifyInboxChanged([currentUser.id]);
+          if (updated.length > 0)
+            yield* notifyInboxChanged(connections, [currentUser.id]);
           return { count: yield* unreadCount(db, currentUser.id) };
         }),
       )
-      .handle("markNotificationRead", ({ path: { id } }) =>
+      .handle("markNotificationRead", ({ params: { id } }) =>
         Effect.gen(function* () {
-          const db = yield* Db;
           const currentUser = yield* CurrentUser;
           const existing = yield* Effect.tryPromise(() =>
             db
@@ -223,9 +223,10 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
                 .set({ readAt: new Date() })
                 .where(eq(notifications.id, id)),
             ).pipe(Effect.orDie);
-            yield* notifyInboxChanged([currentUser.id]);
+            yield* notifyInboxChanged(connections, [currentUser.id]);
           }
           return { count: yield* unreadCount(db, currentUser.id) };
         }),
-      ),
+      );
+  }),
 );
