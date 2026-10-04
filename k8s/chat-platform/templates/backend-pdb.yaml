@@ -1,0 +1,16 @@
+{{- if .Values.backend.podDisruptionBudget.enabled -}}
+{{- $fullname := include "chat-platform.fullname" . -}}
+# See backend.podDisruptionBudget in values.yaml.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $fullname }}-backend
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  maxUnavailable: {{ .Values.backend.podDisruptionBudget.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "chat-platform.selectorLabels" (dict "Release" .Release "Chart" .Chart "component" "backend") | nindent 6 }}
+{{- end }}
