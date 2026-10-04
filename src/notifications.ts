@@ -178,17 +178,18 @@ const MENTION_RE = new RegExp(
 );
 
 // Distinct, lowercased usernames mentioned in `text`, capped at
-// `MAX_USERNAME_LOOKUP_COUNT` — the same bound the client's lookup uses, so
-// content naming more users than that notifies the first ones only.
+// `MAX_USERNAME_LOOKUP_COUNT` exactly the way the client's
+// `mentionedUsernames` caps its lookup — sorted, then sliced — so content
+// naming more users than that notifies the very names that render as links,
+// not merely the first ones to appear (issue #470).
 export const extractMentionedUsernames = (text: string): string[] => {
   const names = new Set<string>();
   for (const match of text.matchAll(MENTION_RE)) {
     const username = match[1]!.replace(/[.-]+$/, "").toLowerCase();
     if (username.length === 0) continue;
     names.add(username);
-    if (names.size >= MAX_USERNAME_LOOKUP_COUNT) break;
   }
-  return [...names];
+  return [...names].sort().slice(0, MAX_USERNAME_LOOKUP_COUNT);
 };
 
 const resolveMentionedUserIds = async (
