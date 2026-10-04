@@ -10,8 +10,6 @@ import { Link } from "@tanstack/react-router";
 import {
   Check,
   CheckCheck,
-  ChevronDown,
-  ChevronUp,
   Loader2,
   Pencil,
   Pin,
@@ -28,6 +26,7 @@ import { Lightbox } from "@/components/Lightbox";
 import { MentionText } from "@/components/MentionText";
 import { MentionTextarea } from "@/components/MentionTextarea";
 import { Button } from "@/components/ui/button";
+import { DisclosureChevron } from "@/components/ui/collapse";
 import { $api } from "@/lib/api";
 import { attachmentKind } from "@/lib/attachments";
 import {
@@ -39,6 +38,7 @@ import {
   type ChatMessage,
 } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
+import { useExpandableText } from "@/lib/motion";
 import type { ReactionEmoji } from "@/lib/reactions";
 import { cn } from "@/lib/utils";
 
@@ -245,7 +245,12 @@ export function MessageBubble({
   const isLongText =
     message.contentType === "text" &&
     message.content.length > MESSAGE_COLLAPSE_THRESHOLD;
-  const [expanded, setExpanded] = useState(!isLongText);
+  const {
+    ref: textRef,
+    expanded,
+    clamped,
+    toggle: toggleExpanded,
+  } = useExpandableText<HTMLParagraphElement>(!isLongText, "line-clamp-4");
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const [saving, setSaving] = useState(false);
@@ -695,9 +700,10 @@ export function MessageBubble({
           ) : (
             <>
               <p
+                ref={textRef}
                 className={cn(
                   "whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed",
-                  !expanded && "line-clamp-4",
+                  clamped && "line-clamp-4",
                 )}
               >
                 <MentionText
@@ -715,23 +721,15 @@ export function MessageBubble({
                   type="button"
                   variant="link"
                   size="sm"
-                  onClick={() => setExpanded((prev) => !prev)}
+                  aria-expanded={expanded}
+                  onClick={toggleExpanded}
                   className={cn(
                     "h-auto self-start p-0 text-xs",
                     isOwn && "text-primary-foreground underline",
                   )}
                 >
-                  {expanded ? (
-                    <>
-                      <ChevronUp className="size-3.5" />
-                      Show less
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown className="size-3.5" />
-                      Show more
-                    </>
-                  )}
+                  <DisclosureChevron open={expanded} className="size-3.5" />
+                  {expanded ? "Show less" : "Show more"}
                 </Button>
               )}
             </>

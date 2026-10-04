@@ -2,8 +2,6 @@ import { type CSSProperties, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
-  ChevronDown,
-  ChevronUp,
   ImageIcon,
   Loader2,
   MessageSquare,
@@ -20,6 +18,7 @@ import { RelativeTime } from "@/components/RelativeTime";
 import { CountUp } from "@/components/reactbits/CountUp";
 import { Spotlight } from "@/components/reactbits/Spotlight";
 import { Button } from "@/components/ui/button";
+import { Collapse, DisclosureChevron } from "@/components/ui/collapse";
 import {
   Card,
   CardContent,
@@ -29,6 +28,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { $api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
+import { useExpandableText } from "@/lib/motion";
 import { patchCachedPost } from "@/lib/posts";
 import type { ReactionEmoji } from "@/lib/reactions";
 import { cn } from "@/lib/utils";
@@ -100,7 +100,12 @@ export function PostCard({
   const totalReactions = post.reactions.reduce((sum, r) => sum + r.count, 0);
   const isLongText =
     post.contentType === "text" && post.content.length > COLLAPSE_THRESHOLD;
-  const [expanded, setExpanded] = useState(!isLongText);
+  const {
+    ref: textRef,
+    expanded,
+    clamped,
+    toggle: toggleExpanded,
+  } = useExpandableText<HTMLParagraphElement>(!isLongText, "line-clamp-6");
   const [showComments, setShowComments] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
@@ -236,11 +241,14 @@ export function PostCard({
           </div>
         ) : (
           <div className="px-6 pt-2 pb-4">
+            {/* Grows to the full text and shrinks back instead of snapping —
+                see `useExpandableText`. */}
             <p
-              className={
-                "whitespace-pre-wrap break-words text-base leading-relaxed" +
-                (!expanded ? " line-clamp-6" : "")
-              }
+              ref={textRef}
+              className={cn(
+                "whitespace-pre-wrap break-words text-base leading-relaxed",
+                clamped && "line-clamp-6",
+              )}
             >
               <MentionText text={post.content} />
             </p>
@@ -249,19 +257,11 @@ export function PostCard({
                 variant="ghost"
                 size="sm"
                 className="mt-2 h-8 gap-1.5 px-3 text-xs text-primary hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-smooth"
-                onClick={() => setExpanded((prev) => !prev)}
+                aria-expanded={expanded}
+                onClick={toggleExpanded}
               >
-                {expanded ? (
-                  <>
-                    <ChevronUp className="size-4 transition-transform duration-300 group-hover:-translate-y-0.5" />
-                    Show less
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="size-4 transition-transform duration-300 group-hover:translate-y-0.5" />
-                    Show more
-                  </>
-                )}
+                <DisclosureChevron open={expanded} />
+                {expanded ? "Show less" : "Show more"}
               </Button>
             )}
           </div>
@@ -299,6 +299,7 @@ export function PostCard({
                 <CountUp value={post.commentCount} />
               </span>
             )}
+            <DisclosureChevron open={showComments} className="size-3.5" />
           </Button>
           {/* Only surface a content-type badge for media posts — labelling
               every plain-text post "Text" was pure noise. */}
@@ -318,16 +319,9 @@ export function PostCard({
           <p className="px-3 pb-2 text-xs text-destructive">{reactionError}</p>
         )}
       </CardFooter>
-      {/* Height-animates open instead of snapping the whole thread into the
-          card — the grid track goes 0fr → 1fr, which actually interpolates
-          where `height: auto` doesn't. See `animate-collapse-in`. */}
-      {showComments && (
-        <div className="motion-safe:animate-collapse-in">
-          <div className="min-h-0 overflow-hidden">
-            <CommentsSection postId={post.id} />
-          </div>
-        </div>
-      )}
+      <Collapse open={showComments}>
+        <CommentsSection postId={post.id} />
+      </Collapse>
       {lightboxOpen && post.contentType === "image_url" && (
         <Lightbox
           src={post.content}

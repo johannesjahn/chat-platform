@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { Collapse, DisclosureChevron } from "@/components/ui/collapse";
 import { cn } from "@/lib/utils";
 
 // A stacked column chart for the admin dashboard's daily timelines, built
@@ -232,52 +233,55 @@ export function ActivityChart({
           onClick={() => setShowTable((open) => !open)}
           aria-expanded={showTable}
           aria-controls={tableId}
-          className="ml-auto rounded text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+          className="ml-auto inline-flex items-center gap-1 rounded text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
         >
           {showTable ? "Hide data" : "Show data"}
+          <DisclosureChevron open={showTable} className="size-3.5" />
         </button>
       </figcaption>
 
       {/* The table isn't just an a11y fallback — it's the exact values the
           chart only approximates, available to anyone who wants them. */}
-      <div id={tableId} hidden={!showTable} className="overflow-x-auto">
-        <table className="w-full text-left text-xs">
-          <caption className="sr-only">{caption}</caption>
-          <thead className="text-muted-foreground">
-            <tr>
-              <th scope="col" className="py-1 pr-3 font-medium">
-                Day
-              </th>
-              {series.map((entry) => (
-                <th
-                  key={entry.key}
-                  scope="col"
-                  className="py-1 pr-3 text-right font-medium"
-                >
-                  {entry.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {points.map((point) => (
-              <tr key={point.date} className="border-t border-border/50">
-                <th scope="row" className="py-1 pr-3 font-normal">
-                  {formatDay(point.date)}
+      <Collapse open={showTable} keepMounted id={tableId}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <caption className="sr-only">{caption}</caption>
+            <thead className="text-muted-foreground">
+              <tr>
+                <th scope="col" className="py-1 pr-3 font-medium">
+                  Day
                 </th>
                 {series.map((entry) => (
-                  <td
+                  <th
                     key={entry.key}
-                    className="py-1 pr-3 text-right tabular-nums"
+                    scope="col"
+                    className="py-1 pr-3 text-right font-medium"
                   >
-                    {point.values[entry.key] ?? 0}
-                  </td>
+                    {entry.label}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {points.map((point) => (
+                <tr key={point.date} className="border-t border-border/50">
+                  <th scope="row" className="py-1 pr-3 font-normal">
+                    {formatDay(point.date)}
+                  </th>
+                  {series.map((entry) => (
+                    <td
+                      key={entry.key}
+                      className="py-1 pr-3 text-right tabular-nums"
+                    >
+                      {point.values[entry.key] ?? 0}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Collapse>
     </figure>
   );
 }
