@@ -1,0 +1,51 @@
+name: Set up Bun and install dependencies
+description: >-
+  Installs Bun, restores the Bun install cache, and runs
+  `bun install --frozen-lockfile` for the requested workspaces. Requires the
+  repo to be checked out first (it's a local action).
+
+inputs:
+  bun-version:
+    description: Bun version to install (pass the workflow's BUN_VERSION).
+    required: true
+  root:
+    description: Install the backend (repo root) dependencies.
+    default: "true"
+  web:
+    description: Install the web/ dependencies.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    # The key names the install set and hashes only that set's lockfiles.
+    # actions/cache saves only on an exact-key miss and never overwrites, so
+    # when every job shared one key, whichever job finished first after a
+    # lockfile change saved the cache — often one that installed only root
+    # or only web/ — and every later run hit that incomplete entry exactly,
+    # never re-saved, and re-downloaded the missing half (issue #473).
+    # Falling back to another set's cache is fine: the install below fills
+    # in whatever's missing, and this set's key is then saved complete.
+    - name: Cache Bun install cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-root=${{ inputs.root }}-web=${{ inputs.web }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
+        restore-keys: |
+          bun-${{ runner.os }}-root=${{ inputs.root }}-web=${{ inputs.web }}-
+          bun-${{ runner.os }}-
+
+    - name: Install backend dependencies
+      if: inputs.root == 'true'
+      shell: bash
+      run: bun install --frozen-lockfile
+
+    - name: Install web dependencies
+      if: inputs.web == 'true'
+      shell: bash
+      run: bun install --frozen-lockfile
+      working-directory: web

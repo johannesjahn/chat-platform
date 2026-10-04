@@ -21,21 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Cache Bun install cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
       - name: Check formatting
         run: bun run format:check
 
@@ -49,24 +38,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Cache Bun install cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-
-      - name: Install backend dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install web dependencies
-        run: bun install --frozen-lockfile
-        working-directory: web
+          web: true
 
       - name: Typecheck backend
         run: bun run typecheck
@@ -88,21 +64,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Cache Bun install cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-
-      - name: Install web dependencies
-        run: bun install --frozen-lockfile
-        working-directory: web
+          root: false
+          web: true
 
       # `typecheck` only tsc --noEmit's web/; that catches type errors but not
       # a bundler failure (e.g. an unresolvable import, an invalid Vite/Rollup
@@ -120,24 +87,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Cache Bun install cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-
-      - name: Install backend dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install web dependencies
-        run: bun install --frozen-lockfile
-        working-directory: web
+          web: true
 
       - name: Regenerate openapi.json and frontend API types
         run: bun run gen:types
@@ -158,24 +112,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Cache Bun install cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-
-      - name: Install backend dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install web dependencies
-        run: bun install --frozen-lockfile
-        working-directory: web
+          web: true
 
       # audit-level=high: drizzle-kit currently pulls in a moderate-severity
       # advisory (GHSA-67mh-4wv8-2f99) via its bundled, deprecated
@@ -291,21 +232,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Cache Bun install cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
       # The hosted runner image ships third-party apt sources (Google Chrome,
       # Microsoft) that nothing here installs from — every package below comes
       # from the Ubuntu archive. When one of those repos serves a stale or
@@ -380,21 +310,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Cache Bun install cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
       # DATABASE_URL mode no longer auto-migrates on boot (see issue #178),
       # so run the standalone migration first. REDIS_URL is left unset so
       # PubSub falls back to its in-memory implementation, which /ready
@@ -526,26 +445,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Cache Bun install cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-          restore-keys: |
-            bun-${{ runner.os }}-
-
       # The e2e webServer boots the backend (`bun run start`, cwd `..`) and the
       # web dev server, so both workspaces need their dependencies installed.
-      - name: Install backend dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install web dependencies
-        run: bun install --frozen-lockfile
-        working-directory: web
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          web: true
 
       # Only the browser binary (Chromium) is cacheable across runs — the
       # system deps below are apt packages on an ephemeral, fresh-each-run
