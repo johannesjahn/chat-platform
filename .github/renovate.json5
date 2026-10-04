@@ -115,13 +115,13 @@
       dependencyDashboardApproval: true,
     },
 
-    // The Bun version is hand-duplicated in three places (Dockerfile's
-    // `FROM oven/bun:...`, and the separate BUN_VERSION copies in ci.yml
-    // and tag-release.yml — see issue #151) with nothing keeping them in
-    // sync. Group every source of the oven/bun Docker Hub tag — the
-    // Dockerfile (picked up automatically by the docker manager) and the
-    // two BUN_VERSION regex managers below — into one PR so all three move
-    // together.
+    // The Bun version is hand-duplicated in four places (Dockerfile's
+    // `FROM oven/bun:...`, and the separate BUN_VERSION copies in ci.yml,
+    // tag-release.yml and bump-version.yml — see issues #151 and #472)
+    // with nothing keeping them in sync. Group every source of the oven/bun
+    // Docker Hub tag — the Dockerfile (picked up automatically by the
+    // docker manager) and the BUN_VERSION regex manager below — into one PR
+    // so they all move together.
     {
       matchDatasources: ["docker"],
       matchPackageNames: ["oven/bun"],
@@ -198,15 +198,19 @@
   ],
 
   customManagers: [
-    // Tracks BUN_VERSION in ci.yml and tag-release.yml against the same
+    // Tracks BUN_VERSION in every workflow that pins one against the same
     // Docker Hub oven/bun tags the Dockerfile's FROM line tracks (grouped
     // with it above) — none of the npm/github-actions/docker/helm-values
-    // managers read a bare `BUN_VERSION: X.Y.Z` env value.
+    // managers read a bare `BUN_VERSION: X.Y.Z` env value. A workflow
+    // missing from this list silently drifts (bump-version.yml sat on
+    // 1.3.14 while everything else moved to 1.4.x — issue #472), so add
+    // any new workflow that sets BUN_VERSION here too.
     {
       customType: "regex",
       managerFilePatterns: [
         "/^\\.github/workflows/ci\\.yml$/",
         "/^\\.github/workflows/tag-release\\.yml$/",
+        "/^\\.github/workflows/bump-version\\.yml$/",
       ],
       matchStrings: ["BUN_VERSION:\\s*(?<currentValue>[0-9.]+)"],
       depNameTemplate: "oven/bun",
