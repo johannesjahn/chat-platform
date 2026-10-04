@@ -22,6 +22,15 @@ export class RateLimiter extends Context.Service<
       limit: number,
       windowSeconds: number,
     ) => Effect.Effect<RateLimitResult>;
+    // Reports whether one more call to `key` would still be within `limit`,
+    // *without* counting it — for buckets that should only count some
+    // outcomes (e.g. failed logins), checked up front and consumed after.
+    readonly peek: (
+      key: string,
+      limit: number,
+    ) => Effect.Effect<RateLimitResult>;
+    // Drops `key`'s bucket entirely, as if its window had just rolled over.
+    readonly reset: (key: string) => Effect.Effect<void>;
   }
 >()("RateLimiter") {}
 
@@ -53,6 +62,25 @@ export const InMemoryRateLimiterLive = Layer.sync(RateLimiter, () => {
           ),
         };
       }),
+    peek: (key, limit) =>
+      Effect.sync(() => {
+        const now = Date.now();
+        const existing = buckets.get(key);
+        if (!existing || existing.resetAt <= now) {
+          return { allowed: true, retryAfterSeconds: 1 };
+        }
+        return {
+          allowed: existing.count < limit,
+          retryAfterSeconds: Math.max(
+            1,
+            Math.ceil((existing.resetAt - now) / 1000),
+          ),
+        };
+      }),
+    reset: (key) =>
+      Effect.sync(() => {
+        buckets.delete(key);
+      }),
   };
 });
 
@@ -80,6 +108,20 @@ export const RedisRateLimiterLive = Layer.sync(RateLimiter, () => {
           allowed: count <= limit,
           retryAfterSeconds: ttl > 0 ? ttl : windowSeconds,
         };
+      }),
+    peek: (key, limit) =>
+      Effect.promise(async () => {
+        const redisKey = `ratelimit:${key}`;
+        const count = Number((await client.get(redisKey)) ?? 0);
+        const ttl = await client.ttl(redisKey);
+        return {
+          allowed: count < limit,
+          retryAfterSeconds: ttl > 0 ? ttl : 1,
+        };
+      }),
+    reset: (key) =>
+      Effect.promise(async () => {
+        await client.del(`ratelimit:${key}`);
       }),
   };
 });

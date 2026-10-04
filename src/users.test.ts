@@ -1336,8 +1336,8 @@ test("login is rate-limited per account after repeated attempts, independent of 
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      // LOGIN_MAX_ATTEMPTS_PER_ACCOUNT is 5, well below the per-IP cap of 20,
-      // so this trips the per-account bucket first. The username need not
+      // LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP is 5, well below the per-IP cap
+      // of 20, so this trips the per-account bucket first. The username need not
       // belong to a real account — the bucket is keyed on the submitted
       // username regardless, so a nonexistent account can't be used to
       // bypass the limit.
@@ -1356,6 +1356,48 @@ test("login is rate-limited per account after repeated attempts, independent of 
       };
       expect(left._tag).toBe("TooManyRequests");
       expect(left.retryAfterSeconds).toBeGreaterThan(0);
+    }),
+  ));
+
+test("successful logins don't count toward the per-account login limit", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "multidevice", password: "pw-multi" },
+      });
+      // Well past the 5-failure account bucket (but under the per-IP cap of
+      // 20): someone signing in on several devices must never be locked out.
+      for (let i = 0; i < 10; i++) {
+        const session = yield* c.users.login({
+          payload: { username: "multidevice", password: "pw-multi" },
+        });
+        expect(session.user.username).toBe("multidevice");
+      }
+    }),
+  ));
+
+test("a successful login clears the account's earlier failed attempts", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "typo-prone", password: "pw-right" },
+      });
+      const fail = c.users
+        .login({ payload: { username: "typo-prone", password: "pw-wrong" } })
+        .pipe(Effect.flip);
+      for (let i = 0; i < 4; i++) {
+        expect((yield* fail)._tag).toBe("InvalidCredentials");
+      }
+      yield* c.users.login({
+        payload: { username: "typo-prone", password: "pw-right" },
+      });
+      // The four failures above were forgiven by the success, so a fresh
+      // run of four more still isn't rate-limited.
+      for (let i = 0; i < 4; i++) {
+        expect((yield* fail)._tag).toBe("InvalidCredentials");
+      }
     }),
   ));
 

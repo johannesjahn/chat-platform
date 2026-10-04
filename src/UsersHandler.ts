@@ -54,16 +54,21 @@ import { PubSub } from "./PubSub.ts";
 import { postReactionInfo } from "./reactions.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { clientIp } from "./ClientIp.ts";
-import { RateLimiter } from "./RateLimiter.ts";
+import { RateLimiter, type RateLimitResult } from "./RateLimiter.ts";
 import { containsPattern } from "./search.ts";
 import { refreshTokens, userBlocks, users, posts } from "./db/schema.ts";
 
 // Sensible defaults for auth-endpoint rate limiting (see issue #25). Login is
-// capped both per source IP and per targeted account, so a single attacker
-// can't brute-force one account from many IPs, or spray many accounts from
-// one IP, without tripping a limit either way.
+// capped per source IP (every attempt counts) and per targeted account — but
+// the account buckets count only *failed* attempts and a successful login
+// clears them (issue #480), so signing in on several devices never locks the
+// owner out. The tight account bucket is also keyed by IP, so an attacker
+// hammering wrong passwords for someone's username only locks *themselves*
+// out of that account; the looser account-wide ceiling still bounds how many
+// guesses a distributed attacker (many IPs) gets per window.
 const LOGIN_MAX_ATTEMPTS_PER_IP = 20;
-const LOGIN_MAX_ATTEMPTS_PER_ACCOUNT = 5;
+const LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP = 5;
+const LOGIN_MAX_FAILURES_PER_ACCOUNT = 50;
 const LOGIN_WINDOW_SECONDS = 15 * 60;
 
 // Registration has no natural "account" bucket (that's what's being
@@ -115,8 +120,27 @@ export const enforceRateLimit = (
   limit: number,
   windowSeconds: number,
 ): Effect.Effect<void, TooManyRequests> =>
+  Effect.flatMap(limiter.consume(key, limit, windowSeconds), (result) =>
+    rejectIfLimited(key, result),
+  );
+
+// Like enforceRateLimit, but only checks `key` without counting this call —
+// for buckets the caller consumes itself once it knows the outcome (login's
+// failure-only account buckets).
+const enforceRateLimitPeek = (
+  limiter: RateLimiter["Service"],
+  key: string,
+  limit: number,
+): Effect.Effect<void, TooManyRequests> =>
+  Effect.flatMap(limiter.peek(key, limit), (result) =>
+    rejectIfLimited(key, result),
+  );
+
+const rejectIfLimited = (
+  key: string,
+  result: RateLimitResult,
+): Effect.Effect<void, TooManyRequests> =>
   Effect.gen(function* () {
-    const result = yield* limiter.consume(key, limit, windowSeconds);
     if (!result.allowed) {
       yield* Metric.update(
         Metric.withAttributes(rateLimitRejectionsTotal, {
@@ -629,11 +653,18 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             LOGIN_MAX_ATTEMPTS_PER_IP,
             LOGIN_WINDOW_SECONDS,
           );
-          yield* enforceRateLimit(
+          const account = payload.username.toLowerCase();
+          const accountIpKey = `login:account-ip:${account}:${ip}`;
+          const accountKey = `login:account:${account}`;
+          yield* enforceRateLimitPeek(
             limiter,
-            `login:account:${payload.username.toLowerCase()}`,
-            LOGIN_MAX_ATTEMPTS_PER_ACCOUNT,
-            LOGIN_WINDOW_SECONDS,
+            accountIpKey,
+            LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP,
+          );
+          yield* enforceRateLimitPeek(
+            limiter,
+            accountKey,
+            LOGIN_MAX_FAILURES_PER_ACCOUNT,
           );
           const rows = yield* Effect.tryPromise(() =>
             db
@@ -654,6 +685,16 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const hash = user ? user.passwordHash : yield* dummyHash();
           const valid = yield* verifyPassword(payload.password, hash);
           if (!user || !valid) {
+            yield* limiter.consume(
+              accountIpKey,
+              LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP,
+              LOGIN_WINDOW_SECONDS,
+            );
+            yield* limiter.consume(
+              accountKey,
+              LOGIN_MAX_FAILURES_PER_ACCOUNT,
+              LOGIN_WINDOW_SECONDS,
+            );
             yield* recordAuthEvent("login", "failure");
             return yield* Effect.fail(
               new InvalidCredentials({
@@ -661,6 +702,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               }),
             );
           }
+
+          yield* limiter.reset(accountIpKey);
+          yield* limiter.reset(accountKey);
 
           const publicUser = toPublicUser(user);
           const tokenUser = {
