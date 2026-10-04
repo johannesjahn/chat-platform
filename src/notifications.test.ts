@@ -3,9 +3,10 @@ import { HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { ChatApi } from "./Api.ts";
+import { ChatApi, MAX_USERNAME_LOOKUP_COUNT } from "./Api.ts";
 import { Db } from "./Db.ts";
 import { gameLobbies, gameResults } from "./db/schema.ts";
+import { extractMentionedUsernames } from "./notifications.ts";
 import { makeTestRun } from "./testApi.ts";
 
 // Same shape as games.test.ts's harness: `effect` also gets `Db` directly,
@@ -219,6 +220,20 @@ test("@mentions in posts and comments notify the named users, case-insensitively
       expect(bobAgain.notifications[0]!.commentId).toBe(comment.id);
     }),
   ));
+
+test("past the lookup cap, the names that notify are the ones the client links", () => {
+  // The client links the alphabetically-first MAX_USERNAME_LOOKUP_COUNT
+  // names (see `mentionedUsernames` in web/src/lib/mentions.ts), so a name
+  // written first but sorting last must not be the one that notifies.
+  const linked = Array.from(
+    { length: MAX_USERNAME_LOOKUP_COUNT },
+    (_, i) => `a${String(i).padStart(2, "0")}`,
+  );
+  const names = extractMentionedUsernames(
+    ["@zed", ...linked.map((name) => `@${name}`)].join(" "),
+  );
+  expect(names).toEqual(linked);
+});
 
 test("editing only pings names the edit added", () =>
   run(
