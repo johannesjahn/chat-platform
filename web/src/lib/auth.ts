@@ -37,7 +37,10 @@ function emit(): void {
   for (const listener of listeners) listener();
 }
 
-function subscribe(callback: () => void): () => void {
+// Notified whenever the session may have changed — set/cleared in this tab,
+// or (via the `storage` event) in another one. Exported for non-React code
+// that has to react to the signed-in user changing (see query.ts).
+export function subscribeSession(callback: () => void): () => void {
   listeners.add(callback);
   window.addEventListener("storage", callback);
   return () => {
@@ -48,5 +51,5 @@ function subscribe(callback: () => void): () => void {
 
 export function useSession(): Session | null {
   // Server snapshot is always null — the session lives only in the browser.
-  return useSyncExternalStore(subscribe, getSession, () => null);
+  return useSyncExternalStore(subscribeSession, getSession, () => null);
 }

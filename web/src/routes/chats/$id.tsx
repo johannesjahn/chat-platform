@@ -184,6 +184,29 @@ function ChatView({
     loadEarlier,
   } = useChatMessages(chatId, !!session);
 
+  // A 403/404 is the server saying this viewer can't — or can no longer —
+  // see this chat: they were removed from the group, it was deleted, or the
+  // cached copy belongs to whoever used this browser before (issue #478).
+  // Unlike a network failure, that's authoritative, so the cached
+  // conversation is dropped rather than kept on screen.
+  const accessDenied = isAccessDenied(chatError);
+  useEffect(() => {
+    if (!accessDenied) return;
+    const cache = queryClient.getQueryCache();
+    // The detail query keeps its error (so this view shows it) but loses
+    // its data; the rest of the chat's queries are simply discarded.
+    cache
+      .find({ queryKey: chatDetailQueryKey(chatId), exact: true })
+      ?.setState({
+        data: undefined,
+        dataUpdatedAt: 0,
+      });
+    queryClient.removeQueries({
+      queryKey: ["chats", chatId],
+      predicate: (query) => query.queryKey[2] !== "detail",
+    });
+  }, [accessDenied, chatId, queryClient]);
+
   // For a direct chat, "online" is a property of the one other participant;
   // group chats don't show a single presence dot. Both hooks must run
   // unconditionally (before the loading/error early returns below), so they
@@ -541,8 +564,9 @@ function ChatView({
     );
   }
 
-  if (!chat) {
-    // Deliberately keyed on `!chat`, not `chatError || !chat`: once a chat
+  if (!chat || accessDenied) {
+    // Keyed on `!chat` (plus an authoritative denial), not on any
+    // `chatError`: once a chat
     // has been loaded (or restored from the persisted cache — see
     // query.ts), a *background* refetch failing (e.g. a WS-triggered
     // invalidation racing a connectivity drop) must not blank the whole
@@ -556,7 +580,8 @@ function ChatView({
     // body instead (see errorMessage.ts's own instanceof check for the same
     // distinction) — so this is the one case that's actually a 403/404, not
     // a connectivity problem, and worth showing the server's own wording for.
-    const isApiError = chatError != null && !(chatError instanceof Error);
+    const isApiError =
+      accessDenied || (chatError != null && !(chatError instanceof Error));
     return (
       <main className="mx-auto w-full max-w-2xl px-4 py-10">
         <Card>
@@ -959,4 +984,11 @@ function ChatView({
       )}
     </main>
   );
+}
+
+function isAccessDenied(error: unknown): boolean {
+  if (error == null || typeof error !== "object" || error instanceof Error)
+    return false;
+  const tag = (error as { _tag?: unknown })._tag;
+  return tag === "Forbidden" || tag === "NotFound";
 }

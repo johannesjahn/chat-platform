@@ -1,6 +1,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import type { PersistQueryClientOptions } from "@tanstack/react-query-persist-client";
+import { getSession, subscribeSession } from "./auth";
 import { stableAttachmentStructuralSharing } from "./stableAttachmentUrls";
 
 // How long a persisted cache entry may sit in storage before the persister
@@ -62,11 +63,71 @@ function isPersistedQueryKey(queryKey: readonly unknown[]): boolean {
 // pages are capped (see MESSAGES_MAX_LIMIT, INITIAL_POSTS_LIMIT) so the
 // persisted payload stays well within localStorage's ~5MB budget, and the
 // sync persister needs no extra IndexedDB wrapper dependency.
+//
+// The snapshot is private to whoever fetched it (their chats, their view of
+// the feed), but query keys aren't scoped per user — so it's stored under a
+// per-user key, resolved at the moment of each read/write, and nothing is
+// persisted while signed out. That alone isn't enough: the *in-memory*
+// cache would still hold the previous account's data (and the throttled
+// writer would carry it into the next user's slot), so `watchCacheOwner`
+// below also clears the client the instant the signed-in user changes, and
+// deletes the previous user's snapshot (issue #478).
+const PERSIST_KEY_PREFIX = "chat-platform-query-cache";
+
+function currentUserId(): number | null {
+  return getSession()?.user.id ?? null;
+}
+
+function persistKeyFor(userId: number): string {
+  return `${PERSIST_KEY_PREFIX}:${userId}`;
+}
+
+// A `Storage`-shaped wrapper that ignores the persister's own (fixed) key
+// and substitutes the signed-in user's.
+const userScopedStorage = {
+  getItem: () => {
+    const userId = currentUserId();
+    return userId === null
+      ? null
+      : window.localStorage.getItem(persistKeyFor(userId));
+  },
+  setItem: (_key: string, value: string) => {
+    const userId = currentUserId();
+    if (userId !== null)
+      window.localStorage.setItem(persistKeyFor(userId), value);
+  },
+  removeItem: () => {
+    const userId = currentUserId();
+    if (userId !== null) window.localStorage.removeItem(persistKeyFor(userId));
+  },
+};
+
+// Clears everything cached for the previous account the moment the session
+// switches to a different user (or to none): logout in this or another tab,
+// an expired refresh token, or logging in as someone else. Synchronous with
+// the session change, so the throttled persister's pending write — which
+// always saves the *latest* snapshot — can only ever save the cleared one.
+// Token refreshes keep the same user id and leave the cache alone.
+function watchCacheOwner(): void {
+  // The single shared slot used before snapshots were scoped per user.
+  window.localStorage.removeItem(PERSIST_KEY_PREFIX);
+  let owner = currentUserId();
+  subscribeSession(() => {
+    const next = currentUserId();
+    if (next === owner) return;
+    if (owner !== null) window.localStorage.removeItem(persistKeyFor(owner));
+    owner = next;
+    queryClient.clear();
+  });
+}
+
+if (typeof window !== "undefined") watchCacheOwner();
+
 export const persistOptions: PersistQueryClientOptions = {
   queryClient,
   persister: createSyncStoragePersister({
-    storage: typeof window !== "undefined" ? window.localStorage : undefined,
-    key: "chat-platform-query-cache",
+    storage: typeof window !== "undefined" ? userScopedStorage : undefined,
+    key: PERSIST_KEY_PREFIX,
   }),
   maxAge: PERSIST_MAX_AGE_MS,
   dehydrateOptions: {

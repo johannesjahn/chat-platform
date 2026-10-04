@@ -130,3 +130,15 @@ export async function fakeOnScreenKeyboard(page: Page): Promise<void> {
     });
   });
 }
+
+// Everything the query persister has written to localStorage, across every
+// per-user slot (`chat-platform-query-cache:<userId>`, see src/lib/query.ts),
+// joined into one string for `toContain`-style assertions.
+export function persistedQueryCache(page: Page): Promise<string> {
+  return page.evaluate(() =>
+    Object.keys(window.localStorage)
+      .filter((key) => key.startsWith("chat-platform-query-cache"))
+      .map((key) => window.localStorage.getItem(key) ?? "")
+      .join("\n"),
+  );
+}
