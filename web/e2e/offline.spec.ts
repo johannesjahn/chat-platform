@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { persistedQueryCache } from "./helpers";
 
 test("losing connectivity mid-session keeps already-loaded messages on screen and shows an offline banner, and persists the cache to localStorage for a later reload", async ({
   browser,
@@ -44,9 +45,7 @@ test("losing connectivity mid-session keeps already-loaded messages on screen an
   // e2e setup, since there's no service worker to serve the app shell
   // without a network — see vite.pwa-options.ts) would rehydrate from.
   await expect
-    .poll(() =>
-      pageA.evaluate(() => localStorage.getItem("chat-platform-query-cache")),
-    )
+    .poll(() => persistedQueryCache(pageA))
     .toContain("Message loaded before going offline");
 
   await contextA.close();
@@ -99,9 +98,7 @@ test("a failed request doesn't blank already-loaded posts behind an error messag
   // a reload restores from wouldn't have the post yet regardless of this
   // test's fix.
   await expect
-    .poll(() =>
-      page.evaluate(() => localStorage.getItem("chat-platform-query-cache")),
-    )
+    .poll(() => persistedQueryCache(page))
     .toContain("Post loaded before the network hiccup");
 
   // A real network-level failure (server unreachable while the browser
