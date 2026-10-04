@@ -525,6 +525,50 @@ test("listComments excludes replies (only top-level comments)", () =>
     }),
   ));
 
+test("listComments reports each comment's replyCount (issue #479)", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("quincy");
+      const busy = yield* authed.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "has replies" },
+      });
+      const quiet = yield* authed.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "no replies" },
+      });
+      expect(busy.replyCount).toBe(0);
+      for (const content of ["one", "two"]) {
+        yield* authed.comments.createReply({
+          params: { id: busy.id },
+          payload: { content },
+        });
+      }
+
+      const page = yield* authed.comments.listComments({
+        params: { id: post.id },
+        query: {},
+      });
+      expect(page.comments.map((c) => [c.id, c.replyCount] as const)).toEqual([
+        [busy.id, 2],
+        [quiet.id, 0],
+      ]);
+
+      const replies = yield* authed.comments.listReplies({
+        params: { id: busy.id },
+        query: {},
+      });
+      expect(replies.comments.map((c) => c.replyCount)).toEqual([0, 0]);
+
+      // An edit returns the comment with its current count, not a reset one.
+      const edited = yield* authed.comments.updateComment({
+        params: { id: busy.id },
+        payload: { content: "has replies (edited)" },
+      });
+      expect(edited.replyCount).toBe(2);
+    }),
+  ));
+
 test("listComments rejects a malformed cursor", () =>
   run(
     Effect.gen(function* () {
