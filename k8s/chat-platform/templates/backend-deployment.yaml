@@ -9,6 +9,10 @@ metadata:
 spec:
   replicas: {{ .Values.backend.replicaCount }}
   revisionHistoryLimit: 3
+  {{- with .Values.backend.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "chat-platform.selectorLabels" (dict "Release" .Release "Chart" .Chart "component" "backend") | nindent 6 }}
@@ -26,10 +30,21 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # The backend never talks to the Kubernetes API.
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.backend.terminationGracePeriodSeconds }}
+      {{- with .Values.backend.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: backend
           image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          {{- with .Values.backend.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: {{ .Values.backend.port }}
               name: http
@@ -56,23 +71,54 @@ spec:
             {{- include "chat-platform.s3Env" . | nindent 12 }}
           # See src/Health.ts: /health is liveness-only (no dependency
           # checks), /ready additionally confirms Postgres and Redis are
-          # reachable.
+          # reachable. The startupProbe holds off the other two until the
+          # process is listening (up to 60s) instead of guessing a fixed
+          # initialDelaySeconds: a slow boot isn't killed by liveness, and a
+          # fast one starts taking traffic as soon as it's ready.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /ready
               port: http
-            initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 3
           livenessProbe:
             httpGet:
               path: /health
               port: http
-            initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
+          {{- if .Values.backend.preStopSleepSeconds }}
+          # See backend.preStopSleepSeconds in values.yaml.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "{{ .Values.backend.preStopSleepSeconds }}"]
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.backend.tmpSizeLimit }}
+      {{- if .Values.backend.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: {{ .Values.backend.topologySpread.topologyKey }}
+          whenUnsatisfiable: {{ .Values.backend.topologySpread.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "chat-platform.selectorLabels" (dict "Release" .Release "Chart" .Chart "component" "backend") | nindent 14 }}
+      {{- end }}
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

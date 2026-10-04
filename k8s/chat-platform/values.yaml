@@ -117,6 +117,63 @@ backend:
       # installing this chart without that stack.
       enabled: true
 
+  # Pod/container hardening (issue #474), applied to both the backend
+  # Deployment and the migration Job. uid/gid 1000 is the `bun` user the
+  # image already runs as — spelled out numerically because the image's
+  # `USER bun` is a name, and the kubelet refuses runAsNonRoot for a
+  # non-numeric image user it can't verify.
+  podSecurityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    runAsNonRoot: true
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  # With readOnlyRootFilesystem above, /tmp is the backend's only writable
+  # path: multipart uploads are buffered there and ffmpeg transcodes video
+  # attachments from/to it (see src/VideoProcessing.ts). Mounted as an
+  # emptyDir; the limit covers a few concurrent uploads at the 2x
+  # MAX_ATTACHMENT_SIZE_BYTES multipart cap plus their transcoded output —
+  # the pod is evicted if it's exceeded.
+  tmpSizeLimit: 1Gi
+
+  # Never take a replica down before its replacement is ready. maxSurge
+  # needs room for one extra backend pod's requests on the node.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  # Keeps a voluntary disruption (node drain, cluster upgrade) from evicting
+  # every replica at once. With replicaCount: 1 a maxUnavailable: 1 budget
+  # still lets the drain through rather than blocking it forever.
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: 1
+
+  # Prefer spreading replicas across nodes. ScheduleAnyway, so a
+  # single-node cluster still schedules every replica.
+  topologySpread:
+    enabled: true
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+
+  # On termination the pod is removed from the Service's endpoints at the
+  # same moment it gets SIGTERM, but kube-proxy and the ingress controller
+  # pick that up asynchronously and keep routing new requests/WebSocket
+  # upgrades to it for a moment. Sleeping in preStop first lets that
+  # propagate before the server starts shutting down. Must stay well under
+  # terminationGracePeriodSeconds, which bounds preStop + shutdown together.
+  preStopSleepSeconds: 5
+  terminationGracePeriodSeconds: 30
+
   podAnnotations: {}
   nodeSelector: {}
   tolerations: []
