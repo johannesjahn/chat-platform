@@ -11,7 +11,7 @@ import {
 } from "@/lib/games/chat";
 import type { GameLobby } from "@/lib/games/lobby";
 import { cn } from "@/lib/utils";
-import { userAvatarName, userLabel } from "@/lib/users";
+import { userAvatarName, userHandle, userLabel } from "@/lib/users";
 import { GamePanel } from "./GamePanel";
 import { ReactionBar } from "./ReactionBar";
 
@@ -99,6 +99,11 @@ export const LobbyChat = memo(function LobbyChat({
                       )}
                     >
                       {mine ? "You" : userLabel(message.user)}
+                      {!mine && userHandle(message.user) && (
+                        <span className="ml-1 font-normal">
+                          {userHandle(message.user)}
+                        </span>
+                      )}
                       {message.user.id === lobby.hostId && (
                         <span className="ml-1 font-normal text-[var(--game-gold)]">
                           · host

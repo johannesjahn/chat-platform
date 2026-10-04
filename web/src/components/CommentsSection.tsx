@@ -33,7 +33,12 @@ import {
   type ReactionEmoji,
   type ReactionSummary,
 } from "@/lib/reactions";
-import { useUserSummariesById, userAvatarName, userLabel } from "@/lib/users";
+import {
+  useUserSummariesById,
+  userAvatarName,
+  userHandle,
+  userLabel,
+} from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 // A small controlled composer used both for new comments/replies and for
@@ -326,6 +331,7 @@ function CommentItem({
     ? userAvatarName(author)
     : `user #${comment.authorId}`;
   const authorLabel = author ? userLabel(author) : `user #${comment.authorId}`;
+  const authorHandle = author ? userHandle(author) : undefined;
   const canModify =
     !!session &&
     (session.user.id === comment.authorId || session.user.role === "admin");
@@ -390,6 +396,11 @@ function CommentItem({
               className="text-sm font-medium hover:underline"
             >
               {authorLabel}
+              {authorHandle && (
+                <span className="ml-1 font-normal text-muted-foreground">
+                  {authorHandle}
+                </span>
+              )}
             </Link>
             <span className="text-xs text-muted-foreground">
               <RelativeTime value={comment.createdAt} />

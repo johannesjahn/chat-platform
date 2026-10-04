@@ -22,6 +22,16 @@ export function userLabel(user: NamedUser): string {
   return user.displayName || `@${user.username}`;
 }
 
+// The `@username` to show next to someone's display name wherever it
+// identifies who said or did something (issue #482). Display names are
+// free-form and not unique, so on their own anyone can pass as anyone —
+// including as another user's handle, which is what a display-name-less
+// user is labelled by. `undefined` when there's no display name: the label
+// already *is* the handle.
+export function userHandle(user: NamedUser): string | undefined {
+  return user.displayName ? `@${user.username}` : undefined;
+}
+
 // The name handed to `Avatar` for initials — same preference, but without
 // the `@` (Avatar.getInitials strips a leading `@` anyway, so this mostly
 // matters for a multi-word display name's two-initial rendering).

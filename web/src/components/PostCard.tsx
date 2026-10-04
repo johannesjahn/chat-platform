@@ -38,6 +38,9 @@ type PostCardProps = {
   post: Post;
   authorId: number;
   authorLabel: string;
+  // The author's `@username`, shown after `authorLabel` when that's a
+  // display name (see `userHandle` in lib/users.ts).
+  authorHandle?: string;
   authorAvatarUrl?: string | null;
   authorAvatarVariants?: AvatarVariants | null;
   canModify: boolean;
@@ -81,6 +84,7 @@ export function PostCard({
   post,
   authorId,
   authorLabel,
+  authorHandle,
   authorAvatarUrl,
   authorAvatarVariants,
   canModify,
@@ -172,7 +176,14 @@ export function PostCard({
             className="transition-transform duration-300 ease-smooth group-hover:scale-105"
           />
           <div className="flex flex-1 flex-col leading-tight">
-            <span className="font-medium">{authorLabel}</span>
+            <span className="font-medium">
+              {authorLabel}
+              {authorHandle && (
+                <span className="ml-1.5 text-sm font-normal text-muted-foreground">
+                  {authorHandle}
+                </span>
+              )}
+            </span>
             <span className="text-xs text-muted-foreground">
               <RelativeTime value={post.createdAt} />
               {wasEdited && " · edited"}
