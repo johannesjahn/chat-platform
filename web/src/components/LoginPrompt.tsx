@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useRedirectHere } from "@/lib/redirect";
 
 type LoginPromptProps = {
   title: string;
@@ -14,6 +15,8 @@ type LoginPromptProps = {
 };
 
 export function LoginPrompt({ title, description }: LoginPromptProps) {
+  // Bring the user back here once they've signed in (issue #481).
+  const redirect = useRedirectHere();
   return (
     <Card className="w-full max-w-xl motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
       <CardHeader>
@@ -22,10 +25,14 @@ export function LoginPrompt({ title, description }: LoginPromptProps) {
       </CardHeader>
       <CardContent className="flex gap-2">
         <Button asChild>
-          <Link to="/login">Log in</Link>
+          <Link to="/login" search={{ redirect }}>
+            Log in
+          </Link>
         </Button>
         <Button asChild variant="outline">
-          <Link to="/register">Create an account</Link>
+          <Link to="/register" search={{ redirect }}>
+            Create an account
+          </Link>
         </Button>
       </CardContent>
     </Card>

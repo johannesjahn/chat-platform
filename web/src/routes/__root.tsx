@@ -32,6 +32,7 @@ import { useUnreadNotificationCount } from "../lib/notifications";
 import { OfflineQueueSync } from "../lib/offlineQueue";
 import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
+import { useRedirectHere } from "../lib/redirect";
 import { userLabel } from "../lib/users";
 import { useAppHeight } from "../lib/viewport";
 import appCss from "../styles.css?url";
@@ -101,6 +102,7 @@ function Nav() {
   useRealtimeSocket(!!session);
   const unreadCount = useTotalUnreadCount(!!session);
   const unreadNotifications = useUnreadNotificationCount(!!session);
+  const redirect = useRedirectHere();
 
   return (
     // `pt-[calc(...)]` rather than `py-3`: `viewport-fit=cover` lets the page
@@ -230,10 +232,14 @@ function Nav() {
       ) : (
         <div className="flex items-center gap-2">
           <Button asChild variant="ghost" size="sm">
-            <Link to="/login">Log in</Link>
+            <Link to="/login" search={{ redirect }}>
+              Log in
+            </Link>
           </Button>
           <Button asChild size="sm">
-            <Link to="/register">Register</Link>
+            <Link to="/register" search={{ redirect }}>
+              Register
+            </Link>
           </Button>
         </div>
       )}
