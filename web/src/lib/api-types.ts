@@ -1874,6 +1874,7 @@ export interface components {
             createdAt: number;
             updatedAt: number;
             reactions: components["schemas"]["ReactionSummary"][];
+            replyCount: number;
         };
         UpdateCommentBody: {
             content: string;
@@ -1892,6 +1893,7 @@ export interface components {
             createdAt: number;
             updatedAt: number;
             reactions: components["schemas"]["ReactionSummary"][];
+            replyCount: number;
         };
         CreateCommentBody: {
             content: string;
@@ -1910,6 +1912,7 @@ export interface components {
             createdAt: number;
             updatedAt: number;
             reactions: components["schemas"]["ReactionSummary"][];
+            replyCount: number;
         };
         Post: {
             id: number;

@@ -1,5 +1,5 @@
 import { HttpApiBuilder } from "effect/http-api";
-import { and, asc, eq, gt, isNull } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, isNull } from "drizzle-orm";
 import { Effect, Metric } from "effect";
 import {
   ChatApi,
@@ -78,6 +78,7 @@ const recordContentCreated = (type: "comment" | "reaction") =>
 const toApiComment = (
   row: typeof comments.$inferSelect,
   reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
+  replyCount = 0,
 ) => ({
   id: row.id,
   postId: row.postId,
@@ -87,7 +88,28 @@ const toApiComment = (
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
   reactions: [...reactions],
+  replyCount,
 });
+
+// Reply counts for a page of comments, keyed by parent id, in one grouped
+// query served by `comments_parent_comment_id_idx`. Comments with no
+// replies (including every reply itself) are absent; callers default to 0.
+const commentReplyCounts = async (
+  db: DrizzleDb,
+  commentIds: ReadonlyArray<number>,
+): Promise<Map<number, number>> => {
+  const result = new Map<number, number>();
+  if (commentIds.length === 0) return result;
+  const rows = await db
+    .select({ parentId: comments.parentCommentId, total: count() })
+    .from(comments)
+    .where(inArray(comments.parentCommentId, [...commentIds]))
+    .groupBy(comments.parentCommentId);
+  for (const row of rows) {
+    if (row.parentId !== null) result.set(row.parentId, Number(row.total));
+  }
+  return result;
+};
 
 // Author or admin — the same ownership rule posts use (see PostsHandler.ts).
 const canModify = (
@@ -177,9 +199,17 @@ const listThread = (
         currentUser.id,
       ),
     ).pipe(Effect.orDie);
+    const replyCounts = yield* Effect.tryPromise(() =>
+      commentReplyCounts(
+        db,
+        rows.map((r) => r.id),
+      ),
+    ).pipe(Effect.orDie);
 
     return {
-      comments: rows.map((r) => toApiComment(r, reactionInfo.get(r.id))),
+      comments: rows.map((r) =>
+        toApiComment(r, reactionInfo.get(r.id), replyCounts.get(r.id) ?? 0),
+      ),
       limit,
       nextCursor,
     };
@@ -538,7 +568,10 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               commentId: row.id,
             },
           );
-          return toApiComment(row, reactions);
+          const replyCounts = yield* Effect.tryPromise(() =>
+            commentReplyCounts(db, [row.id]),
+          ).pipe(Effect.orDie);
+          return toApiComment(row, reactions, replyCounts.get(row.id) ?? 0);
         }),
       )
       .handle("deleteComment", ({ params: { id } }) =>

@@ -699,6 +699,11 @@ export const Comment = Schema.Struct({
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
   reactions: Schema.Array(ReactionSummary),
+  // How many replies a top-level comment has (always 0 for a reply, since
+  // threads are one level deep) — computed on read like `Post.commentCount`.
+  // Lets the client offer "View N replies" instead of hiding existing
+  // replies until the viewer happens to open the reply composer (#479).
+  replyCount: Schema.Finite,
 }).annotate({ identifier: "Comment" });
 export type Comment = typeof Comment.Type;
 

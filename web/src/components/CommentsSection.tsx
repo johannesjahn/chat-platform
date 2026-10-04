@@ -491,6 +491,8 @@ function CommentItem({
                 await queryClient.invalidateQueries({
                   queryKey: commentRepliesQueryKey(comment.id),
                 });
+                // Refreshes this comment's `replyCount` too.
+                await invalidateComments();
                 setReplying(false);
                 setShowReplies(true);
               }}
@@ -500,6 +502,25 @@ function CommentItem({
 
         {!isReply && (
           <div className="mt-1 flex flex-col gap-3">
+            {/* Existing replies used to stay hidden until the viewer opened
+                the reply composer (issue #479) — the count makes them
+                discoverable, and expanding them no longer opens a composer. */}
+            {comment.replyCount > 0 && (
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto w-fit p-0 pl-1 text-xs"
+                aria-expanded={showReplies}
+                onClick={() => setShowReplies((prev) => !prev)}
+              >
+                {showReplies
+                  ? "Hide replies"
+                  : `View ${comment.replyCount} ${
+                      comment.replyCount === 1 ? "reply" : "replies"
+                    }`}
+              </Button>
+            )}
             {showReplies &&
               replyRows.map((reply) => (
                 <CommentItem
