@@ -14,6 +14,7 @@ import { MentionText } from "@/components/MentionText";
 import { MentionTextarea } from "@/components/MentionTextarea";
 import { RelativeTime } from "@/components/RelativeTime";
 import { Button } from "@/components/ui/button";
+import { Collapse, DisclosureChevron } from "@/components/ui/collapse";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import {
@@ -26,6 +27,7 @@ import {
   useReplies,
 } from "@/lib/comments";
 import { errorMessage } from "@/lib/errors";
+import { useTransitionState } from "@/lib/motion";
 import { usePostCommentsSubscription } from "@/lib/postRooms";
 import {
   REACTION_EMOJIS,
@@ -199,7 +201,15 @@ export function ReactionAddButton({
   // components/ui/button.tsx) is a plain function component that doesn't
   // declare/forward a `ref` parameter, so it wouldn't receive one.
   const triggerRef = useRef<HTMLSpanElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
+  const {
+    ref: popoverRef,
+    mounted: popoverMounted,
+    phase: popoverPhase,
+  } = useTransitionState<HTMLDivElement>(pickerPos !== null);
+  // Where the picker last opened, so it can shrink away in place once
+  // `pickerPos` has already been cleared.
+  const [shownPos, setShownPos] = useState(pickerPos);
+  if (pickerPos && pickerPos !== shownPos) setShownPos(pickerPos);
 
   useEffect(() => {
     if (!pickerPos) return;
@@ -222,7 +232,7 @@ export function ReactionAddButton({
       document.removeEventListener("pointerdown", close);
       document.removeEventListener("scroll", close, true);
     };
-  }, [pickerPos]);
+  }, [pickerPos, popoverRef]);
 
   return (
     <>
@@ -247,12 +257,19 @@ export function ReactionAddButton({
           <SmilePlus className={cn("size-4", iconClassName)} />
         </Button>
       </span>
-      {pickerPos &&
+      {popoverMounted &&
+        shownPos &&
         createPortal(
           <div
             ref={popoverRef}
-            style={{ top: pickerPos.top, left: pickerPos.left }}
-            className="fixed z-50 flex gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-md motion-safe:animate-pop-open"
+            style={{ top: shownPos.top, left: shownPos.left }}
+            inert={pickerPos === null}
+            className={cn(
+              "fixed z-50 flex origin-top-left gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-md",
+              popoverPhase === "exiting"
+                ? "motion-safe:animate-pop-close"
+                : "motion-safe:animate-pop-open",
+            )}
           >
             {REACTION_EMOJIS.map((emoji, i) => (
               <button
@@ -488,52 +505,61 @@ function CommentItem({
           )}
         </div>
 
-        {replying && !isReply && (
-          <div className="mt-1">
-            <CommentComposer
-              placeholder={`Reply to ${authorLabel}…`}
-              submitLabel="Reply"
-              autoFocus
-              onSubmit={async (content) => {
-                await createReply.mutateAsync({
-                  params: { path: { id: String(comment.id) } },
-                  body: { content },
-                });
-                await queryClient.invalidateQueries({
-                  queryKey: commentRepliesQueryKey(comment.id),
-                });
-                // Refreshes this comment's `replyCount` too.
-                await invalidateComments();
-                setReplying(false);
-                setShowReplies(true);
-              }}
-            />
-          </div>
+        {!isReply && (
+          <Collapse open={replying}>
+            <div className="mt-1">
+              <CommentComposer
+                placeholder={`Reply to ${authorLabel}…`}
+                submitLabel="Reply"
+                autoFocus
+                onSubmit={async (content) => {
+                  await createReply.mutateAsync({
+                    params: { path: { id: String(comment.id) } },
+                    body: { content },
+                  });
+                  await queryClient.invalidateQueries({
+                    queryKey: commentRepliesQueryKey(comment.id),
+                  });
+                  // Refreshes this comment's `replyCount` too.
+                  await invalidateComments();
+                  setReplying(false);
+                  setShowReplies(true);
+                }}
+              />
+            </div>
+          </Collapse>
+        )}
+
+        {/* Existing replies used to stay hidden until the viewer opened the
+            reply composer (issue #479) — the count makes them discoverable,
+            and expanding them no longer opens a composer. */}
+        {!isReply && comment.replyCount > 0 && (
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="mt-1 h-auto w-fit p-0 pl-1 text-xs"
+            aria-expanded={showReplies}
+            onClick={() => setShowReplies((prev) => !prev)}
+          >
+            {showReplies
+              ? "Hide replies"
+              : `View ${comment.replyCount} ${
+                  comment.replyCount === 1 ? "reply" : "replies"
+                }`}
+            <DisclosureChevron open={showReplies} className="size-3.5" />
+          </Button>
         )}
 
         {!isReply && (
-          <div className="mt-1 flex flex-col gap-3">
-            {/* Existing replies used to stay hidden until the viewer opened
-                the reply composer (issue #479) — the count makes them
-                discoverable, and expanding them no longer opens a composer. */}
-            {comment.replyCount > 0 && (
-              <Button
-                type="button"
-                variant="link"
-                size="sm"
-                className="h-auto w-fit p-0 pl-1 text-xs"
-                aria-expanded={showReplies}
-                onClick={() => setShowReplies((prev) => !prev)}
-              >
-                {showReplies
-                  ? "Hide replies"
-                  : `View ${comment.replyCount} ${
-                      comment.replyCount === 1 ? "reply" : "replies"
-                    }`}
-              </Button>
-            )}
-            {showReplies &&
-              replyRows.map((reply) => (
+          <Collapse open={showReplies}>
+            <div
+              className={cn(
+                "flex flex-col gap-3",
+                comment.replyCount > 0 ? "mt-2" : "mt-1",
+              )}
+            >
+              {replyRows.map((reply) => (
                 <CommentItem
                   key={reply.id}
                   comment={reply}
@@ -541,19 +567,20 @@ function CommentItem({
                   isReply
                 />
               ))}
-            {showReplies && replies.hasNextPage && (
-              <Button
-                type="button"
-                variant="link"
-                size="sm"
-                className="h-auto w-fit p-0 text-xs"
-                onClick={() => void replies.fetchNextPage()}
-                disabled={replies.isFetchingNextPage}
-              >
-                Show more replies
-              </Button>
-            )}
-          </div>
+              {replies.hasNextPage && (
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto w-fit p-0 text-xs"
+                  onClick={() => void replies.fetchNextPage()}
+                  disabled={replies.isFetchingNextPage}
+                >
+                  Show more replies
+                </Button>
+              )}
+            </div>
+          </Collapse>
         )}
       </div>
     </div>

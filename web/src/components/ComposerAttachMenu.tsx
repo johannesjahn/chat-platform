@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useTransitionState } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 export type AttachMenuAction = {
@@ -51,6 +52,12 @@ export function ComposerAttachMenu({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const menuId = useId();
+  // Stays mounted while it shrinks away, so closing is as smooth as opening.
+  const {
+    ref: menuRef,
+    mounted: menuMounted,
+    phase: menuPhase,
+  } = useTransitionState<HTMLDivElement>(open);
 
   // A tap anywhere else — including into the message field — dismisses the
   // sheet, the way tapping away from an open menu does everywhere else.
@@ -99,15 +106,22 @@ export function ComposerAttachMenu({
 
   return (
     <div ref={rootRef} className="relative shrink-0">
-      {open && (
+      {menuMounted && (
         <div
+          ref={menuRef}
           id={menuId}
           role="menu"
+          inert={!open}
           aria-label="Attach"
           onKeyDown={handleMenuKeyDown}
           // Anchored to the trigger's own corner so it springs out of the
           // button rather than appearing beside it.
-          className="absolute bottom-full left-0 z-30 mb-2 min-w-52 origin-bottom-left rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl motion-safe:animate-pop-open"
+          className={cn(
+            "absolute bottom-full left-0 z-30 mb-2 min-w-52 origin-bottom-left rounded-2xl border border-border bg-popover p-1.5 text-popover-foreground shadow-xl",
+            menuPhase === "exiting"
+              ? "motion-safe:animate-pop-close"
+              : "motion-safe:animate-pop-open",
+          )}
         >
           {actions.map((action, index) => (
             <button

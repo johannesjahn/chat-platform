@@ -22,6 +22,7 @@ import {
 import { Avatar } from "@/components/Avatar";
 import { AvatarCropDialog } from "@/components/AvatarCropDialog";
 import { Button } from "@/components/ui/button";
+import { Collapse } from "@/components/ui/collapse";
 import { Input } from "@/components/ui/input";
 import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { formatBytes } from "@/lib/attachments";
@@ -623,8 +624,8 @@ function GroupManagementBody({
                 </p>
               )}
 
-              {addingParticipants && canAddMore && (
-                <div className="mt-3 flex flex-col gap-2 rounded-xl border border-border bg-background/60 p-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1">
+              <Collapse open={addingParticipants && canAddMore}>
+                <div className="mt-3 flex flex-col gap-2 rounded-xl border border-border bg-background/60 p-3">
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     <Input
@@ -687,7 +688,7 @@ function GroupManagementBody({
                     Add {selectedToAdd.length || ""}
                   </Button>
                 </div>
-              )}
+              </Collapse>
             </div>
           )}
         </Section>

@@ -325,6 +325,26 @@ the client is `web/src/components/games/reflex/` plus
   display only; the client's mirrored scoring constants must track the
   server's.
 
+## Disclosure motion
+
+Anything that expands or collapses in place goes through one primitive so the
+app opens and closes with a single motion language — never a bare
+`{open && …}` that pops in and out:
+
+- **Panels** — `<Collapse open>` ([`web/src/components/ui/collapse.tsx`](web/src/components/ui/collapse.tsx)):
+  a `0fr`↔`1fr` grid-row transition that animates both ways, reverses
+  mid-flight, unmounts once closed (or stays `hidden` with `keepMounted`),
+  and glides when its content resizes while open. Pair it with
+  `<DisclosureChevron open>`.
+- **"Show more" text** — `useExpandableText` ([`web/src/lib/motion.ts`](web/src/lib/motion.ts)),
+  which animates between the `line-clamp-*` height and the full one.
+- **Popovers/menus** — `useTransitionState` keeps them mounted for
+  `animate-pop-close`, the exit half of `animate-pop-open`.
+
+Timing and curves live only in the `--motion-*` tokens ("Disclosure motion"
+in `web/src/styles.css`); the script side reads them back. With
+`prefers-reduced-motion` everything still opens and closes, instantly.
+
 ## Notifications
 
 In-app notifications (issue #317) — the header bell and the `/notifications`

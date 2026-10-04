@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Loader2, Pin, X } from "lucide-react";
+import { Loader2, Pin, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Collapse, DisclosureChevron } from "@/components/ui/collapse";
 import { $api } from "@/lib/api";
 import {
   chatPinnedQueryKey,
@@ -84,64 +85,61 @@ export function PinnedMessagesBar({
         <span className="font-medium">
           {pinned.length} pinned message{pinned.length === 1 ? "" : "s"}
         </span>
-        {!expanded && (
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">
-            {messagePreview(pinned[0]!)}
-          </span>
-        )}
-        <ChevronDown
+        {/* Stays laid out (and fades) rather than unmounting, so the row
+            doesn't reflow and the chevron doesn't jump left as it opens. */}
+        <span
+          aria-hidden={expanded}
           className={cn(
-            "ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-300 ease-spring",
-            expanded && "rotate-180",
+            "disclosure-fade min-w-0 flex-1 truncate text-muted-foreground",
+            expanded && "opacity-0",
           )}
+        >
+          {messagePreview(pinned[0]!)}
+        </span>
+        <DisclosureChevron
+          open={expanded}
+          className="ml-auto shrink-0 text-muted-foreground"
         />
       </button>
 
-      {/* The list height-animates open rather than appearing at full size:
-          the wrapper is a one-row grid whose track goes 0fr → 1fr, which
-          (unlike `height: auto`) actually interpolates. The `<ul>` has to be
-          `min-h-0` or the grid refuses to squeeze it. See
-          `animate-collapse-in`. */}
-      {expanded && (
-        <div className="motion-safe:animate-collapse-in">
-          <ul className="flex max-h-56 min-h-0 flex-col gap-1 overflow-y-auto px-2 pb-2">
-            {pinned.map((message) => (
-              <li key={message.id}>
-                <div className="group/pin flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/70">
-                  <button
-                    type="button"
-                    onClick={() => onJump(message.id)}
-                    className="flex min-w-0 flex-1 flex-col items-start text-left"
-                  >
-                    <span className="text-xs font-semibold text-primary">
-                      {senderName(message.senderId)}
-                    </span>
-                    <span className="line-clamp-1 w-full break-words text-xs text-muted-foreground">
-                      {messagePreview(message)}
-                    </span>
-                  </button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    aria-label="Unpin message"
-                    disabled={unpin.isPending}
-                    onClick={() => void handleUnpin(message.id)}
-                    className="size-6 shrink-0 opacity-0 transition-opacity group-hover/pin:opacity-100"
-                  >
-                    {unpin.isPending ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <X className="size-3.5" />
-                    )}
-                  </Button>
-                </div>
-              </li>
-            ))}
-            {error && <p className="px-2 text-xs text-destructive">{error}</p>}
-          </ul>
-        </div>
-      )}
+      <Collapse open={expanded}>
+        <ul className="flex max-h-56 flex-col gap-1 overflow-y-auto px-2 pb-2">
+          {pinned.map((message) => (
+            <li key={message.id}>
+              <div className="group/pin flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/70">
+                <button
+                  type="button"
+                  onClick={() => onJump(message.id)}
+                  className="flex min-w-0 flex-1 flex-col items-start text-left"
+                >
+                  <span className="text-xs font-semibold text-primary">
+                    {senderName(message.senderId)}
+                  </span>
+                  <span className="line-clamp-1 w-full break-words text-xs text-muted-foreground">
+                    {messagePreview(message)}
+                  </span>
+                </button>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Unpin message"
+                  disabled={unpin.isPending}
+                  onClick={() => void handleUnpin(message.id)}
+                  className="size-6 shrink-0 opacity-0 transition-opacity group-hover/pin:opacity-100"
+                >
+                  {unpin.isPending ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <X className="size-3.5" />
+                  )}
+                </Button>
+              </div>
+            </li>
+          ))}
+          {error && <p className="px-2 text-xs text-destructive">{error}</p>}
+        </ul>
+      </Collapse>
     </div>
   );
 }

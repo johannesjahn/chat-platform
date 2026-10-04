@@ -917,24 +917,98 @@ html[data-app-shell="immersive"] body {
   animation: backdrop-blur-in 0.28s ease-out;
 }
 
-@keyframes collapse-in {
-  from {
+/* ───────────────────────────────────────────────────────────────────────────
+   Disclosure motion
+
+   Everything that expands or collapses — a comment thread, a "Show more"
+   post, the pinned-message list, a menu — moves on these tokens, so the whole
+   app opens and closes with one voice:
+
+   - Opening is the slower, more generous half (`--motion-expand` on the
+     expo-out curve `ease-smooth` already uses): content arrives and settles.
+   - Closing is quicker and accelerates away (`--motion-collapse`): the user
+     asked for it to go, so it gets out of the way instead of lingering.
+   - The chevron that reports the state turns on the app's spring
+     (`ease-spring`), the same overshoot every other toggle glyph uses.
+
+   lib/motion.ts reads `--motion-expand`/`--motion-collapse` back for the
+   animations it has to drive from script (`useExpandableText`), so these
+   values are the only place the timing lives.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --motion-expand: 340ms;
+  --motion-collapse: 240ms;
+  --motion-ease-expand: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-ease-collapse: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* A height-animated panel, rendered by `<Collapse>` (components/ui/collapse.tsx).
+   The panel is a one-row grid whose track goes `0fr` ↔ `1fr` — unlike
+   `height: auto`, a genuinely interpolable pair, so nothing has to be measured.
+   Being a *transition* rather than a keyframe animation is the point: reverse
+   it halfway and it turns around from where it is instead of jumping to an
+   end and starting over.
+
+   Choreography: on the way in, the track leads and the content fades up into
+   it a beat later, so it never appears before it has room; on the way out the
+   content fades first and the track closes behind it. The content also drifts
+   a few pixels on the vertical axis, which is what reads as it *unfolding*
+   from the control above rather than being wiped on by a mask. */
+@layer components {
+  .collapse-panel {
+    display: grid;
     grid-template-rows: 0fr;
     opacity: 0;
+    transition:
+      grid-template-rows var(--motion-collapse) var(--motion-ease-collapse),
+      opacity calc(var(--motion-collapse) * 0.6) var(--motion-ease-collapse);
   }
-  to {
+
+  .collapse-panel[data-state="open"] {
     grid-template-rows: 1fr;
     opacity: 1;
+    transition:
+      grid-template-rows var(--motion-expand) var(--motion-ease-expand),
+      opacity calc(var(--motion-expand) * 0.75) var(--motion-ease-expand)
+        calc(var(--motion-expand) * 0.15);
+  }
+
+  /* The content must be `min-height: 0` or the grid refuses to squeeze it, and
+     clipped while the track is mid-flight. Once fully open the panel is marked
+     `data-settled` and the clip comes off, so focus rings and anything that
+     overhangs the panel's edge aren't cut. No `transform` survives the settle
+     either — a lingering one would turn the content into the containing block
+     for its `position: fixed` descendants. */
+  .collapse-panel > .collapse-panel-content {
+    min-height: 0;
+    overflow: hidden;
+    transform: translateY(-0.5rem);
+    transition: transform var(--motion-collapse) var(--motion-ease-collapse);
+  }
+
+  .collapse-panel[data-state="open"] > .collapse-panel-content {
+    transform: none;
+    transition: transform var(--motion-expand) var(--motion-ease-expand);
+  }
+
+  .collapse-panel[data-settled] > .collapse-panel-content {
+    overflow: visible;
   }
 }
 
-/* Height-animates a disclosure open without anyone having to measure it: the
-   element is a one-row grid whose track goes from `0fr` to `1fr` (its content
-   height), which — unlike `height: auto` — is a genuinely interpolable pair.
-   The child must be `min-h-0 overflow-hidden` or it refuses to be squeezed. */
-@utility animate-collapse-in {
-  display: grid;
-  animation: collapse-in 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+/* The state glyph of a disclosure: a chevron that half-turns on the spring.
+   Paired with Tailwind's `rotate-180` (the `rotate` property in v4, which is
+   what this transitions). */
+@utility disclosure-chevron {
+  transition: rotate var(--motion-expand) var(--motion-ease-spring);
+}
+
+/* An element that cross-fades as its disclosure changes state — e.g. the
+   pinned bar's one-line preview, which gives way to the list it summarises. */
+@utility disclosure-fade {
+  transition: opacity var(--motion-collapse) var(--motion-ease-collapse);
 }
 
 @keyframes blur-in {
@@ -974,6 +1048,25 @@ html[data-app-shell="immersive"] body {
    that). */
 @utility animate-pop-open {
   animation: pop-open 0.24s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes pop-close {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+
+/* The exit half of `animate-pop-open`: a popover shrinks back toward the
+   corner it sprang from (its `transform-origin`) and fades, on the collapse
+   curve and timing — quicker than the entrance, and without the spring's
+   overshoot, since a bounce on the way out reads as reluctance. */
+@utility animate-pop-close {
+  animation: pop-close var(--motion-collapse) var(--motion-ease-collapse) both;
 }
 
 /* A hover lift with real depth: the card tips very slightly toward the
@@ -2333,9 +2426,9 @@ html[data-app-shell="immersive"] body {
   .animate-banner-rise,
   .animate-dialog-in,
   .animate-backdrop-blur-in,
-  .animate-collapse-in,
   .animate-blur-in,
   .animate-pop-open,
+  .animate-pop-close,
   .animate-border-glow::before,
   .animate-avatar-ring,
   .animate-progress-stripes,
@@ -2414,7 +2507,6 @@ html[data-app-shell="immersive"] body {
      leave it visible, not stuck on the first keyframe — `both`/`forwards`
      fills would otherwise hold the entrance state forever. */
   .animate-bubble-in,
-  .animate-collapse-in,
   .animate-blur-in,
   .animate-pop-open,
   .animate-dialog-in,
@@ -2433,8 +2525,13 @@ html[data-app-shell="immersive"] body {
     transform: none;
   }
 
-  .animate-collapse-in {
-    grid-template-rows: 1fr;
+  /* Disclosures still open and close — instantly. The hooks in lib/motion.ts
+     find no running animation to wait for and settle on the spot. */
+  .collapse-panel,
+  .collapse-panel > .collapse-panel-content,
+  .disclosure-chevron,
+  .disclosure-fade {
+    transition: none;
   }
 
   /* A ripple with its animation cancelled would sit on the control as a
