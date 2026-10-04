@@ -3,14 +3,17 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { AuthForm } from "../components/AuthForm";
 import { $api, usersQueryKey } from "../lib/api";
 import { setSession } from "../lib/auth";
+import { validateAuthSearch } from "../lib/redirect";
 
 export const Route = createFileRoute("/login")({
+  validateSearch: validateAuthSearch,
   component: LoginPage,
 });
 
 function LoginPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { redirect } = Route.useSearch();
   const login = $api.useMutation("post", "/users/login");
 
   return (
@@ -24,13 +27,20 @@ function LoginPage() {
         });
         setSession(session);
         await queryClient.invalidateQueries({ queryKey: usersQueryKey });
-        await router.navigate({ to: "/" });
+        if (redirect) {
+          // A full in-app href (path + search + hash), already vetted by
+          // validateAuthSearch — so it's pushed as-is rather than via `to`.
+          router.history.push(redirect);
+        } else {
+          await router.navigate({ to: "/" });
+        }
       }}
       footer={
         <>
           No account yet?{" "}
           <Link
             to="/register"
+            search={{ redirect }}
             className="font-medium text-primary hover:underline"
           >
             Register
