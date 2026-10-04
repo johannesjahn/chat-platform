@@ -129,6 +129,15 @@ const Username = Schema.Trimmed.check(Schema.isNonEmpty()).check(
   Schema.isMaxLength(MAX_USERNAME_LENGTH),
 );
 
+// Floor for newly registered usernames (issue #483) — equal to
+// `MIN_USER_SEARCH_QUERY_LENGTH`, so every account can be found through the
+// people search, which won't run a narrower query for a non-admin. Like
+// `NewPassword` below, only applied at registration: `Username` alone stays
+// the login schema, so accounts created before this floor can still sign in.
+export const MIN_USERNAME_LENGTH = 3;
+
+const NewUsername = Username.check(Schema.isMinLength(MIN_USERNAME_LENGTH));
+
 // Mirrors MAX_USERNAME_LENGTH's rationale but roomier, since a display name
 // may hold a full "First Last" rather than a single token.
 export const MAX_DISPLAY_NAME_LENGTH = 64;
@@ -158,7 +167,7 @@ const Password = Schema.NonEmptyString.check(
 const NewPassword = Password.check(Schema.isMinLength(MIN_PASSWORD_LENGTH));
 
 export const RegisterBody = Schema.Struct({
-  username: Username,
+  username: NewUsername,
   password: NewPassword,
 }).annotate({ identifier: "RegisterBody" });
 

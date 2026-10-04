@@ -580,7 +580,7 @@ test("searchUsers keeps the directory's narrowness floor for non-admins", () =>
   run(
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
-      yield* registerAndLogin("bo", "pw-testpass");
+      yield* registerAndLogin("bob", "pw-testpass");
 
       // Two characters is enough to search *content* but not to browse
       // people (issue #48) — the section comes back empty rather than

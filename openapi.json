@@ -12001,7 +12001,12 @@
             "type": "string",
             "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
             "minLength": 1,
-            "maxLength": 32
+            "maxLength": 32,
+            "allOf": [
+              {
+                "minLength": 2
+              }
+            ]
           },
           "password": {
             "type": "string",

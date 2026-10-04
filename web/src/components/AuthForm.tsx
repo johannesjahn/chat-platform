@@ -28,6 +28,9 @@ type AuthFormProps = {
   // account's password — possibly shorter, from before this floor existed —
   // must still be accepted.
   minPasswordLength?: number;
+  // Likewise for the username (issue #483) — register only, so an account
+  // whose name predates the floor can still log in.
+  minUsernameLength?: number;
 };
 
 export function AuthForm({
@@ -37,6 +40,7 @@ export function AuthForm({
   onSubmit,
   footer,
   minPasswordLength,
+  minUsernameLength,
 }: AuthFormProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -45,6 +49,10 @@ export function AuthForm({
   // Counts submissions so the error panel can be re-keyed per attempt.
   const [attempt, setAttempt] = useState(0);
 
+  const usernameTooShort =
+    minUsernameLength !== undefined &&
+    username.length > 0 &&
+    username.length < minUsernameLength;
   const tooShort =
     minPasswordLength !== undefined &&
     password.length > 0 &&
@@ -104,8 +112,22 @@ export function AuthForm({
                 autoComplete="username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                minLength={minUsernameLength}
                 required
               />
+              {minUsernameLength !== undefined && (
+                <p
+                  className={
+                    usernameTooShort
+                      ? "text-sm text-destructive"
+                      : "text-sm text-muted-foreground"
+                  }
+                >
+                  {usernameTooShort
+                    ? `Username must be at least ${minUsernameLength} characters.`
+                    : `At least ${minUsernameLength} characters.`}
+                </p>
+              )}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">Password</Label>
@@ -136,7 +158,13 @@ export function AuthForm({
             <Button
               type="submit"
               className="mt-1 w-full"
-              disabled={pending || !username || !password || tooShort}
+              disabled={
+                pending ||
+                !username ||
+                !password ||
+                tooShort ||
+                usernameTooShort
+              }
             >
               {pending && <Loader2 className="size-4 animate-spin" />}
               {pending ? "Please wait…" : submitLabel}

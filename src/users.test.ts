@@ -13,6 +13,8 @@ import {
   MAX_USERNAME_LOOKUP_COUNT,
   MAX_USERNAME_LOOKUP_LENGTH,
   MIN_PASSWORD_LENGTH,
+  MIN_USER_SEARCH_QUERY_LENGTH,
+  MIN_USERNAME_LENGTH,
 } from "./Api.ts";
 import { Db } from "./Db.ts";
 import { authEventsTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
@@ -108,6 +110,41 @@ test("register rejects a username over the maximum length", () =>
         .pipe(Effect.flip);
     }),
   ));
+
+test("register rejects a username under the minimum length", () =>
+  run(
+    Effect.gen(function* () {
+      // Sent raw: the typed client would reject the payload itself, before
+      // it ever reached the server's validation.
+      const http = yield* HttpClient.HttpClient;
+      const response = yield* http.execute(
+        HttpClientRequest.post("http://localhost/users/register").pipe(
+          HttpClientRequest.bodyJsonUnsafe({
+            username: "a".repeat(MIN_USERNAME_LENGTH - 1),
+            password: "s3cret-pw",
+          }),
+        ),
+      );
+      expect(response.status).toBe(400);
+      // Exactly the minimum is fine.
+      const c = yield* makeClient;
+      const user = yield* c.users.register({
+        payload: {
+          username: "a".repeat(MIN_USERNAME_LENGTH),
+          password: "s3cret-pw",
+        },
+      });
+      expect(user.username).toBe("a".repeat(MIN_USERNAME_LENGTH));
+    }),
+  ));
+
+test("every registrable username is long enough to be found by people search", () => {
+  // Issue #483: a non-admin can't run a people search shorter than
+  // MIN_USER_SEARCH_QUERY_LENGTH, so a shorter username would be unfindable.
+  expect(MIN_USERNAME_LENGTH).toBeGreaterThanOrEqual(
+    MIN_USER_SEARCH_QUERY_LENGTH,
+  );
+});
 
 test("register rejects a password over the maximum length", () =>
   run(
@@ -729,6 +766,27 @@ test("login accepts a pre-existing account whose password predates the minimum l
         payload: { username: "legacyuser", password: shortPassword },
       });
       expect(user.username).toBe("legacyuser");
+    }),
+  ));
+
+test("login accepts a pre-existing account whose username predates the minimum length", () =>
+  run(
+    Effect.gen(function* () {
+      // Like the short-password case above: inserted directly, since the
+      // register endpoint no longer accepts a name this short.
+      const db = yield* Db;
+      const passwordHash = yield* Effect.tryPromise(() =>
+        Bun.password.hash("pw-legacy1", { algorithm: "argon2id" }),
+      );
+      yield* Effect.tryPromise(() =>
+        db.insert(users).values({ username: "jo", passwordHash }).returning(),
+      );
+
+      const c = yield* makeClient;
+      const { user } = yield* c.users.login({
+        payload: { username: "jo", password: "pw-legacy1" },
+      });
+      expect(user.username).toBe("jo");
     }),
   ));
 

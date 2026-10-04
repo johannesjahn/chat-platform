@@ -2031,7 +2031,7 @@ export interface components {
             statusExpiresAt: number | null;
         };
         RegisterBody: {
-            username: string;
+            username: string & unknown;
             password: string & unknown;
         };
         UserPostsPage: {
