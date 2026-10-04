@@ -19,7 +19,7 @@ import {
 } from "@/lib/offlineQueue";
 import { useOnlineStatus } from "@/lib/online";
 import { postsFeedQueryKey, usePostsFeed } from "@/lib/posts";
-import { useUserSummariesById, userLabel } from "@/lib/users";
+import { useUserSummariesById, userHandle, userLabel } from "@/lib/users";
 
 export const Route = createFileRoute("/")({
   component: PostsFeedPage,
@@ -51,6 +51,10 @@ function PostsFeedPage() {
   const authorLabelFor = (authorId: number) => {
     const author = authorById.get(authorId);
     return author ? userLabel(author) : `user #${authorId}`;
+  };
+  const handleFor = (authorId: number) => {
+    const author = authorById.get(authorId);
+    return author ? userHandle(author) : undefined;
   };
 
   const deletePost = $api.useMutation("delete", "/posts/{id}");
@@ -165,6 +169,7 @@ function PostsFeedPage() {
                 post={post}
                 authorId={post.authorId}
                 authorLabel={authorLabelFor(post.authorId)}
+                authorHandle={handleFor(post.authorId)}
                 authorAvatarUrl={authorById.get(post.authorId)?.avatarUrl}
                 authorAvatarVariants={
                   authorById.get(post.authorId)?.avatarVariants

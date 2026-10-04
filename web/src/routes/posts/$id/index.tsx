@@ -10,7 +10,7 @@ import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { postsFeedQueryKey } from "@/lib/posts";
-import { useUserSummariesById, userLabel } from "@/lib/users";
+import { useUserSummariesById, userHandle, userLabel } from "@/lib/users";
 
 export const Route = createFileRoute("/posts/$id/")({
   component: PostDetailPage,
@@ -86,6 +86,7 @@ function PostDetailPage() {
               authorLabel={
                 author ? userLabel(author) : `user #${post.authorId}`
               }
+              authorHandle={author ? userHandle(author) : undefined}
               authorAvatarUrl={author?.avatarUrl}
               authorAvatarVariants={author?.avatarVariants}
               canModify={

@@ -47,7 +47,7 @@ import { useOnlineStatus } from "@/lib/online";
 import { useIsOnline } from "@/lib/presence";
 import { isStatusVisible, useUserStatus } from "@/lib/status";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
-import { userAvatarName, userLabel } from "@/lib/users";
+import { userAvatarName, userHandle, userLabel } from "@/lib/users";
 import { useImmersiveShell } from "@/lib/viewport";
 
 // `?message=<id>` opens the chat scrolled to (and highlighting) that message
@@ -725,6 +725,14 @@ function ChatView({
                   {name}
                 </span>
                 <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                  {otherParticipant && userHandle(otherParticipant) && (
+                    <>
+                      <span className="truncate">
+                        {userHandle(otherParticipant)}
+                      </span>
+                      <span className="shrink-0">·</span>
+                    </>
+                  )}
                   <span className="shrink-0">
                     {otherParticipantOnline ? "Online" : "Direct message"}
                   </span>
@@ -882,6 +890,11 @@ function ChatView({
                             senderLabel={
                               chat.type === "group" && sender
                                 ? userLabel(sender)
+                                : undefined
+                            }
+                            senderHandle={
+                              chat.type === "group" && sender
+                                ? userHandle(sender)
                                 : undefined
                             }
                             senderAvatar={

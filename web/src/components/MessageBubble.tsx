@@ -46,6 +46,9 @@ type MessageBubbleProps = {
   message: ChatMessage;
   isOwn: boolean;
   senderLabel?: string;
+  // The sender's `@username`, shown after `senderLabel` when that's a
+  // display name (see `userHandle` in lib/users.ts).
+  senderHandle?: string;
   // The sender's avatar, shown beside an incoming message in a group chat so
   // it's easy to tell at a glance who sent it. Only provided for other
   // people's messages in a group; direct chats and your own messages don't
@@ -101,6 +104,7 @@ export function MessageBubble({
   message,
   isOwn,
   senderLabel,
+  senderHandle,
   senderAvatar,
   isRead,
   canModify,
@@ -604,6 +608,11 @@ export function MessageBubble({
               className="w-fit text-xs font-semibold text-primary hover:underline"
             >
               {senderLabel}
+              {senderHandle && (
+                <span className="ml-1 font-normal text-muted-foreground">
+                  {senderHandle}
+                </span>
+              )}
             </Link>
           )}
 

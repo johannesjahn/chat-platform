@@ -27,7 +27,7 @@ import {
   useNotifications,
   type Notification,
 } from "@/lib/notifications";
-import { userAvatarName, userLabel } from "@/lib/users";
+import { userAvatarName, userHandle, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/notifications")({
@@ -220,6 +220,11 @@ function NotificationRow({
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-sm">
             <span className="font-medium">{userLabel(n.actor)}</span>{" "}
+            {userHandle(n.actor) && (
+              <span className="text-muted-foreground">
+                {userHandle(n.actor)}{" "}
+              </span>
+            )}
             <span className="text-muted-foreground">{describe(n)}</span>
           </span>
           {n.excerpt && (
