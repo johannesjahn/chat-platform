@@ -139,6 +139,11 @@ export const blocksQueryKey = ["get", "/users/me/blocks"] as const;
 // (including empty) query.
 export const MIN_USER_SEARCH_QUERY_LENGTH = 3;
 
+// Floor for newly registered usernames (mirrors `MIN_USERNAME_LENGTH` in
+// src/Api.ts) — the same as the people-search floor above, so every account
+// can be found (issue #483).
+export const MIN_USERNAME_LENGTH = 3;
+
 // Floor for newly chosen passwords (mirrors `MIN_PASSWORD_LENGTH` in
 // src/Api.ts) — lets the form reject a too-short password before a round
 // trip, matching the server's own validation (issue #45).

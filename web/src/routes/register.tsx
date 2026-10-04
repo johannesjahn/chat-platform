@@ -1,7 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { AuthForm } from "../components/AuthForm";
-import { $api, MIN_PASSWORD_LENGTH, usersQueryKey } from "../lib/api";
+import {
+  $api,
+  MIN_PASSWORD_LENGTH,
+  MIN_USERNAME_LENGTH,
+  usersQueryKey,
+} from "../lib/api";
 import { setSession } from "../lib/auth";
 
 export const Route = createFileRoute("/register")({
@@ -20,6 +25,7 @@ function RegisterPage() {
       description="Pick a username and password to get started."
       submitLabel="Register"
       minPasswordLength={MIN_PASSWORD_LENGTH}
+      minUsernameLength={MIN_USERNAME_LENGTH}
       onSubmit={async ({ username, password }) => {
         await register.mutateAsync({ body: { username, password } });
         // Registration succeeded — log straight in for a smooth first visit.
