@@ -87,7 +87,15 @@ export function PostForm({
 }: PostFormProps) {
   const [contentType, setContentType] =
     useState<PostContentType>(initialContentType);
-  const [content, setContent] = useState(initialContent);
+  // Each typed post kind keeps its own draft, so switching type neither
+  // carries text into the URL field (where it'd be flagged invalid) nor a
+  // URL into the text body (where it'd be posted as text) — issue #524.
+  const [textContent, setTextContent] = useState(
+    initialContentType === "text" ? initialContent : "",
+  );
+  const [imageUrl, setImageUrl] = useState(
+    initialContentType === "image_url" ? initialContent : "",
+  );
   const [attachment, setAttachment] = useState<Attachment | null>(
     initialAttachment,
   );
@@ -95,6 +103,7 @@ export function PostForm({
   const [pending, setPending] = useState(false);
   const isOnline = useOnlineStatus();
 
+  const content = contentType === "image_url" ? imageUrl : textContent;
   const trimmed = content.trim();
   const overLimit = trimmed.length > MAX_POST_CONTENT_LENGTH;
   const invalidImageUrl =
@@ -209,8 +218,8 @@ export function PostForm({
                 {contentType === "text" ? (
                   <MentionTextarea
                     id="content"
-                    value={content}
-                    onValueChange={setContent}
+                    value={textContent}
+                    onValueChange={setTextContent}
                     placeholder="What's on your mind?"
                     rows={6}
                     required
@@ -220,8 +229,8 @@ export function PostForm({
                   <Input
                     id="content"
                     type="url"
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
                     placeholder="https://picsum.photos/id/1/600/800"
                     required
                     aria-invalid={invalidImageUrl}
@@ -233,15 +242,17 @@ export function PostForm({
                     host (e.g. picsum.photos, imgur.com, unsplash.com).
                   </p>
                 )}
-                <span
-                  className={
-                    overLimit
-                      ? "self-end text-xs text-destructive"
-                      : "self-end text-xs text-muted-foreground"
-                  }
-                >
-                  {trimmed.length}/{MAX_POST_CONTENT_LENGTH}
-                </span>
+                {contentType === "text" && (
+                  <span
+                    className={
+                      overLimit
+                        ? "self-end text-xs text-destructive"
+                        : "self-end text-xs text-muted-foreground"
+                    }
+                  >
+                    {trimmed.length}/{MAX_POST_CONTENT_LENGTH}
+                  </span>
+                )}
                 {contentType === "image_url" &&
                   trimmed &&
                   !overLimit &&

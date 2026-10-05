@@ -363,3 +363,35 @@ test("deleting a post asks in an in-app dialog, and cancelling keeps it", async 
   await expect(dialog).toHaveCount(0);
   await expect(post).toHaveCount(0);
 });
+
+test("switching post type keeps a separate draft per type (issue #524)", async ({
+  page,
+  signUp,
+}) => {
+  await signUp(page);
+  await page.goto("/posts/new");
+
+  const text = "My thoughtful text post about hiking this weekend.";
+  await page.getByRole("button", { name: "Text" }).click();
+  await page.fill("#content", text);
+  await expect(page.getByText(`${text.length}/10000`)).toBeVisible();
+
+  // The text draft must not leak into the URL field (where it would be
+  // flagged as an invalid image URL), and the post-length counter doesn't
+  // belong under a URL input.
+  await page.getByRole("button", { name: "Image URL" }).click();
+  await expect(page.locator("#content")).toHaveValue("");
+  await expect(page.getByText("Image URLs must be https://")).toHaveCount(0);
+  await expect(page.getByText(/\/10000$/)).toHaveCount(0);
+
+  const url = "https://picsum.photos/id/1/600/800";
+  await page.fill("#content", url);
+
+  // Back to Text: the text draft is restored and the URL stays behind.
+  await page.getByRole("button", { name: "Text" }).click();
+  await expect(page.locator("#content")).toHaveValue(text);
+
+  // ...and the URL draft is still there when switching back again.
+  await page.getByRole("button", { name: "Image URL" }).click();
+  await expect(page.locator("#content")).toHaveValue(url);
+});
