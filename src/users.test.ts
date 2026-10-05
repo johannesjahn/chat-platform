@@ -15,7 +15,9 @@ import {
   MIN_PASSWORD_LENGTH,
   MIN_USER_SEARCH_QUERY_LENGTH,
   MIN_USERNAME_LENGTH,
+  USERNAME_PATTERN,
 } from "./Api.ts";
+import { extractMentionedUsernames } from "./notifications.ts";
 import { Db } from "./Db.ts";
 import { authEventsTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { PubSub } from "./PubSub.ts";
@@ -135,6 +137,90 @@ test("register rejects a username under the minimum length", () =>
         },
       });
       expect(user.username).toBe("a".repeat(MIN_USERNAME_LENGTH));
+    }),
+  ));
+
+test("register rejects usernames outside the @mention character set (issue #493)", () =>
+  run(
+    Effect.gen(function* () {
+      // Sent raw, like the minimum-length test above, so the server's own
+      // validation is what's exercised.
+      const http = yield* HttpClient.HttpClient;
+      const register = (username: string) =>
+        http
+          .execute(
+            HttpClientRequest.post("http://localhost/users/register").pipe(
+              HttpClientRequest.bodyJsonUnsafe({
+                username,
+                password: "s3cret-pw",
+              }),
+            ),
+          )
+          .pipe(
+            Effect.flatMap((response) =>
+              response.text.pipe(
+                Effect.map((body) => ({ status: response.status, body })),
+              ),
+            ),
+          );
+
+      for (const username of [
+        "bad name 😀", // the issue's example: a space and an emoji
+        "with space",
+        "emoji😀",
+        "at@sign",
+        "аlice", // Cyrillic "а" — a look-alike of "alice"
+        "bidi‮name", // right-to-left override
+        "zero​width",
+        "trailing.",
+        "trailing-",
+      ]) {
+        const { status, body } = yield* register(username);
+        expect(status, username).toBe(400);
+        expect(body).toContain("may only contain letters");
+      }
+
+      // Everything the mention parser accepts as a whole name still works.
+      for (const username of ["alice", "Bob_99", "j.doe", "x-y_z", ".dot"]) {
+        const { status } = yield* register(username);
+        expect(status, username).toBe(201);
+      }
+    }),
+  ));
+
+test("every username USERNAME_PATTERN accepts parses back whole as a mention", () => {
+  for (const username of ["alice", "Bob_99", "j.doe", "x-y_z", ".dot", "a.-_"])
+    expect(extractMentionedUsernames(`hi @${username} there`)).toEqual([
+      username.toLowerCase(),
+    ]);
+  // And the names it rejects for trailing punctuation are exactly the ones
+  // the parser would cut short.
+  for (const username of ["trailing.", "trailing-"]) {
+    expect(USERNAME_PATTERN.test(username)).toBe(false);
+    expect(extractMentionedUsernames(`@${username}`)).not.toEqual([username]);
+  }
+});
+
+test("a username created before the charset rule can still log in (issue #493)", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      // Register a valid name, then rename it in the database to one the
+      // new rule rejects — standing in for an account that predates it.
+      const user = yield* c.users.register({
+        payload: { username: "legacy", password: "s3cret-pw" },
+      });
+      const db = yield* Db;
+      yield* Effect.promise(() =>
+        db
+          .update(users)
+          .set({ username: "legacy name 😀" })
+          .where(eq(users.id, user.id)),
+      );
+      const session = yield* c.users.login({
+        payload: { username: "legacy name 😀", password: "s3cret-pw" },
+      });
+      expect(session.user.username).toBe("legacy name 😀");
     }),
   ));
 
