@@ -190,6 +190,17 @@ test("long posts are collapsed behind a Show more toggle", async ({
 
   await card.getByRole("button", { name: "Show less" }).click();
   await expect(showMore).toBeVisible();
+
+  // The post's own page is for reading all of it — no clamp there (#527).
+  const postId = await card.getAttribute("data-post-id");
+  await page.goto(`/posts/${postId}`);
+  const detail = page.getByRole("article", { name: `Post by @${username}` });
+  const body = detail.locator("p", { hasText: longContent });
+  await expect(body).toBeVisible();
+  await expect(body).not.toHaveClass(/line-clamp/);
+  await expect(detail.getByRole("button", { name: "Show more" })).toHaveCount(
+    0,
+  );
 });
 
 test("clicking a feed image post opens it full-size in a lightbox", async ({

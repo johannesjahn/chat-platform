@@ -117,6 +117,7 @@ function PostDetailPage() {
               }
               onDelete={handleDelete}
               isDeleting={isDeleting}
+              fullText
             />
           </div>
           <CommentsSection postId={postId} />
