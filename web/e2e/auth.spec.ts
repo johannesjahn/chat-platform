@@ -85,3 +85,24 @@ test("setting a display name replaces the username in the nav, but the profile p
   await expect(page).toHaveURL(/\/users\/\d+/);
   await expect(page.getByText(`@${username}`)).toBeVisible();
 });
+
+test("register asks password managers for a new password; login for the current one", async ({
+  page,
+}) => {
+  await page.goto("/register");
+  const password = page.locator("#password");
+  await expect(password).toHaveAttribute("autocomplete", "new-password");
+
+  // The show/hide toggle flips the field between masked and plain text.
+  await expect(password).toHaveAttribute("type", "password");
+  await page.getByRole("button", { name: "Show password" }).click();
+  await expect(password).toHaveAttribute("type", "text");
+  await page.getByRole("button", { name: "Hide password" }).click();
+  await expect(password).toHaveAttribute("type", "password");
+
+  await page.goto("/login");
+  await expect(page.locator("#password")).toHaveAttribute(
+    "autocomplete",
+    "current-password",
+  );
+});

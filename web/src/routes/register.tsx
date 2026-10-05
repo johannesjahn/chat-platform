@@ -24,6 +24,7 @@ function RegisterPage() {
 
   return (
     <AuthForm
+      mode="register"
       title="Create an account"
       description="Pick a username and password to get started."
       submitLabel="Register"
