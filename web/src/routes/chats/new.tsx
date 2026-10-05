@@ -19,7 +19,7 @@ import { useSession } from "@/lib/auth";
 import { MAX_GROUP_PARTICIPANTS, chatsListQueryKey } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
-import { userAvatarName, userLabel } from "@/lib/users";
+import { userAvatarName, userHandle, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
 import { staticTitle } from "@/lib/title";
 
@@ -230,8 +230,13 @@ function NewChatPage() {
                           avatarVariants={user.avatarVariants}
                           size="sm"
                         />
-                        <span className="flex-1 font-medium">
+                        <span className="min-w-0 flex-1 truncate font-medium">
                           {userLabel(user)}
+                          {userHandle(user) && (
+                            <span className="ml-1.5 font-normal text-muted-foreground">
+                              {userHandle(user)}
+                            </span>
+                          )}
                         </span>
                         {mode === "direct" && pendingUserId === user.id && (
                           <Loader2 className="size-4 animate-spin text-muted-foreground" />

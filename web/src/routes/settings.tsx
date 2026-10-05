@@ -35,6 +35,7 @@ import {
   uploadAvatar,
 } from "@/lib/avatar";
 import { staticTitle } from "@/lib/title";
+import { userHandle, userLabel } from "@/lib/users";
 
 export const Route = createFileRoute("/settings")({
   head: () => staticTitle("Settings"),
@@ -303,7 +304,12 @@ function BlockedUsersCard() {
                   />
                   <div className="flex min-w-0 flex-col leading-tight">
                     <span className="truncate text-sm font-medium">
-                      {block.user.displayName || `@${block.user.username}`}
+                      {userLabel(block.user)}
+                      {userHandle(block.user) && (
+                        <span className="ml-1.5 font-normal text-muted-foreground">
+                          {userHandle(block.user)}
+                        </span>
+                      )}
                     </span>
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       {block.type === "block" ? (

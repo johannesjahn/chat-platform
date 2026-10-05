@@ -35,7 +35,12 @@ import {
   type UserSearchResult,
 } from "@/lib/search";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
-import { userAvatarName, userLabel } from "@/lib/users";
+import {
+  userAvatarName,
+  userHandle,
+  userLabel,
+  userLabelWithHandle,
+} from "@/lib/users";
 import { staticTitle, usePageTitle } from "@/lib/title";
 
 type SearchParams = { q?: string };
@@ -516,17 +521,27 @@ function UserRow({ result: { user, snippet } }: { result: UserSearchResult }) {
 // The author/timestamp header every content row shares.
 function RowHeading({
   label,
+  handle,
   createdAt,
   detail,
 }: {
   label: string;
+  // The author's `@username` when `label` is a display name (issue #526).
+  handle?: string;
   createdAt: number;
   detail?: string;
 }) {
   return (
     <>
       <span className="flex items-center gap-2">
-        <span className="truncate font-medium">{label}</span>
+        <span className="truncate font-medium">
+          {label}
+          {handle && (
+            <span className="ml-1.5 font-normal text-muted-foreground">
+              {handle}
+            </span>
+          )}
+        </span>
         <span className="shrink-0 text-xs text-muted-foreground">
           {formatChatTimestamp(createdAt)}
         </span>
@@ -554,7 +569,11 @@ function PostRow({ result }: { result: PostSearchResult }) {
           size="sm"
         />
         <span className="flex min-w-0 flex-col gap-0.5">
-          <RowHeading label={userLabel(author)} createdAt={createdAt} />
+          <RowHeading
+            label={userLabel(author)}
+            handle={userHandle(author)}
+            createdAt={createdAt}
+          />
           <SearchHighlight
             snippet={snippet}
             className="line-clamp-3 text-muted-foreground group-hover:text-foreground"
@@ -583,6 +602,7 @@ function CommentRow({ result }: { result: CommentSearchResult }) {
         <span className="flex min-w-0 flex-col gap-0.5">
           <RowHeading
             label={userLabel(author)}
+            handle={userHandle(author)}
             createdAt={createdAt}
             // A comment with a parent is a reply — worth saying, since both
             // live in the same section.
@@ -624,7 +644,7 @@ function MessageRow({
           <RowHeading
             label={chatName}
             createdAt={createdAt}
-            detail={userLabel(sender)}
+            detail={userLabelWithHandle(sender)}
           />
           <SearchHighlight
             snippet={snippet}

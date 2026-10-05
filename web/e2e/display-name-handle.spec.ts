@@ -57,3 +57,68 @@ test("a display name copying someone else's handle still shows the impersonator'
   await page.goto(`/posts/${(await post.json()).id}`);
   await expect(page.getByText(`@${impostor.username}`)).toBeVisible();
 });
+
+// Issue #526: the pickers and lists where you choose *who* to message, add,
+// promote or remove showed only the display name (and /users the internal
+// `#id`), so a borrowed display name couldn't be told apart there either.
+test("user pickers and lists show the @username next to a display name", async ({
+  page,
+  apiUrl,
+  request,
+  createUser,
+  signUp,
+}) => {
+  const viewer = await signUp(page);
+  const carol = await createUser();
+  const as = (token: string) => ({ Authorization: `Bearer ${token}` });
+  const displayName = "Carol Lookalike";
+  const handle = `@${carol.username}`;
+
+  const renamed = await request.put(`${apiUrl}/users/me`, {
+    headers: as(carol.session.accessToken),
+    data: { displayName, avatarUrl: null },
+  });
+  expect(renamed.ok()).toBe(true);
+  const word = `wren${carol.username.slice(-6)}`;
+  const post = await request.post(`${apiUrl}/posts`, {
+    headers: as(carol.session.accessToken),
+    data: { contentType: "text", content: `Spotted a ${word} today` },
+  });
+  expect(post.ok()).toBe(true);
+  const group = await request.post(`${apiUrl}/chats/group`, {
+    headers: as(viewer.session.accessToken),
+    data: { title: "Handles", participantIds: [carol.session.user.id] },
+  });
+  expect(group.ok()).toBe(true);
+  const { id: chatId } = await group.json();
+
+  // /users: the handle, not `#id`.
+  await page.goto("/users");
+  await page.getByPlaceholder("Search users…").fill(carol.username);
+  const userRow = page.getByRole("link").filter({ hasText: displayName });
+  await expect(userRow).toContainText(handle);
+  await expect(userRow).not.toContainText(`#${carol.session.user.id}`);
+
+  // New chat picker.
+  await page.goto("/chats/new");
+  await page.getByPlaceholder("Search users…").fill(carol.username);
+  await expect(
+    page.getByRole("button").filter({ hasText: displayName }),
+  ).toContainText(handle);
+
+  // Group chat -> Manage -> Members, including who the remove button names.
+  await page.goto(`/chats/${chatId}`);
+  await page.getByRole("button", { name: "Manage group" }).click();
+  await expect(
+    page.getByRole("button", { name: `Remove ${displayName} ${handle}` }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("listitem").filter({ hasText: displayName }).first(),
+  ).toContainText(handle);
+
+  // Global search -> Posts: the author line.
+  await page.goto(`/search?q=${word}`);
+  await expect(
+    page.getByRole("link").filter({ hasText: `Spotted a ${word}` }),
+  ).toContainText(handle);
+});

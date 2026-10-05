@@ -43,7 +43,12 @@ import {
 import { errorMessage } from "@/lib/errors";
 import { useUserStatus } from "@/lib/status";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
-import { userAvatarName, userLabel } from "@/lib/users";
+import {
+  userAvatarName,
+  userHandle,
+  userLabel,
+  userLabelWithHandle,
+} from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 type GroupManagementDialogProps = {
@@ -696,6 +701,16 @@ function GroupManagementBody({
                             )}
                           >
                             {userLabel(u)}
+                            {userHandle(u) && (
+                              <span
+                                className={cn(
+                                  "ml-1",
+                                  !isSelected && "text-muted-foreground",
+                                )}
+                              >
+                                {userHandle(u)}
+                              </span>
+                            )}
                           </button>
                         );
                       })}
@@ -888,6 +903,9 @@ function ParticipantRow({
   onRemove,
 }: ParticipantRowProps) {
   const status = useUserStatus(p.userId, p);
+  // Buttons and their confirm dialogs name exactly who they act on: display
+  // names aren't unique (issue #526).
+  const actionLabel = userLabelWithHandle(p);
 
   return (
     <li
@@ -903,6 +921,11 @@ function ParticipantRow({
       <div className="flex min-w-0 flex-1 flex-col leading-tight">
         <span className="truncate text-sm font-medium">
           {label}
+          {userHandle(p) && (
+            <span className="ml-1.5 font-normal text-muted-foreground">
+              {userHandle(p)}
+            </span>
+          )}
           {isSelf && <span className="text-muted-foreground"> (you)</span>}
         </span>
         <RoleBadge isOwner={isOwner} role={p.role} />
@@ -919,8 +942,8 @@ function ParticipantRow({
             className="h-8 px-2 text-xs"
             aria-label={
               p.role === "admin"
-                ? `Remove admin from ${label}`
-                : `Make ${label} an admin`
+                ? `Remove admin from ${actionLabel}`
+                : `Make ${actionLabel} an admin`
             }
             disabled={updateRolePending}
             onClick={() =>
@@ -945,9 +968,9 @@ function ParticipantRow({
             size="sm"
             variant="ghost"
             className="h-8 px-2 text-xs"
-            aria-label={`Make ${label} the owner`}
+            aria-label={`Make ${actionLabel} the owner`}
             disabled={transferOwnershipPending}
-            onClick={() => onTransferOwnership(p.userId, label)}
+            onClick={() => onTransferOwnership(p.userId, actionLabel)}
           >
             <Crown className="size-3.5" />
             <span className="hidden min-[420px]:inline">Make owner</span>
@@ -958,9 +981,9 @@ function ParticipantRow({
             size="icon"
             variant="ghost"
             className="size-8 text-destructive hover:text-destructive"
-            aria-label={`Remove ${label}`}
+            aria-label={`Remove ${actionLabel}`}
             disabled={removePending}
-            onClick={() => onRemove(p.userId, label)}
+            onClick={() => onRemove(p.userId, actionLabel)}
           >
             <UserMinus className="size-4" />
           </Button>

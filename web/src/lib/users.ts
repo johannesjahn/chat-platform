@@ -32,6 +32,14 @@ export function userHandle(user: NamedUser): string | undefined {
   return user.displayName ? `@${user.username}` : undefined;
 }
 
+// `userLabel` with `userHandle` appended — "Carol @carol", or just "@dave"
+// when there's no display name. For plain-string slots (a sub-line, a
+// confirm dialog's title) where the handle can't be its own styled span.
+export function userLabelWithHandle(user: NamedUser): string {
+  const handle = userHandle(user);
+  return handle ? `${userLabel(user)} ${handle}` : userLabel(user);
+}
+
 // The name handed to `Avatar` for initials — same preference, but without
 // the `@` (Avatar.getInitials strips a leading `@` anyway, so this mostly
 // matters for a multi-word display name's two-initial rendering).
