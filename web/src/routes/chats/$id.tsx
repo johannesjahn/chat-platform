@@ -803,7 +803,7 @@ function ChatView({
                 </span>
                 <span className="truncate text-xs text-muted-foreground">
                   {chat.participants.length} participant
-                  {chat.participants.length === 1 ? "" : "s"} · Tap to manage
+                  {chat.participants.length === 1 ? "" : "s"}
                 </span>
               </div>
             </button>
