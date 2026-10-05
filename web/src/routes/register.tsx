@@ -8,10 +8,11 @@ import {
   usersQueryKey,
 } from "../lib/api";
 import { setSession } from "../lib/auth";
-import { validateAuthSearch } from "../lib/redirect";
+import { redirectIfSignedIn, validateAuthSearch } from "../lib/redirect";
 
 export const Route = createFileRoute("/register")({
   validateSearch: validateAuthSearch,
+  beforeLoad: redirectIfSignedIn,
   component: RegisterPage,
 });
 
