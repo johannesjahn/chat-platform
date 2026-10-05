@@ -25,12 +25,15 @@ import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
   useNotifications,
+  useUnreadNotificationCount,
   type Notification,
 } from "@/lib/notifications";
 import { userAvatarName, userHandle, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
+import { staticTitle, usePageTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/notifications")({
+  head: () => staticTitle("Notifications"),
   component: NotificationsPage,
 });
 
@@ -86,6 +89,9 @@ function useOpenNotification() {
 
 function NotificationsPage() {
   const session = useSession();
+  // The same count as the header bell's badge, so the tab says it too.
+  const unreadCount = useUnreadNotificationCount(!!session);
+  usePageTitle(unreadCount > 0 ? `Notifications (${unreadCount})` : undefined);
   const {
     data,
     isLoading,

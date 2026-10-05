@@ -232,3 +232,10 @@ export function gameThemeStyle(theme: GameTheme): CSSProperties {
     "--game-glow": theme.glow,
   } as CSSProperties;
 }
+
+// A game's name for the document title, from an unvalidated URL slug — the
+// route's `head` runs before its component checks the slug, so an unknown
+// one falls back to the arcade's name rather than throwing like `getGame`.
+export function gameTitle(slug: string): string {
+  return GAMES.find((entry) => entry.id === slug)?.name ?? "Arcade";
+}

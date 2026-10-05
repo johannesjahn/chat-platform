@@ -21,8 +21,10 @@ import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { useSession } from "@/lib/auth";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/users/")({
+  head: () => staticTitle("Users"),
   component: UsersPage,
 });
 

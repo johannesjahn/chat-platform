@@ -29,10 +29,12 @@ import { formatBytes } from "@/lib/attachments";
 import { errorMessage } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import type { components } from "@/lib/api-types";
+import { staticTitle } from "@/lib/title";
 
 type AdminStats = components["schemas"]["AdminStats"];
 
 export const Route = createFileRoute("/admin")({
+  head: () => staticTitle("Admin dashboard"),
   component: AdminPage,
 });
 

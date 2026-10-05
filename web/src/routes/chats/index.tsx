@@ -10,8 +10,10 @@ import { useSession } from "@/lib/auth";
 import { useChatsList } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
 import { useOnlineStatus } from "@/lib/online";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/chats/")({
+  head: () => staticTitle("Chats"),
   component: ChatsListPage,
 });
 

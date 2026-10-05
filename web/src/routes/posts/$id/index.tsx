@@ -12,8 +12,10 @@ import { useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { postsFeedQueryKey } from "@/lib/posts";
 import { useUserSummariesById, userHandle, userLabel } from "@/lib/users";
+import { staticTitle, usePageTitle, titleExcerpt } from "@/lib/title";
 
 export const Route = createFileRoute("/posts/$id/")({
+  head: () => staticTitle("Post"),
   component: PostDetailPage,
 });
 
@@ -40,6 +42,13 @@ function PostDetailPage() {
     !!session,
   );
   const author = post ? authorById.get(post.authorId) : undefined;
+  const authorName = author ? userLabel(author) : undefined;
+  // Text posts are titled by their opening words; an image/attachment post
+  // (or one whose text is empty) by who posted it.
+  const excerpt =
+    post && post.contentType === "text" ? titleExcerpt(post.content) : "";
+  const heading = excerpt || (authorName ? `Post by ${authorName}` : "Post");
+  usePageTitle(post ? heading : undefined);
 
   const deletePost = $api.useMutation("delete", "/posts/{id}");
   const confirm = useConfirm();
@@ -67,6 +76,9 @@ function PostDetailPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col gap-6 px-4 py-10">
+      <h1 className="sr-only">
+        {post && authorName ? `Post by ${authorName}` : "Post"}
+      </h1>
       <Button asChild variant="ghost" size="sm" className="self-start">
         <Link to="/">
           <ArrowLeft className="size-4" />

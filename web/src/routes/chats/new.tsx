@@ -21,8 +21,10 @@ import { errorMessage } from "@/lib/errors";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { userAvatarName, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/chats/new")({
+  head: () => staticTitle("New chat"),
   component: NewChatPage,
 });
 
@@ -52,6 +54,7 @@ function NewChatPage() {
     return (
       <main className="mx-auto flex w-full max-w-xl justify-center px-4 py-10">
         <LoginPrompt
+          pageHeading
           title="Log in to start a chat"
           description="You need an account to message people."
         />
@@ -105,7 +108,9 @@ function NewChatPage() {
     <main className="mx-auto w-full max-w-xl px-4 py-10">
       <Card className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
         <CardHeader>
-          <CardTitle>New chat</CardTitle>
+          <CardTitle asChild>
+            <h1>New chat</h1>
+          </CardTitle>
           <CardDescription>
             Message someone directly, or start a group with up to{" "}
             {MAX_GROUP_PARTICIPANTS} people.

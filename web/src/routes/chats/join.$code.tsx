@@ -14,8 +14,10 @@ import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { chatsListQueryKey } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/chats/join/$code")({
+  head: () => staticTitle("Chat invite"),
   component: JoinChatByCodePage,
 });
 
@@ -34,6 +36,7 @@ function JoinChatByCodePage() {
     return (
       <main className="mx-auto flex w-full max-w-xl justify-center px-4 py-10">
         <LoginPrompt
+          pageHeading
           title="Log in to join this chat"
           description="You need an account to redeem an invite link."
         />
@@ -58,9 +61,11 @@ function JoinChatByCodePage() {
     <main className="mx-auto w-full max-w-xl px-4 py-10">
       <Card className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="size-4 text-primary" />
-            You&apos;ve been invited to a chat
+          <CardTitle asChild className="flex items-center gap-2">
+            <h1>
+              <Users className="size-4 text-primary" />
+              You&apos;ve been invited to a chat
+            </h1>
           </CardTitle>
           <CardDescription>
             Join to see the conversation and start messaging.
