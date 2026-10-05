@@ -5,6 +5,7 @@ import {
   Outlet,
   Scripts,
   useRouter,
+  useRouterState,
 } from "@tanstack/react-router";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import {
@@ -12,15 +13,20 @@ import {
   Gamepad2,
   Gauge,
   LogOut,
+  Menu,
   MessagesSquare,
   Settings,
+  User,
   Users,
+  X,
+  type LucideIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { NavIcon } from "@/components/NavIcon";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
+import { Collapse } from "@/components/ui/collapse";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { HeaderSearch } from "@/components/HeaderSearch";
 import { OfflineBanner } from "@/components/OfflineBanner";
@@ -106,22 +112,54 @@ function Nav() {
   const unreadCount = useTotalUnreadCount(!!session);
   const unreadNotifications = useUnreadNotificationCount(!!session);
   const redirect = useRedirectHere();
+  const menuId = useId();
+  // The phone menu remembers the location it was opened on rather than a
+  // bare boolean, so any navigation — a menu link, a search submit, the
+  // brand — closes it and it never stays open over the page it led to.
+  const href = useRouterState({ select: (s) => s.location.href });
+  const [menuOpenAt, setMenuOpenAt] = useState<string | null>(null);
+  const menuOpen = menuOpenAt === href;
+  const setMenuOpen = (open: boolean) => setMenuOpenAt(open ? href : null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpenAt(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [menuOpen]);
+
+  const onLogout = session
+    ? () => {
+        logout(session);
+        // Leave whatever page was open (e.g. /settings) rather than
+        // re-rendering it half signed out (issue #499).
+        void router.navigate({ to: "/" });
+        router.invalidate();
+      }
+    : undefined;
 
   return (
     // `pt-[calc(...)]` rather than `py-3`: `viewport-fit=cover` lets the page
     // run under the status bar and the notch, so the nav owns that inset —
     // its background then fills the area instead of the bar overlapping the
     // links. Resolves to plain `0.75rem` everywhere `env()` is 0.
+    //
+    // Below `sm` it's a single row — brand, Chats, the bell, and a menu
+    // button — with search and everything else in the menu panel (issue
+    // #494): the full set wrapped onto three rows there and, pinned, took
+    // about a third of a phone screen. Links that only live in the menu on a
+    // phone are `hidden sm:inline-flex` in the bar rather than rendered twice
+    // visibly, so each has one accessible copy at any width.
+    //
     // `data-app-nav` is what the immersive shell hides on phone widths while
     // a conversation is open (see the rules in styles.css, switched on by
-    // `useImmersiveShell`) — the chat has its own header and back button, and
-    // these three wrapped rows are the space the thread needs once the
-    // on-screen keyboard is up.
+    // `useImmersiveShell`) — the chat has its own header and back button.
     <nav
       data-app-nav
       className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-card/70 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur sm:px-5"
     >
-      <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+      <div className="flex min-w-0 items-center gap-2 sm:flex-wrap sm:gap-4">
         <Link
           to="/"
           className="group relative flex items-center gap-2 font-semibold tracking-tight text-foreground"
@@ -130,8 +168,9 @@ function Nav() {
           {/* The entrance lives on this wrapper, not on GradientText itself:
               GradientText already owns its element's `animation` (the gradient
               drift), and a second shorthand on the same element would simply
-              replace it. */}
-          <span className="inline-block motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2 motion-safe:duration-700">
+              replace it. On the narrowest phones the wordmark steps aside
+              (still the link's accessible name) so the row never wraps. */}
+          <span className="inline-block motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2 motion-safe:duration-700 max-[22.5rem]:sr-only">
             <GradientText>Chat Platform</GradientText>
           </span>
           <span className="pointer-events-none absolute -bottom-1 left-7 h-px w-0 bg-primary transition-all duration-300 ease-out group-hover:w-[calc(100%-1.75rem)]" />
@@ -139,7 +178,8 @@ function Nav() {
         <Button asChild variant="ghost" size="sm" className="relative">
           <Link to="/chats" className="group/nav-icon">
             <NavIcon icon={MessagesSquare} />
-            Chats
+            {/* Icon-only on a phone; the label stays the accessible name. */}
+            <span className="max-sm:sr-only">Chats</span>
             {unreadCount > 0 && (
               <span
                 // Re-keyed on the count so the pop replays every time a new
@@ -152,13 +192,23 @@ function Nav() {
             )}
           </Link>
         </Button>
-        <Button asChild variant="ghost" size="sm">
+        <Button
+          asChild
+          variant="ghost"
+          size="sm"
+          className="hidden sm:inline-flex"
+        >
           <Link to="/users" className="group/nav-icon">
             <NavIcon icon={Users} />
             Users
           </Link>
         </Button>
-        <Button asChild variant="ghost" size="sm">
+        <Button
+          asChild
+          variant="ghost"
+          size="sm"
+          className="hidden sm:inline-flex"
+        >
           <Link to="/games" className="group/nav-icon">
             <NavIcon icon={Gamepad2} />
             Games
@@ -168,7 +218,12 @@ function Nav() {
             403s a non-admin) — hiding the link just keeps a dead end out of
             everyone else's nav. */}
         {session?.user.role === "admin" && (
-          <Button asChild variant="ghost" size="sm">
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="hidden sm:inline-flex"
+          >
             <Link to="/admin" className="group/nav-icon">
               <NavIcon icon={Gauge} />
               Admin
@@ -176,80 +231,154 @@ function Nav() {
           </Button>
         )}
       </div>
-      {session && <HeaderSearch />}
-      {session ? (
-        <div className="flex items-center gap-3">
-          <Link
-            to="/users/$id"
-            params={{ id: String(session.user.id) }}
-            // `link-sweep` draws the underline in from the left rather than
-            // switching it on whole, and retracts it the same way — see
-            // styles.css.
-            className="link-sweep text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            {userLabel(session.user)}
-          </Link>
-          <Button
-            asChild
-            variant="ghost"
-            size="icon"
-            className="relative"
-            aria-label={
-              unreadNotifications > 0
-                ? `Notifications (${unreadNotifications} unread)`
-                : "Notifications"
-            }
-          >
-            <Link to="/notifications" className="group/nav-icon">
-              <NavIcon icon={Bell} />
-              {unreadNotifications > 0 && (
-                <span
-                  // Re-keyed like the Chats badge so the pop replays on
-                  // every new notification.
-                  key={unreadNotifications}
-                  className="absolute -right-1 -top-1 flex size-4.5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground motion-safe:animate-badge-pop"
-                >
-                  {unreadNotifications > 99 ? "99+" : unreadNotifications}
-                </span>
-              )}
+      {session && <HeaderSearch className="hidden sm:block" />}
+      <div className="flex items-center gap-2 sm:gap-3">
+        {session ? (
+          <>
+            <Link
+              to="/users/$id"
+              params={{ id: String(session.user.id) }}
+              // `link-sweep` draws the underline in from the left rather than
+              // switching it on whole, and retracts it the same way — see
+              // styles.css.
+              className="link-sweep hidden text-sm text-muted-foreground transition-colors hover:text-foreground sm:inline"
+            >
+              {userLabel(session.user)}
             </Link>
-          </Button>
-          <Button asChild variant="ghost" size="icon" aria-label="Settings">
-            <Link to="/settings" className="group/nav-icon">
-              <NavIcon icon={Settings} />
-            </Link>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="group/nav-icon"
-            onClick={() => {
-              logout(session);
-              // Leave whatever page was open (e.g. /settings) rather than
-              // re-rendering it half signed out (issue #499).
-              void router.navigate({ to: "/" });
-              router.invalidate();
-            }}
-          >
-            <NavIcon icon={LogOut} />
-            Log out
-          </Button>
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              className="relative"
+              aria-label={
+                unreadNotifications > 0
+                  ? `Notifications (${unreadNotifications} unread)`
+                  : "Notifications"
+              }
+            >
+              <Link to="/notifications" className="group/nav-icon">
+                <NavIcon icon={Bell} />
+                {unreadNotifications > 0 && (
+                  <span
+                    // Re-keyed like the Chats badge so the pop replays on
+                    // every new notification.
+                    key={unreadNotifications}
+                    className="absolute -right-1 -top-1 flex size-4.5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground motion-safe:animate-badge-pop"
+                  >
+                    {unreadNotifications > 99 ? "99+" : unreadNotifications}
+                  </span>
+                )}
+              </Link>
+            </Button>
+            <Button
+              asChild
+              variant="ghost"
+              size="icon"
+              aria-label="Settings"
+              className="hidden sm:inline-flex"
+            >
+              <Link to="/settings" className="group/nav-icon">
+                <NavIcon icon={Settings} />
+              </Link>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="group/nav-icon hidden sm:inline-flex"
+              onClick={onLogout}
+            >
+              <NavIcon icon={LogOut} />
+              Log out
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/login" search={{ redirect }}>
+                Log in
+              </Link>
+            </Button>
+            <Button asChild size="sm" className="hidden sm:inline-flex">
+              <Link to="/register" search={{ redirect }}>
+                Register
+              </Link>
+            </Button>
+          </>
+        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="group/nav-icon sm:hidden"
+          aria-label="Menu"
+          aria-expanded={menuOpen}
+          // The panel unmounts once closed, so it's only pointed at while
+          // it's there.
+          aria-controls={menuOpen ? menuId : undefined}
+          onClick={() => setMenuOpen(!menuOpen)}
+        >
+          <NavIcon icon={menuOpen ? X : Menu} />
+        </Button>
+      </div>
+      <Collapse open={menuOpen} id={menuId} className="basis-full sm:hidden">
+        <div className="flex flex-col gap-1 pt-1">
+          {session && <HeaderSearch className="mb-2" />}
+          <MenuLink to="/users" icon={Users} label="Users" />
+          <MenuLink to="/games" icon={Gamepad2} label="Games" />
+          {session?.user.role === "admin" && (
+            <MenuLink to="/admin" icon={Gauge} label="Admin" />
+          )}
+          {session ? (
+            <>
+              <Button
+                asChild
+                variant="ghost"
+                className="group/nav-icon justify-start"
+              >
+                <Link to="/users/$id" params={{ id: String(session.user.id) }}>
+                  <NavIcon icon={User} />
+                  {userLabel(session.user)}
+                </Link>
+              </Button>
+              <MenuLink to="/settings" icon={Settings} label="Settings" />
+              <Button
+                variant="ghost"
+                className="group/nav-icon justify-start"
+                onClick={onLogout}
+              >
+                <NavIcon icon={LogOut} />
+                Log out
+              </Button>
+            </>
+          ) : (
+            <Button asChild className="mt-1">
+              <Link to="/register" search={{ redirect }}>
+                Register
+              </Link>
+            </Button>
+          )}
         </div>
-      ) : (
-        <div className="flex items-center gap-2">
-          <Button asChild variant="ghost" size="sm">
-            <Link to="/login" search={{ redirect }}>
-              Log in
-            </Link>
-          </Button>
-          <Button asChild size="sm">
-            <Link to="/register" search={{ redirect }}>
-              Register
-            </Link>
-          </Button>
-        </div>
-      )}
+      </Collapse>
     </nav>
+  );
+}
+
+// A full-width row in the phone menu panel.
+function MenuLink({
+  to,
+  icon,
+  label,
+}: {
+  to: "/users" | "/games" | "/admin" | "/settings";
+  icon: LucideIcon;
+  label: string;
+}) {
+  return (
+    <Button asChild variant="ghost" className="group/nav-icon justify-start">
+      <Link to={to}>
+        <NavIcon icon={icon} />
+        {label}
+      </Link>
+    </Button>
   );
 }
 

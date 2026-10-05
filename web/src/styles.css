@@ -199,7 +199,7 @@ html[data-app-shell="immersive"] body {
 
 /* Below `sm`, the conversation is the whole screen and its own header — back
    button included — is the only chrome it needs. Reclaiming the site nav's
-   three wrapped rows is what keeps the thread readable once the on-screen
+   row is part of what keeps the thread readable once the on-screen
    keyboard has taken half the viewport; without it the header, pinned bar and
    composer fill everything that's left. The chat header picks up
    `env(safe-area-inset-top)` at the same breakpoint, so the status bar still

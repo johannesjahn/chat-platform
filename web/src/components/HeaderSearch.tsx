@@ -2,23 +2,29 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 // The unified search box in the app header (issue #224). Submitting navigates
 // to the `/search` results page with the query in the URL, which is the single
 // source of truth for what's being searched — so this input stays a thin entry
 // point and the results page owns the actual querying/pagination.
-export function HeaderSearch() {
+//
+// The nav renders it twice — inline in the bar from `sm` up, and at the top of
+// the phone menu panel below that — and hides whichever doesn't apply via
+// `className`.
+export function HeaderSearch({ className }: { className?: string }) {
   const navigate = useNavigate();
   const [value, setValue] = useState("");
 
   return (
     <form
       role="search"
-      // On narrow viewports the search drops onto its own full-width row
-      // (order-last + basis-full) so it can't get squeezed to an unusable
-      // sliver — or clipped off the edge — next to the nav links and account
-      // actions. From `sm` up it sits inline and flexes to fill the gap.
-      className="relative order-last w-full min-w-0 basis-full sm:order-none sm:w-auto sm:flex-1 sm:basis-auto sm:max-w-xs"
+      // Full width in the phone menu; inline in the bar from `sm` up, flexing
+      // to fill the gap between the links and the account actions.
+      className={cn(
+        "relative w-full min-w-0 sm:w-auto sm:max-w-xs sm:flex-1",
+        className,
+      )}
       onSubmit={(e) => {
         e.preventDefault();
         const q = value.trim();
