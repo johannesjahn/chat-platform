@@ -1,4 +1,5 @@
-import { useRouterState } from "@tanstack/react-router";
+import { redirect, useRouterState } from "@tanstack/react-router";
+import { getSession } from "./auth";
 
 // Search params shared by /login and /register: where to send the user once
 // they're signed in (issue #481). Without it, someone who opened an invite
@@ -42,4 +43,14 @@ function isAuthPath(href: string): boolean {
 export function useRedirectHere(): string | undefined {
   const href = useRouterState({ select: (state) => state.location.href });
   return href === "/" || isAuthPath(href) ? undefined : href;
+}
+
+// `beforeLoad` for /login and /register: a visitor who's already signed in
+// is sent straight on — to their vetted `redirect` target, or the feed —
+// rather than shown the form again (issue #499). `replace` keeps the auth
+// page out of history, so Back doesn't bounce off it.
+export function redirectIfSignedIn({ search }: { search: AuthSearch }): void {
+  if (getSession()) {
+    throw redirect({ href: search.redirect ?? "/", replace: true });
+  }
 }

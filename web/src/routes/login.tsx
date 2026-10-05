@@ -3,10 +3,11 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { AuthForm } from "../components/AuthForm";
 import { $api, usersQueryKey } from "../lib/api";
 import { setSession } from "../lib/auth";
-import { validateAuthSearch } from "../lib/redirect";
+import { redirectIfSignedIn, validateAuthSearch } from "../lib/redirect";
 
 export const Route = createFileRoute("/login")({
   validateSearch: validateAuthSearch,
+  beforeLoad: redirectIfSignedIn,
   component: LoginPage,
 });
 

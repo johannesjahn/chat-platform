@@ -225,6 +225,9 @@ function Nav() {
             className="group/nav-icon"
             onClick={() => {
               logout(session);
+              // Leave whatever page was open (e.g. /settings) rather than
+              // re-rendering it half signed out (issue #499).
+              void router.navigate({ to: "/" });
               router.invalidate();
             }}
           >
