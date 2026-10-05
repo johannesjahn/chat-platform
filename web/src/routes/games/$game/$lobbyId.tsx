@@ -108,7 +108,11 @@ function LobbyRoute() {
           icon={Swords}
           title="Lobby not found"
           description="This lobby doesn't exist."
-        />
+        >
+          <Button asChild>
+            <Link to="/games">Back to the arcade</Link>
+          </Button>
+        </EmptyState>
       </main>
     );
   }

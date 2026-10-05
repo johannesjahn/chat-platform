@@ -352,6 +352,13 @@ test("navigating directly to a chat you can't access shows a not-found message",
   // fallback rather than leaking whether the chat exists.
   await pageC.goto(`/chats/${chatId}`);
   await expect(pageC.getByText("Chat not found")).toBeVisible();
+  await expect(
+    pageC.getByText("It may have been deleted, or you're not a member."),
+  ).toBeVisible();
+
+  // Neither is a dead end (issue #502).
+  await pageC.getByRole("link", { name: "Back to chats" }).click();
+  await expect(pageC).toHaveURL("/chats");
 
   await contextA.close();
   await contextB.close();

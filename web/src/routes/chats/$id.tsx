@@ -21,7 +21,12 @@ import { PresenceDot } from "@/components/PresenceDot";
 import { TypingDots } from "@/components/reactbits/TypingDots";
 import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
@@ -35,7 +40,6 @@ import {
   useChatDetail,
   useChatMessages,
 } from "@/lib/chats";
-import { errorMessage } from "@/lib/errors";
 import {
   dismissQueuedItem,
   enqueueMessage,
@@ -586,7 +590,9 @@ function ChatView({
     // participant" response decodes into the API's typed `{ message }` error
     // body instead (see errorMessage.ts's own instanceof check for the same
     // distinction) — so this is the one case that's actually a 403/404, not
-    // a connectivity problem, and worth showing the server's own wording for.
+    // a connectivity problem. Its copy deliberately doesn't echo the server's
+    // message ("Chat 999 not found" just repeats the title) and covers both
+    // cases alike, so it never reveals whether a chat you're not in exists.
     const isApiError =
       accessDenied || (chatError != null && !(chatError instanceof Error));
     return (
@@ -598,12 +604,20 @@ function ChatView({
             </h1>
             <p className="text-sm text-muted-foreground">
               {isApiError
-                ? errorMessage(chatError)
+                ? "It may have been deleted, or you're not a member."
                 : isOnline
                   ? "Something went wrong reaching the server. Try again in a moment."
                   : "You're offline, and this conversation hasn't been loaded on this device yet."}
             </p>
           </CardHeader>
+          <CardFooter>
+            <Button asChild>
+              <Link to="/chats">
+                <ArrowLeft className="size-4" />
+                Back to chats
+              </Link>
+            </Button>
+          </CardFooter>
         </Card>
       </main>
     );

@@ -139,6 +139,9 @@ test("edit is only available to a post's author, both in the UI and when navigat
   const postId = await cardOnB.getAttribute("data-post-id");
   await pageB.goto(`/posts/${postId}/edit`);
   await expect(pageB.getByText("You can't edit this post")).toBeVisible();
+  // ...with a way out to the post itself rather than a dead end (#502).
+  await pageB.getByRole("link", { name: "View post" }).click();
+  await expect(pageB).toHaveURL(`/posts/${postId}`);
 
   // The author, meanwhile, can actually edit it end-to-end.
   await cardOnA.getByRole("link", { name: "Edit post" }).click();

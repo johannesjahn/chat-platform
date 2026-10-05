@@ -14,3 +14,13 @@ test("an unknown URL shows the 404 page with a way back to the feed", async ({
   await main.getByRole("link", { name: "Go to feed" }).click();
   await expect(page).toHaveURL("/");
 });
+
+// Issue #502: an unknown game slug used to be a dead end.
+test("an unknown game links back to the arcade", async ({ page }) => {
+  await page.goto("/games/no-such-game");
+  const main = page.getByRole("main");
+  await expect(main.getByText("Game not found")).toBeVisible();
+
+  await main.getByRole("link", { name: "Back to the arcade" }).click();
+  await expect(page).toHaveURL("/games");
+});
