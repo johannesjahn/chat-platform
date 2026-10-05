@@ -18,9 +18,40 @@ export function getSession(): Session | null {
   if (typeof window === "undefined") return null;
   const raw = window.localStorage.getItem(STORAGE_KEY);
   if (raw !== cache.raw) {
-    cache = { raw, value: raw ? (JSON.parse(raw) as Session) : null };
+    const value = raw === null ? null : parseSession(raw);
+    // Unreadable data (a manual edit, an extension, a partial write, an old
+    // format) is treated as signed out and dropped, rather than throwing
+    // during render and keeping the app from loading until storage is
+    // cleared by hand (issue #508).
+    if (raw !== null && value === null) {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+    cache = { raw, value };
   }
   return cache.value;
+}
+
+function parseSession(raw: string): Session | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  return isSession(parsed) ? parsed : null;
+}
+
+// A structural check of just what the app relies on — enough that a stored
+// value from some other shape can't crash a consumer further down.
+function isSession(value: unknown): value is Session {
+  if (typeof value !== "object" || value === null) return false;
+  const { user, accessToken, refreshToken } = value as Record<string, unknown>;
+  if (typeof accessToken !== "string" || typeof refreshToken !== "string") {
+    return false;
+  }
+  if (typeof user !== "object" || user === null) return false;
+  const { id, username } = user as Record<string, unknown>;
+  return typeof id === "number" && typeof username === "string";
 }
 
 export function setSession(session: Session): void {
