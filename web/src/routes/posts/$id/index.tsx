@@ -6,10 +6,17 @@ import { CommentsSection } from "@/components/CommentsSection";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PostCard, PostCardSkeleton } from "@/components/PostCard";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage, isNotFoundError } from "@/lib/errors";
 import { postsFeedQueryKey } from "@/lib/posts";
 import { useUserSummariesById, userHandle, userLabel } from "@/lib/users";
 import { staticTitle, usePageTitle, titleExcerpt } from "@/lib/title";
@@ -48,7 +55,11 @@ function PostDetailPage() {
   const excerpt =
     post && post.contentType === "text" ? titleExcerpt(post.content) : "";
   const heading = excerpt || (authorName ? `Post by ${authorName}` : "Post");
-  usePageTitle(post ? heading : undefined);
+  // Deleted posts are a normal case (stale notification, search result or
+  // shared link), so a missing post gets a proper not-found state rather
+  // than the raw API error (issue #529).
+  const notFound = !!session && isNotFoundError(error);
+  usePageTitle(post ? heading : notFound ? "Post not found" : undefined);
 
   const deletePost = $api.useMutation("delete", "/posts/{id}");
   const confirm = useConfirm();
@@ -74,6 +85,29 @@ function PostDetailPage() {
     }
   }
 
+  if (notFound) {
+    return (
+      <main className="mx-auto w-full max-w-xl px-4 py-10">
+        <Card>
+          <CardHeader>
+            <CardTitle asChild>
+              <h1>Post not found</h1>
+            </CardTitle>
+            <CardDescription>This post may have been deleted.</CardDescription>
+          </CardHeader>
+          <CardFooter>
+            <Button asChild>
+              <Link to="/">
+                <ArrowLeft className="size-4" />
+                Back to feed
+              </Link>
+            </Button>
+          </CardFooter>
+        </Card>
+      </main>
+    );
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col gap-6 px-4 py-10">
       <h1 className="sr-only">
@@ -97,7 +131,8 @@ function PostDetailPage() {
         <p className="w-full rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error
             ? `Could not load post: ${errorMessage(error)}`
-            : "Post not found."}
+            : // No data and no error: the fetch is paused, offline.
+              "You're offline, and this post hasn't been loaded on this device yet."}
         </p>
       ) : (
         <>

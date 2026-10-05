@@ -36,3 +36,15 @@ export function errorMessage(err: unknown): string {
   }
   return "Something failed";
 }
+
+// Whether a read query failed because the thing it asked for isn't there:
+// the API's `NotFound` (deleted, never existed, or hidden from this reader),
+// or an id in the URL that doesn't even parse (`HttpApiDecodeError` on a
+// path param). Pages show a "not found" state for these rather than the raw
+// error text, which they keep for real failures (network, 5xx).
+export function isNotFoundError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null || err instanceof Error)
+    return false;
+  const tag = (err as { _tag?: unknown })._tag;
+  return tag === "NotFound" || tag === "HttpApiDecodeError";
+}
