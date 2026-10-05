@@ -9,6 +9,9 @@ type EmptyStateProps = {
   /** Optional call-to-action(s) rendered below the copy. */
   children?: ReactNode;
   className?: string;
+  // Set where the empty state is all the page shows (a 404, an error page),
+  // so its title is the page's `<h1>`.
+  pageHeading?: boolean;
 };
 
 // A friendly, lightly animated "nothing here yet" panel shared across the
@@ -22,7 +25,9 @@ export function EmptyState({
   description,
   children,
   className,
+  pageHeading = false,
 }: EmptyStateProps) {
+  const Title = pageHeading ? "h1" : "p";
   return (
     <div
       className={cn(
@@ -46,7 +51,9 @@ export function EmptyState({
         </span>
       </div>
       <div className="flex flex-col gap-1.5">
-        <p className="text-base font-semibold tracking-tight">{title}</p>
+        <Title className="text-base font-semibold tracking-tight">
+          {title}
+        </Title>
         {description && (
           <p className="mx-auto max-w-xs text-sm text-muted-foreground">
             {description}
