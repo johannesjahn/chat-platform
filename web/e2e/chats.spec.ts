@@ -1133,6 +1133,7 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
   expect(await pageScrollable()).toBe(false);
 
   // The build-version tag stays out of the corner the composer now occupies.
+  // (It's hidden at phone widths everywhere, not just in a chat — #506.)
   const versionTag = page.locator("[data-version-tag]");
   await expect(versionTag).toBeHidden();
 
@@ -1173,11 +1174,16 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
   await expect(nav).toBeVisible();
   await expect(page.locator("html")).not.toHaveAttribute("data-app-shell");
 
-  // Back on an ordinary page the tag is visible again — and it rides the
-  // *visible* bottom edge, not the layout viewport's. Fixed positioning
-  // resolves against the latter, which the keyboard doesn't shrink, so the
-  // `bottom`-anchored version of this used to leave the tag floating in the
-  // middle of the screen whenever a keyboard was up (see VersionFooter).
+  // Even on an ordinary page a phone has no spare corner for the tag: the
+  // cards run edge to edge, so pinned there it would sit on top of one (#506).
+  await expect(versionTag).toBeHidden();
+
+  // From `sm` up it's back — and it rides the *visible* bottom edge, not the
+  // layout viewport's. Fixed positioning resolves against the latter, which
+  // the keyboard doesn't shrink, so the `bottom`-anchored version of this used
+  // to leave the tag floating in the middle of the screen whenever a keyboard
+  // was up (see VersionFooter) — which a tablet's on-screen keyboard still does.
+  await page.setViewportSize({ width: 768, height: 1024 });
   await expect(versionTag).toBeVisible();
   await page.evaluate(() => window.__shrinkVisualViewport(400));
   await expect

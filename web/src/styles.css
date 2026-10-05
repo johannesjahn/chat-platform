@@ -208,13 +208,6 @@ html[data-app-shell="immersive"] body {
   html[data-app-shell="immersive"] [data-app-nav] {
     display: none;
   }
-
-  /* Same reasoning for the build-version tag: on a phone the conversation
-     reaches every corner, so a tag pinned to the bottom-right one lands on
-     the send button instead of the empty margin it has everywhere else. */
-  html[data-app-shell="immersive"] [data-version-tag] {
-    display: none;
-  }
 }
 
 @keyframes aurora-drift {

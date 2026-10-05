@@ -17,9 +17,12 @@ export function VersionFooter() {
     // in a chat. `--app-height` is the visible viewport (lib/viewport.ts), and
     // its top edge is the layout viewport's, so measuring down from there puts
     // this back on the bottom edge people can actually see.
+    // Hidden below `sm`: pages run edge to edge on a phone, so there's no empty
+    // margin for the corner to sit in and the tag lands on whatever card is at
+    // the bottom of the screen (#506).
     <span
       data-version-tag
-      className="pointer-events-none fixed top-[calc(var(--app-height,100dvh)-1.5rem)] right-3 z-10 text-xs text-muted-foreground/60 select-none"
+      className="pointer-events-none fixed top-[calc(var(--app-height,100dvh)-1.5rem)] right-3 z-10 hidden text-xs text-muted-foreground/60 select-none sm:inline"
     >
       v{data.version}
     </span>
