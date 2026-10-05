@@ -305,10 +305,14 @@ function SectionHeader({
   icon: Icon,
   title,
   count,
+  more = false,
 }: {
   icon: LucideIcon;
   title: string;
   count?: number;
+  // The count is only a preview page's size: mark it as a lower bound ("5+")
+  // rather than let it read as the total number of matches.
+  more?: boolean;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -316,7 +320,13 @@ function SectionHeader({
       <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
         {count !== undefined && count > 0 && (
-          <span className="ml-1.5 text-muted-foreground/70">{count}</span>
+          <span
+            className="ml-1.5 text-muted-foreground/70"
+            aria-label={more ? `${count} or more` : undefined}
+          >
+            {count}
+            {more && "+"}
+          </span>
         )}
       </h2>
     </div>
@@ -350,7 +360,12 @@ function Section({
 
   return (
     <section className="flex flex-col gap-3">
-      <SectionHeader icon={icon} title={title} count={count} />
+      <SectionHeader
+        icon={icon}
+        title={title}
+        count={count}
+        more={onSeeAll !== undefined}
+      />
       {isLoading ? (
         <SearchingRow />
       ) : error ? (

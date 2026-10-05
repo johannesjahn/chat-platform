@@ -137,3 +137,38 @@ test("a message search result opens the chat on the matching message", async ({
   await expect(targetBubble.getByTestId("jump-highlight")).toBeVisible();
   await expect(page.locator("[data-message-id]").last()).not.toBeInViewport();
 });
+
+// The All tab's section counts are the size of a preview page, so once more
+// matches exist than it holds they read as a lower bound ("5+"), not a total.
+test("all-tab section counts mark a truncated preview with a plus", async ({
+  page,
+  request,
+  apiUrl,
+  signUp,
+}) => {
+  await signUp(page);
+
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  const seed = async (content: string) => {
+    const response = await request.post(`${apiUrl}/posts`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      data: { contentType: "text", content },
+    });
+    expect(response.ok()).toBe(true);
+  };
+  for (let i = 0; i < 7; i++) await seed(`quetzalcoatl sighting ${i}`);
+  await seed("a lone axolotl");
+
+  await page.goto("/search?q=quetzalcoatl");
+  const postsHeading = page.getByRole("heading", { name: /^Posts/ });
+  await expect(postsHeading).toContainText("5+");
+  await expect(
+    page.getByRole("button", { name: "See all posts" }),
+  ).toBeVisible();
+
+  // A preview that holds every match shows its plain count.
+  await page.goto("/search?q=axolotl");
+  await expect(postsHeading).toHaveText(/^Posts\s*1$/);
+});
