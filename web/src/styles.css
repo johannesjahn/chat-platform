@@ -65,8 +65,17 @@
 }
 
 @layer base {
+  /* The browser's own focus outline (plain links, like the brand mark and
+     the profile name in the nav) takes the full ring color — at half
+     opacity it all but vanished against the dark surfaces (issue #497). */
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring;
+  }
+
+  /* The skip link focuses the page's <main> so the next Tab starts inside
+     it; that landmark isn't a control, so it doesn't draw a ring itself. */
+  main:focus {
+    outline: none;
   }
 
   html {
