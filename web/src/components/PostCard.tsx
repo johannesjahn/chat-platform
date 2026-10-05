@@ -98,6 +98,11 @@ export function PostCard({
   // they change in real time (comment/reaction realtime events patch the
   // cached post — see useRealtimeSocket).
   const totalReactions = post.reactions.reduce((sum, r) => sum + r.count, 0);
+  // With a single emoji kind its chip already shows the total, so a separate
+  // counter would just repeat that number beside the add-reaction button
+  // (issue #503). Only surface it once there are several chips to sum up.
+  const showReactionTotal =
+    post.reactions.filter((r) => r.count > 0).length > 1;
   const isLongText =
     post.contentType === "text" && post.content.length > COLLAPSE_THRESHOLD;
   const {
@@ -275,12 +280,12 @@ export function PostCard({
             pending={reactionPending}
             onToggle={toggleReaction}
           />
-          {totalReactions > 0 && (
+          {showReactionTotal && (
             <span
               className="text-xs tabular-nums text-muted-foreground"
-              aria-label={`${totalReactions} reaction${totalReactions === 1 ? "" : "s"} total`}
+              aria-label={`${totalReactions} reactions total`}
             >
-              <CountUp value={totalReactions} />
+              <CountUp value={totalReactions} /> total
             </span>
           )}
           <Button
