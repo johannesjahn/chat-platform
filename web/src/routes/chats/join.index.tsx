@@ -13,8 +13,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSession } from "@/lib/auth";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/chats/join/")({
+  head: () => staticTitle("Join a chat"),
   component: JoinChatPage,
 });
 
@@ -37,6 +39,7 @@ function JoinChatPage() {
     return (
       <main className="mx-auto flex w-full max-w-xl justify-center px-4 py-10">
         <LoginPrompt
+          pageHeading
           title="Log in to join a chat"
           description="You need an account to redeem an invite link."
         />
@@ -50,9 +53,11 @@ function JoinChatPage() {
     <main className="mx-auto w-full max-w-xl px-4 py-10">
       <Card className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Link2 className="size-4 text-primary" />
-            Join a chat
+          <CardTitle asChild className="flex items-center gap-2">
+            <h1>
+              <Link2 className="size-4 text-primary" />
+              Join a chat
+            </h1>
           </CardTitle>
           <CardDescription>
             Paste an invite link or code someone shared with you.

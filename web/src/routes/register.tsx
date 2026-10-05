@@ -9,8 +9,10 @@ import {
 } from "../lib/api";
 import { setSession } from "../lib/auth";
 import { redirectIfSignedIn, validateAuthSearch } from "../lib/redirect";
+import { staticTitle } from "../lib/title";
 
 export const Route = createFileRoute("/register")({
+  head: () => staticTitle("Create an account"),
   validateSearch: validateAuthSearch,
   beforeLoad: redirectIfSignedIn,
   component: RegisterPage,

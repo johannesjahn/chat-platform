@@ -6,8 +6,10 @@ import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { enqueuePost } from "@/lib/offlineQueue";
 import { postsFeedQueryKey } from "@/lib/posts";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/posts/new")({
+  head: () => staticTitle("New post"),
   component: NewPostPage,
 });
 
@@ -21,6 +23,7 @@ function NewPostPage() {
     return (
       <main className="mx-auto flex w-full max-w-xl justify-center px-4 py-10">
         <LoginPrompt
+          pageHeading
           title="Log in to create a post"
           description="You need an account to post."
         />

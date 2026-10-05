@@ -36,10 +36,12 @@ import {
 } from "@/lib/search";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { userAvatarName, userLabel } from "@/lib/users";
+import { staticTitle, usePageTitle } from "@/lib/title";
 
 type SearchParams = { q?: string };
 
 export const Route = createFileRoute("/search")({
+  head: () => staticTitle("Search"),
   validateSearch: (search: Record<string, unknown>): SearchParams => ({
     q:
       typeof search.q === "string" && search.q.length > 0
@@ -70,6 +72,7 @@ function SearchPage() {
   const session = useSession();
   const navigate = Route.useNavigate();
   const { q: urlQuery } = Route.useSearch();
+  usePageTitle(urlQuery ? `“${urlQuery}” · Search` : undefined);
   const [input, setInput] = useState(urlQuery ?? "");
   const [tab, setTab] = useState<Tab>("all");
 

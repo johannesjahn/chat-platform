@@ -48,6 +48,7 @@ import {
 } from "@/lib/games/lobby";
 import {
   GAMES,
+  gameTitle,
   getGame,
   type GameDefinition,
   type GameId,
@@ -58,8 +59,10 @@ import {
   useGameRoom,
 } from "@/lib/games/rooms";
 import { userLabel } from "@/lib/users";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/games/$game/$lobbyId")({
+  head: ({ params }) => staticTitle(`${gameTitle(params.game)} lobby`),
   component: LobbyRoute,
 });
 

@@ -11,8 +11,10 @@ import {
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { postsFeedQueryKey } from "@/lib/posts";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/posts/$id/edit")({
+  head: () => staticTitle("Edit post"),
   component: EditPostPage,
 });
 
@@ -38,6 +40,7 @@ function EditPostPage() {
     return (
       <main className="mx-auto flex w-full max-w-xl justify-center px-4 py-10">
         <LoginPrompt
+          pageHeading
           title="Log in to edit this post"
           description="You need an account to edit posts."
         />
@@ -54,7 +57,9 @@ function EditPostPage() {
       <main className="mx-auto w-full max-w-xl px-4 py-10">
         <Card>
           <CardHeader>
-            <CardTitle>Post not found</CardTitle>
+            <CardTitle asChild>
+              <h1>Post not found</h1>
+            </CardTitle>
             <CardDescription>This post may have been deleted.</CardDescription>
           </CardHeader>
         </Card>
@@ -71,7 +76,9 @@ function EditPostPage() {
       <main className="mx-auto w-full max-w-xl px-4 py-10">
         <Card>
           <CardHeader>
-            <CardTitle>You can&apos;t edit this post</CardTitle>
+            <CardTitle asChild>
+              <h1>You can&apos;t edit this post</h1>
+            </CardTitle>
             <CardDescription>
               Only the author or an admin can edit this post.
             </CardDescription>

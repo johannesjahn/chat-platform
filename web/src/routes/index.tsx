@@ -21,8 +21,10 @@ import {
 import { useOnlineStatus } from "@/lib/online";
 import { postsFeedQueryKey, usePostsFeed } from "@/lib/posts";
 import { useUserSummariesById, userHandle, userLabel } from "@/lib/users";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/")({
+  head: () => staticTitle("Feed"),
   component: PostsFeedPage,
 });
 

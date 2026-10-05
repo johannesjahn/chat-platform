@@ -49,6 +49,7 @@ import { isStatusVisible, useUserStatus } from "@/lib/status";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
 import { userAvatarName, userHandle, userLabel } from "@/lib/users";
 import { useImmersiveShell } from "@/lib/viewport";
+import { staticTitle, usePageTitle } from "@/lib/title";
 
 // `?message=<id>` opens the chat scrolled to (and highlighting) that message
 // instead of the newest one — how a message search result lands on the
@@ -70,6 +71,7 @@ function groupByDay<T extends { createdAt: number }>(messages: T[]) {
 }
 
 export const Route = createFileRoute("/chats/$id")({
+  head: () => staticTitle("Chat"),
   validateSearch: (search: Record<string, unknown>): ChatSearch => {
     const message = Number(search.message);
     return Number.isInteger(message) && message > 0 ? { message } : {};
@@ -216,6 +218,9 @@ function ChatView({
       ? chat.participants.find((p) => p.userId !== session?.user.id)
       : undefined;
   const otherParticipantId = otherParticipant?.userId;
+  usePageTitle(
+    chat && session ? chatDisplayName(chat, session.user.id) : undefined,
+  );
   const otherParticipantOnline = useIsOnline(otherParticipantId);
   const otherParticipantStatus = useUserStatus(
     otherParticipantId,
@@ -539,6 +544,7 @@ function ChatView({
     return (
       <main className="mx-auto flex w-full max-w-2xl justify-center px-4 py-10">
         <LoginPrompt
+          pageHeading
           title="Log in to view this chat"
           description="Conversations are only visible to signed-in users."
         />
@@ -549,6 +555,7 @@ function ChatView({
   if (chatLoading) {
     return (
       <main className="mx-auto flex min-h-0 w-full max-w-2xl grow basis-0 flex-col sm:px-4 sm:py-6">
+        <h1 className="sr-only">Loading conversation</h1>
         <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-none border-x-0 py-0 sm:rounded-xl sm:border-x">
           <CardHeader className={CHAT_HEADER_CLASS}>
             <Skeleton className="size-9 rounded-full" />
@@ -586,9 +593,9 @@ function ChatView({
       <main className="mx-auto w-full max-w-2xl px-4 py-10">
         <Card>
           <CardHeader>
-            <p className="text-lg font-semibold">
+            <h1 className="text-lg font-semibold">
               {isApiError ? "Chat not found" : "Can't load this conversation"}
-            </p>
+            </h1>
             <p className="text-sm text-muted-foreground">
               {isApiError
                 ? errorMessage(chatError)
@@ -693,6 +700,11 @@ function ChatView({
     // leftover viewport height and the thread scrolls within it — which is
     // what issue #321's fill-the-screen layout was after all along.
     <main className="mx-auto flex min-h-0 w-full max-w-2xl grow basis-0 flex-col sm:px-4 sm:py-6">
+      {/* The visible name sits inside the header's link/button, which can't
+          hold a heading — so the page's heading is a hidden one named after
+          it. Named by `aria-label` rather than text so the name isn't on the
+          page twice (the header and the chat list rows are found by it). */}
+      <h1 className="sr-only" aria-label={name} />
       <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-none border-x-0 py-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 sm:rounded-xl sm:border-x">
         <CardHeader className={CHAT_HEADER_CLASS}>
           <Button

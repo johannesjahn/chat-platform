@@ -23,9 +23,11 @@ import {
   userPostsQueryKey,
 } from "@/lib/posts";
 import { useUserStatus } from "@/lib/status";
+import { staticTitle, usePageTitle } from "@/lib/title";
 import { userLabel } from "@/lib/users";
 
 export const Route = createFileRoute("/users/$id")({
+  head: () => staticTitle("Profile"),
   component: UserProfilePage,
 });
 
@@ -52,6 +54,13 @@ function UserProfilePage() {
     "/users/{id}",
     { params: { path: { id } } },
     { enabled: !!session },
+  );
+  usePageTitle(
+    user
+      ? user.displayName
+        ? `${user.displayName} (@${user.username})`
+        : `@${user.username}`
+      : undefined,
   );
 
   const updateUserRole = $api.useMutation("patch", "/users/{id}/role");
@@ -136,6 +145,7 @@ function UserProfilePage() {
     return (
       <main className="mx-auto flex w-full max-w-xl justify-center px-4 py-10">
         <LoginPrompt
+          pageHeading
           title="Log in to view this profile"
           description="User profiles are only visible to signed-in users."
         />
@@ -163,7 +173,7 @@ function UserProfilePage() {
       ) : error || !user ? (
         <Card>
           <CardHeader>
-            <p className="text-lg font-semibold">User not found</p>
+            <h1 className="text-lg font-semibold">User not found</h1>
             <p className="text-sm text-muted-foreground">
               {error ? errorMessage(error) : "This user may not exist."}
             </p>
@@ -180,9 +190,9 @@ function UserProfilePage() {
                 size="xl"
               />
               <div className="flex flex-1 flex-col leading-tight">
-                <span className="text-xl font-semibold">
+                <h1 className="text-xl font-semibold">
                   {user.displayName || `@${user.username}`}
-                </span>
+                </h1>
                 {user.displayName && (
                   <span className="text-sm text-muted-foreground">
                     @{user.username}

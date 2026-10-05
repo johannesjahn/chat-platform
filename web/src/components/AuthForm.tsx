@@ -77,7 +77,9 @@ export function AuthForm({
 
       <Card className="relative w-full max-w-sm border-border/60 bg-card/80 shadow-xl backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-500">
         <CardHeader>
-          <CardTitle>{title}</CardTitle>
+          <CardTitle asChild>
+            <h1>{title}</h1>
+          </CardTitle>
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent>

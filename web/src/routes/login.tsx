@@ -4,8 +4,10 @@ import { AuthForm } from "../components/AuthForm";
 import { $api, usersQueryKey } from "../lib/api";
 import { setSession } from "../lib/auth";
 import { redirectIfSignedIn, validateAuthSearch } from "../lib/redirect";
+import { staticTitle } from "../lib/title";
 
 export const Route = createFileRoute("/login")({
+  head: () => staticTitle("Log in"),
   validateSearch: validateAuthSearch,
   beforeLoad: redirectIfSignedIn,
   component: LoginPage,

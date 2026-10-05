@@ -21,10 +21,12 @@ import {
   useServerClock,
   type LeaderboardPeriod,
 } from "@/lib/games/lobby";
-import { GAMES, getGame, type GameId } from "@/lib/games/registry";
+import { GAMES, gameTitle, getGame, type GameId } from "@/lib/games/registry";
 import { gameHubRoom, useGameRoom } from "@/lib/games/rooms";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/games/$game/")({
+  head: ({ params }) => staticTitle(gameTitle(params.game)),
   component: GameHubRoute,
 });
 

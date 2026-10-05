@@ -34,8 +34,10 @@ import {
   isAllowedAvatarFile,
   uploadAvatar,
 } from "@/lib/avatar";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/settings")({
+  head: () => staticTitle("Settings"),
   component: SettingsPage,
 });
 

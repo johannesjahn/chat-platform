@@ -7,8 +7,10 @@ import { useSession } from "@/lib/auth";
 import { useGameLobbies } from "@/lib/games/lobby";
 import { GAMES, type GameId } from "@/lib/games/registry";
 import { gameHubRoom, useGameRoom } from "@/lib/games/rooms";
+import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/games/")({
+  head: () => staticTitle("Arcade"),
   component: ArcadePage,
 });
 

@@ -117,7 +117,9 @@ export function PostForm({
     <main className="mx-auto w-full max-w-xl px-4 py-10">
       <Card className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
         <CardHeader>
-          <CardTitle>{title}</CardTitle>
+          <CardTitle asChild>
+            <h1>{title}</h1>
+          </CardTitle>
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent>
