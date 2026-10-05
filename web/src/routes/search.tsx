@@ -138,14 +138,19 @@ function SearchPage() {
             />
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
+          {/* One row that scrolls sideways rather than wrapping its last chip
+              onto a line of its own on a phone (issue #530); the chips are
+              also a little tighter there so all five fit at 390px. The
+              padding (offset by the negative margin) keeps the focus ring and
+              the active underline from being clipped by the scroll box. */}
+          <div className="-m-1 flex gap-1 overflow-x-auto p-1 sm:gap-1.5">
             {TABS.map((t) => (
               <Button
                 key={t.id}
                 variant={tab === t.id ? "default" : "ghost"}
                 size="sm"
                 onClick={() => setTab(t.id)}
-                className="relative"
+                className="relative px-2 sm:px-3"
               >
                 {t.label}
                 {/* The active marker grows out of its own centre when the tab
