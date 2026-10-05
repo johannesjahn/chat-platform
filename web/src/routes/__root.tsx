@@ -21,6 +21,7 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { NavIcon } from "@/components/NavIcon";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
+import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { HeaderSearch } from "@/components/HeaderSearch";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { PwaUpdatePrompt } from "@/components/PwaUpdatePrompt";
@@ -85,12 +86,14 @@ function RootComponent() {
         client={queryClient}
         persistOptions={persistOptions}
       >
-        <OfflineQueueSync />
-        <Nav />
-        <OfflineBanner />
-        <Outlet />
-        <VersionFooter />
-        <PwaUpdatePrompt />
+        <ConfirmProvider>
+          <OfflineQueueSync />
+          <Nav />
+          <OfflineBanner />
+          <Outlet />
+          <VersionFooter />
+          <PwaUpdatePrompt />
+        </ConfirmProvider>
       </PersistQueryClientProvider>
     </RootDocument>
   );

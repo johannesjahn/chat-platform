@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -673,6 +674,7 @@ function DeleteAccountCard() {
   const session = useSession();
   const router = useRouter();
   const deleteAccount = $api.useMutation("delete", "/users/me");
+  const confirm = useConfirm();
 
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -701,13 +703,13 @@ function DeleteAccountCard() {
             event.preventDefault();
             setError(null);
             if (!session) return;
-            if (
-              !window.confirm(
-                "Delete your account permanently? This can't be undone.",
-              )
-            ) {
-              return;
-            }
+            const ok = await confirm({
+              title: "Delete your account?",
+              description:
+                "Your profile, posts, comments, and messages are permanently removed and you'll be signed out. This can't be undone.",
+              confirmLabel: "Delete account",
+            });
+            if (!ok) return;
             try {
               await deleteAccount.mutateAsync({ body: { password } });
               clearSession();

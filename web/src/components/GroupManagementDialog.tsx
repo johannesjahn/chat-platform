@@ -23,6 +23,7 @@ import { Avatar } from "@/components/Avatar";
 import { AvatarCropDialog } from "@/components/AvatarCropDialog";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { formatBytes } from "@/lib/attachments";
@@ -134,6 +135,7 @@ function GroupManagementBody({
     "/chats/{id}/participants/{userId}",
   );
   const leaveChat = $api.useMutation("post", "/chats/{id}/leave");
+  const confirm = useConfirm();
   const deleteChat = $api.useMutation("delete", "/chats/{id}");
   const transferOwnership = $api.useMutation("post", "/chats/{id}/owner");
   const updateParticipantRole = $api.useMutation(
@@ -246,7 +248,13 @@ function GroupManagementBody({
   }
 
   async function handleRemoveParticipant(userId: number, label: string) {
-    if (!window.confirm(`Remove ${label} from this chat?`)) return;
+    const ok = await confirm({
+      title: `Remove ${label} from this chat?`,
+      description:
+        "They'll lose access to the conversation. You can add them back later.",
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
     setActionError(null);
     try {
       await removeParticipant.mutateAsync({
@@ -259,7 +267,14 @@ function GroupManagementBody({
   }
 
   async function handleTransferOwnership(userId: number, label: string) {
-    if (!window.confirm(`Make ${label} the owner of this chat?`)) return;
+    const ok = await confirm({
+      title: `Make ${label} the owner of this chat?`,
+      description:
+        "They'll be able to manage members, settings, and delete the chat. Only they can hand ownership back.",
+      confirmLabel: "Transfer ownership",
+      destructive: false,
+    });
+    if (!ok) return;
     setActionError(null);
     try {
       await transferOwnership.mutateAsync({
@@ -328,7 +343,13 @@ function GroupManagementBody({
   }
 
   async function handleLeave() {
-    if (!window.confirm("Leave this chat?")) return;
+    const ok = await confirm({
+      title: "Leave this chat?",
+      description:
+        "You'll stop receiving its messages. Someone in the chat will need to add you back.",
+      confirmLabel: "Leave chat",
+    });
+    if (!ok) return;
     setActionError(null);
     try {
       await leaveChat.mutateAsync({ params: { path: { id: String(chatId) } } });
@@ -341,8 +362,13 @@ function GroupManagementBody({
   }
 
   async function handleDelete() {
-    if (!window.confirm("Delete this chat for everyone? This can't be undone."))
-      return;
+    const ok = await confirm({
+      title: "Delete this chat for everyone?",
+      description:
+        "All of its messages and attachments are removed for every member. This can't be undone.",
+      confirmLabel: "Delete chat",
+    });
+    if (!ok) return;
     setActionError(null);
     try {
       await deleteChat.mutateAsync({

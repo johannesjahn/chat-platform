@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api, usersQueryKey } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 
@@ -22,9 +23,9 @@ type DeleteUserButtonProps = {
 };
 
 // Admin-only control that permanently deletes another user via
-// `DELETE /users/:id` (see UsersHandler.ts). Confirms first with
-// `window.confirm` — the same pattern used for every other destructive
-// action in the app (post/comment/message/chat deletion) — then invalidates
+// `DELETE /users/:id` (see UsersHandler.ts). Confirms first with the shared
+// `useConfirm` dialog — the same one every other destructive action in the
+// app (post/comment/message/chat deletion) goes through — then invalidates
 // the cached user search + profile queries so the UI reflects the removal.
 export function DeleteUserButton({
   userId,
@@ -36,15 +37,16 @@ export function DeleteUserButton({
   const queryClient = useQueryClient();
   const deleteUser = $api.useMutation("delete", "/users/{id}");
   const [pending, setPending] = useState(false);
+  const confirm = useConfirm();
 
   async function handleDelete() {
-    if (
-      !window.confirm(
-        `Permanently delete ${label}? This removes their account, posts, comments, and messages, and can't be undone.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Permanently delete ${label}?`,
+      description:
+        "This removes their account, posts, comments, and messages, and can't be undone.",
+      confirmLabel: "Delete user",
+    });
+    if (!ok) return;
     setPending(true);
     try {
       await deleteUser.mutateAsync({

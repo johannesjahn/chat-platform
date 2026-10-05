@@ -27,6 +27,7 @@ import { MentionText } from "@/components/MentionText";
 import { MentionTextarea } from "@/components/MentionTextarea";
 import { Button } from "@/components/ui/button";
 import { DisclosureChevron } from "@/components/ui/collapse";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api } from "@/lib/api";
 import { attachmentKind } from "@/lib/attachments";
 import {
@@ -255,6 +256,7 @@ export function MessageBubble({
   const [draft, setDraft] = useState(message.content);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const confirm = useConfirm();
 
   // Touch equivalent of the desktop hover-reveal (issue #309). The per-message
   // action group (react/pin/star/reply/edit/delete) is otherwise only shown on
@@ -361,7 +363,13 @@ export function MessageBubble({
   }
 
   async function handleDelete() {
-    if (!window.confirm("Delete this message? This can't be undone.")) return;
+    const ok = await confirm({
+      title: "Delete this message?",
+      description:
+        "It's removed from the chat for everyone. This can't be undone.",
+      confirmLabel: "Delete message",
+    });
+    if (!ok) return;
     setDeleting(true);
     try {
       await onDelete();

@@ -15,6 +15,7 @@ import { MentionTextarea } from "@/components/MentionTextarea";
 import { RelativeTime } from "@/components/RelativeTime";
 import { Button } from "@/components/ui/button";
 import { Collapse, DisclosureChevron } from "@/components/ui/collapse";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import {
@@ -362,6 +363,7 @@ function CommentItem({
   const createReply = $api.useMutation("post", "/comments/{id}/replies");
   const updateComment = $api.useMutation("patch", "/comments/{id}");
   const deleteComment = $api.useMutation("delete", "/comments/{id}");
+  const confirm = useConfirm();
 
   const invalidateComments = () =>
     queryClient.invalidateQueries({ queryKey: commentsQueryKeyRoot });
@@ -491,7 +493,13 @@ function CommentItem({
                 disabled={deleteComment.isPending}
                 className="h-8 gap-1.5 px-2 text-muted-foreground hover:text-destructive"
                 onClick={async () => {
-                  if (!window.confirm("Delete this comment?")) return;
+                  const ok = await confirm({
+                    title: "Delete this comment?",
+                    description:
+                      "It's removed from the post for everyone. This can't be undone.",
+                    confirmLabel: "Delete comment",
+                  });
+                  if (!ok) return;
                   await deleteComment.mutateAsync({
                     params: { path: { id: String(comment.id) } },
                   });
