@@ -1,10 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { ArrowLeft } from "lucide-react";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PostForm, PostFormSkeleton } from "@/components/PostForm";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -57,6 +60,14 @@ function EditPostPage() {
             <CardTitle>Post not found</CardTitle>
             <CardDescription>This post may have been deleted.</CardDescription>
           </CardHeader>
+          <CardFooter>
+            <Button asChild>
+              <Link to="/">
+                <ArrowLeft className="size-4" />
+                Back to feed
+              </Link>
+            </Button>
+          </CardFooter>
         </Card>
       </main>
     );
@@ -76,6 +87,13 @@ function EditPostPage() {
               Only the author or an admin can edit this post.
             </CardDescription>
           </CardHeader>
+          <CardFooter>
+            <Button asChild>
+              <Link to="/posts/$id" params={{ id }}>
+                View post
+              </Link>
+            </Button>
+          </CardFooter>
         </Card>
       </main>
     );

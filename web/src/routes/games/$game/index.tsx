@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Crown, DoorOpen, Flag, Plus, Swords, Trophy, Zap } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { GamePanel } from "@/components/games/GamePanel";
@@ -44,7 +44,11 @@ function GameHubRoute() {
           icon={Swords}
           title="Game not found"
           description="That game isn't in the arcade (yet)."
-        />
+        >
+          <Button asChild>
+            <Link to="/games">Back to the arcade</Link>
+          </Button>
+        </EmptyState>
       </main>
     );
   }
