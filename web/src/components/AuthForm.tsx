@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { DotGrid } from "@/components/reactbits/DotGrid";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +15,10 @@ import { Label } from "@/components/ui/label";
 import { errorMessage } from "@/lib/errors";
 
 type AuthFormProps = {
+  // Which credential the password field holds, for password managers
+  // (issue #500): "register" asks for a *new* password, so managers offer to
+  // generate and save one; "login" asks for the account's current one.
+  mode: "login" | "register";
   title: string;
   description: string;
   submitLabel: string;
@@ -34,6 +38,7 @@ type AuthFormProps = {
 };
 
 export function AuthForm({
+  mode,
   title,
   description,
   submitLabel,
@@ -44,6 +49,7 @@ export function AuthForm({
 }: AuthFormProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // Counts submissions so the error panel can be re-keyed per attempt.
@@ -131,16 +137,37 @@ export function AuthForm({
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                minLength={minPasswordLength}
-                required
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete={
+                    mode === "register" ? "new-password" : "current-password"
+                  }
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  minLength={minPasswordLength}
+                  required
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute top-0 right-0 text-muted-foreground hover:bg-transparent"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  aria-controls="password"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </Button>
+              </div>
               {minPasswordLength !== undefined && (
                 <p
                   className={

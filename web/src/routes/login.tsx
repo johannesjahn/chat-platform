@@ -18,6 +18,7 @@ function LoginPage() {
 
   return (
     <AuthForm
+      mode="login"
       title="Welcome back"
       description="Log in to continue to Chat Platform."
       submitLabel="Log in"
