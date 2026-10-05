@@ -123,10 +123,11 @@ function NewChatPage() {
             </p>
           )}
 
-          <div className="flex gap-2">
+          <div role="group" aria-label="Chat type" className="flex gap-2">
             <Button
               type="button"
               variant={mode === "direct" ? "default" : "outline"}
+              aria-pressed={mode === "direct"}
               className="flex-1"
               onClick={() => setMode("direct")}
             >
@@ -136,6 +137,7 @@ function NewChatPage() {
             <Button
               type="button"
               variant={mode === "group" ? "default" : "outline"}
+              aria-pressed={mode === "group"}
               className="flex-1"
               onClick={() => setMode("group")}
             >

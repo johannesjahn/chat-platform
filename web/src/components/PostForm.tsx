@@ -163,10 +163,11 @@ export function PostForm({
           >
             <div className="flex flex-col gap-2">
               <Label>Post type</Label>
-              <div className="flex gap-2">
+              <div role="group" aria-label="Post type" className="flex gap-2">
                 <Button
                   type="button"
                   variant={contentType === "text" ? "default" : "outline"}
+                  aria-pressed={contentType === "text"}
                   onClick={() => setContentType("text")}
                   className="flex-1"
                 >
@@ -176,6 +177,7 @@ export function PostForm({
                 <Button
                   type="button"
                   variant={contentType === "image_url" ? "default" : "outline"}
+                  aria-pressed={contentType === "image_url"}
                   onClick={() => setContentType("image_url")}
                   className="flex-1"
                 >
@@ -185,6 +187,7 @@ export function PostForm({
                 <Button
                   type="button"
                   variant={contentType === "attachment" ? "default" : "outline"}
+                  aria-pressed={contentType === "attachment"}
                   onClick={() => setContentType("attachment")}
                   className="flex-1"
                 >
