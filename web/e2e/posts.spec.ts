@@ -322,3 +322,41 @@ test("the full-screen viewer zooms and pans an image past its on-page size", asy
   await page.mouse.up();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
+
+test("deleting a post asks in an in-app dialog, and cancelling keeps it", async ({
+  page,
+  signUp,
+}) => {
+  await signUp(page);
+
+  // Any native `confirm()` would be auto-dismissed by Playwright — fail
+  // loudly instead, since the app should never raise one (issue #507).
+  page.on("dialog", (dialog) => {
+    throw new Error(`Unexpected native dialog: ${dialog.message()}`);
+  });
+
+  await page.goto("/posts/new");
+  await page.getByRole("button", { name: "Text" }).click();
+  await page.fill("#content", "A post to delete");
+  await page.getByRole("button", { name: "Post" }).click();
+  await expect(page).toHaveURL("/");
+  const post = page
+    .getByRole("article")
+    .filter({ hasText: "A post to delete" });
+  await expect(post).toBeVisible();
+
+  // Cancel (via Escape) leaves the post where it was.
+  await post.getByRole("button", { name: "Delete post" }).click();
+  const dialog = page.getByRole("alertdialog", { name: "Delete this post?" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(post).toBeVisible();
+
+  // Confirming deletes it.
+  await post.getByRole("button", { name: "Delete post" }).click();
+  await dialog.getByRole("button", { name: "Delete post" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(post).toHaveCount(0);
+});

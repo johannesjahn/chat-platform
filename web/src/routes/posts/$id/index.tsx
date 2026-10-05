@@ -6,6 +6,7 @@ import { CommentsSection } from "@/components/CommentsSection";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PostCard, PostCardSkeleton } from "@/components/PostCard";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
@@ -41,10 +42,19 @@ function PostDetailPage() {
   const author = post ? authorById.get(post.authorId) : undefined;
 
   const deletePost = $api.useMutation("delete", "/posts/{id}");
+  const confirm = useConfirm();
   const [isDeleting, setIsDeleting] = useState(false);
 
   async function handleDelete() {
-    if (!window.confirm("Delete this post? This can't be undone.")) return;
+    if (
+      !(await confirm({
+        title: "Delete this post?",
+        description:
+          "It's removed for everyone, along with its comments and reactions. This can't be undone.",
+        confirmLabel: "Delete post",
+      }))
+    )
+      return;
     setIsDeleting(true);
     try {
       await deletePost.mutateAsync({ params: { path: { id } } });

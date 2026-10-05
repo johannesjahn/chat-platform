@@ -10,6 +10,7 @@ import { LoginPrompt } from "@/components/LoginPrompt";
 import { PostCard, PostCardSkeleton } from "@/components/PostCard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { $api } from "@/lib/api";
@@ -89,9 +90,18 @@ function UserProfilePage() {
   const totalPostCount = postsData?.pages[0]?.totalCount ?? 0;
 
   const deletePost = $api.useMutation("delete", "/posts/{id}");
+  const confirm = useConfirm();
   const [deletingPostId, setDeletingPostId] = useState<number | null>(null);
   async function handleDeletePost(postId: number) {
-    if (!window.confirm("Delete this post? This can't be undone.")) return;
+    if (
+      !(await confirm({
+        title: "Delete this post?",
+        description:
+          "It's removed for everyone, along with its comments and reactions. This can't be undone.",
+        confirmLabel: "Delete post",
+      }))
+    )
+      return;
     setDeletingPostId(postId);
     try {
       await deletePost.mutateAsync({

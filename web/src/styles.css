@@ -917,6 +917,19 @@ html[data-app-shell="immersive"] body {
   animation: backdrop-blur-in 0.28s ease-out;
 }
 
+@keyframes backdrop-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* The backdrop's exit, timed with the panel's `animate-pop-close` so the page
+   comes back into focus as the dialog shrinks away (see ConfirmDialog). */
+@utility animate-backdrop-fade-out {
+  animation: backdrop-fade-out var(--motion-collapse)
+    var(--motion-ease-collapse) both;
+}
+
 /* ───────────────────────────────────────────────────────────────────────────
    Disclosure motion
 

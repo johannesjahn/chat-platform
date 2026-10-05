@@ -8,6 +8,7 @@ import { PendingPostCard } from "@/components/PendingPostCard";
 import { PostCard, PostCardSkeleton } from "@/components/PostCard";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
@@ -58,6 +59,7 @@ function PostsFeedPage() {
   };
 
   const deletePost = $api.useMutation("delete", "/posts/{id}");
+  const confirm = useConfirm();
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -77,7 +79,15 @@ function PostsFeedPage() {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   async function handleDelete(id: number) {
-    if (!window.confirm("Delete this post? This can't be undone.")) return;
+    if (
+      !(await confirm({
+        title: "Delete this post?",
+        description:
+          "It's removed for everyone, along with its comments and reactions. This can't be undone.",
+        confirmLabel: "Delete post",
+      }))
+    )
+      return;
     setDeletingId(id);
     try {
       await deletePost.mutateAsync({ params: { path: { id: String(id) } } });
