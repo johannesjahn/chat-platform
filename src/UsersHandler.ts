@@ -60,9 +60,11 @@ import { refreshTokens, userBlocks, users, posts } from "./db/schema.ts";
 
 // Sensible defaults for auth-endpoint rate limiting (see issue #25). Login is
 // capped per source IP (every attempt counts) and per targeted account — but
-// the account buckets count only *failed* attempts and a successful login
-// clears them (issue #480), so signing in on several devices never locks the
-// owner out. The tight account bucket is also keyed by IP, so an attacker
+// the account buckets effectively count only *failed* attempts (issue #480):
+// every attempt consumes them up front, so concurrent guesses can't race past
+// the limit (issue #543), and a successful login then clears the account+IP
+// bucket and refunds its own unit on the account-wide one, so signing in on
+// several devices never locks the owner out. The tight account bucket is also keyed by IP, so an attacker
 // hammering wrong passwords for someone's username only locks *themselves*
 // out of that account; the looser account-wide ceiling still bounds how many
 // guesses a distributed attacker (many IPs) gets per window.
@@ -121,18 +123,6 @@ export const enforceRateLimit = (
   windowSeconds: number,
 ): Effect.Effect<void, TooManyRequests> =>
   Effect.flatMap(limiter.consume(key, limit, windowSeconds), (result) =>
-    rejectIfLimited(key, result),
-  );
-
-// Like enforceRateLimit, but only checks `key` without counting this call —
-// for buckets the caller consumes itself once it knows the outcome (login's
-// failure-only account buckets).
-const enforceRateLimitPeek = (
-  limiter: RateLimiter["Service"],
-  key: string,
-  limit: number,
-): Effect.Effect<void, TooManyRequests> =>
-  Effect.flatMap(limiter.peek(key, limit), (result) =>
     rejectIfLimited(key, result),
   );
 
@@ -656,15 +646,21 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const account = payload.username.toLowerCase();
           const accountIpKey = `login:account-ip:${account}:${ip}`;
           const accountKey = `login:account:${account}`;
-          yield* enforceRateLimitPeek(
+          // Both account buckets are consumed atomically *before* the
+          // (slow, async) password check — a check-then-consume would let
+          // concurrent guesses all pass the check before any of them counted
+          // (issue #543). A success hands its unit back below.
+          yield* enforceRateLimit(
             limiter,
             accountIpKey,
             LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP,
+            LOGIN_WINDOW_SECONDS,
           );
-          yield* enforceRateLimitPeek(
+          yield* enforceRateLimit(
             limiter,
             accountKey,
             LOGIN_MAX_FAILURES_PER_ACCOUNT,
+            LOGIN_WINDOW_SECONDS,
           );
           const rows = yield* Effect.tryPromise(() =>
             db
@@ -685,16 +681,6 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const hash = user ? user.passwordHash : yield* dummyHash();
           const valid = yield* verifyPassword(payload.password, hash);
           if (!user || !valid) {
-            yield* limiter.consume(
-              accountIpKey,
-              LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP,
-              LOGIN_WINDOW_SECONDS,
-            );
-            yield* limiter.consume(
-              accountKey,
-              LOGIN_MAX_FAILURES_PER_ACCOUNT,
-              LOGIN_WINDOW_SECONDS,
-            );
             yield* recordAuthEvent("login", "failure");
             return yield* Effect.fail(
               new InvalidCredentials({
@@ -703,8 +689,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             );
           }
 
+          // Success: forgive this IP's failures against the account, but
+          // only refund this one attempt on the account-wide bucket — wiping
+          // it would erase a distributed attacker's tally whenever the owner
+          // signs in.
           yield* limiter.reset(accountIpKey);
-          yield* limiter.reset(accountKey);
+          yield* limiter.refund(accountKey);
 
           const publicUser = toPublicUser(user);
           const tokenUser = {
