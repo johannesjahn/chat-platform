@@ -453,6 +453,9 @@ function CommentItem({
         {reactionError && (
           <p className="pl-1 text-xs text-destructive">{reactionError}</p>
         )}
+        {/* On a phone, Edit and Delete drop to icon-only (their labels stay
+            for screen readers) so an own comment's controls fit on one line
+            instead of wrapping Delete onto a row of its own (issue #530). */}
         <div className="flex flex-wrap items-center gap-1 pl-1">
           <ReactionPicker
             reactions={comment.reactions}
@@ -484,7 +487,7 @@ function CommentItem({
                 onClick={() => setEditing(true)}
               >
                 <Pencil className="size-3.5" />
-                Edit
+                <span className="sr-only sm:not-sr-only">Edit</span>
               </Button>
               <Button
                 type="button"
@@ -507,7 +510,7 @@ function CommentItem({
                 }}
               >
                 <Trash2 className="size-3.5" />
-                Delete
+                <span className="sr-only sm:not-sr-only">Delete</span>
               </Button>
             </>
           )}
