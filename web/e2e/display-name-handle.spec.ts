@@ -121,4 +121,14 @@ test("user pickers and lists show the @username next to a display name", async (
   await expect(
     page.getByRole("link").filter({ hasText: `Spotted a ${word}` }),
   ).toContainText(handle);
+
+  // Issue #546: the game lobby invite picker.
+  await page.goto("/games/typing");
+  await page.getByRole("button", { name: "New lobby" }).click();
+  await expect(page.getByText("Waiting room")).toBeVisible();
+  await page.getByRole("button", { name: "Invite players" }).click();
+  await page.getByLabel("Search users to invite").fill(carol.username);
+  await expect(
+    page.getByRole("listitem").filter({ hasText: displayName }),
+  ).toContainText(handle);
 });

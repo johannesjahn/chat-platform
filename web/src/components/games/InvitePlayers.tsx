@@ -8,7 +8,7 @@ import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { useInviteToLobby, type GameLobby } from "@/lib/games/lobby";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
-import { userAvatarName, userLabel } from "@/lib/users";
+import { userAvatarName, userHandle, userLabel } from "@/lib/users";
 
 // Search for someone and drop a `game_invite` notification in their inbox —
 // the in-app counterpart to copying the lobby link. Rendered in the waiting
@@ -91,6 +91,11 @@ export function InvitePlayers({
                     />
                     <span className="min-w-0 flex-1 truncate text-sm">
                       {userLabel(user)}
+                      {userHandle(user) && (
+                        <span className="ml-1.5 font-normal text-muted-foreground">
+                          {userHandle(user)}
+                        </span>
+                      )}
                     </span>
                     <Button
                       size="sm"
