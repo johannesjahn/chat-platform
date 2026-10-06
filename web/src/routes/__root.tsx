@@ -94,6 +94,7 @@ function RootComponent() {
       >
         <ConfirmProvider>
           <OfflineQueueSync />
+          <SkipLink />
           <Nav />
           <OfflineBanner />
           <Outlet />
@@ -102,6 +103,32 @@ function RootComponent() {
         </ConfirmProvider>
       </PersistQueryClientProvider>
     </RootDocument>
+  );
+}
+
+// The first tab stop on every page (issue #497): hidden until focused, it
+// jumps past the nav to the page's own <main> — every route renders one —
+// so a keyboard user doesn't tab through the whole header on each page.
+// It moves focus itself rather than following a `#fragment`: routes don't
+// share an id for their <main>, and a bare hash change would also land in
+// the router's history.
+function SkipLink() {
+  return (
+    <a
+      href="#main"
+      onClick={(e) => {
+        // Never follow the href, even before the route's <main> has
+        // rendered: that would only put a dead `#main` into history.
+        e.preventDefault();
+        const main = document.querySelector("main");
+        if (!main) return;
+        if (!main.hasAttribute("tabindex")) main.tabIndex = -1;
+        main.focus();
+      }}
+      className="sr-only rounded-md bg-primary text-sm font-medium text-primary-foreground shadow-md outline-none focus:not-sr-only focus:fixed focus:px-3 focus:py-2 focus:left-4 focus:top-[calc(0.5rem+env(safe-area-inset-top))] focus:z-50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    >
+      Skip to content
+    </a>
   );
 }
 

@@ -10,7 +10,12 @@ const buttonVariants = cva(
   // span is `inset-0` inside whatever element this ends up on (see
   // lib/ripple.ts). The clipping lives on that host rather than here, so a
   // badge deliberately hanging outside a button still escapes.
-  "relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all duration-200 ease-out disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px] motion-safe:hover:scale-[1.015] motion-safe:active:scale-[0.985]",
+  //
+  // The keyboard focus ring is the full `--ring` color, offset from the
+  // button by a `--background` gap (issue #497): at half opacity it was
+  // under 2:1 against the dark nav, and flush against a primary button it
+  // just read as the button growing, since `--ring` is the primary color.
+  "relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all duration-200 ease-out disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-safe:hover:scale-[1.015] motion-safe:active:scale-[0.985]",
   {
     variants: {
       variant: {
@@ -19,7 +24,7 @@ const buttonVariants = cva(
         destructive:
           // The glyph inside a destructive button shimmies on hover — a
           // last "this one deletes things" beat before it's pressed.
-          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 focus-visible:ring-destructive/40 motion-safe:[&_svg]:hover:animate-wiggle",
+          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90 focus-visible:ring-destructive motion-safe:[&_svg]:hover:animate-wiggle",
         outline:
           "border border-input bg-transparent shadow-sm hover:bg-accent hover:text-accent-foreground",
         secondary:
