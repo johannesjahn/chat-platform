@@ -1,4 +1,7 @@
-import { QueryClient } from "@tanstack/react-query";
+import {
+  QueryClient,
+  defaultShouldDehydrateQuery,
+} from "@tanstack/react-query";
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import type { PersistQueryClientOptions } from "@tanstack/react-query-persist-client";
 import { getSession, subscribeSession } from "./auth";
@@ -130,7 +133,14 @@ export const persistOptions: PersistQueryClientOptions = {
     key: PERSIST_KEY_PREFIX,
   }),
   maxAge: PERSIST_MAX_AGE_MS,
+  // Overriding `shouldDehydrateQuery` replaces React Query's default check
+  // that a query has actually loaded, so it has to be kept explicitly: a
+  // still-pending query is dehydrated together with its in-flight promise,
+  // which logs "dehydrated as pending ended up rejecting" whenever that
+  // fetch is later cancelled, and — since a promise doesn't survive JSON —
+  // makes the next restore throw and discard the whole snapshot (#501).
   dehydrateOptions: {
-    shouldDehydrateQuery: (query) => isPersistedQueryKey(query.queryKey),
+    shouldDehydrateQuery: (query) =>
+      defaultShouldDehydrateQuery(query) && isPersistedQueryKey(query.queryKey),
   },
 };
