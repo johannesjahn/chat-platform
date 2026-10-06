@@ -8,11 +8,17 @@ test("an unknown URL shows the 404 page with a way back to the feed", async ({
   await page.goto("/does-not-exist");
   const main = page.getByRole("main");
   await expect(main.getByText("Page not found")).toBeVisible();
+  // Issue #528: it carries its own title and `<h1>` like every other page.
+  await expect(page).toHaveTitle("Page not found · Chat Platform");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Page not found",
+  );
   // The app shell still renders around it.
   await expect(page.locator("[data-app-nav]")).toBeVisible();
 
   await main.getByRole("link", { name: "Go to feed" }).click();
   await expect(page).toHaveURL("/");
+  await expect(page).toHaveTitle("Feed · Chat Platform");
 });
 
 // Issue #502: an unknown game slug used to be a dead end.

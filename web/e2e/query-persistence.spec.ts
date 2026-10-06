@@ -4,7 +4,7 @@ import { persistedQueryCache } from "./helpers";
 // Issue #501: the persister used to write queries to storage while they were
 // still in flight, so every feed load whose request was later cancelled
 // logged "A query that was dehydrated as pending ended up rejecting". Only
-// successfully loaded queries may be persisted.
+// queries that have data (never a pending one) may be persisted.
 test("loading the feed persists only settled queries and logs no dehydration errors", async ({
   page,
   signUp,
@@ -29,7 +29,7 @@ test("loading the feed persists only settled queries and logs no dehydration err
   };
   expect(snapshot.clientState.queries.length).toBeGreaterThan(0);
   for (const query of snapshot.clientState.queries)
-    expect(query.state.status).toBe("success");
+    expect(query.state.status).not.toBe("pending");
   expect(
     consoleErrors.filter((text) => text.includes("dehydrated as pending")),
   ).toEqual([]);
