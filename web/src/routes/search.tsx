@@ -148,11 +148,16 @@ function SearchPage() {
               also a little tighter there so all five fit at 390px. The
               padding (offset by the negative margin) keeps the focus ring and
               the active underline from being clipped by the scroll box. */}
-          <div className="-m-1 flex gap-1 overflow-x-auto p-1 sm:gap-1.5">
+          <div
+            role="group"
+            aria-label="Filter results"
+            className="-m-1 flex gap-1 overflow-x-auto p-1 sm:gap-1.5"
+          >
             {TABS.map((t) => (
               <Button
                 key={t.id}
                 variant={tab === t.id ? "default" : "ghost"}
+                aria-pressed={tab === t.id}
                 size="sm"
                 onClick={() => setTab(t.id)}
                 className="relative px-2 sm:px-3"
