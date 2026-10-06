@@ -22,13 +22,13 @@ export class RateLimiter extends Context.Service<
       limit: number,
       windowSeconds: number,
     ) => Effect.Effect<RateLimitResult>;
-    // Reports whether one more call to `key` would still be within `limit`,
-    // *without* counting it — for buckets that should only count some
-    // outcomes (e.g. failed logins), checked up front and consumed after.
-    readonly peek: (
-      key: string,
-      limit: number,
-    ) => Effect.Effect<RateLimitResult>;
+    // Gives back one unit previously taken from `key` by `consume`, never
+    // going below zero and leaving the window's expiry untouched (a missing
+    // or expired bucket is a no-op). For buckets that should only count some
+    // outcomes (e.g. failed logins): consume atomically up front, so
+    // concurrent calls can't all slip past a check, then refund once the
+    // outcome turns out not to count.
+    readonly refund: (key: string) => Effect.Effect<void>;
     // Drops `key`'s bucket entirely, as if its window had just rolled over.
     readonly reset: (key: string) => Effect.Effect<void>;
   }
@@ -62,20 +62,12 @@ export const InMemoryRateLimiterLive = Layer.sync(RateLimiter, () => {
           ),
         };
       }),
-    peek: (key, limit) =>
+    refund: (key) =>
       Effect.sync(() => {
-        const now = Date.now();
         const existing = buckets.get(key);
-        if (!existing || existing.resetAt <= now) {
-          return { allowed: true, retryAfterSeconds: 1 };
+        if (existing && existing.resetAt > Date.now()) {
+          existing.count = Math.max(0, existing.count - 1);
         }
-        return {
-          allowed: existing.count < limit,
-          retryAfterSeconds: Math.max(
-            1,
-            Math.ceil((existing.resetAt - now) / 1000),
-          ),
-        };
       }),
     reset: (key) =>
       Effect.sync(() => {
@@ -92,6 +84,17 @@ export const InMemoryRateLimiterLive = Layer.sync(RateLimiter, () => {
 // would leave a key that never expires) — acceptable here, since the only
 // consequence is a rate limit occasionally staying stricter than intended,
 // not a correctness issue.
+// Atomic floor-at-zero decrement for `refund`. DECR keeps the key's TTL, and
+// a missing key is left alone rather than recreated (which DECR on its own
+// would do, as -1 with no expiry).
+const REFUND_SCRIPT = `
+local count = tonumber(redis.call("GET", KEYS[1]))
+if count and count > 0 then
+  return redis.call("DECR", KEYS[1])
+end
+return 0
+`;
+
 export const RedisRateLimiterLive = Layer.sync(RateLimiter, () => {
   const client = new RedisClient(process.env.REDIS_URL);
 
@@ -109,15 +112,9 @@ export const RedisRateLimiterLive = Layer.sync(RateLimiter, () => {
           retryAfterSeconds: ttl > 0 ? ttl : windowSeconds,
         };
       }),
-    peek: (key, limit) =>
+    refund: (key) =>
       Effect.promise(async () => {
-        const redisKey = `ratelimit:${key}`;
-        const count = Number((await client.get(redisKey)) ?? 0);
-        const ttl = await client.ttl(redisKey);
-        return {
-          allowed: count < limit,
-          retryAfterSeconds: ttl > 0 ? ttl : 1,
-        };
+        await client.send("EVAL", [REFUND_SCRIPT, "1", `ratelimit:${key}`]);
       }),
     reset: (key) =>
       Effect.promise(async () => {

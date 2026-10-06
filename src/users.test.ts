@@ -1487,6 +1487,34 @@ test("a successful login clears the account's earlier failed attempts", () =>
     }),
   ));
 
+test("concurrent wrong-password logins can't race past the per-account limit", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "raced", password: "pw-raced" },
+      });
+      // Issue #543: the account buckets used to be checked up front but only
+      // consumed after the (slow) password check, so every concurrent guess
+      // passed the check and reached verification. Under the per-IP cap of
+      // 20, LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP (5) must still hold.
+      const results = yield* Effect.all(
+        Array.from({ length: 15 }, () =>
+          c.users
+            .login({ payload: { username: "raced", password: "pw-wrong" } })
+            .pipe(Effect.flip),
+        ),
+        { concurrency: "unbounded" },
+      );
+      const tags = results.map((r) => r._tag);
+      const invalid = tags.filter((t) => t === "InvalidCredentials").length;
+      expect(invalid).toBeLessThanOrEqual(5);
+      expect(tags.filter((t) => t === "TooManyRequests").length).toBe(
+        15 - invalid,
+      );
+    }),
+  ));
+
 test("refresh is rate-limited per IP after repeated attempts", () =>
   run(
     Effect.gen(function* () {
