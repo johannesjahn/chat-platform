@@ -35,6 +35,9 @@ type AuthFormProps = {
   // Likewise for the username (issue #483) — register only, so an account
   // whose name predates the floor can still log in.
   minUsernameLength?: number;
+  // And the characters a new username may use (issue #493) — the `@mention`
+  // token class, so every new account can be mentioned. Register only.
+  usernamePattern?: RegExp;
 };
 
 export function AuthForm({
@@ -46,6 +49,7 @@ export function AuthForm({
   footer,
   minPasswordLength,
   minUsernameLength,
+  usernamePattern,
 }: AuthFormProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -59,6 +63,11 @@ export function AuthForm({
     minUsernameLength !== undefined &&
     username.length > 0 &&
     username.length < minUsernameLength;
+  const usernameBadChars =
+    usernamePattern !== undefined &&
+    username.length > 0 &&
+    !usernamePattern.test(username);
+  const usernameInvalid = usernameTooShort || usernameBadChars;
   const tooShort =
     minPasswordLength !== undefined &&
     password.length > 0 &&
@@ -121,19 +130,37 @@ export function AuthForm({
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 minLength={minUsernameLength}
+                aria-invalid={usernameInvalid || undefined}
+                aria-describedby={
+                  minUsernameLength !== undefined ||
+                  usernamePattern !== undefined
+                    ? "username-hint"
+                    : undefined
+                }
                 required
               />
-              {minUsernameLength !== undefined && (
+              {(minUsernameLength !== undefined ||
+                usernamePattern !== undefined) && (
                 <p
+                  id="username-hint"
                   className={
-                    usernameTooShort
+                    usernameInvalid
                       ? "text-sm text-destructive"
                       : "text-sm text-muted-foreground"
                   }
                 >
-                  {usernameTooShort
-                    ? `Username must be at least ${minUsernameLength} characters.`
-                    : `At least ${minUsernameLength} characters.`}
+                  {usernameBadChars
+                    ? 'Username may only use letters (A-Z), digits, "_", "." and "-", and can\'t end in "." or "-".'
+                    : usernameTooShort
+                      ? `Username must be at least ${minUsernameLength} characters.`
+                      : [
+                          minUsernameLength !== undefined &&
+                            `At least ${minUsernameLength} characters`,
+                          usernamePattern !== undefined &&
+                            'letters, digits, "_", "." and "-"',
+                        ]
+                          .filter(Boolean)
+                          .join(": ") + "."}
                 </p>
               )}
             </div>
@@ -188,11 +215,7 @@ export function AuthForm({
               type="submit"
               className="mt-1 w-full"
               disabled={
-                pending ||
-                !username ||
-                !password ||
-                tooShort ||
-                usernameTooShort
+                pending || !username || !password || tooShort || usernameInvalid
               }
             >
               {pending && <Loader2 className="size-4 animate-spin" />}

@@ -144,6 +144,13 @@ export const MIN_USER_SEARCH_QUERY_LENGTH = 3;
 // can be found (issue #483).
 export const MIN_USERNAME_LENGTH = 3;
 
+// Characters a newly registered username may use (mirrors `USERNAME_PATTERN`
+// in src/Api.ts, issue #493): the `@mention` token class from
+// `MENTION_CHARS` in lib/mentions.ts, not ending in "." or "-" (which the
+// mention parser trims off as punctuation) — so every new account can be
+// @mentioned. Register only; existing names still log in.
+export const USERNAME_PATTERN = /^[A-Za-z0-9_.-]*[A-Za-z0-9_]$/u;
+
 // Floor for newly chosen passwords (mirrors `MIN_PASSWORD_LENGTH` in
 // src/Api.ts) — lets the form reject a too-short password before a round
 // trip, matching the server's own validation (issue #45).

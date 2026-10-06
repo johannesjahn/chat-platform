@@ -5,6 +5,7 @@ import {
   $api,
   MIN_PASSWORD_LENGTH,
   MIN_USERNAME_LENGTH,
+  USERNAME_PATTERN,
   usersQueryKey,
 } from "../lib/api";
 import { setSession } from "../lib/auth";
@@ -33,6 +34,7 @@ function RegisterPage() {
       submitLabel="Register"
       minPasswordLength={MIN_PASSWORD_LENGTH}
       minUsernameLength={MIN_USERNAME_LENGTH}
+      usernamePattern={USERNAME_PATTERN}
       onSubmit={async ({ username, password }) => {
         await register.mutateAsync({ body: { username, password } });
         // Registration succeeded — log straight in for a smooth first visit.

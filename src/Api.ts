@@ -136,7 +136,22 @@ const Username = Schema.Trimmed.check(Schema.isNonEmpty()).check(
 // the login schema, so accounts created before this floor can still sign in.
 export const MIN_USERNAME_LENGTH = 3;
 
-const NewUsername = Username.check(Schema.isMinLength(MIN_USERNAME_LENGTH));
+// Characters a newly registered username may use (issue #493): exactly the
+// `@mention` token class (`MENTION_CHARS` in src/notifications.ts and
+// web/src/lib/mentions.ts), and not ending in "." or "-" — the mention parser
+// hands a trailing run of those back to the surrounding prose — so every new
+// account can be @mentioned, and no space, emoji, look-alike or bidi-control
+// character can get into a name. Like the length floor, registration only:
+// accounts that predate it can still sign in.
+export const USERNAME_PATTERN = /^[A-Za-z0-9_.-]*[A-Za-z0-9_]$/u;
+
+export const USERNAME_PATTERN_MESSAGE =
+  'Username may only contain letters (A-Z), digits, "_", "." and "-", and must not end in "." or "-"';
+
+const NewUsername = Username.check(
+  Schema.isMinLength(MIN_USERNAME_LENGTH),
+  Schema.isPattern(USERNAME_PATTERN, { message: USERNAME_PATTERN_MESSAGE }),
+);
 
 // Mirrors MAX_USERNAME_LENGTH's rationale but roomier, since a display name
 // may hold a full "First Last" rather than a single token.

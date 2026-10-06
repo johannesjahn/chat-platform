@@ -5,13 +5,12 @@ import { useSession } from "./auth";
 
 // `@username` mentions in post/comment/message content (issue #318).
 //
-// The token character class is deliberately narrower than what the backend
-// accepts as a username (any non-empty trimmed string up to
-// `MAX_USERNAME_LENGTH` characters — see `Username` in src/Api.ts): a
-// mention sits inside ordinary prose and has to end *somewhere*, so only
+// A mention sits inside ordinary prose and has to end *somewhere*, so only
 // characters that can't be mistaken for the punctuation around it are part
-// of the token. A user whose username falls outside this class simply
-// isn't reachable by typing `@` — which is why `isMentionable` below also
+// of the token. Since issue #493, registration only accepts usernames made
+// of exactly this class (`USERNAME_PATTERN` in src/Api.ts and lib/api.ts),
+// but accounts created before that may still fall outside it and simply
+// aren't reachable by typing `@` — which is why `isMentionable` below also
 // filters the composer's autocomplete, rather than offering a suggestion
 // that couldn't be written down.
 // "-" is last so it reads as a literal inside the character classes below
