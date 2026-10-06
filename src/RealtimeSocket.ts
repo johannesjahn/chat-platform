@@ -12,12 +12,25 @@ import {
 import { allowedOrigins } from "./WebOrigin.ts";
 import { WsTicket } from "./WsTicket.ts";
 
-// Caps handshake attempts per source IP so a connection flood can't exhaust
-// server resources upgrading sockets (see issue #41, sub-task of #25). A
-// window this short is fine for legitimate reconnects (one ticket mint + one
-// upgrade per connection) while still capping a flood tightly.
-const WS_HANDSHAKE_MAX_ATTEMPTS_PER_IP = 30;
+// Caps handshake attempts so a connection flood can't exhaust server
+// resources upgrading sockets (see issue #41, sub-task of #25). The tight
+// limit is per *user*, applied once the ticket has been redeemed: a window
+// this short is fine for legitimate reconnects (one ticket mint + one upgrade
+// per connection) while still capping a reconnect loop tightly. It used to be
+// per IP, which made everyone behind one shared address (office, campus,
+// carrier-grade NAT) share a single budget — a deploy that reconnected them
+// all at once got most of them a 429 (issue #495). The per-IP bucket stays as
+// a much looser backstop, checked before the ticket so attempts that never
+// get as far as a user (no/invalid tickets) are still bounded per source.
+const WS_HANDSHAKE_MAX_ATTEMPTS_PER_USER = 30;
+const WS_HANDSHAKE_MAX_ATTEMPTS_PER_IP = 300;
 const WS_HANDSHAKE_WINDOW_SECONDS = 60;
+
+const tooManyAttempts = (retryAfterSeconds: number) =>
+  HttpServerResponse.text("Too many connection attempts", {
+    status: 429,
+    headers: { "retry-after": String(retryAfterSeconds) },
+  });
 
 // A browser `WebSocket` can't set an `Authorization` header on the handshake
 // request, so authentication travels as a query param instead — a
@@ -205,16 +218,13 @@ const wsHandler = Effect.gen(function* () {
   }
 
   const ip = yield* clientIp;
-  const rateLimit = yield* limiter.consume(
+  const ipLimit = yield* limiter.consume(
     `ws:handshake:ip:${ip}`,
     WS_HANDSHAKE_MAX_ATTEMPTS_PER_IP,
     WS_HANDSHAKE_WINDOW_SECONDS,
   );
-  if (!rateLimit.allowed) {
-    return HttpServerResponse.text("Too many connection attempts", {
-      status: 429,
-      headers: { "retry-after": String(rateLimit.retryAfterSeconds) },
-    });
+  if (!ipLimit.allowed) {
+    return tooManyAttempts(ipLimit.retryAfterSeconds);
   }
 
   const ticket = getTicket(request.originalUrl);
@@ -227,6 +237,15 @@ const wsHandler = Effect.gen(function* () {
     return HttpServerResponse.text("Invalid or expired ticket", {
       status: 401,
     });
+  }
+
+  const userLimit = yield* limiter.consume(
+    `ws:handshake:user:${userId}`,
+    WS_HANDSHAKE_MAX_ATTEMPTS_PER_USER,
+    WS_HANDSHAKE_WINDOW_SECONDS,
+  );
+  if (!userLimit.allowed) {
+    return tooManyAttempts(userLimit.retryAfterSeconds);
   }
 
   const socket = yield* request.upgrade;
