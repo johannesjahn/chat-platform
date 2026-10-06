@@ -46,6 +46,10 @@ type PostCardProps = {
   canModify: boolean;
   onDelete: () => void;
   isDeleting: boolean;
+  // Show a long text post in full, with no "Show more" clamp. The clamp only
+  // exists so one post can't dominate a list (feed, profile); the post's own
+  // page is where you go to read all of it (issue #527).
+  fullText?: boolean;
   style?: CSSProperties;
 };
 
@@ -77,7 +81,7 @@ export function PostCardSkeleton() {
 }
 
 // Posts longer than this are collapsed behind a "Show more" toggle so a
-// single long text post can't dominate the feed.
+// single long text post can't dominate the feed (unless `fullText` is set).
 const COLLAPSE_THRESHOLD = 500;
 
 export function PostCard({
@@ -90,6 +94,7 @@ export function PostCard({
   canModify,
   onDelete,
   isDeleting,
+  fullText = false,
   style,
 }: PostCardProps) {
   const wasEdited = post.updatedAt !== post.createdAt;
@@ -104,7 +109,9 @@ export function PostCard({
   const showReactionTotal =
     post.reactions.filter((r) => r.count > 0).length > 1;
   const isLongText =
-    post.contentType === "text" && post.content.length > COLLAPSE_THRESHOLD;
+    !fullText &&
+    post.contentType === "text" &&
+    post.content.length > COLLAPSE_THRESHOLD;
   const {
     ref: textRef,
     expanded,
