@@ -117,9 +117,11 @@ function SkipLink() {
     <a
       href="#main"
       onClick={(e) => {
+        // Never follow the href, even before the route's <main> has
+        // rendered: that would only put a dead `#main` into history.
+        e.preventDefault();
         const main = document.querySelector("main");
         if (!main) return;
-        e.preventDefault();
         if (!main.hasAttribute("tabindex")) main.tabIndex = -1;
         main.focus();
       }}

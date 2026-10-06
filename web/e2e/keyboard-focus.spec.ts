@@ -8,6 +8,9 @@ test("a skip link is the first tab stop and lands in the page", async ({
 }) => {
   await page.goto("/");
   await expect(page.getByRole("link", { name: "Chats" })).toBeVisible();
+  // The nav renders before the route's own component, so wait for the
+  // skip link's target too.
+  await expect(page.locator("main")).toBeVisible();
 
   await page.keyboard.press("Tab");
   const skip = page.getByRole("link", { name: "Skip to content" });
