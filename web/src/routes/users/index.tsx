@@ -21,6 +21,12 @@ import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { useSession } from "@/lib/auth";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
+import {
+  userAvatarName,
+  userHandle,
+  userLabel,
+  userLabelWithHandle,
+} from "@/lib/users";
 import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/users/")({
@@ -161,27 +167,39 @@ function UsersPage() {
                     <Spotlight size={220} />
                     <span className="flex min-w-0 items-center gap-2.5">
                       <Avatar
-                        name={user.displayName || user.username}
+                        name={userAvatarName(user)}
                         avatarUrl={user.avatarUrl}
                         avatarVariants={user.avatarVariants}
                         size="sm"
                       />
                       <span className="truncate font-medium">
-                        {user.displayName || `@${user.username}`}
+                        {userLabel(user)}
                       </span>
                     </span>
-                    <span className="shrink-0 text-muted-foreground">
-                      #{user.id}
-                    </span>
+                    {/* The handle, not the internal id: display names aren't
+                        unique, so this is what tells two "Carol"s apart
+                        (issue #526). Without a display name the label
+                        already is the handle. */}
+                    {userHandle(user) && (
+                      <span className="max-w-[45%] shrink-0 truncate text-muted-foreground">
+                        {userHandle(user)}
+                      </span>
+                    )}
                   </Link>
-                  {isAdmin && session && user.id !== session.user.id && (
-                    <DeleteUserButton
-                      userId={user.id}
-                      label={user.displayName || `@${user.username}`}
-                      variant="icon"
-                      onError={setDeleteError}
-                    />
-                  )}
+                  {isAdmin &&
+                    session &&
+                    (user.id !== session.user.id ? (
+                      <DeleteUserButton
+                        userId={user.id}
+                        label={userLabelWithHandle(user)}
+                        variant="icon"
+                        onError={setDeleteError}
+                      />
+                    ) : (
+                      // Holds the delete button's width on the admin's own
+                      // row so every row's edges line up.
+                      <span aria-hidden className="size-8 shrink-0" />
+                    ))}
                 </li>
               ))}
             </ul>
