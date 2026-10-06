@@ -347,7 +347,17 @@ function Nav() {
         </Button>
       </div>
       <Collapse open={menuOpen} id={menuId} className="basis-full sm:hidden">
-        <div className="flex flex-col gap-1 pt-1">
+        {/* Activating anything in the panel closes it, even when the URL
+            doesn't change — the current page's own link, or logging out on
+            `/` — which the href check above can't see (issue #545). Clicks
+            and submits bubble, so one handler covers every item. */}
+        <div
+          className="flex flex-col gap-1 pt-1"
+          onClick={(e) => {
+            if ((e.target as Element).closest("a, button")) setMenuOpen(false);
+          }}
+          onSubmit={() => setMenuOpen(false)}
+        >
           {session && <HeaderSearch className="mb-2" />}
           <MenuLink to="/users" icon={Users} label="Users" />
           <MenuLink to="/games" icon={Gamepad2} label="Games" />

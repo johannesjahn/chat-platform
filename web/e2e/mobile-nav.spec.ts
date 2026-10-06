@@ -43,3 +43,39 @@ test("the phone nav is a single row with the rest behind a menu", async ({
   await expect(page).toHaveURL(/\/search\?q=peregrine/);
   await expect(menu).toHaveAttribute("aria-expanded", "false");
 });
+
+// Issue #545: the menu closes on navigation by watching the URL, so an item
+// that leaves the URL unchanged — the current page's own link, or logging
+// out on `/` (which navigates to `/`) — used to leave it open.
+test("the phone menu closes even when an item doesn't change the URL", async ({
+  page,
+  signUp,
+}) => {
+  await signUp(page);
+  await page.goto("/users");
+
+  const nav = page.locator("[data-app-nav]");
+  const menu = nav.getByRole("button", { name: "Menu" });
+  // Signed-in only, so it's there once the app has taken over the page.
+  await expect(
+    nav.getByRole("link", { name: "Notifications", exact: true }),
+  ).toBeVisible();
+
+  await menu.click();
+  await expect(menu).toHaveAttribute("aria-expanded", "true");
+  await nav.getByRole("link", { name: "Users" }).click();
+  await expect(page).toHaveURL("/users");
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await expect(nav.getByRole("link", { name: "Users" })).toHaveCount(0);
+
+  // Back to the feed in-app (the brand link) rather than a reload.
+  await nav.getByRole("link", { name: "Chat Platform" }).click();
+  await expect(page).toHaveURL("/");
+  await menu.click();
+  await expect(menu).toHaveAttribute("aria-expanded", "true");
+  await nav.getByRole("button", { name: "Log out" }).click();
+  await expect(nav.getByRole("link", { name: "Log in" })).toBeVisible();
+  await expect(page).toHaveURL("/");
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await expect(nav.getByRole("link", { name: "Register" })).toHaveCount(0);
+});
