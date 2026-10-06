@@ -368,7 +368,11 @@ function CommentItem({
   const invalidateComments = () =>
     queryClient.invalidateQueries({ queryKey: commentsQueryKeyRoot });
 
-  const replies = useReplies(comment.id, showReplies && !isReply);
+  // The toggle only renders while there are replies, so the panel must close
+  // with it when they drop to zero (deleted here or by someone else) — or it
+  // would sit open and empty with nothing left to close it (issue #544).
+  const repliesOpen = showReplies && !isReply && comment.replyCount > 0;
+  const replies = useReplies(comment.id, repliesOpen);
   const replyRows = replies.data?.pages.flatMap((p) => p.comments) ?? [];
 
   const reactionPending = addReaction.isPending || removeReaction.isPending;
@@ -563,13 +567,8 @@ function CommentItem({
         )}
 
         {!isReply && (
-          <Collapse open={showReplies}>
-            <div
-              className={cn(
-                "flex flex-col gap-3",
-                comment.replyCount > 0 ? "mt-2" : "mt-1",
-              )}
-            >
+          <Collapse open={repliesOpen}>
+            <div className="mt-2 flex flex-col gap-3">
               {replyRows.map((reply) => (
                 <CommentItem
                   key={reply.id}
