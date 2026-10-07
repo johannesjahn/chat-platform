@@ -60,8 +60,11 @@ func newRoot(a *app) *cobra.Command {
 create posts, comment and react, send and follow chat messages, search, and
 check notifications.
 
-Log in once with ` + "`chatctl login`" + `; the session is stored in ~/.chatctl.json
-(override with --config or $CHATCTL_CONFIG) and refreshed automatically.`,
+Log in once per account with ` + "`chatctl login -u NAME`" + `; each account gets its own
+profile in ~/.chatctl.yml (override with --config or $CHATCTL_CONFIG), and
+sessions are refreshed automatically. Hop between accounts with
+` + "`chatctl use NAME`" + ` (` + "`chatctl use -`" + ` goes back), or run a single command as
+another account with --as NAME.`,
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -77,8 +80,10 @@ Log in once with ` + "`chatctl login`" + `; the session is stored in ~/.chatctl.
 			return nil
 		},
 	}
-	root.PersistentFlags().StringVar(&a.configPath, "config", "", "path to the config dotfile (default ~/.chatctl.json, or $CHATCTL_CONFIG)")
-	root.PersistentFlags().StringVarP(&a.profile, "profile", "p", "", "profile to use (default: the current profile, or $CHATCTL_PROFILE)")
+	root.PersistentFlags().StringVar(&a.configPath, "config", "", "path to the config dotfile (default ~/.chatctl.yml, or $CHATCTL_CONFIG)")
+	root.PersistentFlags().StringVarP(&a.profile, "profile", "p", "", "profile (account) to use for this command: a profile name or @username (default: the current profile, or $CHATCTL_PROFILE)")
+	// --as reads naturally for hopping accounts: `chatctl --as bob dm alice hi`.
+	root.PersistentFlags().StringVar(&a.profile, "as", "", "alias for --profile")
 	root.PersistentFlags().BoolVar(&a.jsonOut, "json", false, "print raw JSON responses instead of formatted output")
 
 	root.AddGroup(
@@ -93,7 +98,10 @@ Log in once with ` + "`chatctl login`" + `; the session is stored in ~/.chatctl.
 			root.AddCommand(c)
 		}
 	}
-	add("auth", loginCmd(a), logoutCmd(a), whoamiCmd(a), profilesCmd(a), statusCmd(a))
+	add("auth", loginCmd(a), useCmd(a), profilesCmd(a), logoutCmd(a), whoamiCmd(a), statusCmd(a))
+	for _, flag := range []string{"profile", "as"} {
+		_ = root.RegisterFlagCompletionFunc(flag, a.profileCompletion)
+	}
 	add("social", feedCmd(a), postCmd(a), commentCmd(a))
 	add("chat", chatsCmd(a), chatCmd(a), dmCmd(a))
 	add("other", userCmd(a), searchCmd(a), notificationsCmd(a), apiCmd(a))
@@ -109,13 +117,16 @@ func (a *app) Client() (*api.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	name := f.ResolveName(a.profile)
-	p := f.Profiles[name]
-	if p == nil || !p.LoggedIn() {
-		if name == config.DefaultProfile {
-			return nil, api.ErrNotLoggedIn
-		}
-		return nil, fmt.Errorf("profile %q is not logged in — run `chatctl login --profile %s`", name, name)
+	ref := f.Selected(a.profile)
+	if ref == "" {
+		return nil, api.ErrNotLoggedIn
+	}
+	name, p, err := f.Find(ref)
+	if err != nil {
+		return nil, err
+	}
+	if !p.LoggedIn() {
+		return nil, fmt.Errorf("profile %q is logged out — run `chatctl login --profile %s`", name, name)
 	}
 	a.client = api.New(a.store, name, p)
 	a.client.UserAgent = "chatctl/" + Version

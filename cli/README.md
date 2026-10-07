@@ -18,25 +18,29 @@ To stamp a version: `go build -ldflags "-X github.com/johannesjahn/chat-platform
 ## Log in
 
 ```sh
-chatctl login --server https://chat.example.com --username alice   # prompts for the password
-echo "$PASSWORD" | chatctl login -u alice --password-stdin          # non-interactive
+chatctl login --server https://chat.example.com -u alice   # prompts for the password
+echo "$PASSWORD" | chatctl login -u alice --password-stdin  # non-interactive
 ```
 
-The session is stored in the dotfile **`~/.chatctl.json`** (override with
-`--config` or `$CHATCTL_CONFIG`), written with `0600` permissions:
+Each login is stored as a **profile** in the dotfile **`~/.chatctl.yml`**
+(override with `--config` or `$CHATCTL_CONFIG`), written with `0600`
+permissions:
 
-```json
-{
-  "currentProfile": "default",
-  "profiles": {
-    "default": {
-      "server": "https://chat.example.com",
-      "accessToken": "…",
-      "refreshToken": "…",
-      "user": { "id": 1, "username": "alice" }
-    }
-  }
-}
+```yaml
+# chatctl config — managed by `chatctl login` / `chatctl use`.
+currentProfile: alice
+previousProfile: bob
+profiles:
+  alice:
+    server: https://chat.example.com
+    user:
+      id: 1
+      username: alice
+    accessToken: …
+    refreshToken: …
+  bob:
+    server: https://chat.example.com
+    # …
 ```
 
 You never need to log in again while you keep using it. The access token is
@@ -46,17 +50,29 @@ rotates refresh tokens and treats a reused one as stolen, so before refreshing,
 chatctl checks the dotfile for tokens another chatctl process already rotated
 and uses those instead.
 
-### Profiles
+## Switching accounts
 
-Keep several servers or accounts side by side:
+Every account you log into is kept, so hopping between them is one command:
 
 ```sh
-chatctl login --profile local --server http://localhost:3000 -u alice
-chatctl profiles                 # list; * marks the current one
-chatctl profiles use local       # switch
-chatctl --profile local feed     # one-off (or CHATCTL_PROFILE=local)
-chatctl logout [--all]           # revoke this session (or every session)
+chatctl login -u alice -s https://chat.example.com
+chatctl login -u bob          # adds bob (same server as the current profile) and switches to him
+chatctl use alice             # switch back to alice (or: chatctl use @alice)
+chatctl use -                 # toggle to the previous account, like `cd -`
+chatctl use                   # list accounts; * marks the current one
+chatctl --as bob dm alice "hi"   # run one command as bob without switching
 ```
+
+- A login's profile is **named after the username** (pass `--profile` to pick
+  another name, e.g. the same username on a second server:
+  `chatctl login --profile alice-local -s http://localhost:3000 -u alice`).
+- Logging in makes that profile current; `chatctl use -` goes back.
+- Anywhere a profile is expected (`use`, `--as`, `-p/--profile`,
+  `$CHATCTL_PROFILE`) you can give the profile name or `@username`.
+  `$CHATCTL_PROFILE` is handy for pinning one terminal to one account.
+- Profile names tab-complete once shell completion is installed.
+- `chatctl logout [--all]` revokes the current account's session (or all of
+  its sessions); `chatctl profiles rm NAME` forgets a profile.
 
 ## Usage
 

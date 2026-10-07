@@ -92,7 +92,7 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func newTestClient(t *testing.T, srv *httptest.Server) (*Client, *config.Store) {
-	store := &config.Store{Path: filepath.Join(t.TempDir(), "chatctl.json")}
+	store := &config.Store{Path: filepath.Join(t.TempDir(), "chatctl.yml")}
 	return New(store, "default", &config.Profile{Server: srv.URL}), store
 }
 
@@ -169,7 +169,7 @@ func TestRetriesOnceAfter401(t *testing.T) {
 func TestAdoptsTokensRotatedByAnotherProcess(t *testing.T) {
 	fake, srv := newFakeServer(t)
 	ctx := context.Background()
-	store := &config.Store{Path: filepath.Join(t.TempDir(), "chatctl.json")}
+	store := &config.Store{Path: filepath.Join(t.TempDir(), "chatctl.yml")}
 	first := New(store, "default", &config.Profile{Server: srv.URL})
 	if _, err := first.Login(ctx, "alice", "secret"); err != nil {
 		t.Fatal(err)
