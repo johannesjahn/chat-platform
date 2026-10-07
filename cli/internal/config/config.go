@@ -1,37 +1,42 @@
-// Package config reads and writes the chatctl dotfile (~/.chatctl.json by
-// default), which holds one or more named profiles — a server URL plus the
-// session tokens issued by `POST /users/login`.
+// Package config reads and writes the chatctl dotfile (~/.chatctl.yml by
+// default), which holds one named profile per account — a server URL plus
+// the session tokens issued by `POST /users/login` — and which one is
+// current.
 package config
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
-)
+	"strings"
 
-// DefaultProfile is the profile used when none is selected.
-const DefaultProfile = "default"
+	"go.yaml.in/yaml/v3"
+)
 
 // DefaultServer is the backend's local dev address (`PORT` defaults to 3000).
 const DefaultServer = "http://localhost:3000"
 
+// header is written at the top of the dotfile.
+const header = `# chatctl config — managed by ` + "`chatctl login` / `chatctl use`" + `.
+# Holds live session tokens: keep it private (it is written 0600).
+`
+
 // User is the slice of the logged-in user worth caching locally, so
 // `whoami` and "is this message mine?" don't need a round trip.
 type User struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
+	ID       int64  `yaml:"id"`
+	Username string `yaml:"username"`
 }
 
-// Profile is one server + session.
+// Profile is one account on one server.
 type Profile struct {
-	Server       string `json:"server"`
-	AccessToken  string `json:"accessToken,omitempty"`
-	RefreshToken string `json:"refreshToken,omitempty"`
-	User         *User  `json:"user,omitempty"`
+	Server       string `yaml:"server"`
+	User         *User  `yaml:"user,omitempty"`
+	AccessToken  string `yaml:"accessToken,omitempty"`
+	RefreshToken string `yaml:"refreshToken,omitempty"`
 }
 
 // LoggedIn reports whether the profile holds a session.
@@ -39,8 +44,10 @@ func (p *Profile) LoggedIn() bool { return p.RefreshToken != "" || p.AccessToken
 
 // File is the on-disk dotfile.
 type File struct {
-	CurrentProfile string              `json:"currentProfile"`
-	Profiles       map[string]*Profile `json:"profiles"`
+	CurrentProfile string `yaml:"currentProfile,omitempty"`
+	// PreviousProfile is what `chatctl use -` switches back to.
+	PreviousProfile string              `yaml:"previousProfile,omitempty"`
+	Profiles        map[string]*Profile `yaml:"profiles"`
 }
 
 // Store is a dotfile at a fixed path.
@@ -49,7 +56,7 @@ type Store struct {
 }
 
 // DefaultPath resolves the dotfile location: $CHATCTL_CONFIG, else
-// ~/.chatctl.json.
+// ~/.chatctl.yml.
 func DefaultPath() (string, error) {
 	if p := os.Getenv("CHATCTL_CONFIG"); p != "" {
 		return p, nil
@@ -58,7 +65,7 @@ func DefaultPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locating home directory: %w", err)
 	}
-	return filepath.Join(home, ".chatctl.json"), nil
+	return filepath.Join(home, ".chatctl.yml"), nil
 }
 
 // Load reads the dotfile. A missing file is not an error — it yields an
@@ -72,11 +79,16 @@ func (s *Store) Load() (*File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", s.Path, err)
 	}
-	if err := json.Unmarshal(data, f); err != nil {
+	if err := yaml.Unmarshal(data, f); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", s.Path, err)
 	}
 	if f.Profiles == nil {
 		f.Profiles = map[string]*Profile{}
+	}
+	for name, p := range f.Profiles {
+		if p == nil {
+			delete(f.Profiles, name)
+		}
 	}
 	return f, nil
 }
@@ -85,11 +97,11 @@ func (s *Store) Load() (*File, error) {
 // permissions — it holds bearer tokens, so it must not be world-readable,
 // and a crash mid-write must not leave a truncated file behind.
 func (s *Store) Save(f *File) error {
-	data, err := json.MarshalIndent(f, "", "  ")
+	body, err := yaml.Marshal(f)
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
+	data := append([]byte(header), body...)
 	dir := filepath.Dir(s.Path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating %s: %w", dir, err)
@@ -130,19 +142,67 @@ func (s *Store) Update(fn func(*File) error) error {
 	return s.Save(f)
 }
 
-// ResolveName picks the active profile name: an explicit choice (flag or
-// $CHATCTL_PROFILE), else the dotfile's current profile, else "default".
-func (f *File) ResolveName(explicit string) string {
+// Selected names the profile a command runs as: an explicit choice (the
+// --profile/--as flag, then $CHATCTL_PROFILE), else the current profile.
+// Empty means nothing is selected yet.
+func (f *File) Selected(explicit string) string {
 	if explicit != "" {
 		return explicit
 	}
 	if env := os.Getenv("CHATCTL_PROFILE"); env != "" {
 		return env
 	}
-	if f.CurrentProfile != "" {
-		return f.CurrentProfile
+	return f.CurrentProfile
+}
+
+// Find resolves a profile reference: an exact profile name, or "@user" /
+// "user" matching the account's username (if exactly one profile has it).
+// It returns the canonical profile name.
+func (f *File) Find(ref string) (string, *Profile, error) {
+	if p, ok := f.Profiles[ref]; ok {
+		return ref, p, nil
 	}
-	return DefaultProfile
+	username := strings.TrimPrefix(ref, "@")
+	if p, ok := f.Profiles[username]; ok {
+		return username, p, nil
+	}
+	var matches []string
+	for name, p := range f.Profiles {
+		if p.User != nil && strings.EqualFold(p.User.Username, username) {
+			matches = append(matches, name)
+		}
+	}
+	switch len(matches) {
+	case 1:
+		return matches[0], f.Profiles[matches[0]], nil
+	case 0:
+		return "", nil, fmt.Errorf("no profile %q — add one with `chatctl login -u %s`", ref, username)
+	default:
+		sort.Strings(matches)
+		return "", nil, fmt.Errorf("@%s is logged in on several servers (%s) — pick one by profile name",
+			username, strings.Join(matches, ", "))
+	}
+}
+
+// Switch makes name current, remembering the old current profile for
+// `chatctl use -`. Switching to the profile that's already current is a
+// no-op, so `use -` keeps toggling between the last two.
+func (f *File) Switch(name string) {
+	if f.CurrentProfile == name {
+		return
+	}
+	f.PreviousProfile, f.CurrentProfile = f.CurrentProfile, name
+}
+
+// Remove deletes a profile, clearing any reference to it.
+func (f *File) Remove(name string) {
+	delete(f.Profiles, name)
+	if f.CurrentProfile == name {
+		f.CurrentProfile = ""
+	}
+	if f.PreviousProfile == name {
+		f.PreviousProfile = ""
+	}
 }
 
 // Names returns the profile names, sorted.
