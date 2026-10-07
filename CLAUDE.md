@@ -483,6 +483,17 @@ thresholds, and uploads the `coverage-report` artifact — see Testing above),
 and **e2e** (Playwright). The Bun version is pinned once via the
 workflow-level `BUN_VERSION` env var.
 
+**Path filters** (issue #492): on PRs, a leading `changes` job
+(`dorny/paths-filter`) decides which jobs the diff can affect, and each job
+`needs: changes` and is skipped unless one of its filters matched — e.g. a
+docs-only PR runs just `lint` and `chart-version`. Pushes to `main` always run
+everything, since `tag-release.yml` releases off that run. Every filter also
+matches `.github/workflows/**` and `.github/actions/**`. When a job gains a
+new input (a file it reads, a new directory), add it to that job's filter, or
+PRs touching only that input will skip it. A final `ci-ok` job reports one
+stable check (fails if any job failed or was cancelled; skipped counts as
+passing) — that's the one to require in a branch ruleset.
+
 **audit** runs `bun audit --audit-level=high` for both the backend and
 `web/` to catch known-vulnerable dependencies; it's gated to high/critical
 severity because drizzle-kit currently carries a moderate-severity advisory
