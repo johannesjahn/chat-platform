@@ -133,6 +133,12 @@ This is a two-package repo:
   wired to all three. Sources in `src/`.
 - **Frontend** (`web/`): TanStack Start (React) in SPA mode, calling the backend
   over HTTP. Has its own `package.json`.
+- **CLI** (`cli/`): `chatctl`, a Go command-line client (cobra), authenticated
+  via a `~/.chatctl.json` dotfile — see [`cli/README.md`](cli/README.md). Its
+  types in `cli/internal/api/types.go` mirror `openapi.json` by hand, so a
+  backend change that renames/removes a field the CLI reads needs a matching
+  edit there. Go code isn't touched by ESLint/TypeScript (Prettier still
+  formats its Markdown); CI's `cli` job runs gofmt/vet/test/build.
 
 ## Search
 
