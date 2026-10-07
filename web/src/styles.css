@@ -206,6 +206,20 @@ html[data-app-shell="immersive"] body {
   overscroll-behavior: none;
 }
 
+/* The root layout wraps the page in two flex boxes — the frame (top bar or
+   sidebar + page) and the page column (see __root.tsx) — and the pinned
+   height above has to reach the conversation through both. A flex basis of
+   0 makes each one's size come from the (now definite) body rather than
+   from its content, and `min-height: 0` lets it be shorter than the thread
+   it holds, so the thread scrolls inside itself instead of stretching them.
+   On ordinary pages neither applies: they size to their content, so the
+   sticky nav keeps sticking all the way down a long feed. */
+html[data-app-shell="immersive"] [data-app-frame],
+html[data-app-shell="immersive"] [data-app-column] {
+  flex-basis: 0;
+  min-height: 0;
+}
+
 /* Below `sm`, the conversation is the whole screen and its own header — back
    button included — is the only chrome it needs. Reclaiming the site nav's
    row is part of what keeps the thread readable once the on-screen

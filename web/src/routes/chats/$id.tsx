@@ -8,9 +8,13 @@ import {
 } from "react";
 import { onlineManager, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, Loader2, Settings2, Users } from "lucide-react";
+import { ArrowLeft, Loader2, Paperclip, Settings2, Users } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
-import { ChatComposer, type ReplyTarget } from "@/components/ChatComposer";
+import {
+  ChatComposer,
+  type ChatComposerHandle,
+  type ReplyTarget,
+} from "@/components/ChatComposer";
 import { DateSeparator } from "@/components/DateSeparator";
 import { GroupManagementDialog } from "@/components/GroupManagementDialog";
 import { LoginPrompt } from "@/components/LoginPrompt";
@@ -39,6 +43,7 @@ import {
   localDayKey,
   useChatDetail,
   useChatMessages,
+  useChatsTwoPane,
 } from "@/lib/chats";
 import {
   dismissQueuedItem,
@@ -52,6 +57,7 @@ import { useIsOnline } from "@/lib/presence";
 import { isStatusVisible, useUserStatus } from "@/lib/status";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
 import { userAvatarName, userHandle, userLabel } from "@/lib/users";
+import { cn } from "@/lib/utils";
 import { useImmersiveShell } from "@/lib/viewport";
 import { staticTitle, usePageTitle } from "@/lib/title";
 
@@ -155,8 +161,19 @@ function nextPaint(): Promise<void> {
 // screen — `viewport-fit=cover` lets the page run under the status bar, so
 // something has to put a background there or the clock sits on the messages.
 // Above `sm` the nav is back and owns the inset again, hence `sm:pt-3`.
+// At `lg` it's exactly as tall as the chat list pane's header beside it
+// (issue #554), so the two read as one bar across the messenger.
 const CHAT_HEADER_CLASS =
-  "flex shrink-0 flex-row items-center gap-3 border-b border-border pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-3";
+  "flex shrink-0 flex-row items-center gap-3 border-b border-border pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-3 lg:h-16 lg:py-0";
+
+// The conversation's <main> and card. Below `lg` it's the centred card it
+// always was; at `lg`+ it sits in the two-pane layout's right pane (see
+// chats/route.tsx) and fills it edge to edge — no card frame, no margins —
+// so it reads as an app rather than a document.
+const CHAT_MAIN_CLASS =
+  "mx-auto flex min-h-0 w-full max-w-2xl grow basis-0 flex-col sm:px-4 sm:py-6 lg:max-w-none lg:p-0";
+const CHAT_CARD_CLASS =
+  "flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-none border-x-0 py-0 sm:rounded-xl sm:border-x lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none lg:backdrop-blur-none lg:hover:border-transparent";
 
 function ChatViewPage() {
   const { id } = Route.useParams();
@@ -254,6 +271,17 @@ function ChatView({
   // The message a reply is currently being composed against (issue #217), or
   // null when composing a normal message.
   const [replyingTo, setReplyingTo] = useState<ReplyTarget | null>(null);
+  const twoPane = useChatsTwoPane();
+  const composerRef = useRef<ChatComposerHandle | null>(null);
+  // `↑` in an empty composer opens your newest text message's editor
+  // (issue #554); the counter replays it for the same message.
+  const [editRequest, setEditRequest] = useState<{
+    messageId: number;
+    key: number;
+  } | null>(null);
+  // Files dragged over the conversation: a counter rather than a flag,
+  // because `dragenter`/`dragleave` fire for every child crossed on the way.
+  const [dragDepth, setDragDepth] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -544,6 +572,49 @@ function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat?.unreadCount, newestMessageId]);
 
+  function editLastMessage() {
+    const mine = [...messages]
+      .reverse()
+      .find((m) => m.senderId === session?.user.id && m.contentType === "text");
+    if (!mine) return;
+    setEditRequest((prev) => ({
+      messageId: mine.id,
+      key: (prev?.key ?? 0) + 1,
+    }));
+  }
+
+  function focusComposer() {
+    composerRef.current?.focus();
+  }
+
+  // Drop a file anywhere on the conversation — thread, header, composer —
+  // and it becomes the message's attachment (issue #554), not just on the
+  // composer's own small upload field. Only drags carrying files count, so
+  // dragging selected text around the page doesn't raise the overlay.
+  const draggingFiles = (e: React.DragEvent) =>
+    e.dataTransfer.types.includes("Files");
+  function onDragEnter(e: React.DragEvent) {
+    if (!draggingFiles(e)) return;
+    e.preventDefault();
+    setDragDepth((depth) => depth + 1);
+  }
+  function onDragOver(e: React.DragEvent) {
+    if (!draggingFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+  function onDragLeave(e: React.DragEvent) {
+    if (!draggingFiles(e)) return;
+    setDragDepth((depth) => Math.max(0, depth - 1));
+  }
+  function onDrop(e: React.DragEvent) {
+    if (!draggingFiles(e)) return;
+    e.preventDefault();
+    setDragDepth(0);
+    const file = e.dataTransfer.files[0];
+    if (file) composerRef.current?.attachFile(file);
+  }
+
   if (!session) {
     return (
       <main className="mx-auto flex w-full max-w-2xl justify-center px-4 py-10">
@@ -558,9 +629,9 @@ function ChatView({
 
   if (chatLoading) {
     return (
-      <main className="mx-auto flex min-h-0 w-full max-w-2xl grow basis-0 flex-col sm:px-4 sm:py-6">
+      <main className={CHAT_MAIN_CLASS}>
         <h1 className="sr-only">Loading conversation</h1>
-        <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-none border-x-0 py-0 sm:rounded-xl sm:border-x">
+        <Card className={CHAT_CARD_CLASS}>
           <CardHeader className={CHAT_HEADER_CLASS}>
             <Skeleton className="size-9 rounded-full" />
             <Skeleton className="h-4 w-32" />
@@ -713,19 +784,31 @@ function ChatView({
     // `flex-basis: 0px` resolves fine, so the min-height clamp gives this the
     // leftover viewport height and the thread scrolls within it — which is
     // what issue #321's fill-the-screen layout was after all along.
-    <main className="mx-auto flex min-h-0 w-full max-w-2xl grow basis-0 flex-col sm:px-4 sm:py-6">
+    <main className={CHAT_MAIN_CLASS}>
       {/* The visible name sits inside the header's link/button, which can't
           hold a heading — so the page's heading is a hidden one named after
           it. Named by `aria-label` rather than text so the name isn't on the
           page twice (the header and the chat list rows are found by it). */}
       <h1 className="sr-only" aria-label={name} />
-      <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-none border-x-0 py-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 sm:rounded-xl sm:border-x">
+      <Card
+        className={cn(
+          CHAT_CARD_CLASS,
+          "relative motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500",
+        )}
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
+        {dragDepth > 0 && <DropOverlay />}
         <CardHeader className={CHAT_HEADER_CLASS}>
+          {/* Beside the desktop chat list there's nothing to go back to. */}
           <Button
             asChild
             size="icon"
             variant="ghost"
             aria-label="Back to chats"
+            className="lg:hidden"
           >
             <Link to="/chats">
               <ArrowLeft className="size-4" />
@@ -938,6 +1021,12 @@ function ChatView({
                                 ? jumpHighlight.key
                                 : undefined
                             }
+                            editRequestKey={
+                              editRequest?.messageId === message.id
+                                ? editRequest.key
+                                : undefined
+                            }
+                            onEditEnd={focusComposer}
                             senderLabel={
                               chat.type === "group" && sender
                                 ? userLabel(sender)
@@ -993,10 +1082,13 @@ function ChatView({
         </CardContent>
 
         <ChatComposer
+          ref={composerRef}
           chatId={chatId}
           onSend={handleSend}
           replyingTo={replyingTo}
           onCancelReply={() => setReplyingTo(null)}
+          onEditLast={editLastMessage}
+          autoFocus={twoPane}
         />
       </Card>
 
@@ -1009,6 +1101,21 @@ function ChatView({
         />
       )}
     </main>
+  );
+}
+
+// What the conversation shows while a file is dragged over it.
+function DropOverlay() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-primary bg-background/85 text-sm font-medium text-foreground backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
+    >
+      <span className="flex size-12 items-center justify-center rounded-full bg-primary/15 text-primary">
+        <Paperclip className="size-5" />
+      </span>
+      Drop to attach
+    </div>
   );
 }
 

@@ -92,6 +92,11 @@ export function AttachmentUploadField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingFile]);
 
+  // An upload still running when the field goes away (the composer backed
+  // out of the mode, or a newly dropped file replaced this one) is
+  // abandoned, so it can't land later and attach itself to the next message.
+  useEffect(() => () => uploadRef.current?.abort(), []);
+
   function handleFiles(files: FileList | null) {
     const file = files?.[0];
     if (file) startUpload(file);

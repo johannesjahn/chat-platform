@@ -1,50 +1,48 @@
-import { type CSSProperties, useEffect, useRef } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Link2, Loader2, MessagesSquare, PlusCircle } from "lucide-react";
-import { ChatListItem, ChatListItemSkeleton } from "@/components/ChatListItem";
+import { Link2, MessagesSquare, PlusCircle } from "lucide-react";
+import { ChatList } from "@/components/ChatList";
 import { EmptyState } from "@/components/EmptyState";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth";
-import { useChatsList } from "@/lib/chats";
-import { errorMessage } from "@/lib/errors";
-import { useOnlineStatus } from "@/lib/online";
+import { useChatsTwoPane } from "@/lib/chats";
+import { modKeyLabel } from "@/lib/shell";
 import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/chats/")({
   head: () => staticTitle("Chats"),
-  component: ChatsListPage,
+  component: ChatsIndexPage,
 });
+
+function ChatsIndexPage() {
+  // At `lg`+ the list is already the layout's left pane (see route.tsx), so
+  // the right pane just invites a pick.
+  return useChatsTwoPane() ? <SelectConversation /> : <ChatsListPage />;
+}
+
+function SelectConversation() {
+  return (
+    <main className="flex flex-1 flex-col items-center justify-center p-8">
+      <EmptyState
+        pageHeading
+        icon={MessagesSquare}
+        title="Select a conversation"
+        description={`Pick a chat from the list, or press ${modKeyLabel()}+K to jump to one.`}
+      >
+        <Button asChild>
+          <Link to="/chats/new">
+            <PlusCircle className="size-4" />
+            New chat
+          </Link>
+        </Button>
+      </EmptyState>
+    </main>
+  );
+}
 
 function ChatsListPage() {
   const session = useSession();
-  const isOnline = useOnlineStatus();
-  const {
-    data,
-    isLoading,
-    error,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-  } = useChatsList(!!session);
-  const chats = data?.pages.flatMap((page) => page.chats) ?? [];
-
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const node = sentinelRef.current;
-    if (!node || !hasNextPage) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && !isFetchingNextPage) {
-          void fetchNextPage();
-        }
-      },
-      { rootMargin: "400px" },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col items-center gap-6 px-4 py-10">
@@ -71,76 +69,13 @@ function ChatsListPage() {
         )}
       </div>
 
-      {!session ? (
+      {session ? (
+        <ChatList session={session} />
+      ) : (
         <LoginPrompt
           title="Log in to see your chats"
           description="Conversations are only visible to signed-in users."
         />
-      ) : isLoading ? (
-        <div className="flex w-full flex-col gap-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <ChatListItemSkeleton key={i} />
-          ))}
-        </div>
-      ) : chats.length === 0 && error && !(error instanceof Error) ? (
-        // A decoded API error body (not a raw `Error`) only happens for a
-        // real server-side failure — a network-level failure (offline,
-        // unreachable server) throws a plain Error instead and is handled
-        // by the offline branch below, not here (see errorMessage.ts's own
-        // instanceof check for the same distinction).
-        <p className="w-full rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          Could not load chats: {errorMessage(error)}
-        </p>
-      ) : chats.length === 0 && (!isOnline || error) ? (
-        // Already-loaded chats (persisted across reloads — see query.ts)
-        // stay on screen even if a background refresh just failed; this is
-        // only reached when there's truly nothing cached yet.
-        <p className="text-sm text-muted-foreground">
-          You&apos;re offline, and your chats haven&apos;t been loaded on this
-          device yet.
-        </p>
-      ) : chats.length === 0 ? (
-        <EmptyState
-          icon={MessagesSquare}
-          title="No conversations yet"
-          description="Start a direct message or spin up a group with people you know."
-        >
-          <Button asChild>
-            <Link to="/chats/new">
-              <PlusCircle className="size-4" />
-              New chat
-            </Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link to="/chats/join">
-              <Link2 className="size-4" />
-              Join via invite
-            </Link>
-          </Button>
-        </EmptyState>
-      ) : (
-        <ul role="list" className="flex w-full flex-col gap-2">
-          {chats.map((chat, i) => (
-            <li key={chat.id}>
-              <ChatListItem
-                chat={chat}
-                currentUserId={session.user.id}
-                style={{ "--stagger-index": Math.min(i, 8) } as CSSProperties}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {session && (
-        <div
-          ref={sentinelRef}
-          data-testid="chats-sentinel"
-          className="h-1 w-full"
-        />
-      )}
-      {isFetchingNextPage && (
-        <Loader2 className="size-5 animate-spin text-muted-foreground" />
       )}
     </main>
   );

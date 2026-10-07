@@ -19,10 +19,12 @@ export function VersionFooter() {
     // this back on the bottom edge people can actually see.
     // Hidden below `sm`: pages run edge to edge on a phone, so there's no empty
     // margin for the corner to sit in and the tag lands on whatever card is at
-    // the bottom of the screen (#506).
+    // the bottom of the screen (#506). Hidden again from `lg`, where the
+    // desktop sidebar carries the tag instead (issue #554) and this corner
+    // is a full-width conversation's send button.
     <span
       data-version-tag
-      className="pointer-events-none fixed top-[calc(var(--app-height,100dvh)-1.5rem)] right-3 z-10 hidden text-xs text-muted-foreground/60 select-none sm:inline"
+      className="pointer-events-none fixed top-[calc(var(--app-height,100dvh)-1.5rem)] right-3 z-10 hidden text-xs text-muted-foreground/60 select-none sm:inline lg:hidden"
     >
       v{data.version}
     </span>

@@ -10,6 +10,7 @@ import { Link } from "@tanstack/react-router";
 import {
   Check,
   CheckCheck,
+  Copy,
   Loader2,
   Pencil,
   Pin,
@@ -40,6 +41,7 @@ import {
 } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
 import { useExpandableText } from "@/lib/motion";
+import { formatAbsoluteTime } from "@/lib/time";
 import type { ReactionEmoji } from "@/lib/reactions";
 import { cn } from "@/lib/utils";
 
@@ -86,6 +88,13 @@ type MessageBubbleProps = {
   // plain `animate-jump-flash` in the cascade and swallowed the pulse, and
   // any re-render of the row's `className` wiped a script-added class anyway.
   highlightKey?: number;
+  // Changed to open this message's editor from outside the bubble — `↑` in
+  // an empty composer edits your last message (issue #554). Ignored unless
+  // the message is editable at all.
+  editRequestKey?: number;
+  // Called when an edit ends (saved or cancelled), so the composer can take
+  // focus back.
+  onEditEnd?: () => void;
   style?: CSSProperties;
 };
 
@@ -115,6 +124,8 @@ export function MessageBubble({
   onReply,
   onJumpToParent,
   highlightKey,
+  editRequestKey,
+  onEditEnd,
   style,
 }: MessageBubbleProps) {
   const queryClient = useQueryClient();
@@ -257,6 +268,46 @@ export function MessageBubble({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const confirm = useConfirm();
+  const canEdit = canModify && message.contentType === "text";
+
+  function startEditing() {
+    setDraft(message.content);
+    setIsEditing(true);
+  }
+
+  function stopEditing() {
+    setIsEditing(false);
+    onEditEnd?.();
+  }
+
+  // A new request opens the editor during render (the "adjust state when a
+  // prop changes" pattern), so it's open on the very commit that asked.
+  const [seenEditRequest, setSeenEditRequest] = useState(editRequestKey);
+  if (editRequestKey !== seenEditRequest) {
+    setSeenEditRequest(editRequestKey);
+    if (editRequestKey !== undefined && canEdit) startEditing();
+  }
+  useEffect(() => {
+    if (editRequestKey === undefined) return;
+    rowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [editRequestKey]);
+
+  // "Copy text" (issue #554): the action group's way to copy a message
+  // without having to select it, with a tick for a moment once it's done.
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  async function copyText() {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+    } catch {
+      setActionError("Couldn't copy to the clipboard.");
+    }
+  }
 
   // Touch equivalent of the desktop hover-reveal (issue #309). The per-message
   // action group (react/pin/star/reply/edit/delete) is otherwise only shown on
@@ -288,6 +339,9 @@ export function MessageBubble({
   // lands outside this message row (the reaction popover itself portals to
   // document.body, so picking an emoji counts as "outside" and collapses the
   // group too — which is the desired outcome once a reaction is chosen).
+  //
+  // A desktop right-click reveals the same group (issue #554) and is put
+  // away the same way, or with Escape.
   useEffect(() => {
     if (!touchRevealed) return;
     const dismiss = (event: Event) => {
@@ -296,8 +350,15 @@ export function MessageBubble({
         setTouchRevealed(false);
       }
     };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setTouchRevealed(false);
+    };
     document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", onKeyDown);
+    };
   }, [touchRevealed]);
 
   const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {
@@ -356,7 +417,7 @@ export function MessageBubble({
     setSaving(true);
     try {
       await onEdit(trimmedDraft);
-      setIsEditing(false);
+      stopEditing();
     } finally {
       setSaving(false);
     }
@@ -411,6 +472,22 @@ export function MessageBubble({
       >
         <Star className={cn("size-3.5", message.starred && "fill-current")} />
       </Button>
+      {message.contentType === "text" && (
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          aria-label={copied ? "Copied" : "Copy text"}
+          onClick={() => void copyText()}
+          className="size-6"
+        >
+          {copied ? (
+            <Check className="size-3.5 text-primary" />
+          ) : (
+            <Copy className="size-3" />
+          )}
+        </Button>
+      )}
     </>
   );
 
@@ -556,17 +633,14 @@ export function MessageBubble({
               <Reply className="size-3.5" />
             </Button>
           )}
-          {canModify && message.contentType === "text" && (
+          {canEdit && (
             <Button
               type="button"
               size="icon"
               variant="ghost"
               aria-label="Edit message"
               className="size-6"
-              onClick={() => {
-                setDraft(message.content);
-                setIsEditing(true);
-              }}
+              onClick={startEditing}
             >
               <Pencil className="size-3" />
             </Button>
@@ -597,12 +671,26 @@ export function MessageBubble({
         onTouchEnd={clearLongPress}
         onTouchCancel={clearLongPress}
         onContextMenu={(e) => {
-          // Suppress the browser's own long-press context menu on touch, but
-          // leave desktop right-click alone.
-          if (longPressFired.current) e.preventDefault();
+          // Suppress the browser's own long-press context menu on touch.
+          if (longPressFired.current) {
+            e.preventDefault();
+            return;
+          }
+          // A desktop right-click opens the message's actions, the way the
+          // long press does on touch (issue #554) — except on a link, a
+          // picture or player, or over selected text, where the browser's
+          // own menu (copy link, save image, copy) is what's wanted.
+          if (isEditing) return;
+          const target = e.target as Element;
+          if (target.closest("a, img, video, audio, button")) return;
+          if (window.getSelection()?.toString()) return;
+          e.preventDefault();
+          setTouchRevealed(true);
         }}
         className={cn(
-          "flex min-w-0 max-w-[75%] flex-col gap-1",
+          // On a wide desktop pane the bubble is capped in characters too,
+          // so lines stay readable — the pane takes the width, not the text.
+          "flex min-w-0 max-w-[75%] flex-col gap-1 lg:max-w-[min(75%,70ch)]",
           isOwn ? "items-end" : "items-start",
         )}
       >
@@ -642,7 +730,7 @@ export function MessageBubble({
                     e.preventDefault();
                     void handleSave();
                   } else if (e.key === "Escape") {
-                    setIsEditing(false);
+                    stopEditing();
                   }
                 }}
                 rows={1}
@@ -662,7 +750,7 @@ export function MessageBubble({
                     "size-6",
                     isOwn && "hover:bg-primary-foreground/20",
                   )}
-                  onClick={() => setIsEditing(false)}
+                  onClick={stopEditing}
                 >
                   <X className="size-3.5" />
                 </Button>
@@ -763,7 +851,7 @@ export function MessageBubble({
                 aria-label="Starred"
               />
             )}
-            <span>
+            <span title={formatAbsoluteTime(message.createdAt)}>
               {new Date(message.createdAt).toLocaleTimeString([], {
                 hour: "numeric",
                 minute: "2-digit",

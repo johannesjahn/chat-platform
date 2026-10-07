@@ -23,17 +23,25 @@ export function staticTitle(page: string) {
 //
 // On cleanup it only restores the previous title if nothing replaced ours in
 // the meantime: navigating away commits the next route's `<title>` before
-// this cleanup runs, and that must win.
+// this cleanup runs, and that must win. Both sides are compared without the
+// unread prefix, which `useTabBadge` re-applies to whatever lands.
 export function usePageTitle(page: string | undefined) {
   useEffect(() => {
     if (page === undefined) return;
-    const previous = document.title;
+    const previous = stripTitleBadge(document.title);
     const title = pageTitle(page);
     document.title = title;
     return () => {
-      if (document.title === title) document.title = previous;
+      if (stripTitleBadge(document.title) === title) document.title = previous;
     };
   }, [page]);
+}
+
+// The "(3) " unread prefix `useTabBadge` (lib/tabBadge.ts) puts in front of
+// every title, removed — so code comparing titles compares the route's own.
+const TITLE_BADGE = /^\(\d+\+?\) /;
+export function stripTitleBadge(title: string): string {
+  return title.replace(TITLE_BADGE, "");
 }
 
 // Trims user-written text (a post body) to something that fits a tab.

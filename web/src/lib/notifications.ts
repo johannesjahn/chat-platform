@@ -5,6 +5,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
 
@@ -111,4 +112,22 @@ export function useMarkAllNotificationsRead() {
     onSuccess: (count) =>
       queryClient.setQueryData(unreadNotificationCountQueryKey, count),
   });
+}
+
+// Where clicking a notification goes: the post it's about, the lobby an
+// invite points at, or the game's leaderboard.
+export function useOpenNotification() {
+  const navigate = useNavigate();
+  return (n: Notification) => {
+    if (n.type === "game_invite" && n.game && n.lobbyId !== null) {
+      void navigate({
+        to: "/games/$game/$lobbyId",
+        params: { game: n.game, lobbyId: String(n.lobbyId) },
+      });
+    } else if (n.type === "game_record" && n.game) {
+      void navigate({ to: "/games/$game", params: { game: n.game } });
+    } else if (n.postId !== null) {
+      void navigate({ to: "/posts/$id", params: { id: String(n.postId) } });
+    }
+  };
 }
