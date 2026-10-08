@@ -133,6 +133,12 @@ This is a two-package repo:
   wired to all three. Sources in `src/`.
 - **Frontend** (`web/`): TanStack Start (React) in SPA mode, calling the backend
   over HTTP. Has its own `package.json`.
+- **CLI** (`cli/`): `chatctl`, a Go command-line client (cobra), authenticated
+  via a `~/.chatctl.yml` dotfile (one profile per account; `chatctl use` switches) — see [`cli/README.md`](cli/README.md). Its
+  types in `cli/internal/api/types.go` mirror `openapi.json` by hand, so a
+  backend change that renames/removes a field the CLI reads needs a matching
+  edit there. Go code isn't touched by ESLint/TypeScript (Prettier still
+  formats its Markdown); CI's `cli` job runs gofmt/vet/test/build.
 
 ## Search
 
@@ -524,7 +530,8 @@ generated spec/types weren't regenerated and committed), **unit**
 spec against the `ChatApi` definition, enforces `bunfig.toml`'s coverage
 thresholds, and uploads the `coverage-report` artifact — see Testing above),
 and **e2e** (Playwright). The Bun version is pinned once via the
-workflow-level `BUN_VERSION` env var.
+workflow-level `BUN_VERSION` env var. A separate **cli** job covers the Go
+CLI in `cli/` (`gofmt`, `go vet`, `go test -race`, build).
 
 **Path filters** (issue #492): on PRs, a leading `changes` job
 (`dorny/paths-filter`) decides which jobs the diff can affect, and each job
@@ -535,7 +542,8 @@ matches `.github/workflows/**` and `.github/actions/**`. When a job gains a
 new input (a file it reads, a new directory), add it to that job's filter, or
 PRs touching only that input will skip it. A final `ci-ok` job reports one
 stable check (fails if any job failed or was cancelled; skipped counts as
-passing) — that's the one to require in a branch ruleset.
+passing) — that's the one to require in a branch ruleset. A new job must
+also be added to `ci-ok`'s `needs`, or its failures won't block a merge.
 
 **audit** runs `bun audit --audit-level=high` for both the backend and
 `web/` to catch known-vulnerable dependencies; it's gated to high/critical
