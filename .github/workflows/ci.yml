@@ -21,6 +21,78 @@ env:
   BUN_VERSION: 1.4.2
 
 jobs:
+  # Decides which of the jobs below a PR actually needs (issue #492): each
+  # expensive job `needs: changes` and only runs when one of its filters
+  # matched. Pushes to main skip the filter and run everything — tag-release.yml
+  # releases off a green CI run on main, and a release must be validated by
+  # the full suite (a skipped job still counts as success). Filters are
+  # deliberately per job rather than workflow-level `on.pull_request.paths`,
+  # which would skip the whole workflow and report no status at all.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      web: ${{ steps.filter.outputs.web }}
+      db: ${{ steps.filter.outputs.db }}
+      docker: ${{ steps.filter.outputs.docker }}
+      deps: ${{ steps.filter.outputs.deps }}
+      chart: ${{ steps.filter.outputs.chart }}
+      observability: ${{ steps.filter.outputs.observability }}
+    steps:
+      # On pull_request the action lists the changed files through the API,
+      # so no checkout is needed.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          # Every filter includes `ci`, so a workflow or composite-action
+          # change still runs everything.
+          filters: |
+            ci: &ci
+              - .github/workflows/**
+              - .github/actions/**
+            backend:
+              - *ci
+              - src/**
+              - drizzle/**
+              - scripts/**
+              - package.json
+              - bun.lock
+              - bunfig.toml
+              - tsconfig.json
+            web:
+              - *ci
+              - web/**
+            db:
+              - *ci
+              - drizzle/**
+              - src/db/**
+              - src/Db.ts
+              - scripts/migrate.ts
+              - drizzle.config.ts
+            docker:
+              - *ci
+              - Dockerfile
+              - .dockerignore
+              - docker-compose.yml
+            deps:
+              - *ci
+              - bun.lock
+              - web/bun.lock
+            chart:
+              - *ci
+              - k8s/chat-platform/**
+              - package.json
+              - web/package.json
+            observability:
+              - *ci
+              - k8s/observability/**
+
   lint:
     name: Lint & format
     runs-on: ubuntu-latest
@@ -40,6 +112,8 @@ jobs:
 
   typecheck:
     name: Typecheck
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -66,6 +140,8 @@ jobs:
 
   build-web:
     name: Web production build
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -89,6 +165,8 @@ jobs:
 
   openapi:
     name: OpenAPI spec & generated types
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -114,6 +192,8 @@ jobs:
 
   audit:
     name: Dependency vulnerability audit
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.deps == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -163,6 +243,8 @@ jobs:
 
   helm:
     name: Helm chart lint & template
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.chart == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -178,6 +260,8 @@ jobs:
 
   helmfile:
     name: Observability stack lint & template
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.observability == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -220,6 +304,8 @@ jobs:
 
   unit:
     name: Backend tests
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Only RealtimePubSub.integration.test.ts uses this — it's the one test
@@ -291,6 +377,8 @@ jobs:
 
   migrate-postgres:
     name: Migrate against real Postgres
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.db == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Tests migrate PGlite (an embedded, WASM Postgres) per test file, but
@@ -357,6 +445,8 @@ jobs:
 
   docker:
     name: Docker image build
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.docker == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -443,6 +533,8 @@ jobs:
 
   e2e:
     name: E2E tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -510,3 +602,34 @@ jobs:
           path: web/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  # One stable check name covering every job above, for a branch ruleset to
+  # require: a required check whose job was skipped by a path filter would
+  # otherwise never report. Skipped jobs count as passing; a failed or
+  # cancelled one (including `changes` itself) fails this.
+  ci-ok:
+    name: CI OK
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs:
+      - changes
+      - lint
+      - typecheck
+      - build-web
+      - openapi
+      - audit
+      - chart-version
+      - helm
+      - helmfile
+      - unit
+      - migrate-postgres
+      - docker
+      - e2e
+    steps:
+      - name: Fail if any job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "::error::One or more CI jobs failed or were cancelled."
+          exit 1
+      - run: echo "All CI jobs passed or were skipped."
