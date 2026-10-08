@@ -27,7 +27,7 @@
     "@effect/platform-bun": "4.0.2",
     "@electric-sql/pglite": "0.5.8",
     "blurhash": "2.0.5",
-    "drizzle-orm": "0.45.3",
+    "drizzle-orm": "0.45.4",
     "effect": "4.0.2",
     "sharp": "0.35.5"
   },
