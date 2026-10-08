@@ -12,11 +12,6 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  // Playwright defaults to half the machine's cores — 2 workers on a 4-vCPU
-  // GitHub runner. These tests mostly wait (on the browser, on their own
-  // backend process, on network idle) rather than burn CPU, so CI runs 4.
-  // Locally the default stays, since a dev machine is usually doing more.
-  workers: process.env.CI ? 4 : undefined,
   globalSetup: "./e2e/global-setup.ts",
   // `vite dev` compiles route chunks on first request, which is slow on a cold
   // CI runner; the default 5s is too tight for the first assertion after load.
