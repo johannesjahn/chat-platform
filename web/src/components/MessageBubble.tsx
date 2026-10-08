@@ -95,6 +95,10 @@ type MessageBubbleProps = {
   // Called when an edit ends (saved or cancelled), so the composer can take
   // focus back.
   onEditEnd?: () => void;
+  // A narrow thread (a desktop docked chat window, issue #554): the action
+  // group floats over the bubble's top edge as a toolbar instead of sitting
+  // beside it, where — even invisible — it took the width the bubble needs.
+  compact?: boolean;
   style?: CSSProperties;
 };
 
@@ -126,6 +130,7 @@ export function MessageBubble({
   highlightKey,
   editRequestKey,
   onEditEnd,
+  compact = false,
   style,
 }: MessageBubbleProps) {
   const queryClient = useQueryClient();
@@ -555,6 +560,13 @@ export function MessageBubble({
     touchRevealed
       ? "opacity-100 translate-x-0 scale-100"
       : "opacity-0 translate-x-2 scale-95 group-hover:opacity-100 group-hover:translate-x-0 group-hover:scale-100",
+    compact &&
+      cn(
+        "absolute -top-3.5 z-10 rounded-full border border-border bg-popover px-1 py-0.5 shadow-md",
+        isOwn ? "right-1" : "left-1",
+        // Invisible, it mustn't sit over the message above and eat clicks.
+        !touchRevealed && "pointer-events-none group-hover:pointer-events-auto",
+      ),
   );
 
   return (
@@ -730,6 +742,9 @@ export function MessageBubble({
                     e.preventDefault();
                     void handleSave();
                   } else if (e.key === "Escape") {
+                    // Handled: a docked window around this mustn't also
+                    // close on the same key press.
+                    e.preventDefault();
                     stopEditing();
                   }
                 }}

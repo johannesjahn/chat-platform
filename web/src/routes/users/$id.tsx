@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
-import { chatsListQueryKey } from "@/lib/chats";
+import { useStartDirectChat } from "@/lib/directChat";
 import { errorMessage } from "@/lib/errors";
 import {
   postsFeedQueryKey,
@@ -70,18 +70,13 @@ function UserProfilePage() {
   const [messageError, setMessageError] = useState<string | null>(null);
   const status = useUserStatus(user?.id, user);
 
-  const createDirectChat = $api.useMutation("post", "/chats/direct");
+  // On a desktop this opens a docked chat window and leaves you on the
+  // profile (issue #554); below `lg` it goes to the conversation page.
+  const directChat = useStartDirectChat();
   async function startDirectChat() {
     setMessageError(null);
     try {
-      const chat = await createDirectChat.mutateAsync({
-        body: { userId: Number(id) },
-      });
-      await queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
-      await router.navigate({
-        to: "/chats/$id",
-        params: { id: String(chat.id) },
-      });
+      await directChat.start(Number(id));
     } catch (err) {
       setMessageError(errorMessage(err));
     }
@@ -157,7 +152,9 @@ function UserProfilePage() {
   const canManageRole = session.user.role === "admin" && !isSelf;
 
   return (
-    <main className="mx-auto w-full max-w-xl px-4 py-10">
+    // At `lg` the profile becomes two columns (issue #554): the profile card
+    // sticks on the left while the posts scroll on the right.
+    <main className="mx-auto w-full max-w-xl px-4 py-10 lg:max-w-5xl">
       <Button variant="ghost" size="sm" className="mb-4" onClick={goBack}>
         <ArrowLeft className="size-4" />
         Back
@@ -180,14 +177,21 @@ function UserProfilePage() {
           </CardHeader>
         </Card>
       ) : (
-        <div className="flex flex-col gap-6">
-          <Card className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
-            <CardHeader className="flex flex-row items-center gap-4">
+        <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[20rem_minmax(0,1fr)] lg:items-start lg:gap-8">
+          <Card className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 lg:sticky lg:top-6 lg:overflow-hidden lg:pt-0">
+            {/* The cover band: only the desktop card is tall enough to
+                carry one, with the avatar pulled up to sit on its edge. */}
+            <div
+              aria-hidden
+              className="hidden h-24 bg-[radial-gradient(120%_140%_at_0%_0%,oklch(0.62_0.19_277/0.55),transparent_60%),radial-gradient(120%_140%_at_100%_100%,oklch(0.72_0.14_210/0.4),transparent_60%)] lg:block"
+            />
+            <CardHeader className="flex flex-row items-center gap-4 lg:flex-col lg:items-start lg:gap-3">
               <Avatar
                 name={user.displayName || user.username}
                 avatarUrl={user.avatarUrl}
                 avatarVariants={user.avatarVariants}
                 size="xl"
+                className="lg:-mt-16 lg:ring-4 lg:ring-card"
               />
               <div className="flex flex-1 flex-col leading-tight">
                 <h1 className="text-xl font-semibold">
@@ -211,10 +215,11 @@ function UserProfilePage() {
               {!isSelf && (
                 <Button
                   size="sm"
-                  disabled={createDirectChat.isPending}
+                  disabled={directChat.isPending}
                   onClick={() => void startDirectChat()}
+                  className="lg:w-full"
                 >
-                  {createDirectChat.isPending ? (
+                  {directChat.isPending ? (
                     <Loader2 className="size-4 animate-spin" />
                   ) : (
                     <MessageCircle className="size-4" />

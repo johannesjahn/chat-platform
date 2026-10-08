@@ -31,6 +31,7 @@ import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { HeaderSearch } from "@/components/HeaderSearch";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { PwaUpdatePrompt } from "@/components/PwaUpdatePrompt";
+import { ChatDock } from "@/components/shell/ChatDock";
 import { CommandPalette } from "@/components/shell/CommandPalette";
 import { DesktopSidebar } from "@/components/shell/DesktopSidebar";
 import { KeyboardShortcuts } from "@/components/shell/KeyboardShortcuts";
@@ -112,6 +113,7 @@ function RootComponent() {
             </div>
           </div>
           <VersionFooter />
+          <ChatDock />
           <PwaUpdatePrompt />
           <CommandPalette />
           <KeyboardShortcuts />
