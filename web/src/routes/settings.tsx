@@ -1,9 +1,22 @@
 import { useRef, useState } from "react";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Ban, BellOff, ImageUp, KeyRound, Loader2, Trash2 } from "lucide-react";
+import {
+  Ban,
+  Bell,
+  BellOff,
+  ImageUp,
+  KeyRound,
+  Loader2,
+  Shield,
+  Smile,
+  Trash2,
+  UserRound,
+  type LucideIcon,
+} from "lucide-react";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
 import { AvatarCropDialog } from "@/components/AvatarCropDialog";
+import { filterRailRowClassName } from "@/components/filterRailStyles";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { GradientText } from "@/components/reactbits/GradientText";
 import {
@@ -27,6 +40,11 @@ import {
   usersQueryKey,
 } from "@/lib/api";
 import { clearSession, setSession, useSession } from "@/lib/auth";
+import {
+  setBrowserNotifications,
+  useBrowserNotificationState,
+} from "@/lib/browserNotifications";
+import { useIsDesktop } from "@/lib/media";
 import { errorMessage } from "@/lib/errors";
 import { formatBytes } from "@/lib/attachments";
 import {
@@ -37,38 +55,164 @@ import {
 import { staticTitle } from "@/lib/title";
 import { userHandle, userLabel } from "@/lib/users";
 
+type Section =
+  "profile" | "status" | "privacy" | "notifications" | "password" | "account";
+
+const SECTIONS: ReadonlyArray<{
+  value: Section;
+  label: string;
+  icon: LucideIcon;
+}> = [
+  { value: "profile", label: "Profile", icon: UserRound },
+  { value: "status", label: "Status", icon: Smile },
+  { value: "privacy", label: "Blocked & muted", icon: Shield },
+  { value: "notifications", label: "Notifications", icon: Bell },
+  { value: "password", label: "Password", icon: KeyRound },
+  { value: "account", label: "Delete account", icon: Trash2 },
+];
+
+type SettingsSearch = { section?: Section };
+
 export const Route = createFileRoute("/settings")({
   head: () => staticTitle("Settings"),
+  // `?section=` picks the desktop view's section (issue #554), so each one
+  // is addressable — `/settings?section=password` — and the back button
+  // walks back through the ones visited.
+  validateSearch: (search: Record<string, unknown>): SettingsSearch =>
+    SECTIONS.some((s) => s.value === search.section)
+      ? { section: search.section as Section }
+      : {},
   component: SettingsPage,
 });
 
+function SectionCard({ section }: { section: Section }) {
+  switch (section) {
+    case "profile":
+      return <EditProfileCard />;
+    case "status":
+      return <EditStatusCard />;
+    case "privacy":
+      return <BlockedUsersCard />;
+    case "notifications":
+      return <BrowserNotificationsCard />;
+    case "password":
+      return <ChangePasswordCard />;
+    case "account":
+      return <DeleteAccountCard />;
+  }
+}
+
 function SettingsPage() {
   const session = useSession();
+  const { section = "profile" } = Route.useSearch();
+  // Below `lg` it's every card in one column, as it always was; at `lg`+ a
+  // sidebar picks one section at a time — the desktop settings pattern
+  // rather than one long scroll (issue #554).
+  const isDesktop = useIsDesktop();
 
   return (
-    <main className="mx-auto flex w-full max-w-xl flex-col items-center gap-6 px-4 py-10">
-      <div className="flex w-full items-center gap-2">
-        <KeyRound className="size-5 text-primary" />
-        <h1 className="text-2xl font-semibold tracking-tight">
-          <GradientText>Settings</GradientText>
-        </h1>
-      </div>
-
-      {!session ? (
-        <LoginPrompt
-          title="Log in to manage your account"
-          description="Account settings are only available to signed-in users."
-        />
-      ) : (
-        <>
-          <EditProfileCard />
-          <EditStatusCard />
-          <BlockedUsersCard />
-          <ChangePasswordCard />
-          <DeleteAccountCard />
-        </>
+    <main className="mx-auto flex w-full max-w-xl gap-8 px-4 py-10 lg:max-w-4xl">
+      {session && (
+        <nav
+          aria-label="Settings sections"
+          className="sticky top-10 hidden w-52 shrink-0 flex-col gap-0.5 self-start lg:flex"
+        >
+          {SECTIONS.map(({ value, label, icon: Icon }) => (
+            <Link
+              key={value}
+              to="/settings"
+              search={value === "profile" ? {} : { section: value }}
+              aria-current={value === section ? "page" : undefined}
+              className={filterRailRowClassName(value === section)}
+            >
+              <Icon className="size-4 shrink-0" />
+              {label}
+            </Link>
+          ))}
+        </nav>
       )}
+      <div className="flex min-w-0 max-w-xl flex-1 flex-col items-center gap-6">
+        <div className="flex w-full items-center gap-2">
+          <KeyRound className="size-5 text-primary" />
+          <h1 className="text-2xl font-semibold tracking-tight">
+            <GradientText>Settings</GradientText>
+          </h1>
+        </div>
+
+        {!session ? (
+          <LoginPrompt
+            title="Log in to manage your account"
+            description="Account settings are only available to signed-in users."
+          />
+        ) : isDesktop ? (
+          // Keyed so switching sections plays the card's entrance again.
+          <SectionCard key={section} section={section} />
+        ) : (
+          <>
+            <EditProfileCard />
+            <EditStatusCard />
+            <BlockedUsersCard />
+            <BrowserNotificationsCard />
+            <ChangePasswordCard />
+            <DeleteAccountCard />
+          </>
+        )}
+      </div>
     </main>
+  );
+}
+
+// Opt-in system notifications for new messages and notifications while the
+// tab is in the background (issue #554) — see lib/browserNotifications.ts.
+function BrowserNotificationsCard() {
+  const state = useBrowserNotificationState();
+  const [pending, setPending] = useState(false);
+
+  async function toggle() {
+    setPending(true);
+    try {
+      await setBrowserNotifications(state !== "on");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Card className="w-full motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
+      <CardHeader>
+        <CardTitle>Desktop notifications</CardTitle>
+        <CardDescription>
+          Get a system notification for new messages and notifications while
+          this tab is in the background. Applies to this browser only.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex items-center justify-between gap-4">
+        <p className="text-sm text-muted-foreground">
+          {state === "unsupported"
+            ? "This browser doesn't support notifications."
+            : state === "denied"
+              ? "Notifications are blocked for this site in your browser's settings."
+              : state === "on"
+                ? "On — you'll be notified while the tab is hidden."
+                : "Off"}
+        </p>
+        <Button
+          variant={state === "on" ? "outline" : "default"}
+          size="sm"
+          disabled={pending || state === "unsupported" || state === "denied"}
+          onClick={() => void toggle()}
+        >
+          {pending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : state === "on" ? (
+            <BellOff className="size-4" />
+          ) : (
+            <Bell className="size-4" />
+          )}
+          {state === "on" ? "Turn off" : "Turn on"}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 

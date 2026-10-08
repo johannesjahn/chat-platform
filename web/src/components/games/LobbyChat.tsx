@@ -54,7 +54,10 @@ export const LobbyChat = memo(function LobbyChat({
     <GamePanel
       title="Lobby chat"
       icon={MessageSquare}
-      className="gap-3"
+      // From `lg` it's the lobby page's right-hand column: sticky and as tall
+      // as the screen, its history filling whatever the header and the
+      // composer leave (issue #554).
+      className="gap-3 lg:sticky lg:top-6 lg:h-[calc(var(--app-height,100dvh)-3rem)] lg:min-h-80"
       actions={<ReactionBar lobbyId={lobby.id} meId={meId} />}
     >
       {lobby.chatOpen ? (
@@ -69,7 +72,7 @@ export const LobbyChat = memo(function LobbyChat({
                 el.scrollHeight - el.scrollTop - el.clientHeight <
                 STICK_TO_BOTTOM_PX;
             }}
-            className="flex max-h-64 min-h-24 flex-col gap-2.5 overflow-y-auto pr-1"
+            className="flex max-h-64 min-h-24 flex-col gap-2.5 overflow-y-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1"
           >
             {!isLoading && messages.length === 0 && (
               <li className="m-auto text-center text-sm text-muted-foreground">

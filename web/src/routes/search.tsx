@@ -414,7 +414,8 @@ function SearchPage() {
 // The `xl` preview of a message hit: the very conversation, live, opened on
 // the message the search matched — the context around it without leaving
 // the results. It's the docked conversation (issue #554), so it can be
-// replied to from here too.
+// replied to from here too. Its height stops short of the screen's bottom
+// edge, where the messaging dock's tab sits.
 function MessagePreviewPane({
   preview,
   onClose,
@@ -425,7 +426,7 @@ function MessagePreviewPane({
   return (
     <aside
       aria-label={`Preview: ${preview.chatName}`}
-      className="sticky top-10 flex h-[calc(var(--app-height,100dvh)-5rem)] w-[26rem] shrink-0 flex-col self-start overflow-hidden rounded-xl border border-border/60 bg-card/65 backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2 motion-safe:duration-300"
+      className="sticky top-10 flex h-[calc(var(--app-height,100dvh)-8rem)] w-[26rem] shrink-0 flex-col self-start overflow-hidden rounded-xl border border-border/60 bg-card/65 backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2 motion-safe:duration-300"
     >
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border pl-4 pr-1">
         <MessagesSquare className="size-4 text-primary" />

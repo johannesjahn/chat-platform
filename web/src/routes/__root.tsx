@@ -38,7 +38,8 @@ import { KeyboardShortcuts } from "@/components/shell/KeyboardShortcuts";
 import { VersionFooter } from "@/components/VersionFooter";
 import { logout } from "../lib/api";
 import { useSession } from "../lib/auth";
-import { useTotalUnreadCount } from "../lib/chats";
+import { useBrowserNotifications } from "../lib/browserNotifications";
+import { useChatsList, useTotalUnreadCount } from "../lib/chats";
 import { useUnreadNotificationCount } from "../lib/notifications";
 import { OfflineQueueSync } from "../lib/offlineQueue";
 import { persistOptions, queryClient } from "../lib/query";
@@ -160,6 +161,13 @@ function AppNavigation() {
   const unreadCount = useTotalUnreadCount(!!session);
   const unreadNotifications = useUnreadNotificationCount(!!session);
   useTabBadge(unreadCount + unreadNotifications);
+  const { data: chatsData } = useChatsList(!!session);
+  useBrowserNotifications({
+    currentUserId: session?.user.id,
+    chats: chatsData?.pages.flatMap((page) => page.chats) ?? [],
+    unreadChats: unreadCount,
+    unreadNotifications,
+  });
 
   const onLogout = session
     ? () => {

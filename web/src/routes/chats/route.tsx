@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/lib/auth";
 import { useChatsList, useChatsTwoPane, type Chat } from "@/lib/chats";
+import { useResizablePane } from "@/lib/paneWidth";
 import { cn } from "@/lib/utils";
 import { useImmersiveShell } from "@/lib/viewport";
 
@@ -57,15 +58,28 @@ function ChatsLayout() {
     show: "all",
   });
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // The list pane's width, resizable from its edge and remembered per device.
+  const {
+    width: paneWidth,
+    paneRef,
+    handleProps,
+  } = useResizablePane("chat-pane-width");
 
   if (!twoPane || !session) return <Outlet />;
 
   return (
     <div className="flex min-h-0 grow basis-0">
       <aside
+        ref={paneRef}
         aria-label="Conversations"
-        className="flex w-80 shrink-0 flex-col border-r border-border bg-card/40 xl:w-96"
+        style={paneWidth === null ? undefined : { width: paneWidth }}
+        className="relative flex w-80 shrink-0 flex-col border-r border-border bg-card/40 xl:w-96"
       >
+        {/* The drag handle along the pane's edge. */}
+        <div
+          {...handleProps}
+          className="absolute inset-y-0 -right-1.5 z-10 w-3 cursor-col-resize outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:bg-primary/0 after:transition-colors hover:after:bg-primary/50 focus-visible:after:bg-primary"
+        />
         <div className="flex h-16 shrink-0 items-center gap-2 border-b border-border px-4">
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
             <MessagesSquare className="size-5 text-primary" />

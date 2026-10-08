@@ -225,6 +225,9 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
     <GameShell
       game={game}
       back={{ game: gameId, label: game.name }}
+      // Wider from `lg`, where the lobby chat moves beside the game rather
+      // than under it (issue #554).
+      className="lg:max-w-7xl"
       title={host ? `${userLabel(host.user)}'s lobby` : `Lobby #${lobby.id}`}
       subtitle={
         <span className="flex flex-wrap items-center gap-2">
@@ -277,118 +280,128 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
       }
     >
       {won && <Confetti key={lobby.round} />}
-      {actionError && (
-        <p className="text-sm text-destructive" role="alert">
-          {errorMessage(actionError)}
-        </p>
-      )}
-
-      {phase === "waiting" && (
-        <GamePanel
-          title="Waiting room"
-          icon={Users}
-          live={isHost}
-          actions={
-            <span className="text-xs text-muted-foreground">
-              Invite players or share the link to fill the seats
-            </span>
-          }
-        >
-          <LobbySeats lobby={lobby} meId={meId} />
-          {me && !full && (
-            <div className="flex justify-center">
-              <InvitePlayers lobby={lobby} meId={meId} />
-            </div>
+      {/* Below `lg` the chat follows the game down the page; from `lg` it's
+          a full-height panel to its right, so the waiting room and results
+          never scroll it out of reach (issue #554). */}
+      <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-start">
+        <div className="flex min-w-0 flex-col gap-6">
+          {actionError && (
+            <p className="text-sm text-destructive" role="alert">
+              {errorMessage(actionError)}
+            </p>
           )}
-          {Settings && <Settings lobby={lobby} isHost={isHost} />}
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-            {isHost ? (
-              <div className="flex flex-col items-center gap-1.5">
-                <Button
-                  size="lg"
-                  disabled={start.isPending || missing > 0}
-                  onClick={() => start.mutate()}
-                  className="game-gradient min-w-48 border-0 text-white shadow-lg shadow-[var(--game-glow)] hover:opacity-95"
-                >
-                  <Play className="size-4 fill-current" />
-                  {lobby.players.length === 1
-                    ? game.verbs.startSolo
-                    : game.verbs.start}
-                </Button>
-                {missing > 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    Waiting for {missing} more{" "}
-                    {missing === 1 ? "player" : "players"} — this game needs{" "}
-                    {lobby.minPlayers}
+
+          {phase === "waiting" && (
+            <GamePanel
+              title="Waiting room"
+              icon={Users}
+              live={isHost}
+              actions={
+                <span className="text-xs text-muted-foreground">
+                  Invite players or share the link to fill the seats
+                </span>
+              }
+            >
+              <LobbySeats lobby={lobby} meId={meId} />
+              {me && !full && (
+                <div className="flex justify-center">
+                  <InvitePlayers lobby={lobby} meId={meId} />
+                </div>
+              )}
+              {Settings && <Settings lobby={lobby} isHost={isHost} />}
+              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                {isHost ? (
+                  <div className="flex flex-col items-center gap-1.5">
+                    <Button
+                      size="lg"
+                      disabled={start.isPending || missing > 0}
+                      onClick={() => start.mutate()}
+                      className="game-gradient min-w-48 border-0 text-white shadow-lg shadow-[var(--game-glow)] hover:opacity-95"
+                    >
+                      <Play className="size-4 fill-current" />
+                      {lobby.players.length === 1
+                        ? game.verbs.startSolo
+                        : game.verbs.start}
+                    </Button>
+                    {missing > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        Waiting for {missing} more{" "}
+                        {missing === 1 ? "player" : "players"} — this game needs{" "}
+                        {lobby.minPlayers}
+                      </span>
+                    )}
+                  </div>
+                ) : me ? (
+                  <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                    Waiting for {host ? userLabel(host.user) : "the host"} to
+                    start
+                    <TypingDots />
                   </span>
+                ) : (
+                  <Button
+                    size="lg"
+                    disabled={join.isPending || full}
+                    onClick={() => join.mutate()}
+                    className="game-gradient min-w-48 border-0 text-white shadow-lg shadow-[var(--game-glow)] hover:opacity-95"
+                  >
+                    <Swords className="size-4" />
+                    {full ? "Lobby full" : game.verbs.join}
+                  </Button>
                 )}
               </div>
-            ) : me ? (
-              <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-                Waiting for {host ? userLabel(host.user) : "the host"} to start
-                <TypingDots />
-              </span>
-            ) : (
-              <Button
-                size="lg"
-                disabled={join.isPending || full}
-                onClick={() => join.mutate()}
-                className="game-gradient min-w-48 border-0 text-white shadow-lg shadow-[var(--game-glow)] hover:opacity-95"
-              >
-                <Swords className="size-4" />
-                {full ? "Lobby full" : game.verbs.join}
-              </Button>
-            )}
-          </div>
-        </GamePanel>
-      )}
+            </GamePanel>
+          )}
 
-      {(phase === "countdown" || phase === "racing") && (
-        <PlayArea game={game} lobby={lobby} meId={meId} now={now} />
-      )}
+          {(phase === "countdown" || phase === "racing") && (
+            <PlayArea game={game} lobby={lobby} meId={meId} now={now} />
+          )}
 
-      {phase === "finished" && (
-        <GamePanel
-          title="Results"
-          icon={Trophy}
-          actions={
-            isHost ? (
-              <Button
-                disabled={rematch.isPending}
-                onClick={() => rematch.mutate()}
-                className="game-gradient border-0 text-white shadow-md shadow-[var(--game-glow)] hover:opacity-95"
-              >
-                <RotateCcw className="size-4" />
-                Rematch
-              </Button>
-            ) : me ? (
-              <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                Waiting for a rematch
-                <TypingDots />
-              </span>
-            ) : null
-          }
-        >
-          <ResultsPodium
-            players={lobby.players}
-            scoreUnit={game.scoreUnit}
-            meId={meId}
-            raceStats={game.raceStats}
-          />
-          <div className="flex justify-center pt-2">
-            <Button asChild variant="ghost" size="sm">
-              <Link to="/games/$game" params={{ game: gameId }}>
-                <Trophy className="size-4" />
-                See the leaderboard
-              </Link>
-            </Button>
-          </div>
-        </GamePanel>
-      )}
+          {phase === "finished" && (
+            <GamePanel
+              title="Results"
+              icon={Trophy}
+              actions={
+                isHost ? (
+                  <Button
+                    disabled={rematch.isPending}
+                    onClick={() => rematch.mutate()}
+                    className="game-gradient border-0 text-white shadow-md shadow-[var(--game-glow)] hover:opacity-95"
+                  >
+                    <RotateCcw className="size-4" />
+                    Rematch
+                  </Button>
+                ) : me ? (
+                  <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                    Waiting for a rematch
+                    <TypingDots />
+                  </span>
+                ) : null
+              }
+            >
+              <ResultsPodium
+                players={lobby.players}
+                scoreUnit={game.scoreUnit}
+                meId={meId}
+                raceStats={game.raceStats}
+              />
+              <div className="flex justify-center pt-2">
+                <Button asChild variant="ghost" size="sm">
+                  <Link to="/games/$game" params={{ game: gameId }}>
+                    <Trophy className="size-4" />
+                    See the leaderboard
+                  </Link>
+                </Button>
+              </div>
+            </GamePanel>
+          )}
 
-      {phase === "finished" && ResultsExtras && <ResultsExtras lobby={lobby} />}
+          {phase === "finished" && ResultsExtras && (
+            <ResultsExtras lobby={lobby} />
+          )}
+        </div>
 
-      {meId !== undefined && <LobbyChat lobby={lobby} meId={meId} />}
+        {meId !== undefined && <LobbyChat lobby={lobby} meId={meId} />}
+      </div>
       <ReactionStream lobby={lobby} meId={meId} />
     </GameShell>
   );
