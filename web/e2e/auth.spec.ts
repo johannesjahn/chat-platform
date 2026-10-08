@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { randomUsername } from "./helpers";
+import { goToOwnProfile, logOut, randomUsername } from "./helpers";
 
 test("registers a new user and sees the user list after login", async ({
   page,
@@ -14,7 +14,9 @@ test("registers a new user and sees the user list after login", async ({
 
   // Registration auto-logs-in and redirects to the home page (the feed).
   await expect(page).toHaveURL("/");
-  await expect(page.getByText(`@${username}`)).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Main" }).getByText(`@${username}`),
+  ).toBeVisible();
 
   // User search lives on its own page and is a protected endpoint — it
   // should now load (the bearer token is attached) and, once searched,
@@ -32,7 +34,8 @@ test("changes password from settings and can log back in with the new one", asyn
   const { username, password } = await signUp(page);
   const newPassword = "playwright-new-pw-456";
 
-  await page.goto("/settings");
+  // The password section — the desktop settings show one at a time.
+  await page.goto("/settings?section=password");
   await page.fill("#current-password", password);
   await page.fill("#new-password", newPassword);
   await page.fill("#confirm-password", newPassword);
@@ -41,17 +44,21 @@ test("changes password from settings and can log back in with the new one", asyn
 
   // The session stays logged in on this device, under the new password.
   await page.goto("/users");
-  await expect(page.getByText(`@${username}`)).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Main" }).getByText(`@${username}`),
+  ).toBeVisible();
 
   // Logging out and back in with the new password proves it actually took
   // effect server-side (and that the old one no longer works).
-  await page.getByRole("button", { name: "Log out" }).click();
+  await logOut(page);
   await page.goto("/login");
   await page.fill("#username", username);
   await page.fill("#password", newPassword);
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page).toHaveURL("/");
-  await expect(page.getByText(`@${username}`)).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Main" }).getByText(`@${username}`),
+  ).toBeVisible();
 });
 
 test("setting a display name replaces the username in the nav, but the profile page still shows both", async ({
@@ -75,13 +82,13 @@ test("setting a display name replaces the username in the nav, but the profile p
   // username field, checked above), the display name now takes over from
   // the raw username — starting with the feed, once navigated there.
   await page.goto("/");
-  const navLink = page.locator("nav, header").getByText(displayName).first();
-  await expect(navLink).toBeVisible();
-  await expect(page.getByText(`@${username}`)).not.toBeVisible();
+  const nav = page.getByRole("navigation", { name: "Main" });
+  await expect(nav.getByText(displayName).first()).toBeVisible();
+  await expect(nav.getByText(`@${username}`)).not.toBeVisible();
 
   // The profile page is the one place that still surfaces the actual
   // username, alongside the display name.
-  await navLink.click();
+  await goToOwnProfile(page);
   await expect(page).toHaveURL(/\/users\/\d+/);
   await expect(page.getByText(`@${username}`)).toBeVisible();
 });

@@ -14,7 +14,7 @@ test("an unknown URL shows the 404 page with a way back to the feed", async ({
     "Page not found",
   );
   // The app shell still renders around it.
-  await expect(page.locator("[data-app-nav]")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
 
   await main.getByRole("link", { name: "Go to feed" }).click();
   await expect(page).toHaveURL("/");

@@ -7,7 +7,9 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
+import { useSession } from "./auth";
 import { recordChatVersion } from "./chatVersions";
+import { useIsDesktop } from "./media";
 import { userLabel } from "./users";
 
 export type Chat = components["schemas"]["Chat"];
@@ -48,6 +50,18 @@ export const chatPinnedQueryKey = (chatId: number) =>
   ["chats", chatId, "pinned"] as const;
 export const chatStarredQueryKey = (chatId: number) =>
   ["chats", chatId, "starred"] as const;
+
+/**
+ * Whether `/chats/*` is showing the desktop two-pane messenger (issue #554):
+ * signed in, at `lg`+. The chats layout route renders the list pane off it,
+ * and the index route reads it to choose between the full list (phone) and
+ * the "select a conversation" state (desktop).
+ */
+export function useChatsTwoPane(): boolean {
+  const session = useSession();
+  const isDesktop = useIsDesktop();
+  return isDesktop && !!session;
+}
 
 // Chat list is shared between the nav's unread badge and the `/chats` page —
 // same query key, so React Query dedupes the underlying request and both

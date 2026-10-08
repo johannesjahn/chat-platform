@@ -108,7 +108,9 @@ function AdminPage() {
   );
 
   return (
-    <main className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-10">
+    // At `xl` the dashboard takes the width (issue #554): the totals in one
+    // row, health and activity side by side, the timeline across the page.
+    <main className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-10 xl:max-w-7xl">
       <div className="flex w-full flex-wrap items-center gap-2">
         <Gauge className="size-5 text-primary" />
         <h1 className="text-2xl font-semibold tracking-tight">
@@ -152,9 +154,11 @@ function AdminPage() {
         <DashboardSkeleton />
       ) : (
         <>
-          <HealthCard health={stats.health} />
           <TotalsGrid totals={stats.totals} />
-          <ActivityCard activity={stats.activity} />
+          <div className="flex flex-col gap-6 xl:grid xl:grid-cols-2 xl:items-start">
+            <HealthCard health={stats.health} />
+            <ActivityCard activity={stats.activity} />
+          </div>
           <TimelineCard
             timeline={stats.timeline}
             range={range}
@@ -170,7 +174,7 @@ function DashboardSkeleton() {
   return (
     <div className="flex w-full flex-col gap-6">
       <Skeleton className="h-40 w-full rounded-xl" />
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
         {Array.from({ length: 8 }).map((_, i) => (
           <Skeleton key={i} className="h-20 rounded-xl" />
         ))}
@@ -213,7 +217,7 @@ function TotalsGrid({ totals }: { totals: AdminStats["totals"] }) {
           Everything on the platform since it launched.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <CardContent className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
         <StatTile
           label="Users"
           value={totals.users}

@@ -142,3 +142,62 @@ export function persistedQueryCache(page: Page): Promise<string> {
       .join("\n"),
   );
 }
+
+// Logs out through whichever navigation the viewport has: from `lg` up the
+// action sits in the desktop sidebar's account menu (issue #554), below it
+// it's a plain button in the top bar.
+export async function logOut(page: Page): Promise<void> {
+  const accountMenu = page.getByRole("button", { name: /^Account menu for/ });
+  const logOutButton = page.getByRole("button", { name: "Log out" });
+  await accountMenu.or(logOutButton).first().waitFor();
+  if (await accountMenu.isVisible()) {
+    await accountMenu.click();
+    await page.getByRole("menuitem", { name: "Log out" }).click();
+  } else {
+    await logOutButton.click();
+  }
+}
+
+// The desktop sidebar's account menu (issue #554), if this viewport has one.
+function accountMenuTrigger(page: Page) {
+  return page.getByRole("button", { name: /^Account menu for/ });
+}
+
+// Opens one of the account menu's items on a desktop viewport — the place
+// the profile link, Settings and Log out moved to from the top bar.
+export async function openAccountMenuItem(
+  page: Page,
+  name: string | RegExp,
+): Promise<void> {
+  await accountMenuTrigger(page).click();
+  await page.getByRole("menuitem", { name }).click();
+}
+
+// Goes to the signed-in user's own profile through the navigation: the
+// account menu's "View profile" from `lg` up, the top bar's name link below.
+export async function goToOwnProfile(page: Page): Promise<void> {
+  const trigger = accountMenuTrigger(page);
+  // The only `/users/<id>` link in the top bar is your own name.
+  const navLink = page
+    .getByRole("navigation", { name: "Main" })
+    .locator('a[href^="/users/"]');
+  await trigger.or(navLink).first().waitFor();
+  if (await trigger.isVisible()) {
+    await openAccountMenuItem(page, /View profile/);
+  } else {
+    await navLink.first().click();
+  }
+}
+
+// The box a search is typed into: the header's search field below `lg`, the
+// search palette (opened from the sidebar's Search button) from `lg` up.
+export async function openSearchBox(page: Page) {
+  const header = page.getByRole("searchbox", { name: "Search" });
+  const sidebarButton = page
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("button", { name: "Search" });
+  await header.or(sidebarButton).first().waitFor();
+  if (await header.isVisible()) return header;
+  await sidebarButton.click();
+  return page.getByRole("combobox", { name: /^Search/ });
+}

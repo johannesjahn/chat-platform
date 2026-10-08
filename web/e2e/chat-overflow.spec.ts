@@ -48,7 +48,7 @@ test("chat thread never scrolls horizontally on a phone", async ({
   await page.goto(`/chats/${chat.id}`);
   const scroller = page.getByTestId("chat-scroll");
   await expect(scroller).toBeVisible();
-  await expect(page.getByText("hello there")).toBeVisible();
+  await expect(page.getByRole("main").getByText("hello there")).toBeVisible();
 
   const { scrollWidth, clientWidth } = await scroller.evaluate((el) => ({
     scrollWidth: el.scrollWidth,

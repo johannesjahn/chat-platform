@@ -48,11 +48,17 @@ test("a display name copying someone else's handle still shows the impersonator'
   expect(post.ok()).toBe(true);
 
   await page.goto(`/chats/${chatId}`);
-  await expect(page.getByText("trust me, it's me")).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("trust me, it's me"),
+  ).toBeVisible();
   // The impostor's label carries their real handle...
-  await expect(page.getByText(`@${impostor.username}`)).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText(`@${impostor.username}`),
+  ).toBeVisible();
   // ...while the victim, who has no display name, is labelled by theirs.
-  await expect(page.getByText(`@${victim.username}`)).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText(`@${victim.username}`),
+  ).toBeVisible();
 
   await page.goto(`/posts/${(await post.json()).id}`);
   await expect(page.getByText(`@${impostor.username}`)).toBeVisible();

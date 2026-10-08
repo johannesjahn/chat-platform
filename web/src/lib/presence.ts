@@ -8,8 +8,13 @@ import { useSyncExternalStore } from "react";
 // into `queryClient.setQueryData`.
 const onlineUserIds = new Set<number>();
 const listeners = new Set<() => void>();
+// An immutable copy of the set for `useOnlineUserIds`, replaced on every
+// change so `useSyncExternalStore` sees a new snapshot only when something
+// actually changed.
+let snapshot: ReadonlySet<number> = new Set();
 
 function notify(): void {
+  snapshot = new Set(onlineUserIds);
   for (const listener of listeners) listener();
 }
 
@@ -48,5 +53,15 @@ export function useIsOnline(userId: number | undefined): boolean {
   return useSyncExternalStore(
     subscribe,
     () => userId != null && onlineUserIds.has(userId),
+  );
+}
+
+// Everyone currently known to be online — the feed's "online now" rail
+// (issue #554) lists the people you chat with from it.
+export function useOnlineUserIds(): ReadonlySet<number> {
+  return useSyncExternalStore(
+    subscribe,
+    () => snapshot,
+    () => snapshot,
   );
 }

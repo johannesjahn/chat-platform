@@ -34,7 +34,15 @@ test("a profile page shows the user's recent posts and post count, and Message s
   await expect(pageB.getByText("Hello from A's profile")).toBeVisible();
   await expect(pageB.getByText("1 post", { exact: true })).toBeVisible();
 
+  // On a desktop, Message opens the conversation as a docked window and
+  // leaves you on the profile (issue #554); the window opens the full chat.
   await pageB.getByRole("button", { name: "Message" }).click();
+  const dockedChat = pageB.getByRole("region", { name: /^Chat with / });
+  await expect(dockedChat).toBeVisible();
+  await expect(pageB).toHaveURL(`/users/${authorId}`);
+  await dockedChat
+    .getByRole("link", { name: "Open full conversation" })
+    .click();
   await expect(pageB).toHaveURL(/\/chats\/\d+/);
 
   await contextA.close();

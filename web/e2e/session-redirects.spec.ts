@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { logOut } from "./helpers";
 
 // Issue #499: a signed-in user could still open the auth pages, and logging
 // out left them on whatever page they were on, half signed out.
@@ -11,7 +12,9 @@ test("a signed-in user opening /login or /register is sent to the feed", async (
 
   await page.goto("/login");
   await expect(page).toHaveURL("/");
-  await expect(page.getByText(`@${username}`)).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Main" }).getByText(`@${username}`),
+  ).toBeVisible();
 
   await page.goto("/register");
   await expect(page).toHaveURL("/");
@@ -35,7 +38,7 @@ test("logging out from settings lands on the feed", async ({
   await signUp(page);
 
   await page.goto("/settings");
-  await page.getByRole("button", { name: "Log out" }).click();
+  await logOut(page);
 
   await expect(page).toHaveURL("/");
   await expect(

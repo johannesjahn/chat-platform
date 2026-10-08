@@ -10,7 +10,10 @@ export function PwaUpdatePrompt() {
   if (!needRefresh) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-4">
+    // From `lg` up the bottom edge belongs to the messaging dock (issue
+    // #554), so the banner drops in from the top of the page instead of
+    // landing on an open chat window.
+    <div className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4 lg:bottom-auto lg:top-0 lg:pb-0 lg:pt-4">
       {/* The same spring the offline banner drops in on, mirrored: this one
           rises off the bottom edge and settles. */}
       <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 shadow-lg motion-safe:animate-banner-rise">

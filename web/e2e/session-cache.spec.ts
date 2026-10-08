@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { persistedQueryCache } from "./helpers";
+import { logOut, persistedQueryCache } from "./helpers";
 
 // Issue #478: the persisted query cache used to outlive a logout, and query
 // keys aren't scoped per user — so the next account to sign in on the same
@@ -24,12 +24,12 @@ test("logging out wipes cached chats, and the next account on the same browser c
   const secret = "Private message that must not outlive the session";
   await page.fill("textarea", secret);
   await page.keyboard.press("Enter");
-  await expect(page.getByText(secret)).toBeVisible();
+  await expect(page.getByRole("main").getByText(secret)).toBeVisible();
   // The persister throttles writes (1s) — wait until the message really is
   // in the snapshot, so the assertions below prove it gets removed.
   await expect.poll(() => persistedQueryCache(page)).toContain(secret);
 
-  await page.getByRole("button", { name: "Log out" }).click();
+  await logOut(page);
   await expect(
     page.getByRole("navigation").getByRole("link", { name: "Log in" }),
   ).toBeVisible();

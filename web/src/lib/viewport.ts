@@ -76,6 +76,14 @@ export function useAppHeight() {
 // here so the hook and the stylesheet can't drift apart silently.
 const SHELL_ATTRIBUTE = "data-app-shell";
 
+// How many mounted components currently want the immersive shell. More than
+// one can at once — the desktop two-pane chats layout holds it for as long
+// as it's on screen, and the conversation inside it does too — so the
+// attribute comes off only when the last of them lets go, not when the first
+// one unmounts (switching chats remounts the conversation under a layout
+// that still needs it).
+let immersiveHolders = 0;
+
 /**
  * Switches the document into the "immersive" app shell for as long as
  * `active` is true — see the `[data-app-shell="immersive"]` rules in
@@ -109,7 +117,11 @@ export function useImmersiveShell(active: boolean) {
   useEffect(() => {
     if (!active) return;
     const root = document.documentElement;
+    immersiveHolders += 1;
     root.setAttribute(SHELL_ATTRIBUTE, "immersive");
-    return () => root.removeAttribute(SHELL_ATTRIBUTE);
+    return () => {
+      immersiveHolders -= 1;
+      if (immersiveHolders === 0) root.removeAttribute(SHELL_ATTRIBUTE);
+    };
   }, [active]);
 }

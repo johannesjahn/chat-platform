@@ -1,7 +1,10 @@
 import {
   type ChangeEvent,
+  type ClipboardEvent,
   type KeyboardEvent,
+  type Ref,
   useEffect,
+  useImperativeHandle,
   useRef,
   useState,
 } from "react";
@@ -79,7 +82,16 @@ export type ReplyTarget = {
   content: string;
 };
 
+// What the conversation around the composer can ask of it: a file dropped
+// anywhere on the thread (issue #554) goes in as the message's attachment,
+// and focus comes back here once an edit started from `↑` is done.
+export type ChatComposerHandle = {
+  attachFile: (file: File) => void;
+  focus: () => void;
+};
+
 type ChatComposerProps = {
+  ref?: Ref<ChatComposerHandle>;
   chatId: number;
   onSend: (values: {
     contentType: MessageContentType;
@@ -90,6 +102,13 @@ type ChatComposerProps = {
   // The message being replied to, or null when composing a normal message.
   replyingTo?: ReplyTarget | null;
   onCancelReply?: () => void;
+  // `↑` in an empty composer: edit your last message (issue #554).
+  onEditLast?: () => void;
+  // Put the caret in the message field as soon as the composer mounts — the
+  // desktop two-pane view, where opening a chat means you're about to type.
+  // Off by default because on a phone it would throw the keyboard up over a
+  // conversation you may only have opened to read.
+  autoFocus?: boolean;
 };
 
 function replyPreviewText(target: ReplyTarget): string {
@@ -120,10 +139,13 @@ function cancelLabelFor(mode: ComposerMode): string {
 }
 
 export function ChatComposer({
+  ref,
   chatId,
   onSend,
   replyingTo,
   onCancelReply,
+  onEditLast,
+  autoFocus = false,
 }: ChatComposerProps) {
   const [contentType, setContentType] = useState<ComposerMode>("text");
   const [content, setContent] = useState("");
@@ -133,6 +155,9 @@ export function ChatComposer({
   // the upload field is handed a file that's already been chosen rather than
   // rendering a drop zone for one.
   const [pickedFile, setPickedFile] = useState<File | null>(null);
+  // Bumped per handed-in file, remounting the upload field so a new file
+  // replaces the old one outright instead of racing its upload.
+  const [pickedFileKey, setPickedFileKey] = useState(0);
   const [pending, setPending] = useState(false);
   // Set for the length of the send button's one-shot "plane takes off"
   // animation and cleared by its own `animationend` — a class that never
@@ -175,6 +200,12 @@ export function ChatComposer({
     textarea.style.overflowY =
       textarea.scrollHeight > max + 1 ? "auto" : "hidden";
   }, [content, contentType]);
+
+  useEffect(() => {
+    if (autoFocus) textareaRef.current?.focus();
+    // Only on mount: it's "focus when the chat opens", not "keep focus".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Starting a reply (from a bubble's Reply action) drops focus into the
   // composer so the user can start typing the reply straight away.
@@ -256,14 +287,44 @@ export function ChatComposer({
     setPickedFile(null);
   }
 
+  // Hands a file to the upload field the same way the attach sheet's picker
+  // does — from a paste, or a drop anywhere on the conversation. A photo
+  // link in progress is set aside for it (its draft text comes back with
+  // the message field), a voice clip isn't: a recording is never thrown away
+  // by a stray drop.
+  function attachFile(file: File) {
+    if (pending || contentType === "voice") return;
+    if (contentType === "image_url") {
+      setContent(textDraftRef.current);
+      textDraftRef.current = "";
+    }
+    setAttachment(null);
+    setPickedFile(file);
+    setPickedFileKey((key) => key + 1);
+    setContentType("attachment");
+  }
+
+  useImperativeHandle(ref, () => ({
+    attachFile,
+    focus: () => textareaRef.current?.focus(),
+  }));
+
   function handleFilePicked(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
     // Clearing the input means picking the *same* file again still fires a
     // change event later on.
     event.target.value = "";
     if (!file) return;
-    setPickedFile(file);
-    setContentType("attachment");
+    attachFile(file);
+  }
+
+  // A pasted image or file (a screenshot straight from the clipboard,
+  // issue #554) becomes the attachment; pasted text stays text.
+  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const file = event.clipboardData.files[0];
+    if (!file) return;
+    event.preventDefault();
+    attachFile(file);
   }
 
   async function submit() {
@@ -304,6 +365,19 @@ export function ChatComposer({
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void submit();
+    } else if (event.key === "Escape" && replyingTo) {
+      event.preventDefault();
+      onCancelReply?.();
+    } else if (
+      event.key === "ArrowUp" &&
+      content === "" &&
+      !replyingTo &&
+      !event.shiftKey &&
+      !event.altKey &&
+      onEditLast
+    ) {
+      event.preventDefault();
+      onEditLast();
     }
   }
 
@@ -394,6 +468,7 @@ export function ChatComposer({
               value={content}
               onValueChange={handleContentChange}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               // One collapsed attach button and one send button leave the
               // field the rest of a 390px-wide phone, but "Write a message…"
               // still wrapped in it — and a one-row textarea just clips the
@@ -445,6 +520,7 @@ export function ChatComposer({
           </div>
         ) : contentType === "attachment" ? (
           <AttachmentUploadField
+            key={pickedFileKey}
             attachment={attachment}
             pendingFile={pickedFile}
             onUploaded={setAttachment}

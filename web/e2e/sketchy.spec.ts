@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { openSearchBox } from "./helpers";
 
 // Scribbles a zig-zag across the canvas with the mouse — Pointer Events
 // under the hood, the same path a finger or pen takes.
@@ -132,9 +133,9 @@ test("three players play a full round of Sketchy: draw → bluff → vote → re
     await scribble(page);
     const done = page.getByRole("button", { name: "I'm done" });
     if (index === 0) {
-      // Ctrl/⌘+Z in a text field (the header search) is that field's undo,
-      // not the canvas's: the stroke stays.
-      const search = page.getByRole("searchbox", { name: "Search" });
+      // Ctrl/⌘+Z in a text field (the header search — the search palette on
+      // a desktop) is that field's undo, not the canvas's: the stroke stays.
+      const search = await openSearchBox(page);
       await search.fill("cat");
       await search.press("ControlOrMeta+z");
       await expect(done).toBeVisible();
@@ -142,6 +143,8 @@ test("three players play a full round of Sketchy: draw → bluff → vote → re
         page.getByRole("button", { name: "Submit a blank canvas" }),
       ).toBeHidden();
       await search.fill("");
+      // Closes the palette (and does nothing in the header field).
+      await search.press("Escape");
     }
     await done.click();
     // Sent — the last one in skips straight on to the first bluff.

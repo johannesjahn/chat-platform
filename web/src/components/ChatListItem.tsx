@@ -39,16 +39,30 @@ export function ChatListItemSkeleton() {
 type ChatListItemProps = {
   chat: Chat;
   currentUserId: number;
+  // The conversation open beside the list (desktop two-pane, issue #554).
+  active?: boolean;
+  // "compact" is the desktop pane's row: no card of its own, so the pane
+  // reads as one list rather than a stack of cards.
+  density?: "comfortable" | "compact";
   style?: CSSProperties;
 };
 
 export function ChatListItem({
   chat,
   currentUserId,
+  active = false,
+  density = "comfortable",
   style,
 }: ChatListItemProps) {
   const name = chatDisplayName(chat, currentUserId);
-  const transitionNames = chatViewTransitionNames(chat.id);
+  const compact = density === "compact";
+  // The shared-element morph into the conversation header only makes sense
+  // when the list *leaves*: beside an open conversation (the desktop pane)
+  // the row and the header would both carry the name at once, and a
+  // duplicate `view-transition-name` makes the browser skip the transition.
+  const transitionNames = compact
+    ? { avatar: undefined, title: undefined }
+    : chatViewTransitionNames(chat.id);
   const hasUnread = chat.unreadCount > 0;
   const lastMessage = chat.lastMessage;
   const isOwnLastMessage = lastMessage?.senderId === currentUserId;
@@ -66,12 +80,19 @@ export function ChatListItem({
     <div
       style={style}
       className={cn(
-        "group flex items-center gap-3 rounded-lg border border-border bg-background/40 px-3 py-3 transition-[transform,border-color,background-color] duration-400 ease-out hover:-translate-y-px hover:border-primary/40 hover:bg-background/70",
+        compact
+          ? cn(
+              "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors duration-200",
+              active
+                ? "bg-primary/12 before:absolute before:inset-y-3 before:left-0 before:w-0.5 before:rounded-full before:bg-primary"
+                : "hover:bg-accent/50",
+            )
+          : "group flex items-center gap-3 rounded-lg border border-border bg-background/40 px-3 py-3 transition-[transform,border-color,background-color] duration-400 ease-out hover:-translate-y-px hover:border-primary/40 hover:bg-background/70",
         "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 stagger-in",
         // A conic sheen creeping around the border of a row that's waiting on
         // you — the "this one is live" cue, without adding a second badge
         // next to the count that's already there.
-        hasUnread && "motion-safe:animate-border-glow",
+        hasUnread && !compact && "motion-safe:animate-border-glow",
       )}
     >
       {chat.type === "direct" && otherParticipant ? (
@@ -121,6 +142,7 @@ export function ChatListItem({
       <Link
         to="/chats/$id"
         params={{ id: String(chat.id) }}
+        aria-current={active ? "page" : undefined}
         className="flex min-w-0 flex-1 flex-col"
       >
         <div className="flex items-center justify-between gap-2">

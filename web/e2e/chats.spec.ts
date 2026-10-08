@@ -30,7 +30,9 @@ test("starting a direct chat, sending a message, and seeing it marked read", asy
   );
   await pageA.keyboard.press("Enter");
   await expect(
-    pageA.getByText("Hey there, this is a message from the e2e suite"),
+    pageA
+      .getByRole("main")
+      .getByText("Hey there, this is a message from the e2e suite"),
   ).toBeVisible();
 
   // B sees the chat show up in their list with an unread badge...
@@ -45,7 +47,9 @@ test("starting a direct chat, sending a message, and seeing it marked read", asy
   await chatRow.click();
   await expect(pageB).toHaveURL(/\/chats\/\d+/);
   await expect(
-    pageB.getByText("Hey there, this is a message from the e2e suite"),
+    pageB
+      .getByRole("main")
+      .getByText("Hey there, this is a message from the e2e suite"),
   ).toBeVisible();
   await pageB.goto("/chats");
   await expect(chatRow.getByTestId("unread-badge")).toHaveCount(0);
@@ -76,8 +80,12 @@ test("group chats can be created, renamed by the creator, and show all participa
   await pageA.getByRole("button", { name: `@${usernameB}` }).click();
   await pageA.getByRole("button", { name: /^Create group/ }).click();
   await expect(pageA).toHaveURL(/\/chats\/\d+/);
-  await expect(pageA.getByText("Playwright squad")).toBeVisible();
-  await expect(pageA.getByText("2 participants")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("Playwright squad"),
+  ).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("2 participants"),
+  ).toBeVisible();
 
   // Only the creator can rename — the rename control shouldn't even render
   // for B inside the group settings dialog, and the chat still shows up in
@@ -99,7 +107,9 @@ test("group chats can be created, renamed by the creator, and show all participa
   await pageA.keyboard.press("Enter");
   // Close the dialog so the assertion matches only the chat header title.
   await pageA.getByRole("button", { name: "Close group settings" }).click();
-  await expect(pageA.getByText("Renamed squad")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("Renamed squad"),
+  ).toBeVisible();
 
   await contextA.close();
   await contextB.close();
@@ -169,7 +179,7 @@ test("a user can redeem a group invite through the join page and via a direct in
 
   await pageB.getByRole("button", { name: "Join chat" }).click();
   await expect(pageB).toHaveURL(/\/chats\/\d+/);
-  await expect(pageB.getByText("Invite squad")).toBeVisible();
+  await expect(pageB.getByRole("main").getByText("Invite squad")).toBeVisible();
 
   // Path 2: a brand-new user opening the shared invite link directly (the
   // `<origin>/chats/join/<code>` shape the copy-link button produces) also
@@ -183,7 +193,7 @@ test("a user can redeem a group invite through the join page and via a direct in
   await expect(pageC.getByText("You've been invited to a chat")).toBeVisible();
   await pageC.getByRole("button", { name: "Join chat" }).click();
   await expect(pageC).toHaveURL(/\/chats\/\d+/);
-  await expect(pageC.getByText("Invite squad")).toBeVisible();
+  await expect(pageC.getByRole("main").getByText("Invite squad")).toBeVisible();
 
   await contextA.close();
   await contextB.close();
@@ -213,7 +223,9 @@ test("messages are grouped under a sticky day separator (issue #307)", async ({
 
   await pageA.fill("textarea", "First message of the day");
   await pageA.keyboard.press("Enter");
-  await expect(pageA.getByText("First message of the day")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("First message of the day"),
+  ).toBeVisible();
 
   // A single separator labelled "Today" is inserted ahead of the first
   // message — all of today's messages share one day, so there's exactly one.
@@ -224,7 +236,9 @@ test("messages are grouped under a sticky day separator (issue #307)", async ({
   // Sending another message the same day doesn't add a second separator.
   await pageA.fill("textarea", "Second message, same day");
   await pageA.keyboard.press("Enter");
-  await expect(pageA.getByText("Second message, same day")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("Second message, same day"),
+  ).toBeVisible();
   await expect(separators).toHaveCount(1);
 
   await contextA.close();
@@ -297,7 +311,9 @@ test("the creator can add participants to a group chat, and the new participant 
   await pageA.getByRole("button", { name: `@${usernameB}` }).click();
   await pageA.getByRole("button", { name: /^Create group/ }).click();
   await expect(pageA).toHaveURL(/\/chats\/\d+/);
-  await expect(pageA.getByText("2 participants")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("2 participants"),
+  ).toBeVisible();
 
   await pageA.getByRole("button", { name: "Manage group" }).click();
   await pageA
@@ -306,7 +322,9 @@ test("the creator can add participants to a group chat, and the new participant 
   await pageA.getByPlaceholder("Search users to add…").fill(usernameC);
   await pageA.getByRole("button", { name: `@${usernameC}` }).click();
   await pageA.getByRole("button", { name: /^Add 1/ }).click();
-  await expect(pageA.getByText("3 participants")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("3 participants"),
+  ).toBeVisible();
 
   // The newly added participant now sees the chat in their own list.
   await pageC.goto("/chats");
@@ -391,14 +409,16 @@ test("a message sent by one user appears on the other's already-open chat via th
   // so anything B sees has to come from the `/ws` push invalidating the
   // query, not a fresh load.
   await pageB.goto(`/chats/${chatId}`);
-  await expect(pageB.getByText(`@${usernameA}`)).toBeVisible();
+  await expect(
+    pageB.getByRole("main").getByText(`@${usernameA}`),
+  ).toBeVisible();
 
   await pageA.fill("textarea", "Message sent while B is watching");
   await pageA.keyboard.press("Enter");
 
-  await expect(pageB.getByText("Message sent while B is watching")).toBeVisible(
-    { timeout: 10_000 },
-  );
+  await expect(
+    pageB.getByRole("main").getByText("Message sent while B is watching"),
+  ).toBeVisible({ timeout: 10_000 });
 
   await contextA.close();
   await contextB.close();
@@ -457,7 +477,9 @@ test("sending a message doesn't leave a duplicate copy in the sender's own view 
   await pageA.fill("textarea", "First message, just to anchor the cursor");
   await pageA.keyboard.press("Enter");
   await expect(
-    pageA.getByText("First message, just to anchor the cursor"),
+    pageA
+      .getByRole("main")
+      .getByText("First message, just to anchor the cursor"),
   ).toBeVisible();
   await pageA.waitForTimeout(1_000);
 
@@ -465,7 +487,7 @@ test("sending a message doesn't leave a duplicate copy in the sender's own view 
   await pageA.fill("textarea", messageText);
   await pageA.keyboard.press("Enter");
 
-  const messageLocator = pageA.getByText(messageText);
+  const messageLocator = pageA.getByRole("main").getByText(messageText);
   await expect(messageLocator).toBeVisible();
   // Give the deliberately-delayed `chat_updated` push time to arrive and
   // trigger `useChatMessages`'s catch-up refetch before asserting there's
@@ -528,7 +550,9 @@ test("infinite scroll stops requesting more messages once the oldest one is load
   });
 
   await page.reload();
-  await expect(page.getByText("Seeded message 129")).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("Seeded message 129"),
+  ).toBeVisible();
 
   const scrollContainer = page.getByTestId("chat-scroll");
 
@@ -550,9 +574,12 @@ test("infinite scroll stops requesting more messages once the oldest one is load
   for (let i = 0; i < 20; i++) {
     await scrollToTop();
     await page.waitForTimeout(300);
-    if (await page.getByText("Seeded message 0").isVisible()) break;
+    if (await page.getByRole("main").getByText("Seeded message 0").isVisible())
+      break;
   }
-  await expect(page.getByText("Seeded message 0")).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("Seeded message 0"),
+  ).toBeVisible();
 
   const countOnceOldestLoaded = messagesRequestCount;
 
@@ -595,12 +622,19 @@ test("reopening an already-visited chat still paginates instead of loading its w
 
   // This first mount fetches (and caches) the empty message list for this
   // brand-new chat.
-  await expect(page.getByText("No messages yet")).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("No messages yet"),
+  ).toBeVisible();
 
   // Leave the chat (client-side nav back to the list) before seeding, so the
   // now-unmounted `ChatView`/`useChatMessages` isn't live-reacting to the
-  // seeded messages via WS — only its stale cached page should remain.
-  await page.getByRole("link", { name: "Back to chats" }).click();
+  // seeded messages via WS — only its stale cached page should remain. The
+  // nav's Chats link rather than the header's back button: beside the
+  // desktop chat list there is no back button (issue #554).
+  await page
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("link", { name: "Chats" })
+    .click();
   await expect(page).toHaveURL("/chats");
 
   // More than MESSAGES_PAGE_SIZE (30) so a "load everything" regression is
@@ -657,10 +691,14 @@ test("reopening an already-visited chat still paginates instead of loading its w
     .click();
   await expect(page).toHaveURL(`/chats/${chatId}`);
   await messagesResponse;
-  await expect(page.getByText("Seeded message 39")).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("Seeded message 39"),
+  ).toBeVisible();
 
   expect(messagesLimits).toEqual(["30"]);
-  await expect(page.getByText("Seeded message 0")).not.toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("Seeded message 0"),
+  ).not.toBeVisible();
 });
 
 test("a client that missed a chat_updated push while its socket was down catches up via a full refetch on reconnect (issue #54)", async ({
@@ -709,7 +747,9 @@ test("a client that missed a chat_updated push while its socket was down catches
   await pageA.getByRole("button", { name: `@${usernameB}` }).click();
   await expect(pageA).toHaveURL(/\/chats\/\d+/);
   const chatId = pageA.url().split("/").pop();
-  await expect(pageA.getByText("No messages yet")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("No messages yet"),
+  ).toBeVisible();
 
   // Drop A's live connection — its client notices via `onclose` and starts
   // reconnecting (see RECONNECT_BASE_MS in realtimeSocket.ts), but the
@@ -722,17 +762,23 @@ test("a client that missed a chat_updated push while its socket was down catches
   // listening — so without a reconnect-triggered refetch, A would only see
   // it once some *later* event happened to touch this chat again.
   await pageB.goto(`/chats/${chatId}`);
-  await expect(pageB.getByText(`@${usernameA}`)).toBeVisible();
+  await expect(
+    pageB.getByRole("main").getByText(`@${usernameA}`),
+  ).toBeVisible();
   await pageB.fill("textarea", "Sent while A's socket was down");
   await pageB.keyboard.press("Enter");
-  await expect(pageB.getByText("Sent while A's socket was down")).toBeVisible();
+  await expect(
+    pageB.getByRole("main").getByText("Sent while A's socket was down"),
+  ).toBeVisible();
 
   // Now let A's reconnect through. The message shows up from the full
   // refetch `useRealtimeSocket` does on every `onopen`, without a page
   // reload — there was no live push to trigger the usual version-checked
   // path (issue #55).
   releaseReconnect();
-  await expect(pageA.getByText("Sent while A's socket was down")).toBeVisible({
+  await expect(
+    pageA.getByRole("main").getByText("Sent while A's socket was down"),
+  ).toBeVisible({
     timeout: 10_000,
   });
 
@@ -776,7 +822,9 @@ test("a long conversation fits the viewport and opens scrolled to the newest mes
   }
 
   await page.reload();
-  await expect(page.getByText("Seeded message 29")).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("Seeded message 29"),
+  ).toBeVisible();
   // The composer's auto-size and the message-in animations settle a beat
   // after the thread first paints — the assertions below are about where
   // things end up once they have.
@@ -806,7 +854,10 @@ test("a long conversation fits the viewport and opens scrolled to the newest mes
 
   // The newest bubble is genuinely on screen, not just scrolled-to in theory.
   const viewportHeight = page.viewportSize()!.height;
-  const newest = await page.getByText("Seeded message 29").boundingBox();
+  const newest = await page
+    .getByRole("main")
+    .getByText("Seeded message 29")
+    .boundingBox();
   expect(newest).not.toBeNull();
   expect(newest!.y).toBeGreaterThanOrEqual(0);
   expect(newest!.y + newest!.height).toBeLessThanOrEqual(viewportHeight);
@@ -830,7 +881,9 @@ test("the empty composer is one line tall and only grows once there's something 
   // A narrow phone viewport, where the textarea is only ~150px wide and the
   // placeholder used to wrap over several lines.
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByText("No messages yet")).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("No messages yet"),
+  ).toBeVisible();
   await page.waitForTimeout(500);
 
   const composer = page.locator("textarea");
@@ -906,7 +959,9 @@ test("the composer's extra send modes collapse into one attach button", async ({
   await page.fill("#user-search", otherUsername);
   await page.getByRole("button", { name: `@${otherUsername}` }).click();
   await expect(page).toHaveURL(/\/chats\/\d+/);
-  await expect(page.getByText("No messages yet")).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("No messages yet"),
+  ).toBeVisible();
 
   // The row of four permanently-visible mode buttons is gone; one trigger
   // stands in for all of them.
@@ -977,7 +1032,9 @@ test("the chat fits the *visual* viewport, not the layout viewport the keyboard 
   await page.fill("#user-search", otherUsername);
   await page.getByRole("button", { name: `@${otherUsername}` }).click();
   await expect(page).toHaveURL(/\/chats\/\d+/);
-  await expect(page.getByText("No messages yet")).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("No messages yet"),
+  ).toBeVisible();
 
   const appHeight = () =>
     page.evaluate(() =>
@@ -1062,7 +1119,7 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
 
   await page.reload();
   await expect(
-    page.getByText("Seeded message 11", { exact: true }),
+    page.getByRole("main").getByText("Seeded message 11", { exact: true }),
   ).toBeVisible();
   // The composer's auto-size and the message-in animations settle a beat after
   // the thread first paints.
@@ -1132,6 +1189,7 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
     return box!.y;
   };
   const newest = await page
+    .getByRole("main")
     .getByText("Seeded message 11", { exact: true })
     .boundingBox();
   expect(newest).not.toBeNull();

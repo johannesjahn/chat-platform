@@ -31,15 +31,22 @@ import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { HeaderSearch } from "@/components/HeaderSearch";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { PwaUpdatePrompt } from "@/components/PwaUpdatePrompt";
+import { ChatDock } from "@/components/shell/ChatDock";
+import { CommandPalette } from "@/components/shell/CommandPalette";
+import { DesktopSidebar } from "@/components/shell/DesktopSidebar";
+import { KeyboardShortcuts } from "@/components/shell/KeyboardShortcuts";
 import { VersionFooter } from "@/components/VersionFooter";
 import { logout } from "../lib/api";
 import { useSession } from "../lib/auth";
-import { useTotalUnreadCount } from "../lib/chats";
+import { useBrowserNotifications } from "../lib/browserNotifications";
+import { useIsDesktop } from "../lib/media";
+import { useChatsList, useTotalUnreadCount } from "../lib/chats";
 import { useUnreadNotificationCount } from "../lib/notifications";
 import { OfflineQueueSync } from "../lib/offlineQueue";
 import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
 import { useRedirectHere } from "../lib/redirect";
+import { useTabBadge } from "../lib/tabBadge";
 import { userLabel } from "../lib/users";
 import { useAppHeight } from "../lib/viewport";
 import appCss from "../styles.css?url";
@@ -95,11 +102,23 @@ function RootComponent() {
         <ConfirmProvider>
           <OfflineQueueSync />
           <SkipLink />
-          <Nav />
-          <OfflineBanner />
-          <Outlet />
+          {/* The frame is a column below `lg` — the top bar over the page,
+              as it always was — and a row from `lg` up, where the desktop
+              sidebar takes the left edge and the page fills the rest
+              (issue #554). `data-app-frame`/`data-app-column` are what the
+              immersive shell clamps to the viewport (see styles.css). */}
+          <div data-app-frame className="flex grow flex-col lg:flex-row">
+            <AppNavigation />
+            <div data-app-column className="flex min-w-0 grow flex-col">
+              <OfflineBanner />
+              <Outlet />
+            </div>
+          </div>
           <VersionFooter />
+          <ChatDock />
           <PwaUpdatePrompt />
+          <CommandPalette />
+          <KeyboardShortcuts />
         </ConfirmProvider>
       </PersistQueryClientProvider>
     </RootDocument>
@@ -132,12 +151,66 @@ function SkipLink() {
   );
 }
 
-function Nav() {
+// Owns what both navigations share — the realtime socket, the unread counts
+// (and with them the tab badge), logging out — and renders whichever of the
+// phone/tablet top bar and the desktop sidebar fits the window. Only one is
+// mounted, so there's never a second, hidden copy of every link and name in
+// the document; the bar's `lg:hidden` and the sidebar's `hidden lg:flex`
+// still hold the line for the first frame, before the media query is read.
+function AppNavigation() {
   const session = useSession();
   const router = useRouter();
+  const isDesktop = useIsDesktop();
   useRealtimeSocket(!!session);
   const unreadCount = useTotalUnreadCount(!!session);
   const unreadNotifications = useUnreadNotificationCount(!!session);
+  useTabBadge(unreadCount + unreadNotifications);
+  const { data: chatsData } = useChatsList(!!session);
+  useBrowserNotifications({
+    currentUserId: session?.user.id,
+    chats: chatsData?.pages.flatMap((page) => page.chats) ?? [],
+    unreadChats: unreadCount,
+    unreadNotifications,
+  });
+
+  const onLogout = session
+    ? () => {
+        logout(session);
+        // Leave whatever page was open (e.g. /settings) rather than
+        // re-rendering it half signed out (issue #499).
+        void router.navigate({ to: "/" });
+        router.invalidate();
+      }
+    : undefined;
+
+  return isDesktop ? (
+    <DesktopSidebar
+      session={session}
+      unreadChats={unreadCount}
+      unreadNotifications={unreadNotifications}
+      onLogout={onLogout}
+    />
+  ) : (
+    <Nav
+      session={session}
+      unreadCount={unreadCount}
+      unreadNotifications={unreadNotifications}
+      onLogout={onLogout}
+    />
+  );
+}
+
+function Nav({
+  session,
+  unreadCount,
+  unreadNotifications,
+  onLogout,
+}: {
+  session: ReturnType<typeof useSession>;
+  unreadCount: number;
+  unreadNotifications: number;
+  onLogout: (() => void) | undefined;
+}) {
   const redirect = useRedirectHere();
   const menuId = useId();
   // The phone menu remembers the location it was opened on rather than a
@@ -156,16 +229,6 @@ function Nav() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [menuOpen]);
 
-  const onLogout = session
-    ? () => {
-        logout(session);
-        // Leave whatever page was open (e.g. /settings) rather than
-        // re-rendering it half signed out (issue #499).
-        void router.navigate({ to: "/" });
-        router.invalidate();
-      }
-    : undefined;
-
   return (
     // `pt-[calc(...)]` rather than `py-3`: `viewport-fit=cover` lets the page
     // run under the status bar and the notch, so the nav owns that inset —
@@ -182,9 +245,13 @@ function Nav() {
     // `data-app-nav` is what the immersive shell hides on phone widths while
     // a conversation is open (see the rules in styles.css, switched on by
     // `useImmersiveShell`) — the chat has its own header and back button.
+    //
+    // `lg:hidden`: from `lg` up the desktop sidebar is the navigation
+    // instead (issue #554), so this bar is phone/tablet only.
     <nav
       data-app-nav
-      className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-card/70 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur sm:px-5"
+      aria-label="Main"
+      className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-card/70 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur sm:px-5 lg:hidden"
     >
       <div className="flex min-w-0 items-center gap-2 sm:flex-wrap sm:gap-4">
         <Link
