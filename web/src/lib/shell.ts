@@ -9,7 +9,16 @@ import { useSyncExternalStore } from "react";
 
 export type ShellOverlay = "palette" | "shortcuts";
 
+// The palette opens in one of two modes — the same box, a different idea of
+// what Enter means (issue #554 asks for both):
+// - "search" (`/`, the sidebar's Search button): a typeahead whose Enter
+//   goes to the full results page; ↓ first to open a suggestion instead.
+// - "switcher" (`Ctrl/⌘+K`): a quick switcher whose Enter opens the top
+//   match — usually a chat.
+export type PaletteMode = "search" | "switcher";
+
 let current: ShellOverlay | null = null;
+let paletteMode: PaletteMode = "switcher";
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -21,6 +30,17 @@ export function openOverlay(overlay: ShellOverlay): void {
   if (current === overlay) return;
   current = overlay;
   emit();
+}
+
+export function openPalette(mode: PaletteMode): void {
+  paletteMode = mode;
+  current = "palette";
+  emit();
+}
+
+// The mode the palette was last opened in.
+export function getPaletteMode(): PaletteMode {
+  return paletteMode;
 }
 
 export function closeOverlay(overlay: ShellOverlay): void {

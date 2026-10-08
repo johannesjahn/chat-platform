@@ -30,7 +30,7 @@ import { useSession } from "@/lib/auth";
 import { chatDisplayName, useChatsList, type Chat } from "@/lib/chats";
 import { useTransitionState } from "@/lib/motion";
 import { MIN_SEARCH_QUERY_LENGTH, useSearchAll } from "@/lib/search";
-import { closeOverlay, useOverlayOpen } from "@/lib/shell";
+import { closeOverlay, getPaletteMode, useOverlayOpen } from "@/lib/shell";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { userAvatarName, userHandle, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
@@ -106,7 +106,12 @@ function PaletteBody() {
   const navigate = useNavigate();
   const listId = useId();
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  // Fixed for this opening (the body remounts per opening). In search mode
+  // nothing is highlighted until ↓ — Enter means "all results" — while the
+  // switcher highlights its top match so Enter opens it.
+  const [mode] = useState(getPaletteMode);
+  const initialActive = mode === "search" ? -1 : 0;
+  const [active, setActive] = useState(initialActive);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   // Focus goes back where it was once the palette closes.
@@ -260,8 +265,9 @@ function PaletteBody() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, chatsData, trimmed, searching, results]);
 
-  // Keep the selection on a real row as the list changes under it.
-  const activeIndex = Math.min(active, Math.max(items.length - 1, 0));
+  // Keep the selection on a real row as the list changes under it (-1 is
+  // the search box itself).
+  const activeIndex = Math.min(active, items.length - 1);
   const activeItem = items[activeIndex];
 
   useEffect(() => {
@@ -278,10 +284,18 @@ function PaletteBody() {
       event.preventDefault();
       if (items.length === 0) return;
       const step = event.key === "ArrowDown" ? 1 : -1;
-      setActive((activeIndex + step + items.length) % items.length);
+      setActive(
+        activeIndex === -1 && step === -1
+          ? items.length - 1
+          : (activeIndex + step + items.length) % items.length,
+      );
     } else if (event.key === "Enter") {
       event.preventDefault();
-      activeItem?.onSelect();
+      if (activeItem) activeItem.onSelect();
+      else if (trimmed) {
+        close();
+        void navigate({ to: "/search", search: { q: trimmed } });
+      }
     } else if (event.key === "Tab") {
       // Nothing else in the dialog takes focus; keep it in the box.
       event.preventDefault();
@@ -309,10 +323,14 @@ function PaletteBody() {
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
-            setActive(0);
+            setActive(initialActive);
           }}
           onKeyDown={onKeyDown}
-          placeholder="Search or jump to…"
+          placeholder={
+            mode === "search"
+              ? "Search people, posts and messages…"
+              : "Jump to a chat or page…"
+          }
           className="h-14 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground"
         />
         <kbd className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">

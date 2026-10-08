@@ -176,14 +176,18 @@ test("a group chat shows the sender's avatar beside their message", async ({
 
   await pageA.fill("textarea", "Hello from A in the group");
   await pageA.keyboard.press("Enter");
-  await expect(pageA.getByText("Hello from A in the group")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("Hello from A in the group"),
+  ).toBeVisible();
 
   // B opens the group and sees A's incoming message with A's avatar linked to
   // A's profile next to it — the affordance that makes the sender identifiable
   // at a glance in a group. B's own messages don't get an avatar, so this link
   // is unambiguous.
   await pageB.goto(`/chats/${chatId}`);
-  await expect(pageB.getByText("Hello from A in the group")).toBeVisible();
+  await expect(
+    pageB.getByRole("main").getByText("Hello from A in the group"),
+  ).toBeVisible();
   await expect(
     pageB.getByRole("link", { name: `@${usernameA}'s profile` }),
   ).toBeVisible();
@@ -278,7 +282,8 @@ test("a failed comment reaction shows a visible error instead of silently doing 
 
   const card = page.getByRole("article", { name: /^Post by / });
   await card.getByRole("button", { name: "Comments" }).click();
-  await page.fill("textarea", "A comment to react to");
+  // The card's own comment box, not the feed's inline desktop composer.
+  await card.locator("textarea").fill("A comment to react to");
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   await expect(page.getByText("A comment to react to")).toBeVisible();
 

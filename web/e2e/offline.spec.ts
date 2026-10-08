@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { persistedQueryCache } from "./helpers";
+import { logOut, persistedQueryCache } from "./helpers";
 
 test("losing connectivity mid-session keeps already-loaded messages on screen and shows an offline banner, and persists the cache to localStorage for a later reload", async ({
   browser,
@@ -25,7 +25,7 @@ test("losing connectivity mid-session keeps already-loaded messages on screen an
   await pageA.fill("textarea", "Message loaded before going offline");
   await pageA.keyboard.press("Enter");
   await expect(
-    pageA.getByText("Message loaded before going offline"),
+    pageA.getByRole("main").getByText("Message loaded before going offline"),
   ).toBeVisible();
 
   // Losing connectivity while the chat is already open and its data already
@@ -35,7 +35,7 @@ test("losing connectivity mid-session keeps already-loaded messages on screen an
   await contextA.setOffline(true);
   await expect(pageA.getByRole("status")).toContainText("You're offline");
   await expect(
-    pageA.getByText("Message loaded before going offline"),
+    pageA.getByRole("main").getByText("Message loaded before going offline"),
   ).toBeVisible();
 
   // The sync persister throttles writes (default 1s, see query.ts) but
@@ -147,7 +147,9 @@ test("queues a message sent while offline and delivers it automatically once bac
   // Rather than failing, the message is queued locally (see
   // lib/offlineQueue.ts) and shown right away as a "Pending" bubble.
   await expect(pageA.getByTestId("pending-message")).toBeVisible();
-  await expect(pageA.getByText("Sent while offline")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("Sent while offline"),
+  ).toBeVisible();
   await expect(pageA.getByText("Pending sync…")).toBeVisible();
   // The composer itself is cleared immediately, same as an online send.
   await expect(pageA.locator("textarea")).toHaveValue("");
@@ -157,13 +159,17 @@ test("queues a message sent while offline and delivers it automatically once bac
   // Reconnecting replays the queue automatically: the pending bubble is
   // replaced by the real, server-confirmed message.
   await expect(pageA.getByTestId("pending-message")).toHaveCount(0);
-  await expect(pageA.getByText("Sent while offline")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("Sent while offline"),
+  ).toBeVisible();
 
   // The other participant receives it too, proving it actually made it to
   // the server rather than only rendering locally.
   await pageB.goto("/chats");
   await pageB.getByText("Sent while offline").click();
-  await expect(pageB.getByText("Sent while offline")).toBeVisible();
+  await expect(
+    pageB.getByRole("main").getByText("Sent while offline"),
+  ).toBeVisible();
 
   await contextA.close();
   await contextB.close();
@@ -209,7 +215,9 @@ test("retries a queued message that failed to send, without losing its place", a
   );
   await contextA.setOffline(false);
 
-  await expect(pageA.getByText("Failed to send")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("Failed to send"),
+  ).toBeVisible();
   await expect(
     pageA.getByRole("button", { name: "Retry sending message" }),
   ).toBeVisible();
@@ -219,7 +227,9 @@ test("retries a queued message that failed to send, without losing its place", a
   await pageA.getByRole("button", { name: "Retry sending message" }).click();
 
   await expect(pageA.getByTestId("pending-message")).toHaveCount(0);
-  await expect(pageA.getByText("Queued then rejected")).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText("Queued then rejected"),
+  ).toBeVisible();
 
   await contextA.close();
   await contextB.close();
@@ -282,7 +292,7 @@ test("a post queued offline by one user isn't sent under a different user who lo
 
   // Log out while still offline (works locally — see auth.ts's
   // `clearSession`) with the item still queued and unsent.
-  await page.getByRole("button", { name: "Log out" }).click();
+  await logOut(page);
   await expect(page.getByTestId("pending-post")).toHaveCount(0);
 
   // Reconnect and register a second user on this same browser — the queued
@@ -297,7 +307,7 @@ test("a post queued offline by one user isn't sent under a different user who lo
 
   // Logging back in as A picks the item back up and sends it for real —
   // proving it wasn't silently dropped, just correctly held back from B.
-  await page.getByRole("button", { name: "Log out" }).click();
+  await logOut(page);
   await page.goto("/login");
   await page.fill("#username", usernameA);
   await page.fill("#password", passwordA);

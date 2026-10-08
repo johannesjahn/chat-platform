@@ -8,6 +8,7 @@ import {
   closeOverlay,
   modKeyLabel,
   openOverlay,
+  openPalette,
   useOverlayOpen,
 } from "@/lib/shell";
 import { cn } from "@/lib/utils";
@@ -60,7 +61,7 @@ export function KeyboardShortcuts() {
       ) {
         if (!session) return;
         event.preventDefault();
-        openOverlay("palette");
+        openPalette("switcher");
         return;
       }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -79,7 +80,7 @@ export function KeyboardShortcuts() {
         chordAtRef.current = Date.now();
       } else if (event.key === "/" && session) {
         event.preventDefault();
-        openOverlay("palette");
+        openPalette("search");
       } else if (event.key === "?") {
         event.preventDefault();
         openOverlay("shortcuts");
@@ -99,7 +100,8 @@ function shortcutGroups(mod: string): { title: string; items: Shortcut[] }[] {
     {
       title: "Anywhere",
       items: [
-        { keys: [[mod, "K"], ["/"]], label: "Search and quick switcher" },
+        { keys: [[mod, "K"]], label: "Quick switcher" },
+        { keys: [["/"]], label: "Search" },
         { keys: [["?"]], label: "Show this list" },
         { keys: [["Esc"]], label: "Close a panel, menu or dialog" },
       ],

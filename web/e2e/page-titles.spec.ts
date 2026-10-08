@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { openAccountMenuItem } from "./helpers";
 
 // Issue #498: every page used to be titled just "Chat Platform", and many
 // had no `<h1>` for screen readers to land on.
@@ -49,7 +50,7 @@ test("titles follow navigation and use loaded data", async ({
 
   // Client-side navigation away replaces the data-derived title rather than
   // leaving it behind.
-  await page.getByRole("link", { name: "Settings" }).first().click();
+  await openAccountMenuItem(page, "Settings");
   await expect(page).toHaveTitle("Settings · Chat Platform");
   await page.goBack();
   await expect(page).toHaveTitle(`@${username} · Chat Platform`);

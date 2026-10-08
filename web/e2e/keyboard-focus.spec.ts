@@ -35,8 +35,12 @@ test("header links show an opaque focus ring", async ({ page }) => {
   const chats = page.getByRole("link", { name: "Chats" });
   await expect(chats).toBeVisible();
 
-  // Skip link, brand, then Chats.
-  for (let i = 0; i < 3; i++) await page.keyboard.press("Tab");
+  // Tab from the top until Chats has focus: the skip link and the brand
+  // come first, then (on the desktop sidebar) Search and Feed.
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press("Tab");
+    if (await chats.evaluate((el) => el === document.activeElement)) break;
+  }
   await expect(chats).toBeFocused();
 
   // The ring is a box-shadow in the full `--ring` color (it used to be at

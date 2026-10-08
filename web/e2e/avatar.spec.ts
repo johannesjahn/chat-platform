@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { makeSolidPng } from "./helpers";
+import { goToOwnProfile, makeSolidPng } from "./helpers";
 
 test("uploads and crops an avatar from settings, replacing the initials everywhere it's shown", async ({
   page,
@@ -45,7 +45,7 @@ test("uploads and crops an avatar from settings, replacing the initials everywhe
 
   // Reflected on the user's own profile page too, on a fresh navigation —
   // proves it round-tripped through the backend, not just local form state.
-  await page.getByRole("link", { name: /^@/ }).click();
+  await goToOwnProfile(page);
   await expect(page).toHaveURL(/\/users\/\d+/);
   const profileImg = page.locator("img").first();
   await expect(profileImg).toHaveAttribute("src", /\/avatars\/[0-9a-f-]+$/);
@@ -82,7 +82,7 @@ test("removes an uploaded avatar back to the initials placeholder", async ({
   );
 
   // Reflected on the user's own profile page too, on a fresh navigation.
-  await page.getByRole("link", { name: /^@/ }).click();
+  await goToOwnProfile(page);
   await expect(page).toHaveURL(/\/users\/\d+/);
   await expect(page.locator("img")).toHaveCount(0);
 });

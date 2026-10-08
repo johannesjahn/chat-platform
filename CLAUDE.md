@@ -345,6 +345,49 @@ Timing and curves live only in the `--motion-*` tokens ("Disclosure motion"
 in `web/src/styles.css`); the script side reads them back. With
 `prefers-reduced-motion` everything still opens and closes, instantly.
 
+## Desktop layout
+
+The frontend is mobile-first; from Tailwind's `lg` (1024px) up it switches to
+a desktop layout (issue #554). **Below `lg` nothing changes** — the phone top
+bar, the immersive chat shell and the phone menu stay exactly as they were.
+
+- **Style vs structure.** Styling differences use `lg:`/`xl:` classes. Where
+  the _structure_ differs (what mounts at all), components read
+  `useIsDesktop()` ([`web/src/lib/media.ts`](web/src/lib/media.ts)) instead,
+  so there's never a hidden second copy of a nav or a chat list in the DOM.
+  The root's `AppNavigation` mounts either the phone `Nav` or the
+  `DesktopSidebar` (icon rail at `lg`, labelled at `xl`, with the account
+  menu, notifications popover and search) — never both.
+- **Two-pane chats.** `/chats` is a layout route
+  ([`web/src/routes/chats/route.tsx`](web/src/routes/chats/route.tsx)): at
+  `lg`+ the chat list sits in a resizable left pane and every `/chats/*` page
+  renders on the right; below `lg` it's a pass-through. The conversation
+  itself is [`ChatConversation`](web/src/components/chat/ChatConversation.tsx),
+  shared by the page, the docked chat windows and the search preview
+  (`variant="docked"`) — don't fork a second chat view. `useImmersiveShell`
+  is reference-counted because the layout and the conversation both hold it;
+  the root's `data-app-frame`/`data-app-column` boxes are what it clamps.
+- **Messaging dock.** [`ChatDock`](web/src/components/shell/ChatDock.tsx) +
+  [`lib/chatDock.ts`](web/src/lib/chatDock.ts): docked windows on every
+  non-`/chats` page at `lg`+, persisted per user and device. "Message" on a
+  profile or the users list opens one (`useStartDirectChat`).
+- **Overlays and keys.** The command palette and the shortcut sheet are
+  opened through [`lib/shell.ts`](web/src/lib/shell.ts); the palette has a
+  `search` mode (`/`, the sidebar button — Enter goes to `/search`) and a
+  `switcher` mode (`Ctrl/⌘+K` — Enter opens the top match). Global keys live
+  in `KeyboardShortcuts`; `Alt+↑/↓` in the chats layout; composer keys in
+  `ChatComposer`.
+- **Tab badge.** `useTabBadge` prefixes every title with the unread count
+  and dots the favicon; compare titles through `stripTitleBadge`.
+
+**E2E:** the suite runs at Playwright's 1280px desktop, i.e. the desktop
+layout. Beside an open conversation the chat list pane repeats each chat's
+newest message, so assert conversation text through `page.getByRole("main")`.
+Use the `logOut`/`goToOwnProfile`/`openSearchBox`/`openAccountMenuItem`
+helpers in `web/e2e/helpers.ts` rather than reaching for top-bar controls,
+and [`desktop-layout.spec.ts`](web/e2e/desktop-layout.spec.ts) covers the
+wide (1440px) and phone (390px) layouts.
+
 ## Notifications
 
 In-app notifications (issue #317) — the header bell and the `/notifications`

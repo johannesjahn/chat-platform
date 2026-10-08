@@ -39,7 +39,9 @@ test("a URL in a post, its comment, and a chat message all render as clickable l
   await expect(postLink).toHaveAttribute("rel", "noopener noreferrer");
 
   await post.getByRole("button", { name: "Comments" }).click();
-  await page.fill("textarea", "See (https://example.org) as well");
+  // The post's own comment box — on a desktop the feed's inline composer
+  // is a textarea too.
+  await post.locator("textarea").fill("See (https://example.org) as well");
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   await expect(
     page.getByText("See (https://example.org) as well"),

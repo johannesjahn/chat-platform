@@ -93,7 +93,9 @@ test("picking a chat mention with Enter completes it instead of sending the mess
   // A second Enter, with the list closed, sends as usual — and the mention
   // arrives as a profile link for the recipient too.
   await pageA.keyboard.press("Enter");
-  await expect(pageA.getByText(`ping @${usernameB}`)).toBeVisible();
+  await expect(
+    pageA.getByRole("main").getByText(`ping @${usernameB}`),
+  ).toBeVisible();
 
   await pageB.goto("/chats");
   await pageB.getByRole("link", { name: new RegExp(`@${usernameA}`) }).click();

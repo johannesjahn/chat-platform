@@ -70,8 +70,13 @@ function FilterRailButton<T extends string>({
     >
       <Icon className="size-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
+      {/* Hidden from the button's name, which stays just the label: the
+          sections the rail points at announce their own counts. */}
       {item.count !== undefined && (
-        <span className="text-xs tabular-nums text-muted-foreground">
+        <span
+          aria-hidden
+          className="text-xs tabular-nums text-muted-foreground"
+        >
           {item.count}
         </span>
       )}

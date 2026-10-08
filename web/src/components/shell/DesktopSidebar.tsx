@@ -14,7 +14,7 @@ import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { $api, type Session } from "@/lib/api";
 import { useRedirectHere } from "@/lib/redirect";
-import { modKeyLabel, openOverlay } from "@/lib/shell";
+import { openPalette } from "@/lib/shell";
 import { cn } from "@/lib/utils";
 import { AccountMenu } from "./AccountMenu";
 import { NotificationsPopover } from "./NotificationsPopover";
@@ -66,9 +66,9 @@ export function DesktopSidebar({
       {session && (
         <button
           type="button"
-          onClick={() => openOverlay("palette")}
-          aria-keyshortcuts="Control+K Meta+K /"
-          title={`Search (${modKeyLabel()}+K)`}
+          onClick={() => openPalette("search")}
+          aria-keyshortcuts="/"
+          title="Search (/)"
           className={cn(
             sidebarItemClassName,
             "group/nav-icon mb-2 border border-border bg-background/40",
@@ -77,7 +77,7 @@ export function DesktopSidebar({
           <NavIcon icon={Search} className="size-5" />
           <span className="sr-only xl:not-sr-only">Search</span>
           <kbd className="ml-auto hidden rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground xl:inline">
-            {modKeyLabel()} K
+            /
           </kbd>
         </button>
       )}

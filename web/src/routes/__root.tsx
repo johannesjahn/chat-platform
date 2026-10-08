@@ -39,6 +39,7 @@ import { VersionFooter } from "@/components/VersionFooter";
 import { logout } from "../lib/api";
 import { useSession } from "../lib/auth";
 import { useBrowserNotifications } from "../lib/browserNotifications";
+import { useIsDesktop } from "../lib/media";
 import { useChatsList, useTotalUnreadCount } from "../lib/chats";
 import { useUnreadNotificationCount } from "../lib/notifications";
 import { OfflineQueueSync } from "../lib/offlineQueue";
@@ -151,12 +152,15 @@ function SkipLink() {
 }
 
 // Owns what both navigations share — the realtime socket, the unread counts
-// (and with them the tab badge), logging out — and renders the phone/tablet
-// top bar and the desktop sidebar side by side. Only one of the two is ever
-// displayed: the bar is `lg:hidden`, the sidebar `hidden lg:flex`.
+// (and with them the tab badge), logging out — and renders whichever of the
+// phone/tablet top bar and the desktop sidebar fits the window. Only one is
+// mounted, so there's never a second, hidden copy of every link and name in
+// the document; the bar's `lg:hidden` and the sidebar's `hidden lg:flex`
+// still hold the line for the first frame, before the media query is read.
 function AppNavigation() {
   const session = useSession();
   const router = useRouter();
+  const isDesktop = useIsDesktop();
   useRealtimeSocket(!!session);
   const unreadCount = useTotalUnreadCount(!!session);
   const unreadNotifications = useUnreadNotificationCount(!!session);
@@ -179,21 +183,20 @@ function AppNavigation() {
       }
     : undefined;
 
-  return (
-    <>
-      <Nav
-        session={session}
-        unreadCount={unreadCount}
-        unreadNotifications={unreadNotifications}
-        onLogout={onLogout}
-      />
-      <DesktopSidebar
-        session={session}
-        unreadChats={unreadCount}
-        unreadNotifications={unreadNotifications}
-        onLogout={onLogout}
-      />
-    </>
+  return isDesktop ? (
+    <DesktopSidebar
+      session={session}
+      unreadChats={unreadCount}
+      unreadNotifications={unreadNotifications}
+      onLogout={onLogout}
+    />
+  ) : (
+    <Nav
+      session={session}
+      unreadCount={unreadCount}
+      unreadNotifications={unreadNotifications}
+      onLogout={onLogout}
+    />
   );
 }
 

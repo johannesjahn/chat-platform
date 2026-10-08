@@ -14,7 +14,7 @@ import type { Session } from "@/lib/api";
 import { usePopover } from "@/lib/popover";
 import { openOverlay } from "@/lib/shell";
 import { isStatusVisible, useUserStatus } from "@/lib/status";
-import { userAvatarName, userHandle, userLabel } from "@/lib/users";
+import { userAvatarName, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 const itemClassName =
@@ -90,17 +90,13 @@ export function AccountMenu({
           <span className="truncate text-sm font-medium">
             {userLabel(user)}
           </span>
-          {isStatusVisible(status) ? (
+          {/* Just the name — like the top bar, the display name stands
+              in for the handle in the nav (the profile shows both). */}
+          {isStatusVisible(status) && (
             <UserStatusBadge
               status={status}
               className="text-xs text-muted-foreground"
             />
-          ) : (
-            userHandle(user) && (
-              <span className="truncate text-xs text-muted-foreground">
-                {userHandle(user)}
-              </span>
-            )
           )}
         </span>
         <ChevronsUpDown className="hidden size-4 shrink-0 text-muted-foreground xl:block" />

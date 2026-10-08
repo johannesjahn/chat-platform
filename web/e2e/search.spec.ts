@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { openSearchBox } from "./helpers";
 
 // Seeds a couple of text posts through the API, then drives the header search
 // box → results page and asserts the matching post shows up with a highlighted
@@ -24,9 +25,11 @@ test("header search finds a post and highlights the match", async ({
   await seed("The peregrine falcon dives at incredible speed");
   await seed("A totally unrelated grocery list");
 
-  // Use the unified header search box.
-  await page.getByRole("searchbox", { name: "Search" }).fill("peregrine");
-  await page.getByRole("searchbox", { name: "Search" }).press("Enter");
+  // Use the unified header search box (the search palette on a desktop),
+  // where Enter goes to the full results.
+  const searchBox = await openSearchBox(page);
+  await searchBox.fill("peregrine");
+  await searchBox.press("Enter");
 
   await expect(page).toHaveURL(/\/search\?q=peregrine/);
 
@@ -128,6 +131,18 @@ test("a message search result opens the chat on the matching message", async ({
   await page.goto("/search?q=lighthouse");
   await page.getByRole("button", { name: "Messages", exact: true }).click();
   await page.getByRole("link").filter({ hasText: "lighthouse" }).click();
+
+  // From `xl` a message hit opens in a preview pane beside the results
+  // first (issue #554) — the same conversation, landed on the match — and
+  // its Open link continues to the chat itself.
+  const preview = page.getByRole("complementary", { name: /^Preview: / });
+  await expect(preview).toBeVisible();
+  await expect(
+    preview
+      .locator(`[data-message-id="${target.id}"]`)
+      .getByTestId("jump-highlight"),
+  ).toBeVisible();
+  await preview.getByRole("link", { name: "Open" }).click();
 
   await expect(page).toHaveURL(
     new RegExp(`/chats/${chatId}\\?message=${target.id}$`),
