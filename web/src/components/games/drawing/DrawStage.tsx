@@ -150,7 +150,7 @@ export function DrawStage({
       )}
 
       {mine && done && (
-        <div className="mx-auto flex w-full max-w-sm flex-col items-center gap-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-500">
+        <div className="mx-auto flex w-full max-w-sm flex-col xl:max-w-lg items-center gap-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-500">
           <DrawingView
             strokes={mine.strokes ?? strokes}
             label="Your drawing"

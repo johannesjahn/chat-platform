@@ -161,7 +161,7 @@ export function ReflexArena({
       className={cn(
         // As wide as the panel, but never so tall the round track and score
         // above it scroll off a laptop screen.
-        "reflex-arena relative isolate mx-auto aspect-[16/10] w-full max-w-[calc(64svh*1.6)] touch-none select-none overflow-hidden rounded-2xl",
+        "reflex-arena relative isolate mx-auto aspect-[16/10] w-full max-w-[calc(64svh*1.6)] xl:max-w-[calc(74svh*1.6)] touch-none select-none overflow-hidden rounded-2xl",
         interactive && "cursor-crosshair",
       )}
     >

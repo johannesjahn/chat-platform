@@ -124,7 +124,7 @@ export function TypingPassage({
         ref={containerRef}
         aria-hidden
         data-passage
-        className="relative select-none font-mono text-lg leading-[2.1] tracking-tight sm:text-xl"
+        className="relative select-none font-mono text-lg leading-[2.1] tracking-tight sm:text-xl xl:mx-auto xl:max-w-[72ch] xl:text-2xl"
       >
         {words.map((word, wordIndex) => (
           <span key={wordIndex} className="inline-block whitespace-pre">
