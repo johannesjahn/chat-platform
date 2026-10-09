@@ -412,9 +412,18 @@ your all-time #1 spot on a game's leaderboard.
 - **Live delivery** is an id-less `notifications_changed` event to the
   recipient (`notifyUsers`); the client refetches the badge/inbox.
 
+- **Rows are links; `xl` previews.** `NotificationRow` renders each row as a
+  real link to `notificationTarget(n)` (`web/src/lib/notifications.ts`). At
+  `xl`+ a plain click on `/notifications` opens
+  [`NotificationPreviewPane`](web/src/components/NotificationPreviewPane.tsx)
+  instead (issue #564) — the post with the comment highlighted in its thread
+  (via `GET /comments/:id`), an invite's lobby, or a record's leaderboard.
+  Modified clicks and Enter still navigate; ↑/↓ move the preview.
+
 To add a notification type: add it to `NotificationType` (Api.ts), call
-`createNotifications` from the handler that causes it, and give it a sentence,
-icon, and link target in `web/src/routes/notifications.tsx`.
+`createNotifications` from the handler that causes it, give it a sentence and
+icon in `web/src/components/NotificationRow.tsx` / `NOTIFICATION_ICONS`, a
+target in `notificationTarget`, and a preview in `NotificationPreviewPane`.
 
 Tooling (Prettier, ESLint, TypeScript) lives at the root and covers **both**
 packages — there is a single `eslint.config.js` and `.prettierrc.json`. Run

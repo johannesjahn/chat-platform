@@ -608,6 +608,47 @@ test("createReply creates a reply with parentCommentId set", () =>
     }),
   ));
 
+test("getComment returns a comment or reply with its reactions and replyCount", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("tess");
+      const comment = yield* authed.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "parent" },
+      });
+      const reply = yield* authed.comments.createReply({
+        params: { id: comment.id },
+        payload: { content: "child" },
+      });
+      yield* authed.comments.addCommentReaction({
+        params: { id: comment.id },
+        payload: { emoji: "👍" },
+      });
+
+      const fetched = yield* authed.comments.getComment({
+        params: { id: comment.id },
+      });
+      expect(fetched.content).toBe("parent");
+      expect(fetched.replyCount).toBe(1);
+      expect(reactionOf(fetched.reactions, "👍")).toEqual({
+        emoji: "👍",
+        count: 1,
+        reactedByMe: true,
+      });
+
+      const fetchedReply = yield* authed.comments.getComment({
+        params: { id: reply.id },
+      });
+      expect(fetchedReply.parentCommentId).toBe(comment.id);
+      expect(fetchedReply.postId).toBe(post.id);
+
+      const missing = yield* authed.comments
+        .getComment({ params: { id: 9999 } })
+        .pipe(Effect.flip);
+      expect(missing._tag).toBe("NotFound");
+    }),
+  ));
+
 test("createReply rejects replying to a reply (depth cap)", () =>
   run(
     Effect.gen(function* () {

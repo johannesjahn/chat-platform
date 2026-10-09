@@ -1476,6 +1476,16 @@ const CommentsGroup = HttpApiGroup.make("comments")
     }).middleware(Authentication),
   )
   .add(
+    // One comment or reply, with its reactions and reply count — what the
+    // notifications page's preview pane (issue #564) needs to show the
+    // comment a notification points at inside its thread.
+    HttpApiEndpoint.get("getComment", "/comments/:id", {
+      params: IdParam,
+      success: Comment,
+      error: NotFound,
+    }).middleware(Authentication),
+  )
+  .add(
     // Creates a reply to a top-level comment. Rejects (400) if the target is
     // itself a reply — the depth-2 nesting cap (see EngagementHandler.ts).
     HttpApiEndpoint.post("createReply", "/comments/:id/replies", {

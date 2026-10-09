@@ -1,4 +1,4 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
 
@@ -22,6 +22,8 @@ export const postCommentsQueryKey = (postId: number) =>
   ["comments", "post", postId] as const;
 export const commentRepliesQueryKey = (commentId: number) =>
   ["comments", "replies", commentId] as const;
+export const commentQueryKey = (commentId: number) =>
+  ["comments", "one", commentId] as const;
 
 // Oldest-first, keyset-paginated top-level comments on a post — replies are
 // fetched separately per comment via `useReplies`.
@@ -69,5 +71,23 @@ export function useReplies(commentId: number, enabled: boolean) {
       return data;
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  });
+}
+
+// One comment or reply on its own — the notifications preview pane (issue
+// #564) uses it to show the comment a notification points at in its thread.
+// Under `commentsQueryKeyRoot`, so the same realtime events refresh it.
+export function useComment(commentId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: commentQueryKey(commentId),
+    enabled,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await fetchClient.GET("/comments/{id}", {
+        params: { path: { id: String(commentId) } },
+        signal,
+      });
+      if (error) throw error;
+      return data;
+    },
   });
 }
