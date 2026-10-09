@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { Link } from "@tanstack/react-router";
+import { ProfileHoverCard } from "@/components/ProfileHoverCard";
 import { parseLinks } from "@/lib/linkify";
 import { parseMentions, useMentionedUsers } from "@/lib/mentions";
 import { cn } from "@/lib/utils";
@@ -36,23 +37,26 @@ export function MentionText({
       {segments.map((segment, i) => {
         if (segment.type === "mention") {
           const user = mentionedUsers.get(segment.username.toLowerCase());
+          // On a desktop, resting the mouse on a mention previews the
+          // profile (issue #562).
           return user ? (
-            <Link
-              key={i}
-              to="/users/$id"
-              params={{ id: String(user.id) }}
-              // A mention can sit inside an element with its own pointer
-              // handling (a chat bubble carries the long-press gesture that
-              // reveals its action group) — following the link shouldn't
-              // also set that off.
-              onClick={(e) => e.stopPropagation()}
-              className={cn(
-                "font-medium text-primary hover:underline",
-                className,
-              )}
-            >
-              {segment.text}
-            </Link>
+            <ProfileHoverCard key={i} userId={user.id}>
+              <Link
+                to="/users/$id"
+                params={{ id: String(user.id) }}
+                // A mention can sit inside an element with its own pointer
+                // handling (a chat bubble carries the long-press gesture that
+                // reveals its action group) — following the link shouldn't
+                // also set that off.
+                onClick={(e) => e.stopPropagation()}
+                className={cn(
+                  "font-medium text-primary hover:underline",
+                  className,
+                )}
+              >
+                {segment.text}
+              </Link>
+            </ProfileHoverCard>
           ) : (
             <span key={i}>{segment.text}</span>
           );

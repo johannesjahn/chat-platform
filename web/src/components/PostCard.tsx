@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
+import { ProfileHoverCard } from "@/components/ProfileHoverCard";
 import { Lightbox } from "@/components/Lightbox";
 import { MentionText } from "@/components/MentionText";
 import { CommentsSection, ReactionPicker } from "@/components/CommentsSection";
@@ -181,32 +182,34 @@ export function PostCard({
           the header) and trimmed content padding keep a short post dense, while
           a lighter footer divider still fences off the reaction controls. */}
       <CardHeader className="flex flex-row items-center gap-3 pt-4 pb-2">
-        <Link
-          to="/users/$id"
-          params={{ id: String(authorId) }}
-          className="flex flex-1 items-center gap-3 leading-tight"
-        >
-          <Avatar
-            name={authorLabel}
-            avatarUrl={authorAvatarUrl}
-            avatarVariants={authorAvatarVariants}
-            className="transition-transform duration-300 ease-smooth group-hover:scale-105"
-          />
-          <div className="flex flex-1 flex-col leading-tight">
-            <span className="font-medium">
-              {authorLabel}
-              {authorHandle && (
-                <span className="ml-1.5 text-sm font-normal text-muted-foreground">
-                  {authorHandle}
-                </span>
-              )}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              <RelativeTime value={post.createdAt} />
-              {wasEdited && " · edited"}
-            </span>
-          </div>
-        </Link>
+        <ProfileHoverCard userId={authorId}>
+          <Link
+            to="/users/$id"
+            params={{ id: String(authorId) }}
+            className="flex flex-1 items-center gap-3 leading-tight"
+          >
+            <Avatar
+              name={authorLabel}
+              avatarUrl={authorAvatarUrl}
+              avatarVariants={authorAvatarVariants}
+              className="transition-transform duration-300 ease-smooth group-hover:scale-105"
+            />
+            <div className="flex flex-1 flex-col leading-tight">
+              <span className="font-medium">
+                {authorLabel}
+                {authorHandle && (
+                  <span className="ml-1.5 text-sm font-normal text-muted-foreground">
+                    {authorHandle}
+                  </span>
+                )}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                <RelativeTime value={post.createdAt} />
+                {wasEdited && " · edited"}
+              </span>
+            </div>
+          </Link>
+        </ProfileHoverCard>
         {canModify && (
           <div className="flex items-center gap-1">
             <Button asChild size="icon" variant="ghost" aria-label="Edit post">
