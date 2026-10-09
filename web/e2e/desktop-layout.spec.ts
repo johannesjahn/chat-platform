@@ -346,6 +346,103 @@ test("the tab title carries the unread count", async ({
   await expect(page).toHaveTitle(`@${bob.username} · Chat Platform`);
 });
 
+async function seedPosts(
+  request: APIRequestContext,
+  apiUrl: string,
+  author: TestUser,
+  count: number,
+): Promise<number[]> {
+  const ids: number[] = [];
+  for (let i = 1; i <= count; i++) {
+    const response = await request.post(`${apiUrl}/posts`, {
+      headers: as(author),
+      data: { contentType: "text", content: `Feed post number ${i}` },
+    });
+    expect(response.ok()).toBe(true);
+    ids.push(((await response.json()) as { id: number }).id);
+  }
+  return ids;
+}
+
+test("a post opens as an overlay over the feed, which keeps its place", async ({
+  page,
+  request,
+  apiUrl,
+  signUp,
+}) => {
+  // Issue #561.
+  const me = await signUp(page);
+  const ids = await seedPosts(request, apiUrl, me, 12);
+  // "Feed post number 7": far enough down the (newest-first) feed that the
+  // page has to scroll, but still on its first page.
+  const postId = ids[6]!;
+  await page.goto("/");
+
+  const card = page.locator(`[data-post-id="${postId}"]`).first();
+  const openLink = card.getByRole("link", { name: "Open post" });
+  await openLink.scrollIntoViewIfNeeded();
+  const scrollY = await page.evaluate(() => window.scrollY);
+  expect(scrollY).toBeGreaterThan(0);
+
+  const overlay = page.getByRole("dialog", { name: `Post by @${me.username}` });
+  const open = async () => {
+    await openLink.click();
+    await expect(overlay).toBeVisible();
+    // The address bar shows the post's own URL — shareable as is.
+    await expect(page).toHaveURL(`/posts/${postId}`);
+  };
+  const expectClosed = async () => {
+    await expect(overlay).toHaveCount(0);
+    await expect(page).toHaveURL("/");
+    await expect(page).toHaveTitle("Feed · Chat Platform");
+    expect(await page.evaluate(() => window.scrollY)).toBe(scrollY);
+    await expect(openLink).toBeFocused();
+  };
+
+  await open();
+  await expect(overlay.getByText("Feed post number 7")).toBeVisible();
+  await expect(
+    overlay.getByRole("textbox", { name: /comment/i }).first(),
+  ).toBeVisible();
+  await expect(page).toHaveTitle("Feed post number 7 · Chat Platform");
+  await expect(
+    overlay.getByRole("button", { name: "Close post" }),
+  ).toBeFocused();
+  // The feed is still there underneath, scrolled where it was.
+  await expect(
+    page.getByRole("heading", { name: "Feed", exact: true }),
+  ).toBeAttached();
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollY);
+
+  // Escape, the backdrop, the close button and Back all dismiss it.
+  await page.keyboard.press("Escape");
+  await expectClosed();
+
+  await open();
+  await page
+    .getByTestId("post-overlay-backdrop")
+    .click({ position: { x: 40, y: 400 } });
+  await expectClosed();
+
+  await open();
+  await overlay.getByRole("button", { name: "Close post" }).click();
+  await expectClosed();
+
+  await open();
+  await page.goBack();
+  await expectClosed();
+
+  // A reload of the overlay's URL is the full page, as a direct load is.
+  await open();
+  await page.reload();
+  await expect(page).toHaveURL(`/posts/${postId}`);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    `Post by @${me.username}`,
+  );
+  await expect(page.getByRole("link", { name: "Back to feed" })).toBeVisible();
+});
+
 test.describe("below lg", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
@@ -381,5 +478,26 @@ test.describe("below lg", () => {
       page.getByRole("link", { name: "Back to chats" }),
     ).toBeVisible();
     await expect(page.locator("[data-app-nav]")).toBeHidden();
+  });
+
+  test("a post from the feed opens as its own page", async ({
+    page,
+    request,
+    apiUrl,
+    signUp,
+  }) => {
+    const me = await signUp(page);
+    const [postId] = await seedPosts(request, apiUrl, me, 1);
+    await page.goto("/");
+
+    await page
+      .locator(`[data-post-id="${postId}"]`)
+      .getByRole("link", { name: "Open post" })
+      .click();
+    await expect(page).toHaveURL(`/posts/${postId}`);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: "Back to feed" }),
+    ).toBeVisible();
   });
 });
