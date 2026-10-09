@@ -1017,6 +1017,10 @@ export const CreateMessageBody = Schema.Struct({
   // a parent from another chat (or a nonexistent one) 404s (see
   // ChatsHandler.ts).
   parentMessageId: Schema.optional(Schema.Finite),
+  // Idempotency key (issue #567): a client-generated id, reused when a send is
+  // retried. If this sender already stored a message with the same key in
+  // this chat, that message is returned instead of creating a duplicate.
+  clientId: Schema.optional(Schema.String.check(Schema.isMaxLength(64))),
 })
   .check(
     Schema.makeFilter(requireAllowedImageUrl),

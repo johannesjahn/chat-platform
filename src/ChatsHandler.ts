@@ -1990,6 +1990,35 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           const chatRow = yield* getChatOr404(db, id);
           yield* requireParticipant(db, id, currentUser.id);
 
+          // A repeat of a send the server already stored (issue #567) — e.g.
+          // the page reloaded mid-request and the offline queue replayed it —
+          // returns the original message untouched: no second row, no second
+          // notification.
+          const findByClientId = (clientId: string) =>
+            Effect.tryPromise(() =>
+              db
+                .select()
+                .from(messages)
+                .where(
+                  and(
+                    eq(messages.chatId, id),
+                    eq(messages.senderId, currentUser.id),
+                    eq(messages.clientId, clientId),
+                  ),
+                )
+                .limit(1),
+            ).pipe(Effect.orDie);
+          if (payload.clientId !== undefined) {
+            const existing = (yield* findByClientId(payload.clientId))[0];
+            if (existing)
+              return yield* buildMessageResponse(
+                db,
+                storage,
+                existing,
+                currentUser.id,
+              );
+          }
+
           // In a direct chat, a *block* by either party (not a mere mute)
           // stops messaging in both directions (issue #219). Checked against
           // the other participant only — group chats aren't gated, and a
@@ -2067,9 +2096,11 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 content: payload.content,
                 attachmentId: payload.attachmentId ?? null,
                 parentMessageId: payload.parentMessageId ?? null,
+                clientId: payload.clientId ?? null,
                 createdAt: now,
                 updatedAt: now,
               })
+              .onConflictDoNothing()
               .returning(),
           );
           // Bumps `version` in the same statement as `updatedAt` — one
@@ -2086,6 +2117,17 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             db.with(inserted, touched).select().from(inserted),
           ).pipe(Effect.orDie);
           const row = created[0];
+          if (!row && payload.clientId !== undefined) {
+            // Lost a race with a concurrent send of the same key.
+            const existing = (yield* findByClientId(payload.clientId))[0];
+            if (existing)
+              return yield* buildMessageResponse(
+                db,
+                storage,
+                existing,
+                currentUser.id,
+              );
+          }
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
           yield* Metric.update(

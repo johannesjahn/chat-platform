@@ -379,6 +379,11 @@ export const messages = pgTable(
       (): AnyPgColumn => messages.id,
       { onDelete: "set null" },
     ),
+    // Client-generated idempotency key (issue #567): a resend carrying the
+    // same key from the same sender in the same chat returns the stored
+    // message instead of inserting another. Null for messages sent without
+    // one (older clients), which are never deduplicated.
+    clientId: text("client_id"),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -387,6 +392,13 @@ export const messages = pgTable(
       .$defaultFn(() => new Date()),
   },
   (table) => [
+    // Backs the idempotency check in `createMessage`. Nulls never collide in
+    // a Postgres unique index, so key-less messages are unaffected.
+    uniqueIndex("messages_client_id_idx").on(
+      table.chatId,
+      table.senderId,
+      table.clientId,
+    ),
     // `listMessages` filters + orders by (chatId, id) for every page fetch,
     // and `createMessage`/`markRead` etc. all look up by chatId too —
     // Postgres doesn't auto-index foreign key columns, so without this every
