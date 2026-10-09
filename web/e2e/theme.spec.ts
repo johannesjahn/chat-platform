@@ -8,10 +8,29 @@ test("the theme follows the OS preference by default", async ({ page }) => {
   const html = page.locator("html");
   await expect(html).toHaveClass(/\blight\b/);
   await expect(html).not.toHaveClass(/\bdark\b/);
+  // The app is interactive (so the first paint was the boot script's work,
+  // and from here the app's own listener takes over). The toggle paints a
+  // beat before React's effects subscribe that listener, so let a frame and
+  // a task go by too — an OS switch inside that instant is what
+  // `watch()`'s catch-up is for, but emulating one there races the
+  // renderer's own media re-evaluation.
+  await expect(
+    page.getByRole("button", { name: /^Theme: System/ }),
+  ).toBeVisible();
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => setTimeout(resolve)),
+      ),
+  );
 
-  // Flipping the OS setting flips the open tab.
+  // Flipping the OS setting flips the open tab, browser chrome included.
   await page.emulateMedia({ colorScheme: "dark" });
   await expect(html).toHaveClass(/\bdark\b/);
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
+    "content",
+    "#0b0d13",
+  );
 });
 
 test("the header toggle overrides the OS and is remembered", async ({

@@ -75,10 +75,6 @@ function readStoredPreference(): ThemePreference {
   }
 }
 
-// One list for the module's lifetime. A `change` listener doesn't keep a
-// MediaQueryList alive by itself: one created only to attach a listener
-// (and a fresh one made to detach it) can be garbage-collected, silently
-// taking the OS-preference updates with it.
 let darkMediaList: MediaQueryList | null = null;
 
 function darkMedia(): MediaQueryList {
@@ -93,14 +89,25 @@ function systemPrefersDark(): boolean {
 // Puts `theme` on the document: the class every `dark:` variant and token
 // keys off, `color-scheme` for native controls and scrollbars, and the
 // browser-chrome color.
+//
+// `<meta name="theme-color">` is deliberately outside React: React 19
+// doesn't hydrate a rendered <meta> (it inserts its own copy beside the
+// prerendered one), so a React-owned tag ends up duplicated with one copy
+// stale. The boot script creates it and this keeps it current.
 function applyTheme(theme: ResolvedTheme) {
   const root = document.documentElement;
   root.classList.toggle("dark", theme === "dark");
   root.classList.toggle("light", theme === "light");
   root.style.colorScheme = theme;
-  document
-    .querySelector('meta[name="theme-color"]')
-    ?.setAttribute("content", THEME_COLORS[theme]);
+  let meta = document.querySelector<HTMLMetaElement>(
+    'meta[name="theme-color"]',
+  );
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.name = "theme-color";
+    document.head.appendChild(meta);
+  }
+  meta.content = THEME_COLORS[theme];
 }
 
 const listeners = new Set<() => void>();
@@ -130,21 +137,31 @@ export function setThemePreference(next: ThemePreference) {
   sync();
 }
 
+let watching = false;
+
+// Starts watching what can change the theme from outside: the OS setting
+// (matters while on "system") and another tab writing the stored choice.
+// Once, for the page's lifetime, never detached: React mounts and unmounts
+// subscribers freely (the phone bar and the desktop sidebar swap), and
+// Chromium stops delivering `change` to a MediaQueryList whose listener was
+// removed and re-added — the OS switch then went unseen. The module-level
+// reference also keeps the list from being garbage-collected under it.
+function watch() {
+  if (watching) return;
+  watching = true;
+  darkMedia().addEventListener("change", sync);
+  window.addEventListener("storage", onStorage);
+  // Nothing was listening between the boot script and now (the bundle
+  // loading, hydration), so an OS switch in that window went unseen —
+  // catch up on it.
+  applyTheme(resolveTheme(currentPreference(), systemPrefersDark()));
+}
+
 function subscribe(listener: () => void) {
+  watch();
   listeners.add(listener);
-  // The first subscriber starts watching what can change the theme from
-  // outside: the OS setting (matters while on "system") and another tab
-  // writing the stored choice.
-  if (listeners.size === 1) {
-    darkMedia().addEventListener("change", sync);
-    window.addEventListener("storage", onStorage);
-  }
   return () => {
     listeners.delete(listener);
-    if (listeners.size === 0) {
-      darkMedia().removeEventListener("change", sync);
-      window.removeEventListener("storage", onStorage);
-    }
   };
 }
 
@@ -186,4 +203,5 @@ export const THEME_BOOT_SCRIPT =
   'var d=p==="dark"||(p!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches);' +
   'r.classList.add(d?"dark":"light");r.style.colorScheme=d?"dark":"light";' +
   "var m=document.querySelector('meta[name=\"theme-color\"]');" +
-  'if(m)m.setAttribute("content",d?"#0b0d13":"#f7f8fb");}catch(e){r.classList.add("dark");}})();';
+  'if(!m){m=document.createElement("meta");m.name="theme-color";document.head.appendChild(m);}' +
+  'm.content=d?"#0b0d13":"#f7f8fb";}catch(e){r.classList.add("dark");}})();';

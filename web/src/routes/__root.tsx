@@ -48,7 +48,7 @@ import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
 import { useRedirectHere } from "../lib/redirect";
 import { useTabBadge } from "../lib/tabBadge";
-import { THEME_BOOT_SCRIPT, THEME_COLORS } from "../lib/theme";
+import { THEME_BOOT_SCRIPT } from "../lib/theme";
 import { userLabel } from "../lib/users";
 import { useAppHeight } from "../lib/viewport";
 import appCss from "../styles.css?url";
@@ -76,8 +76,6 @@ export const Route = createRootRoute({
           "width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content",
       },
       { title: "Chat Platform" },
-      // Rewritten to the active theme's color by lib/theme.ts.
-      { name: "theme-color", content: THEME_COLORS.dark },
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       {
@@ -496,11 +494,12 @@ function MenuLink({
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   useAppHeight();
   return (
-    // The theme class (`dark`/`light`) and `color-scheme` are owned by
-    // lib/theme.ts, not React: the inline boot script sets them before the
-    // first paint, from the stored choice or `prefers-color-scheme` (issue
-    // #315). React never renders them, so nothing resets them on a
-    // re-render; the hydration warning is suppressed for that mismatch.
+    // The theme class (`dark`/`light`), `color-scheme` and the
+    // `theme-color` meta are owned by lib/theme.ts, not React: the inline
+    // boot script sets them before the first paint, from the stored choice
+    // or `prefers-color-scheme` (issue #315). React never renders them, so
+    // nothing resets or duplicates them; the hydration warning is
+    // suppressed for the <html> attribute mismatch.
     <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
