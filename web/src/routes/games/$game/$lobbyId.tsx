@@ -252,7 +252,7 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
         <>
           <Button variant="outline" size="sm" onClick={copyInvite}>
             {copied ? (
-              <Check className="size-4 text-emerald-400 motion-safe:animate-like-pop" />
+              <Check className="size-4 text-emerald-600 dark:text-emerald-400 motion-safe:animate-like-pop" />
             ) : (
               <Link2 className="size-4" />
             )}

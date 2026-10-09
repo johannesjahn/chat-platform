@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errorMessage } from "@/lib/errors";
+import { useTheme } from "@/lib/theme";
 
 type AuthFormProps = {
   // Which credential the password field holds, for password managers
@@ -51,6 +52,7 @@ export function AuthForm({
   minUsernameLength,
   usernamePattern,
 }: AuthFormProps) {
+  const { resolved: theme } = useTheme();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -78,7 +80,9 @@ export function AuthForm({
       {/* reactbits dot field — interactive background for the auth screens. */}
       <DotGrid
         className="opacity-70 mask-[radial-gradient(ellipse_at_center,black,transparent_75%)]"
-        baseColor="#2a2f3a"
+        // Dots a step off the page background either way: the dark theme's
+        // slate reads as smudges on the light one.
+        baseColor={theme === "dark" ? "#2a2f3a" : "#d5d9e4"}
         activeColor="#6366f1"
         proximity={130}
         shockRadius={240}

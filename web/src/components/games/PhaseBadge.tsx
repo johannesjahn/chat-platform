@@ -8,25 +8,28 @@ const PHASES: Record<
   waiting: {
     label: "Waiting for players",
     dot: "bg-sky-400",
-    className: "border-sky-400/30 bg-sky-400/10 text-sky-200",
+    className: "border-sky-400/30 bg-sky-400/10 text-sky-700 dark:text-sky-200",
     pulse: true,
   },
   countdown: {
     label: "Starting",
     dot: "bg-amber-400",
-    className: "border-amber-400/30 bg-amber-400/10 text-amber-200",
+    className:
+      "border-amber-400/30 bg-amber-400/10 text-amber-700 dark:text-amber-200",
     pulse: true,
   },
   racing: {
     label: "Live",
     dot: "bg-rose-500",
-    className: "border-rose-500/30 bg-rose-500/10 text-rose-200",
+    className:
+      "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-200",
     pulse: true,
   },
   finished: {
     label: "Finished",
     dot: "bg-emerald-400",
-    className: "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
+    className:
+      "border-emerald-400/30 bg-emerald-400/10 text-emerald-700 dark:text-emerald-200",
     pulse: false,
   },
 };

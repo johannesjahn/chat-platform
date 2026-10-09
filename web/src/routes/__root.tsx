@@ -31,6 +31,7 @@ import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { HeaderSearch } from "@/components/HeaderSearch";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { PwaUpdatePrompt } from "@/components/PwaUpdatePrompt";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { ChatDock } from "@/components/shell/ChatDock";
 import { CommandPalette } from "@/components/shell/CommandPalette";
 import { DesktopSidebar } from "@/components/shell/DesktopSidebar";
@@ -47,6 +48,7 @@ import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
 import { useRedirectHere } from "../lib/redirect";
 import { useTabBadge } from "../lib/tabBadge";
+import { THEME_BOOT_SCRIPT } from "../lib/theme";
 import { userLabel } from "../lib/users";
 import { useAppHeight } from "../lib/viewport";
 import appCss from "../styles.css?url";
@@ -74,7 +76,6 @@ export const Route = createRootRoute({
           "width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content",
       },
       { title: "Chat Platform" },
-      { name: "theme-color", content: "#0b0d13" },
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       {
@@ -399,6 +400,9 @@ function Nav({
             </Button>
           </>
         )}
+        {/* Below `sm` the bar is one row with no room to spare (issue
+            #494), so there the toggle lives in the menu panel instead. */}
+        <ThemeToggle className="hidden sm:inline-flex" />
         <Button
           variant="ghost"
           size="icon"
@@ -431,6 +435,7 @@ function Nav({
           {session?.user.role === "admin" && (
             <MenuLink to="/admin" icon={Gauge} label="Admin" />
           )}
+          <ThemeToggle variant="menu" />
           {session ? (
             <>
               <Button
@@ -489,9 +494,16 @@ function MenuLink({
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   useAppHeight();
   return (
-    <html lang="en" className="dark">
+    // The theme class (`dark`/`light`), `color-scheme` and the
+    // `theme-color` meta are owned by lib/theme.ts, not React: the inline
+    // boot script sets them before the first paint, from the stored choice
+    // or `prefers-color-scheme` (issue #315). React never renders them, so
+    // nothing resets or duplicates them; the hydration warning is
+    // suppressed for the <html> attribute mismatch.
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>
       {/* `--app-height` is the visual viewport — what's actually on screen
           once the keyboard and the dynamic toolbar have had their say — with

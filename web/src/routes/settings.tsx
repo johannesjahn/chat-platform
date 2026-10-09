@@ -8,6 +8,7 @@ import {
   ImageUp,
   KeyRound,
   Loader2,
+  Palette,
   Shield,
   Smile,
   Trash2,
@@ -52,11 +53,19 @@ import {
   isAllowedAvatarFile,
   uploadAvatar,
 } from "@/lib/avatar";
+import { setThemePreference, THEME_OPTIONS, useTheme } from "@/lib/theme";
 import { staticTitle } from "@/lib/title";
 import { userHandle, userLabel } from "@/lib/users";
+import { cn } from "@/lib/utils";
 
 type Section =
-  "profile" | "status" | "privacy" | "notifications" | "password" | "account";
+  | "profile"
+  | "status"
+  | "appearance"
+  | "privacy"
+  | "notifications"
+  | "password"
+  | "account";
 
 const SECTIONS: ReadonlyArray<{
   value: Section;
@@ -65,6 +74,7 @@ const SECTIONS: ReadonlyArray<{
 }> = [
   { value: "profile", label: "Profile", icon: UserRound },
   { value: "status", label: "Status", icon: Smile },
+  { value: "appearance", label: "Appearance", icon: Palette },
   { value: "privacy", label: "Blocked & muted", icon: Shield },
   { value: "notifications", label: "Notifications", icon: Bell },
   { value: "password", label: "Password", icon: KeyRound },
@@ -91,6 +101,8 @@ function SectionCard({ section }: { section: Section }) {
       return <EditProfileCard />;
     case "status":
       return <EditStatusCard />;
+    case "appearance":
+      return <AppearanceCard />;
     case "privacy":
       return <BlockedUsersCard />;
     case "notifications":
@@ -140,10 +152,15 @@ function SettingsPage() {
         </div>
 
         {!session ? (
-          <LoginPrompt
-            title="Log in to manage your account"
-            description="Account settings are only available to signed-in users."
-          />
+          <>
+            <LoginPrompt
+              title="Log in to manage your account"
+              description="Account settings are only available to signed-in users."
+            />
+            {/* The theme is a per-browser choice, not an account one, so
+                it's on offer signed out too. */}
+            <AppearanceCard />
+          </>
         ) : isDesktop ? (
           // Keyed so switching sections plays the card's entrance again.
           <SectionCard key={section} section={section} />
@@ -151,6 +168,7 @@ function SettingsPage() {
           <>
             <EditProfileCard />
             <EditStatusCard />
+            <AppearanceCard />
             <BlockedUsersCard />
             <BrowserNotificationsCard />
             <ChangePasswordCard />
@@ -159,6 +177,58 @@ function SettingsPage() {
         )}
       </div>
     </main>
+  );
+}
+
+// Light, dark, or whatever the OS prefers (issue #315) — see lib/theme.ts.
+// The header toggle steps through the same three; this spells them out.
+function AppearanceCard() {
+  const { preference, resolved } = useTheme();
+
+  return (
+    <Card className="w-full motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
+      <CardHeader>
+        <CardTitle>Appearance</CardTitle>
+        <CardDescription>
+          Choose a light or dark theme, or follow your device&apos;s setting.
+          Applies to this browser only.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <div
+          role="radiogroup"
+          aria-label="Theme"
+          className="grid grid-cols-3 gap-2"
+        >
+          {THEME_OPTIONS.map(({ value, label, icon: Icon }) => {
+            const selected = value === preference;
+            return (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => setThemePreference(value)}
+                className={cn(
+                  "flex flex-col items-center gap-2 rounded-xl border px-3 py-4 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  selected
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                )}
+              >
+                <Icon className="size-5" />
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {preference === "system" && (
+          <p className="text-sm text-muted-foreground">
+            Your device is currently set to {resolved}.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

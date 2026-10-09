@@ -398,9 +398,9 @@ function RoundTrack({
                 "motion-safe:animate-reflex-current border-[var(--game-from)] text-foreground",
               !result && !current && "border-border/50 bg-background/30",
               result?.outcome === "hit" &&
-                "border-transparent bg-[oklch(0.72_0.19_150/0.25)] text-[oklch(0.8_0.19_150)]",
+                "border-transparent bg-[oklch(0.72_0.19_150/0.25)] text-[oklch(0.5_0.17_150)] dark:text-[oklch(0.8_0.19_150)]",
               result?.outcome === "early" &&
-                "border-transparent bg-[oklch(0.62_0.22_25/0.25)] text-[oklch(0.72_0.2_25)]",
+                "border-transparent bg-[oklch(0.62_0.22_25/0.25)] text-[oklch(0.55_0.2_25)] dark:text-[oklch(0.72_0.2_25)]",
               (result?.outcome === "miss" || result?.outcome === "wrong") &&
                 "border-transparent bg-muted/60",
             )}
