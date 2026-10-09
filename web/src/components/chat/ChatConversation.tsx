@@ -48,6 +48,7 @@ import {
 import {
   dismissQueuedItem,
   enqueueMessage,
+  makeClientId,
   replayQueue,
   retryQueuedItem,
   useQueuedMessages,
@@ -755,10 +756,14 @@ export function ChatConversation({
       enqueueMessage(chatId, values);
       return;
     }
+    // Sent with the request and reused if it gets queued below, so a send
+    // the server stored but whose response was lost (e.g. a reload mid-flight)
+    // isn't stored a second time when the queue replays it.
+    const clientId = makeClientId();
     try {
       const message = await sendMessage.mutateAsync({
         params: { path: { id: String(chatId) } },
-        body: values,
+        body: { ...values, clientId },
       });
       // Show it immediately from the mutation's own response instead of
       // waiting on a refetch. The server also pushes a `chat_updated` WS event
@@ -775,7 +780,7 @@ export function ChatConversation({
       // not for an attachment message (see the comment above; the queue
       // can't replay one without re-uploading the file).
       if (values.contentType !== "attachment" && !onlineManager.isOnline()) {
-        enqueueMessage(chatId, values);
+        enqueueMessage(chatId, values, clientId);
         return;
       }
       throw err;

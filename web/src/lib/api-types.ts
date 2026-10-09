@@ -1808,6 +1808,7 @@ export interface components {
             content: string;
             attachmentId?: number | null;
             parentMessageId?: number | null;
+            clientId?: string | null;
         };
         MessagesPage: {
             messages: components["schemas"]["Message"][];

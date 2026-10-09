@@ -10830,6 +10830,17 @@
                 "type": "null"
               }
             ]
+          },
+          "clientId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

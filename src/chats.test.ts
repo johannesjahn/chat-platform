@@ -472,6 +472,37 @@ test("createMessage sends a message, bumps chat activity, and is forbidden for n
     }),
   ));
 
+test("createMessage is idempotent per clientId (issue #567)", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const send = (clientId?: string) =>
+        alice.client.chats.createMessage({
+          params: { id: chat.id },
+          payload: { contentType: "text", content: "once", clientId },
+        });
+
+      const first = yield* send("key-1");
+      const repeat = yield* send("key-1");
+      expect(repeat.id).toBe(first.id);
+
+      // A different key, or no key at all, is a new message.
+      const other = yield* send("key-2");
+      const keyless = yield* send();
+      expect(new Set([first.id, other.id, keyless.id]).size).toBe(3);
+
+      const { messages } = yield* alice.client.chats.listMessages({
+        params: { id: chat.id },
+        query: {},
+      });
+      expect(messages).toHaveLength(3);
+    }),
+  ));
+
 test("createMessage rejects content over the max length", () =>
   run(
     Effect.gen(function* () {

@@ -131,7 +131,7 @@ function getServerSnapshot(): QueuedItem[] {
   return EMPTY_QUEUE;
 }
 
-function makeClientId(): string {
+export function makeClientId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
@@ -149,12 +149,17 @@ export function enqueueMessage(
     content: string;
     parentMessageId?: number;
   },
+  // The idempotency key of the live attempt that failed, if there was one —
+  // the server may have stored that attempt before the connection dropped
+  // (a reload aborts the response, not the request), so the replay must carry
+  // the same key to be recognised as a repeat rather than a new message.
+  clientId: string = makeClientId(),
 ): void {
   writeQueue([
     ...readQueue(),
     {
       kind: "message",
-      clientId: makeClientId(),
+      clientId,
       ownerId: currentUserId(),
       chatId,
       contentType: values.contentType,
@@ -293,6 +298,7 @@ async function drainQueue(queryClient: QueryClient): Promise<void> {
           body: {
             contentType: next.contentType,
             content: next.content,
+            clientId: next.clientId,
             ...(next.parentMessageId !== undefined
               ? { parentMessageId: next.parentMessageId }
               : {}),
