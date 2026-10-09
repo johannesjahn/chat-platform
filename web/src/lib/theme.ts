@@ -75,8 +75,19 @@ function readStoredPreference(): ThemePreference {
   }
 }
 
+// One list for the module's lifetime. A `change` listener doesn't keep a
+// MediaQueryList alive by itself: one created only to attach a listener
+// (and a fresh one made to detach it) can be garbage-collected, silently
+// taking the OS-preference updates with it.
+let darkMediaList: MediaQueryList | null = null;
+
+function darkMedia(): MediaQueryList {
+  darkMediaList ??= window.matchMedia(DARK_MEDIA_QUERY);
+  return darkMediaList;
+}
+
 function systemPrefersDark(): boolean {
-  return window.matchMedia(DARK_MEDIA_QUERY).matches;
+  return darkMedia().matches;
 }
 
 // Puts `theme` on the document: the class every `dark:` variant and token
@@ -125,13 +136,13 @@ function subscribe(listener: () => void) {
   // outside: the OS setting (matters while on "system") and another tab
   // writing the stored choice.
   if (listeners.size === 1) {
-    window.matchMedia(DARK_MEDIA_QUERY).addEventListener("change", sync);
+    darkMedia().addEventListener("change", sync);
     window.addEventListener("storage", onStorage);
   }
   return () => {
     listeners.delete(listener);
     if (listeners.size === 0) {
-      window.matchMedia(DARK_MEDIA_QUERY).removeEventListener("change", sync);
+      darkMedia().removeEventListener("change", sync);
       window.removeEventListener("storage", onStorage);
     }
   };
@@ -166,11 +177,13 @@ export function useTheme(): {
 
 // Runs inline in <head>, before the stylesheet paints anything. It has to
 // stand alone (it can't import this module), so it repeats the resolution
-// above in miniature — keep the two in step.
-export const THEME_BOOT_SCRIPT = `(function(){try{var p=localStorage.getItem(${JSON.stringify(
-  THEME_STORAGE_KEY,
-)});var d=p==="dark"||(p!=="light"&&matchMedia(${JSON.stringify(
-  DARK_MEDIA_QUERY,
-)}).matches);var r=document.documentElement;r.classList.add(d?"dark":"light");r.style.colorScheme=d?"dark":"light";var m=document.querySelector('meta[name="theme-color"]');if(m)m.setAttribute("content",d?${JSON.stringify(
-  THEME_COLORS.dark,
-)}:${JSON.stringify(THEME_COLORS.light)});}catch(e){document.documentElement.classList.add("dark");}})();`;
+// above in miniature, with the storage key, media query and colors written
+// out literally — a plain constant, never assembled from values (CodeQL
+// flags code built by interpolation). Keep it in step with
+// `THEME_STORAGE_KEY`, `DARK_MEDIA_QUERY` and `THEME_COLORS`.
+export const THEME_BOOT_SCRIPT =
+  '(function(){var r=document.documentElement;try{var p=localStorage.getItem("theme");' +
+  'var d=p==="dark"||(p!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches);' +
+  'r.classList.add(d?"dark":"light");r.style.colorScheme=d?"dark":"light";' +
+  "var m=document.querySelector('meta[name=\"theme-color\"]');" +
+  'if(m)m.setAttribute("content",d?"#0b0d13":"#f7f8fb");}catch(e){r.classList.add("dark");}})();';

@@ -402,7 +402,9 @@ function Nav({
             </Button>
           </>
         )}
-        <ThemeToggle />
+        {/* Below `sm` the bar is one row with no room to spare (issue
+            #494), so there the toggle lives in the menu panel instead. */}
+        <ThemeToggle className="hidden sm:inline-flex" />
         <Button
           variant="ghost"
           size="icon"
@@ -435,6 +437,7 @@ function Nav({
           {session?.user.role === "admin" && (
             <MenuLink to="/admin" icon={Gauge} label="Admin" />
           )}
+          <ThemeToggle variant="menu" />
           {session ? (
             <>
               <Button

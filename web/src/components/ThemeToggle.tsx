@@ -17,12 +17,14 @@ function themeOption(value: ThemePreference) {
 // The header's quick theme switch (issue #315): one button that steps
 // System → Light → Dark, showing the current choice. Settings has the same
 // choice spelled out as three options. `variant="sidebar"` renders it as a
-// desktop sidebar row; otherwise it's an icon button for the top bar.
+// desktop sidebar row, `variant="menu"` as a full-width row in the phone
+// menu (the phone bar has no room for another icon — issue #494);
+// otherwise it's an icon button for the top bar.
 export function ThemeToggle({
   variant = "bar",
   className,
 }: {
-  variant?: "bar" | "sidebar";
+  variant?: "bar" | "sidebar" | "menu";
   className?: string;
 }) {
   const { preference } = useTheme();
@@ -45,6 +47,20 @@ export function ThemeToggle({
           Theme: {current.label}
         </span>
       </button>
+    );
+  }
+
+  if (variant === "menu") {
+    return (
+      <Button
+        variant="ghost"
+        onClick={onClick}
+        aria-label={label}
+        className={cn("group/nav-icon justify-start", className)}
+      >
+        <NavIcon icon={current.icon} />
+        Theme: {current.label}
+      </Button>
     );
   }
 
