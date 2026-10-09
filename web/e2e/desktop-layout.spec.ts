@@ -87,6 +87,54 @@ test("the sidebar replaces the top bar, marks where you are, and holds the accou
   ).toBeVisible();
 });
 
+test("navigating animates only the page, and re-clicking where you are does nothing", async ({
+  page,
+  signUp,
+}) => {
+  // Issue #574: the page column is the only thing that animates on a change
+  // of page; the sidebar is captured on its own so it stays still, and a
+  // navigation that keeps the pathname runs no view transition at all.
+  await signUp(page);
+
+  const transitionName = (selector: string) =>
+    page
+      .locator(selector)
+      .evaluate((el) => getComputedStyle(el).viewTransitionName);
+  expect(await transitionName("[data-app-sidebar]")).toBe("app-nav");
+  expect(await transitionName("[data-app-column]")).toBe("app-content");
+
+  // Count the transitions the router starts (and still run them, so the
+  // navigation itself is untouched).
+  await page.evaluate(() => {
+    const w = window as unknown as { viewTransitions: number };
+    w.viewTransitions = 0;
+    const start = document.startViewTransition?.bind(document);
+    document.startViewTransition = ((arg: Parameters<typeof start>[0]) => {
+      w.viewTransitions++;
+      return start(arg);
+    }) as typeof document.startViewTransition;
+  });
+  const transitions = () =>
+    page.evaluate(
+      () => (window as unknown as { viewTransitions: number }).viewTransitions,
+    );
+
+  const users = sidebar(page).getByRole("link", { name: "Users" });
+  await users.click();
+  await expect(page).toHaveURL(/\/users$/);
+  await expect(users).toHaveAttribute("aria-current", "page");
+  await expect.poll(transitions).toBe(1);
+
+  const historyLength = await page.evaluate(() => history.length);
+  await users.click();
+  await expect(page).toHaveURL(/\/users$/);
+  // Give a (wrongly) started transition time to show up before asserting
+  // there was none.
+  await page.waitForTimeout(500);
+  expect(await transitions()).toBe(1);
+  expect(await page.evaluate(() => history.length)).toBe(historyLength);
+});
+
 test("chats open beside the list, and Alt+↓ moves to the next one", async ({
   page,
   request,

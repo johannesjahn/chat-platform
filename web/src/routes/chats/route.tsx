@@ -69,8 +69,11 @@ function ChatsLayout() {
 
   return (
     <div className="flex min-h-0 grow basis-0">
+      {/* `data-chat-pane` keeps the list still while the conversation beside
+          it changes (see "View transitions" in styles.css). */}
       <aside
         ref={paneRef}
+        data-chat-pane
         aria-label="Conversations"
         style={paneWidth === null ? undefined : { width: paneWidth }}
         className="relative flex w-80 shrink-0 flex-col border-r border-border bg-card/40 xl:w-96"
