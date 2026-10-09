@@ -1,13 +1,51 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* Dark-first design system for the chat platform. shadcn/ui token names are
-   mapped to CSS variables so components stay themeable from one place. */
+/* Design system for the chat platform. shadcn/ui token names are mapped to
+   CSS variables so components stay themeable from one place. Two palettes
+   (issue #315): light on `:root`, dark under `.dark`. lib/theme.ts puts
+   `dark` or `light` on <html> — from the reader's choice, else
+   `prefers-color-scheme` — before the first paint. */
 @custom-variant dark (&:is(.dark *));
 
 :root {
   --radius: 0.75rem;
 
+  --background: oklch(0.985 0.004 265);
+  --foreground: oklch(0.21 0.02 265);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.02 265);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.02 265);
+
+  --primary: oklch(0.55 0.2 277);
+  --primary-foreground: oklch(0.99 0.005 277);
+
+  --secondary: oklch(0.955 0.008 265);
+  --secondary-foreground: oklch(0.25 0.02 265);
+
+  --muted: oklch(0.955 0.008 265);
+  --muted-foreground: oklch(0.5 0.02 265);
+
+  --accent: oklch(0.94 0.025 277);
+  --accent-foreground: oklch(0.3 0.06 277);
+
+  --destructive: oklch(0.57 0.22 25);
+  --destructive-foreground: oklch(0.99 0.005 25);
+
+  --border: oklch(0.9 0.008 265);
+  --input: oklch(0.88 0.01 265);
+  --ring: oklch(0.55 0.2 277);
+
+  /* The ambient body gradients (see `body` below) — fainter on a light
+     page, where the same tint would read as a stain. */
+  --aurora-primary: oklch(0.62 0.19 277 / 0.09);
+  --aurora-secondary: oklch(0.72 0.14 210 / 0.07);
+}
+
+.dark {
   --background: oklch(0.16 0.012 265);
   --foreground: oklch(0.93 0.01 265);
 
@@ -35,6 +73,9 @@
   --border: oklch(0.3 0.015 265);
   --input: oklch(0.3 0.015 265);
   --ring: oklch(0.62 0.19 277);
+
+  --aurora-primary: oklch(0.62 0.19 277 / 0.13);
+  --aurora-secondary: oklch(0.72 0.14 210 / 0.1);
 }
 
 @theme inline {
@@ -79,6 +120,9 @@
   }
 
   html {
+    color-scheme: light;
+  }
+  html.dark {
     color-scheme: dark;
   }
 
@@ -96,12 +140,12 @@
     background-image:
       radial-gradient(
         60rem 30rem at 10% -10%,
-        oklch(0.62 0.19 277 / 0.14),
+        var(--aurora-primary),
         transparent 60%
       ),
       radial-gradient(
         50rem 25rem at 90% 0%,
-        oklch(0.72 0.14 210 / 0.1),
+        var(--aurora-secondary),
         transparent 55%
       );
     background-repeat: no-repeat;
@@ -120,12 +164,12 @@
     background:
       radial-gradient(
         30rem 30rem at 30% 40%,
-        oklch(0.62 0.19 277 / 0.12),
+        var(--aurora-primary),
         transparent 60%
       ),
       radial-gradient(
         26rem 26rem at 70% 60%,
-        oklch(0.72 0.14 210 / 0.1),
+        var(--aurora-secondary),
         transparent 60%
       );
     filter: blur(40px);
@@ -1374,7 +1418,14 @@ html[data-app-shell="immersive"] [data-app-column] {
   --game-from: oklch(0.72 0.14 210);
   --game-to: oklch(0.62 0.19 277);
   --game-glow: oklch(0.62 0.19 277 / 0.35);
-  /* Podium metals, shared by every game's results and leaderboard. */
+  /* Podium metals, shared by every game's results and leaderboard. Deeper
+     on the light theme, where they're also used as text on a white card. */
+  --game-gold: oklch(0.7 0.15 80);
+  --game-silver: oklch(0.62 0.02 250);
+  --game-bronze: oklch(0.6 0.12 55);
+}
+
+.dark {
   --game-gold: oklch(0.84 0.16 85);
   --game-silver: oklch(0.82 0.02 250);
   --game-bronze: oklch(0.7 0.12 55);

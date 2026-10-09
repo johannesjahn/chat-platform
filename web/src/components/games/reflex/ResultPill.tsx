@@ -43,7 +43,7 @@ export function ResultPill({
         "relative flex h-7 min-w-0 items-center justify-center rounded-md text-[10px] font-bold tabular-nums motion-safe:animate-reflex-pop-in sm:text-xs",
         hit && "text-white",
         result.outcome === "early" &&
-          "bg-[oklch(0.62_0.22_25/0.3)] text-[oklch(0.72_0.2_25)]",
+          "bg-[oklch(0.62_0.22_25/0.3)] text-[oklch(0.55_0.2_25)] dark:text-[oklch(0.72_0.2_25)]",
         (result.outcome === "miss" || result.outcome === "wrong") &&
           "bg-muted/70 text-muted-foreground",
         fastest && "ring-2 ring-[var(--game-gold)]",

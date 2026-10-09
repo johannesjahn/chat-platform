@@ -11,6 +11,7 @@ import {
 import { BrandLogo } from "@/components/BrandLogo";
 import { NavIcon } from "@/components/NavIcon";
 import { GradientText } from "@/components/reactbits/GradientText";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { $api, type Session } from "@/lib/api";
 import { useRedirectHere } from "@/lib/redirect";
@@ -100,6 +101,8 @@ export function DesktopSidebar({
       )}
 
       <div className="flex-1" />
+
+      <ThemeToggle variant="sidebar" className="mb-1" />
 
       {session && onLogout ? (
         <AccountMenu session={session} onLogout={onLogout} />

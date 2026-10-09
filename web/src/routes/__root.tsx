@@ -31,6 +31,7 @@ import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { HeaderSearch } from "@/components/HeaderSearch";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { PwaUpdatePrompt } from "@/components/PwaUpdatePrompt";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { ChatDock } from "@/components/shell/ChatDock";
 import { CommandPalette } from "@/components/shell/CommandPalette";
 import { DesktopSidebar } from "@/components/shell/DesktopSidebar";
@@ -47,6 +48,7 @@ import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
 import { useRedirectHere } from "../lib/redirect";
 import { useTabBadge } from "../lib/tabBadge";
+import { THEME_BOOT_SCRIPT, THEME_COLORS } from "../lib/theme";
 import { userLabel } from "../lib/users";
 import { useAppHeight } from "../lib/viewport";
 import appCss from "../styles.css?url";
@@ -74,7 +76,8 @@ export const Route = createRootRoute({
           "width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content",
       },
       { title: "Chat Platform" },
-      { name: "theme-color", content: "#0b0d13" },
+      // Rewritten to the active theme's color by lib/theme.ts.
+      { name: "theme-color", content: THEME_COLORS.dark },
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       {
@@ -399,6 +402,7 @@ function Nav({
             </Button>
           </>
         )}
+        <ThemeToggle />
         <Button
           variant="ghost"
           size="icon"
@@ -489,9 +493,15 @@ function MenuLink({
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   useAppHeight();
   return (
-    <html lang="en" className="dark">
+    // The theme class (`dark`/`light`) and `color-scheme` are owned by
+    // lib/theme.ts, not React: the inline boot script sets them before the
+    // first paint, from the stored choice or `prefers-color-scheme` (issue
+    // #315). React never renders them, so nothing resets them on a
+    // re-render; the hydration warning is suppressed for that mismatch.
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>
       {/* `--app-height` is the visual viewport — what's actually on screen
           once the keyboard and the dynamic toolbar have had their say — with

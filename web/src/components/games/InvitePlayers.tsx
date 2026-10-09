@@ -109,7 +109,7 @@ export function InvitePlayers({
                       }
                     >
                       {sent ? (
-                        <Check className="size-4 text-emerald-400" />
+                        <Check className="size-4 text-emerald-600 dark:text-emerald-400" />
                       ) : sending ? (
                         <Loader2 className="size-4 animate-spin" />
                       ) : (
