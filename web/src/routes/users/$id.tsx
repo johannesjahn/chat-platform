@@ -349,6 +349,7 @@ function UserProfilePage() {
                       }
                       onDelete={() => handleDeletePost(post.id)}
                       isDeleting={deletingPostId === post.id}
+                      openPost="page"
                       style={{ animationDelay: `${Math.min(i, 6) * 60}ms` }}
                     />
                   </li>
