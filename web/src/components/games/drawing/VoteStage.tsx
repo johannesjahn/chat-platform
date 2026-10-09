@@ -64,7 +64,7 @@ export function VoteStage({
         <DrawingView
           strokes={drawing.strokes}
           label={`${castLabel(cast, drawing.artistId)}'s drawing`}
-          className="mx-auto max-w-md rotate-[-1deg]"
+          className="mx-auto max-w-md rotate-[-1deg] xl:max-w-xl"
         />
         <ul className="flex flex-col gap-2.5" aria-label="Answers">
           {answers.map((answer, index) => {

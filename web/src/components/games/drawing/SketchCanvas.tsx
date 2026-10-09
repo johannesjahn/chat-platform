@@ -265,7 +265,7 @@ export const SketchCanvas = memo(function SketchCanvas({
     <div className="flex flex-col gap-3">
       <div
         className={cn(
-          "sketch-paper relative aspect-[4/3] w-full overflow-hidden rounded-2xl shadow-[inset_0_0_0_1px_rgb(0_0_0/0.06),0_18px_50px_-20px_var(--game-glow)] transition-[filter,opacity] duration-500",
+          "sketch-paper relative mx-auto aspect-[4/3] w-full overflow-hidden rounded-2xl xl:max-w-[calc(72svh*4/3)] shadow-[inset_0_0_0_1px_rgb(0_0_0/0.06),0_18px_50px_-20px_var(--game-glow)] transition-[filter,opacity] duration-500",
           disabled && "opacity-80 saturate-50",
         )}
       >

@@ -226,8 +226,9 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
       game={game}
       back={{ game: gameId, label: game.name }}
       // Wider from `lg`, where the lobby chat moves beside the game rather
-      // than under it (issue #554).
-      className="lg:max-w-7xl"
+      // than under it, and wider again at `xl` so the play areas can grow
+      // (issue #554).
+      className="lg:max-w-7xl xl:max-w-[90rem]"
       title={host ? `${userLabel(host.user)}'s lobby` : `Lobby #${lobby.id}`}
       subtitle={
         <span className="flex flex-wrap items-center gap-2">
@@ -283,7 +284,7 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
       {/* Below `lg` the chat follows the game down the page; from `lg` it's
           a full-height panel to its right, so the waiting room and results
           never scroll it out of reach (issue #554). */}
-      <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-start">
+      <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_21rem] xl:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
         <div className="flex min-w-0 flex-col gap-6">
           {actionError && (
             <p className="text-sm text-destructive" role="alert">
