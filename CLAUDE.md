@@ -377,6 +377,11 @@ bar, the immersive chat shell and the phone menu stay exactly as they were.
   `switcher` mode (`Ctrl/⌘+K` — Enter opens the top match). Global keys live
   in `KeyboardShortcuts`; `Alt+↑/↓` in the chats layout; composer keys in
   `ChatComposer`.
+- **Profile hover cards.** Wrap an `@mention`, avatar or author name in
+  [`ProfileHoverCard`](web/src/components/ProfileHoverCard.tsx) (issue #562):
+  mouse-only, opens after 400ms and only then fetches `GET /users/{id}`.
+  It's portalled and stops event propagation, so it's safe inside a link
+  row or a chat bubble.
 - **Tab badge.** `useTabBadge` prefixes every title with the unread count
   and dots the favicon; compare titles through `stripTitleBadge`.
 
