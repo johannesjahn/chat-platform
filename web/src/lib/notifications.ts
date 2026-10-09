@@ -5,7 +5,15 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import {
+  AtSign,
+  Bell,
+  CornerDownRight,
+  MessageSquare,
+  Swords,
+  Trophy,
+  type LucideIcon,
+} from "lucide-react";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
 
@@ -114,20 +122,33 @@ export function useMarkAllNotificationsRead() {
   });
 }
 
-// Where clicking a notification goes: the post it's about, the lobby an
-// invite points at, or the game's leaderboard.
-export function useOpenNotification() {
-  const navigate = useNavigate();
-  return (n: Notification) => {
-    if (n.type === "game_invite" && n.game && n.lobbyId !== null) {
-      void navigate({
-        to: "/games/$game/$lobbyId",
-        params: { game: n.game, lobbyId: String(n.lobbyId) },
-      });
-    } else if (n.type === "game_record" && n.game) {
-      void navigate({ to: "/games/$game", params: { game: n.game } });
-    } else if (n.postId !== null) {
-      void navigate({ to: "/posts/$id", params: { id: String(n.postId) } });
-    }
-  };
+// Where a notification leads: the post it's about, the lobby an invite
+// points at, or the game's leaderboard. Rows render it as a real link, so a
+// modified click opens it the way any link would (issue #564).
+export type NotificationTarget =
+  | { to: "/games/$game/$lobbyId"; params: { game: string; lobbyId: string } }
+  | { to: "/games/$game"; params: { game: string } }
+  | { to: "/posts/$id"; params: { id: string } };
+
+export function notificationTarget(n: Notification): NotificationTarget | null {
+  if (n.type === "game_invite" && n.game && n.lobbyId !== null)
+    return {
+      to: "/games/$game/$lobbyId",
+      params: { game: n.game, lobbyId: String(n.lobbyId) },
+    };
+  if ((n.type === "game_invite" || n.type === "game_record") && n.game)
+    return { to: "/games/$game", params: { game: n.game } };
+  if (n.postId !== null)
+    return { to: "/posts/$id", params: { id: String(n.postId) } };
+  return null;
 }
+
+// Each type's badge glyph, shared by the rows and the inbox's preview pane.
+export const NOTIFICATION_ICONS: Record<Notification["type"], LucideIcon> = {
+  comment: MessageSquare,
+  reply: CornerDownRight,
+  reaction: Bell,
+  mention: AtSign,
+  game_invite: Swords,
+  game_record: Trophy,
+};

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState, type KeyboardEvent } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   AtSign,
@@ -9,21 +9,23 @@ import {
   Inbox,
   Loader2,
   MessageSquare,
+  PanelRight,
 } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { FilterRail, type FilterRailItem } from "@/components/FilterRail";
 import { LoginPrompt } from "@/components/LoginPrompt";
+import { NotificationPreviewPane } from "@/components/NotificationPreviewPane";
 import { NotificationRow } from "@/components/NotificationRow";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
+import { useMediaQuery } from "@/lib/media";
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
   useNotifications,
-  useOpenNotification,
   type Notification,
   type NotificationType,
 } from "@/lib/notifications";
@@ -63,6 +65,24 @@ function matchesFilter(n: Notification, filter: NotificationFilter): boolean {
   return filter === "all" || FILTER_TYPES[filter].includes(n.type);
 }
 
+// ↑/↓ through the rows: every row carries `data-notification-row`, in the
+// order they're rendered. Returns the index of the row it focused.
+function moveRowFocus(container: HTMLElement | null, step: 1 | -1) {
+  const rows = Array.from(
+    container?.querySelectorAll<HTMLElement>("[data-notification-row]") ?? [],
+  );
+  if (rows.length === 0) return -1;
+  const current = rows.indexOf(document.activeElement as HTMLElement);
+  const next =
+    current === -1
+      ? step === 1
+        ? 0
+        : rows.length - 1
+      : Math.min(rows.length - 1, Math.max(0, current + step));
+  rows[next]?.focus();
+  return next;
+}
+
 function NotificationsPage() {
   const session = useSession();
   const {
@@ -75,18 +95,43 @@ function NotificationsPage() {
   } = useNotifications(!!session);
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
-  const open = useOpenNotification();
   const [filter, setFilter] = useState<NotificationFilter>("all");
+  // At `xl` a notification opens in a preview pane beside the list instead
+  // of navigating away (issue #564), like a message hit on the search page.
+  const canPreview = useMediaQuery("(min-width: 80rem)");
+  const [previewId, setPreviewId] = useState<number | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
 
   const notifications = data?.pages.flatMap((page) => page.notifications);
   const unread = data?.pages[0]?.unreadCount ?? 0;
   // The rail only exists at `lg`+, so below it `filter` never leaves "all".
   const shown = notifications?.filter((n) => matchesFilter(n, filter));
+  // Looked up live, so the pane follows the row (its read flag, a refetch).
+  const previewed = canPreview
+    ? notifications?.find((n) => n.id === previewId)
+    : undefined;
+
+  function preview(n: Notification) {
+    if (!n.read) markRead.mutate(n.id);
+    setPreviewId(n.id);
+  }
+
+  function onListKeyDown(event: KeyboardEvent<HTMLUListElement>) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const index = moveRowFocus(
+      listRef.current,
+      event.key === "ArrowDown" ? 1 : -1,
+    );
+    const n = shown?.[index];
+    if (canPreview && n) preview(n);
+  }
 
   return (
-    // At `lg` the column gains a filter rail beside it (issue #554); the
-    // list itself keeps its readable `max-w-xl`.
-    <main className="mx-auto flex w-full max-w-xl gap-8 px-4 py-10 lg:max-w-4xl">
+    // At `lg` the column gains a filter rail beside it (issue #554), and at
+    // `xl` a preview pane on the right (issue #564); the list itself keeps
+    // its readable `max-w-xl`.
+    <main className="mx-auto flex w-full max-w-xl gap-8 px-4 py-10 lg:max-w-4xl xl:max-w-7xl">
       {session && (
         <FilterRail
           items={FILTERS}
@@ -150,14 +195,34 @@ function NotificationsPage() {
         ) : (
           <>
             {shown && shown.length > 0 ? (
-              <ul role="list" className="flex flex-col gap-2">
+              <ul
+                ref={listRef}
+                role="list"
+                className="flex flex-col gap-2"
+                onKeyDown={onListKeyDown}
+              >
                 {shown.map((n) => (
                   <NotificationRow
                     key={n.id}
                     notification={n}
-                    onOpen={() => {
-                      if (!n.read) markRead.mutate(n.id);
-                      open(n);
+                    selected={previewed?.id === n.id}
+                    onOpen={(e) => {
+                      // The row is a link: below `xl`, on Enter (a click
+                      // with no pointer, `detail` 0) and on a modified
+                      // click it navigates as links do. A plain click at
+                      // `xl` previews instead.
+                      if (
+                        !canPreview ||
+                        e.detail === 0 ||
+                        e.metaKey ||
+                        e.ctrlKey ||
+                        e.shiftKey
+                      ) {
+                        if (!n.read) markRead.mutate(n.id);
+                        return;
+                      }
+                      e.preventDefault();
+                      preview(n);
                     }}
                   />
                 ))}
@@ -185,6 +250,25 @@ function NotificationsPage() {
           </>
         )}
       </div>
+      {canPreview &&
+        session &&
+        notifications &&
+        notifications.length > 0 &&
+        (previewed ? (
+          <NotificationPreviewPane
+            notification={previewed}
+            onClose={() => setPreviewId(null)}
+          />
+        ) : (
+          <aside
+            aria-label="Preview"
+            className="sticky top-10 flex h-64 w-[26rem] shrink-0 flex-col items-center justify-center gap-2 self-start rounded-xl border border-dashed border-border/60 px-8 text-center text-sm text-muted-foreground"
+          >
+            <PanelRight className="size-5" />
+            Select a notification to preview it here. ↑/↓ move through the list;
+            Enter opens one.
+          </aside>
+        ))}
     </main>
   );
 }

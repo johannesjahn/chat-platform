@@ -7,7 +7,6 @@ import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
   useNotifications,
-  useOpenNotification,
 } from "@/lib/notifications";
 import { usePopover } from "@/lib/popover";
 import { cn } from "@/lib/utils";
@@ -36,7 +35,6 @@ export function NotificationsPopover({ unread }: { unread: number }) {
   const { data, isLoading, error } = useNotifications(open);
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
-  const openNotification = useOpenNotification();
   const notifications = data?.pages[0]?.notifications.slice(0, POPOVER_LIMIT);
 
   return (
@@ -113,9 +111,9 @@ export function NotificationsPopover({ unread }: { unread: number }) {
                     key={n.id}
                     compact
                     notification={n}
+                    // The row is a link — it does the navigating.
                     onOpen={() => {
                       if (!n.read) markRead.mutate(n.id);
-                      openNotification(n);
                       setOpen(false);
                     }}
                   />

@@ -384,6 +384,19 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           );
         }),
       )
+      .handle("getComment", ({ params: { id } }) =>
+        Effect.gen(function* () {
+          const currentUser = yield* CurrentUser;
+          const row = yield* getCommentOr404(db, id);
+          const reactions = yield* Effect.tryPromise(() =>
+            commentReactionInfoOne(db, id, currentUser.id),
+          ).pipe(Effect.orDie);
+          const replyCounts = yield* Effect.tryPromise(() =>
+            commentReplyCounts(db, [row.id]),
+          ).pipe(Effect.orDie);
+          return toApiComment(row, reactions, replyCounts.get(row.id) ?? 0);
+        }),
+      )
       .handle("createReply", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;

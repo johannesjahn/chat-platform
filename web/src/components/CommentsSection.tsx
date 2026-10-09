@@ -24,10 +24,11 @@ import {
   commentsQueryKeyRoot,
   MAX_COMMENT_CONTENT_LENGTH,
   postCommentsQueryKey,
+  useComment,
   useComments,
   useReplies,
 } from "@/lib/comments";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage, isNotFoundError } from "@/lib/errors";
 import { useTransitionState } from "@/lib/motion";
 import { usePostCommentsSubscription } from "@/lib/postRooms";
 import {
@@ -336,10 +337,17 @@ function CommentItem({
   comment,
   postId,
   isReply = false,
+  highlighted = false,
+  hideReplies = false,
 }: {
   comment: Comment;
   postId: number;
   isReply?: boolean;
+  // The comment a notification points at (see `CommentThreadPreview`).
+  highlighted?: boolean;
+  // Leaves out the replies toggle — for a parent shown above just the one
+  // reply being previewed.
+  hideReplies?: boolean;
 }) {
   const session = useSession();
   const queryClient = useQueryClient();
@@ -371,7 +379,8 @@ function CommentItem({
   // The toggle only renders while there are replies, so the panel must close
   // with it when they drop to zero (deleted here or by someone else) — or it
   // would sit open and empty with nothing left to close it (issue #544).
-  const repliesOpen = showReplies && !isReply && comment.replyCount > 0;
+  const repliesOpen =
+    showReplies && !isReply && !hideReplies && comment.replyCount > 0;
   const replies = useReplies(comment.id, repliesOpen);
   const replyRows = replies.data?.pages.flatMap((p) => p.comments) ?? [];
 
@@ -411,7 +420,12 @@ function CommentItem({
         />
       </Link>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="rounded-2xl bg-muted/60 px-3 py-2">
+        <div
+          className={cn(
+            "rounded-2xl bg-muted/60 px-3 py-2",
+            highlighted && "bg-primary/10 ring-1 ring-primary/50",
+          )}
+        >
           <div className="flex items-baseline gap-2">
             <Link
               to="/users/$id"
@@ -548,7 +562,7 @@ function CommentItem({
         {/* Existing replies used to stay hidden until the viewer opened the
             reply composer (issue #479) — the count makes them discoverable,
             and expanding them no longer opens a composer. */}
-        {!isReply && comment.replyCount > 0 && (
+        {!isReply && !hideReplies && comment.replyCount > 0 && (
           <Button
             type="button"
             variant="link"
@@ -593,6 +607,53 @@ function CommentItem({
           </Collapse>
         )}
       </div>
+    </div>
+  );
+}
+
+// One comment in its thread, highlighted: a reply under its parent (just the
+// two, so it never hides behind the parent's reply pagination), a top-level
+// comment on its own. The notifications page's `xl` preview pane (issue #564)
+// shows it under the post.
+export function CommentThreadPreview({
+  postId,
+  commentId,
+}: {
+  postId: number;
+  commentId: number;
+}) {
+  usePostCommentsSubscription(postId, true);
+  const target = useComment(commentId, true);
+  const parentId = target.data?.parentCommentId ?? null;
+  const parent = useComment(parentId ?? 0, parentId !== null);
+
+  if (target.isLoading || (parentId !== null && parent.isLoading)) {
+    return (
+      <div className="flex justify-center py-2">
+        <Loader2 className="size-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (!target.data) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {isNotFoundError(target.error)
+          ? "This comment has been deleted."
+          : `Could not load the comment: ${errorMessage(target.error)}`}
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      {parent.data && (
+        <CommentItem comment={parent.data} postId={postId} hideReplies />
+      )}
+      <CommentItem
+        comment={target.data}
+        postId={postId}
+        isReply={parentId !== null}
+        highlighted
+      />
     </div>
   );
 }
