@@ -516,9 +516,10 @@ html[data-app-shell="immersive"] [data-app-column] {
 /* ───────────────────────────────────────────────────────────────────────────
    View transitions
    ───────────────────────────────────────────────────────────────────────────
-   The router opts every navigation into `document.startViewTransition` (see
-   `defaultViewTransition` in router.tsx), so the browser snapshots the old
-   page, swaps the DOM, and cross-fades the two. Everything below only styles
+   The router runs every change of page through `document.startViewTransition`
+   (see `defaultViewTransition` in router.tsx — a navigation that keeps the
+   pathname, like re-clicking the current nav item, is excluded there), so the
+   browser snapshots the old page, swaps the DOM, and cross-fades the two. Everything below only styles
    that transition — with the API unsupported the navigation is simply
    instant, exactly as it was before.
 
@@ -543,11 +544,29 @@ html[data-app-shell="immersive"] [data-app-column] {
   }
 }
 
+/* Only the page animates (issue #574). The content column is named
+   `app-content` and carries the lift/settle; the root snapshot — what's left
+   once every named element is lifted out of it, i.e. the page background and
+   the footer — swaps instantly underneath. Animating `root` instead would
+   sweep up any chrome that isn't explicitly named, which is how the desktop
+   sidebar came to blur and slide on every click. */
+[data-app-column] {
+  view-transition-name: app-content;
+}
+
 ::view-transition-old(root) {
-  animation: page-leave 0.2s cubic-bezier(0.4, 0, 1, 1) both;
+  display: none;
 }
 
 ::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-old(app-content) {
+  animation: page-leave 0.2s cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+::view-transition-new(app-content) {
   animation: page-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
@@ -561,11 +580,58 @@ html[data-app-shell="immersive"] [data-app-column] {
   animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* The nav is the one piece of chrome common to every route. Naming it takes
-   it out of the root snapshot so it stays put during the swap instead of
-   fading out and back in under the incoming page. */
-[data-app-nav] {
+/* The page column doesn't travel — it only changes height with its content —
+   so its group sits still and the two snapshots above do all the moving. */
+::view-transition-group(app-content) {
+  animation: none;
+}
+
+/* Persistent chrome — the phone top bar or the desktop sidebar (only one is
+   ever mounted, so they can share a name), the docked chat windows, and the
+   chat list pane beside an open conversation — is named so it's captured on
+   its own instead of as part of a page, and it doesn't animate at all: the
+   old snapshot is dropped and the new one shown as is, so a nav item's
+   "you are here" state simply switches. Only when a piece of chrome exists on
+   one side of the swap (the chat list pane on the way into or out of
+   `/chats`, the dock on the way out of or back from it) does it come and go
+   with the page. */
+[data-app-nav],
+[data-app-sidebar] {
   view-transition-name: app-nav;
+}
+
+[data-chat-dock] {
+  view-transition-name: chat-dock;
+}
+
+[data-chat-pane] {
+  view-transition-name: chat-pane;
+}
+
+::view-transition-group(app-nav),
+::view-transition-group(chat-dock),
+::view-transition-group(chat-pane),
+::view-transition-new(app-nav),
+::view-transition-new(chat-dock),
+::view-transition-new(chat-pane) {
+  animation: none;
+}
+
+::view-transition-old(app-nav),
+::view-transition-old(chat-dock),
+::view-transition-old(chat-pane) {
+  display: none;
+}
+
+::view-transition-old(chat-dock):only-child,
+::view-transition-old(chat-pane):only-child {
+  display: block;
+  animation: page-leave 0.2s cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+::view-transition-new(chat-dock):only-child,
+::view-transition-new(chat-pane):only-child {
+  animation: page-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* ───────────────────────────────────────────────────────────────────────────
