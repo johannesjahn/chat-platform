@@ -10,6 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { ProfileHoverCard } from "@/components/ProfileHoverCard";
 import { MentionText } from "@/components/MentionText";
 import { MentionTextarea } from "@/components/MentionTextarea";
 import { RelativeTime } from "@/components/RelativeTime";
@@ -407,18 +408,20 @@ function CommentItem({
       data-testid="comment"
       data-comment-id={comment.id}
     >
-      <Link
-        to="/users/$id"
-        params={{ id: String(comment.authorId) }}
-        className="mt-0.5 shrink-0"
-      >
-        <Avatar
-          name={authorName}
-          avatarUrl={author?.avatarUrl}
-          avatarVariants={author?.avatarVariants}
-          className="size-7 text-xs"
-        />
-      </Link>
+      <ProfileHoverCard userId={comment.authorId}>
+        <Link
+          to="/users/$id"
+          params={{ id: String(comment.authorId) }}
+          className="mt-0.5 shrink-0"
+        >
+          <Avatar
+            name={authorName}
+            avatarUrl={author?.avatarUrl}
+            avatarVariants={author?.avatarVariants}
+            className="size-7 text-xs"
+          />
+        </Link>
+      </ProfileHoverCard>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div
           className={cn(
@@ -427,18 +430,20 @@ function CommentItem({
           )}
         >
           <div className="flex items-baseline gap-2">
-            <Link
-              to="/users/$id"
-              params={{ id: String(comment.authorId) }}
-              className="text-sm font-medium hover:underline"
-            >
-              {authorLabel}
-              {authorHandle && (
-                <span className="ml-1 font-normal text-muted-foreground">
-                  {authorHandle}
-                </span>
-              )}
-            </Link>
+            <ProfileHoverCard userId={comment.authorId}>
+              <Link
+                to="/users/$id"
+                params={{ id: String(comment.authorId) }}
+                className="text-sm font-medium hover:underline"
+              >
+                {authorLabel}
+                {authorHandle && (
+                  <span className="ml-1 font-normal text-muted-foreground">
+                    {authorHandle}
+                  </span>
+                )}
+              </Link>
+            </ProfileHoverCard>
             <span className="text-xs text-muted-foreground">
               <RelativeTime value={comment.createdAt} />
               {comment.updatedAt !== comment.createdAt && " · edited"}

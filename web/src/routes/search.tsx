@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { ProfileHoverCard } from "@/components/ProfileHoverCard";
 import { ChatConversation } from "@/components/chat/ChatConversation";
 import { FilterRail, type FilterRailItem } from "@/components/FilterRail";
 import { LoginPrompt } from "@/components/LoginPrompt";
@@ -678,28 +679,39 @@ function UserRow({ result: { user, snippet } }: { result: UserSearchResult }) {
 
 // The author/timestamp header every content row shares.
 function RowHeading({
+  authorId,
   label,
   handle,
   createdAt,
   detail,
 }: {
+  // Whose name `label` is, when it's a person's — hovering it then previews
+  // their profile (issue #562). A message hit is labelled by its chat.
+  authorId?: number;
   label: string;
   // The author's `@username` when `label` is a display name (issue #526).
   handle?: string;
   createdAt: number;
   detail?: string;
 }) {
+  const name = (
+    <span className="truncate font-medium">
+      {label}
+      {handle && (
+        <span className="ml-1.5 font-normal text-muted-foreground">
+          {handle}
+        </span>
+      )}
+    </span>
+  );
   return (
     <>
       <span className="flex items-center gap-2">
-        <span className="truncate font-medium">
-          {label}
-          {handle && (
-            <span className="ml-1.5 font-normal text-muted-foreground">
-              {handle}
-            </span>
-          )}
-        </span>
+        {authorId === undefined ? (
+          name
+        ) : (
+          <ProfileHoverCard userId={authorId}>{name}</ProfileHoverCard>
+        )}
         <span className="shrink-0 text-xs text-muted-foreground">
           {formatChatTimestamp(createdAt)}
         </span>
@@ -721,14 +733,19 @@ function PostRow({ result }: { result: PostSearchResult }) {
         data-search-result
         className={rowClass}
       >
-        <Avatar
-          name={userAvatarName(author)}
-          avatarUrl={author.avatarUrl}
-          avatarVariants={author.avatarVariants}
-          size="sm"
-        />
+        <ProfileHoverCard userId={author.id}>
+          <span className="shrink-0">
+            <Avatar
+              name={userAvatarName(author)}
+              avatarUrl={author.avatarUrl}
+              avatarVariants={author.avatarVariants}
+              size="sm"
+            />
+          </span>
+        </ProfileHoverCard>
         <span className="flex min-w-0 flex-col gap-0.5">
           <RowHeading
+            authorId={author.id}
             label={userLabel(author)}
             handle={userHandle(author)}
             createdAt={createdAt}
@@ -753,14 +770,19 @@ function CommentRow({ result }: { result: CommentSearchResult }) {
         data-search-result
         className={rowClass}
       >
-        <Avatar
-          name={userAvatarName(author)}
-          avatarUrl={author.avatarUrl}
-          avatarVariants={author.avatarVariants}
-          size="sm"
-        />
+        <ProfileHoverCard userId={author.id}>
+          <span className="shrink-0">
+            <Avatar
+              name={userAvatarName(author)}
+              avatarUrl={author.avatarUrl}
+              avatarVariants={author.avatarVariants}
+              size="sm"
+            />
+          </span>
+        </ProfileHoverCard>
         <span className="flex min-w-0 flex-col gap-0.5">
           <RowHeading
+            authorId={author.id}
             label={userLabel(author)}
             handle={userHandle(author)}
             createdAt={createdAt}

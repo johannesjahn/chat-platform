@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
+import { ProfileHoverCard } from "@/components/ProfileHoverCard";
 import { ReactionAddButton, ReactionList } from "@/components/CommentsSection";
 import { Lightbox } from "@/components/Lightbox";
 import { MentionText } from "@/components/MentionText";
@@ -608,19 +609,21 @@ export function MessageBubble({
         />
       )}
       {!isOwn && senderAvatar && (
-        <Link
-          to="/users/$id"
-          params={{ id: String(message.senderId) }}
-          className="shrink-0 self-end"
-          aria-label={senderLabel ? `${senderLabel}'s profile` : "Profile"}
-        >
-          <Avatar
-            name={senderAvatar.name}
-            avatarUrl={senderAvatar.avatarUrl}
-            avatarVariants={senderAvatar.avatarVariants}
-            size="sm"
-          />
-        </Link>
+        <ProfileHoverCard userId={message.senderId}>
+          <Link
+            to="/users/$id"
+            params={{ id: String(message.senderId) }}
+            className="shrink-0 self-end"
+            aria-label={senderLabel ? `${senderLabel}'s profile` : "Profile"}
+          >
+            <Avatar
+              name={senderAvatar.name}
+              avatarUrl={senderAvatar.avatarUrl}
+              avatarVariants={senderAvatar.avatarVariants}
+              size="sm"
+            />
+          </Link>
+        </ProfileHoverCard>
       )}
 
       {isOwn && !isEditing && (
@@ -715,18 +718,20 @@ export function MessageBubble({
           )}
         >
           {senderLabel && !isOwn && (
-            <Link
-              to="/users/$id"
-              params={{ id: String(message.senderId) }}
-              className="w-fit text-xs font-semibold text-primary hover:underline"
-            >
-              {senderLabel}
-              {senderHandle && (
-                <span className="ml-1 font-normal text-muted-foreground">
-                  {senderHandle}
-                </span>
-              )}
-            </Link>
+            <ProfileHoverCard userId={message.senderId}>
+              <Link
+                to="/users/$id"
+                params={{ id: String(message.senderId) }}
+                className="w-fit text-xs font-semibold text-primary hover:underline"
+              >
+                {senderLabel}
+                {senderHandle && (
+                  <span className="ml-1 font-normal text-muted-foreground">
+                    {senderHandle}
+                  </span>
+                )}
+              </Link>
+            </ProfileHoverCard>
           )}
 
           {quotedParent}
