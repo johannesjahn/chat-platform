@@ -8761,8 +8761,14 @@
         "properties": {
           "color": {
             "type": "integer",
-            "minimum": 0,
-            "maximum": 9
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "allOf": [
+              {
+                "minimum": 0,
+                "maximum": 9
+              }
+            ]
           },
           "brush": {
             "$ref": "#/components/schemas/DrawingBrush"
@@ -8771,8 +8777,14 @@
             "type": "array",
             "items": {
               "type": "integer",
-              "minimum": 0,
-              "maximum": 800
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "allOf": [
+                {
+                  "minimum": 0,
+                  "maximum": 800
+                }
+              ]
             },
             "minItems": 2,
             "maxItems": 12000
@@ -8910,7 +8922,13 @@
         "properties": {
           "answer": {
             "type": "integer",
-            "minimum": 0
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "allOf": [
+              {
+                "minimum": 0
+              }
+            ]
           }
         },
         "required": [
@@ -8960,8 +8978,14 @@
           },
           "rounds": {
             "type": "integer",
-            "minimum": 1,
-            "maximum": 3
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "allOf": [
+              {
+                "minimum": 1,
+                "maximum": 3
+              }
+            ]
           }
         },
         "required": [
@@ -9131,6 +9155,8 @@
         "properties": {
           "userId": {
             "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
             "exclusiveMinimum": 0
           }
         },
@@ -9165,8 +9191,14 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 0,
-                "maximum": 10000
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "allOf": [
+                  {
+                    "minimum": 0,
+                    "maximum": 10000
+                  }
+                ]
               },
               {
                 "type": "null"
@@ -9226,8 +9258,14 @@
           },
           "errors": {
             "type": "integer",
-            "minimum": 0,
-            "maximum": 100000
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "allOf": [
+              {
+                "minimum": 0,
+                "maximum": 100000
+              }
+            ]
           }
         },
         "required": [
@@ -10669,8 +10707,14 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 1,
-                "maximum": 720
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "allOf": [
+                  {
+                    "minimum": 1,
+                    "maximum": 720
+                  }
+                ]
               },
               {
                 "type": "null"
@@ -10681,8 +10725,14 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 1,
-                "maximum": 20
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "allOf": [
+                  {
+                    "minimum": 1,
+                    "maximum": 20
+                  }
+                ]
               },
               {
                 "type": "null"
@@ -11764,8 +11814,14 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": 1,
-                "maximum": 43200
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "allOf": [
+                  {
+                    "minimum": 1,
+                    "maximum": 43200
+                  }
+                ]
               },
               {
                 "type": "null"
