@@ -1,10 +1,18 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  Navigate,
+  useNavigate,
+  useRouter,
+  useRouterState,
+} from "@tanstack/react-router";
 import { Loader2, PlusCircle, Sparkles } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { FeedRail } from "@/components/feed/FeedRail";
 import { InlineComposer } from "@/components/feed/InlineComposer";
+import { PostOverlay } from "@/components/feed/PostOverlay";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PendingPostCard } from "@/components/PendingPostCard";
 import { PostCard, PostCardSkeleton } from "@/components/PostCard";
@@ -14,7 +22,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
-import { useMediaQuery } from "@/lib/media";
+import { useIsDesktop, useMediaQuery } from "@/lib/media";
 import {
   dismissQueuedItem,
   replayQueue,
@@ -26,7 +34,17 @@ import { postsFeedQueryKey, usePostsFeed } from "@/lib/posts";
 import { useUserSummariesById, userHandle, userLabel } from "@/lib/users";
 import { staticTitle } from "@/lib/title";
 
+type FeedSearch = {
+  // The post open in the desktop overlay (issue #561). Only ever reached
+  // through a masked link, so the address bar shows `/posts/$id` instead.
+  post?: number;
+};
+
 export const Route = createFileRoute("/")({
+  validateSearch: (search: Record<string, unknown>): FeedSearch => {
+    const post = Number(search.post);
+    return Number.isInteger(post) && post > 0 ? { post } : {};
+  },
   head: () => staticTitle("Feed"),
   component: PostsFeedPage,
 });
@@ -37,6 +55,26 @@ function PostsFeedPage() {
   const isOnline = useOnlineStatus();
   // Tailwind's `xl` — where the right rail fits beside the feed column.
   const showRail = useMediaQuery("(min-width: 80rem)");
+  const isDesktop = useIsDesktop();
+  const { post: openPostId } = Route.useSearch();
+  const router = useRouter();
+  const navigate = useNavigate();
+  const overlayIsMasked = useRouterState({
+    select: (state) => state.location.maskedLocation !== undefined,
+  });
+  // Opening the overlay pushed a history entry, so closing it is Back —
+  // which is also what the browser's own Back does. An unmasked `?post=`
+  // (typed in by hand) has no entry of ours behind it; that one is replaced.
+  const closePost = () => {
+    if (overlayIsMasked) router.history.back();
+    else
+      void navigate({
+        to: "/",
+        search: (prev) => ({ ...prev, post: undefined }),
+        replace: true,
+        resetScroll: false,
+      });
+  };
 
   const {
     data,
@@ -202,6 +240,7 @@ function PostsFeedPage() {
                   }
                   onDelete={() => handleDelete(post.id)}
                   isDeleting={deletingId === post.id}
+                  openPost={isDesktop ? "overlay" : "page"}
                   // The row's place in the cascade; `stagger-in` turns it
                   // into the delay (see styles.css), capped so a long page
                   // doesn't animate its tail in half a second late.
@@ -229,6 +268,20 @@ function PostsFeedPage() {
         )}
       </div>
       {showRail && session && <FeedRail session={session} />}
+      {/* Below `lg` a post opens as its own page, as it always has — an
+          overlay URL that lands there (a resize past the breakpoint) is
+          turned into that page. */}
+      {isDesktop ? (
+        <PostOverlay postId={openPostId} onClose={closePost} />
+      ) : (
+        openPostId !== undefined && (
+          <Navigate
+            to="/posts/$id"
+            params={{ id: String(openPostId) }}
+            replace
+          />
+        )
+      )}
     </main>
   );
 }

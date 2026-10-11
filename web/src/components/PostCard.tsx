@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import {
   ImageIcon,
   Loader2,
+  Maximize2,
   MessageSquare,
   Paperclip,
   Pencil,
@@ -50,6 +51,11 @@ type PostCardProps = {
   // exists so one post can't dominate a list (feed, profile); the post's own
   // page is where you go to read all of it (issue #527).
   fullText?: boolean;
+  // Adds an "Open post" link to the post's full view: its page, or — the
+  // feed on a desktop — the overlay over the feed (issue #561), which the
+  // address bar still shows as `/posts/$id` (route masking). Unset on the
+  // post's own page and in previews that already link to it.
+  openPost?: "page" | "overlay";
   style?: CSSProperties;
 };
 
@@ -95,6 +101,7 @@ export function PostCard({
   onDelete,
   isDeleting,
   fullText = false,
+  openPost,
   style,
 }: PostCardProps) {
   const wasEdited = post.updatedAt !== post.createdAt;
@@ -313,19 +320,60 @@ export function PostCard({
             )}
             <DisclosureChevron open={showComments} className="size-3.5" />
           </Button>
-          {/* Only surface a content-type badge for media posts — labelling
-              every plain-text post "Text" was pure noise. */}
-          {post.contentType === "image_url" ? (
-            <span className="ml-auto flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
-              <ImageIcon className="size-3.5" />
-              Image
-            </span>
-          ) : post.contentType === "attachment" ? (
-            <span className="ml-auto flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
-              <Paperclip className="size-3.5" />
-              Attachment
-            </span>
-          ) : null}
+          <div className="ml-auto flex items-center gap-1">
+            {/* Only surface a content-type badge for media posts — labelling
+                every plain-text post "Text" was pure noise. */}
+            {post.contentType === "image_url" ? (
+              <span className="flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
+                <ImageIcon className="size-3.5" />
+                Image
+              </span>
+            ) : post.contentType === "attachment" ? (
+              <span className="flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
+                <Paperclip className="size-3.5" />
+                Attachment
+              </span>
+            ) : null}
+            {openPost && (
+              <Button
+                asChild
+                size="icon"
+                variant="ghost"
+                className="size-8 text-muted-foreground"
+              >
+                {openPost === "overlay" ? (
+                  <Link
+                    to="/"
+                    search={{ post: post.id }}
+                    // The address bar reads `/posts/$id`, so the URL is
+                    // shareable and a reload lands on the full page.
+                    mask={{
+                      to: "/posts/$id",
+                      params: { id: String(post.id) },
+                      unmaskOnReload: true,
+                    }}
+                    // Same page underneath: the feed stays where it was.
+                    resetScroll={false}
+                    aria-label="Open post"
+                    title="Open post"
+                    data-open-post
+                  >
+                    <Maximize2 className="size-4" />
+                  </Link>
+                ) : (
+                  <Link
+                    to="/posts/$id"
+                    params={{ id: String(post.id) }}
+                    aria-label="Open post"
+                    title="Open post"
+                    data-open-post
+                  >
+                    <Maximize2 className="size-4" />
+                  </Link>
+                )}
+              </Button>
+            )}
+          </div>
         </div>
         {reactionError && (
           <p className="px-3 pb-2 text-xs text-destructive">{reactionError}</p>

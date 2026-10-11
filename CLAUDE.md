@@ -371,6 +371,12 @@ bar, the immersive chat shell and the phone menu stay exactly as they were.
   [`lib/chatDock.ts`](web/src/lib/chatDock.ts): docked windows on every
   non-`/chats` page at `lg`+, persisted per user and device. "Message" on a
   profile or the users list opens one (`useStartDirectChat`).
+- **Post overlay.** At `lg`+ a feed card's "Open post" link opens the post
+  over the feed ([`PostOverlay`](web/src/components/feed/PostOverlay.tsx),
+  issue #561): it navigates to `/?post=<id>` masked as `/posts/<id>`
+  (`unmaskOnReload`), so the URL is shareable, Back closes it, the feed
+  keeps its scroll, and a reload or direct load is the full page. Both
+  render [`PostDetail`](web/src/components/PostDetail.tsx) — don't fork it.
 - **Overlays and keys.** The command palette and the shortcut sheet are
   opened through [`lib/shell.ts`](web/src/lib/shell.ts); the palette has a
   `search` mode (`/`, the sidebar button — Enter goes to `/search`) and a

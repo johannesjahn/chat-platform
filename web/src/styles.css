@@ -1056,6 +1056,37 @@ html[data-app-shell="immersive"] [data-app-column] {
     var(--motion-ease-collapse) both;
 }
 
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateX(2.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* A side panel's entrance (the feed's post overlay): it slides in from the
+   right edge it's docked to on the dialog's curve, while the backdrop blurs
+   up behind it (`animate-backdrop-blur-in`). */
+@utility animate-sheet-in {
+  animation: sheet-in 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes sheet-out {
+  to {
+    opacity: 0;
+    transform: translateX(2.5rem);
+  }
+}
+
+/* Its exit, on the collapse timing like `animate-pop-close`, paired with
+   `animate-backdrop-fade-out`. */
+@utility animate-sheet-out {
+  animation: sheet-out var(--motion-collapse) var(--motion-ease-collapse) both;
+}
+
 /* ───────────────────────────────────────────────────────────────────────────
    Disclosure motion
 
