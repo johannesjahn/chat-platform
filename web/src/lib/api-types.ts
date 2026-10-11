@@ -1400,9 +1400,9 @@ export interface components {
             revealAt: number | null;
         };
         DrawingStroke: {
-            color: number;
+            color: number & unknown;
             brush: components["schemas"]["DrawingBrush"];
-            points: number[];
+            points: (number & unknown)[];
         };
         /** @enum {string} */
         DrawingBrush: "thin" | "thick";
@@ -1426,7 +1426,7 @@ export interface components {
         /** @enum {string} */
         GameLobbyPhase: "waiting" | "countdown" | "racing" | "finished";
         SubmitVoteBody: {
-            answer: number;
+            answer: number & unknown;
         };
         SubmitBluffBody: {
             text: string;
@@ -1436,7 +1436,7 @@ export interface components {
         };
         DrawingSettingsBody: {
             packs: string[];
-            rounds: number;
+            rounds: number & unknown;
         };
         DrawingPackList: {
             packs: components["schemas"]["DrawingPack"][];
@@ -1483,14 +1483,14 @@ export interface components {
         };
         ReflexTap: {
             early: boolean;
-            reactionMs: number | null;
+            reactionMs: (number & unknown) | null;
             direction: components["schemas"]["ReflexDirection"] | null;
             x: number | null;
             y: number | null;
         };
         FinishRaceBody: {
             typed: string;
-            errors: number;
+            errors: number & unknown;
         };
         GameLobby_1: {
             id: number;
@@ -1766,8 +1766,8 @@ export interface components {
             revokedAt: number | null;
         };
         CreateChatInviteBody: {
-            expiresInHours?: number | null;
-            maxUses?: number | null;
+            expiresInHours?: (number & unknown) | null;
+            maxUses?: (number & unknown) | null;
         };
         PinMessageBody: {
             messageId: number;
@@ -1977,7 +1977,7 @@ export interface components {
         UpdateStatusBody: {
             statusText: string | null;
             statusEmoji: string | null;
-            expiresInMinutes?: number | null;
+            expiresInMinutes?: (number & unknown) | null;
         };
         UpdateUserRoleBody: {
             role: components["schemas"]["UserRole"];
