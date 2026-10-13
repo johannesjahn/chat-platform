@@ -1,4 +1,8 @@
-import { type InfiniteData, useInfiniteQuery } from "@tanstack/react-query";
+import {
+  type InfiniteData,
+  infiniteQueryOptions,
+  useInfiniteQuery,
+} from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
@@ -121,10 +125,16 @@ export function usePostsFeed(enabled: boolean) {
 // `usePostsFeed`, just scoped to one author server-side (`GET
 // /users/{id}/posts`), and its response additionally carries `totalCount`
 // (the profile's "N posts" stat).
+//
+// The options are shared with the profile route's loader, which warms the
+// first page before the page is swapped in (see routes/users/$id.tsx).
 export function useUserPosts(userId: number, enabled: boolean) {
-  return useInfiniteQuery({
+  return useInfiniteQuery({ ...userPostsQueryOptions(userId), enabled });
+}
+
+export function userPostsQueryOptions(userId: number) {
+  return infiniteQueryOptions({
     queryKey: userPostsQueryKey(userId),
-    enabled,
     initialPageParam: null as string | null,
     queryFn: async ({ pageParam, signal }) => {
       const limit =
