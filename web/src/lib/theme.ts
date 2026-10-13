@@ -24,8 +24,8 @@ const DARK_MEDIA_QUERY = "(prefers-color-scheme: dark)";
 // The browser-chrome color (`<meta name="theme-color">`) per theme — the
 // page background, so the status bar and the app read as one surface.
 export const THEME_COLORS: Record<ResolvedTheme, string> = {
-  light: "#f8faf4",
-  dark: "#101321",
+  light: "#f6f7fd",
+  dark: "#081221",
 };
 
 export const THEME_PREFERENCES: ReadonlyArray<ThemePreference> = [
@@ -204,4 +204,4 @@ export const THEME_BOOT_SCRIPT =
   'r.classList.add(d?"dark":"light");r.style.colorScheme=d?"dark":"light";' +
   "var m=document.querySelector('meta[name=\"theme-color\"]');" +
   'if(!m){m=document.createElement("meta");m.name="theme-color";document.head.appendChild(m);}' +
-  'm.content=d?"#101321":"#f8faf4";}catch(e){r.classList.add("dark");}})();';
+  'm.content=d?"#081221":"#f6f7fd";}catch(e){r.classList.add("dark");}})();';
