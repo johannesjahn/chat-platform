@@ -1,6 +1,7 @@
 import { createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 import { NotFoundPage, RouteErrorPage } from "./components/RouteFallbacks";
+import { settlePageEntrance } from "./lib/pageEntrance";
 
 export function getRouter() {
   const router = createRouter({
@@ -33,6 +34,13 @@ export function getRouter() {
   // that support view-transition types.)
   router.subscribe("onBeforeNavigate", ({ pathChanged }) => {
     if (!pathChanged) router.shouldViewTransition = false;
+  });
+  // The page enters through the view transition, so content it rendered
+  // from the cache shouldn't then play its own entrance on top (see
+  // lib/pageEntrance.ts). Same `pathChanged` line as above: a search-param
+  // update (the post overlay, a filter) keeps its own enter animations.
+  router.subscribe("onRendered", ({ pathChanged }) => {
+    if (pathChanged) settlePageEntrance();
   });
   return router;
 }
