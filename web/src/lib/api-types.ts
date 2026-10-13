@@ -1400,9 +1400,9 @@ export interface components {
             revealAt: number | null;
         };
         DrawingStroke: {
-            color: number & unknown;
+            color: number;
             brush: components["schemas"]["DrawingBrush"];
-            points: (number & unknown)[];
+            points: number[];
         };
         /** @enum {string} */
         DrawingBrush: "thin" | "thick";
@@ -1426,7 +1426,7 @@ export interface components {
         /** @enum {string} */
         GameLobbyPhase: "waiting" | "countdown" | "racing" | "finished";
         SubmitVoteBody: {
-            answer: number & unknown;
+            answer: number;
         };
         SubmitBluffBody: {
             text: string;
@@ -1436,7 +1436,7 @@ export interface components {
         };
         DrawingSettingsBody: {
             packs: string[];
-            rounds: number & unknown;
+            rounds: number;
         };
         DrawingPackList: {
             packs: components["schemas"]["DrawingPack"][];
@@ -1483,14 +1483,14 @@ export interface components {
         };
         ReflexTap: {
             early: boolean;
-            reactionMs: (number & unknown) | null;
+            reactionMs: number | null;
             direction: components["schemas"]["ReflexDirection"] | null;
             x: number | null;
             y: number | null;
         };
         FinishRaceBody: {
             typed: string;
-            errors: number & unknown;
+            errors: number;
         };
         GameLobby_1: {
             id: number;
@@ -1766,8 +1766,8 @@ export interface components {
             revokedAt: number | null;
         };
         CreateChatInviteBody: {
-            expiresInHours?: (number & unknown) | null;
-            maxUses?: (number & unknown) | null;
+            expiresInHours?: number | null;
+            maxUses?: number | null;
         };
         PinMessageBody: {
             messageId: number;
@@ -1977,7 +1977,7 @@ export interface components {
         UpdateStatusBody: {
             statusText: string | null;
             statusEmoji: string | null;
-            expiresInMinutes?: (number & unknown) | null;
+            expiresInMinutes?: number | null;
         };
         UpdateUserRoleBody: {
             role: components["schemas"]["UserRole"];
@@ -2000,7 +2000,7 @@ export interface components {
         };
         ChangePasswordBody: {
             currentPassword: string;
-            newPassword: string & unknown;
+            newPassword: string;
         };
         LogoutBody: {
             refreshToken: string;
@@ -2035,8 +2035,8 @@ export interface components {
             statusExpiresAt: number | null;
         };
         RegisterBody: {
-            username: string & (unknown & unknown);
-            password: string & unknown;
+            username: string & unknown;
+            password: string;
         };
         UserPostsPage: {
             posts: components["schemas"]["Post"][];

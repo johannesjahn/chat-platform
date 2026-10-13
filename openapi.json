@@ -8761,14 +8761,8 @@
         "properties": {
           "color": {
             "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991,
-            "allOf": [
-              {
-                "minimum": 0,
-                "maximum": 9
-              }
-            ]
+            "minimum": 0,
+            "maximum": 9
           },
           "brush": {
             "$ref": "#/components/schemas/DrawingBrush"
@@ -8777,14 +8771,8 @@
             "type": "array",
             "items": {
               "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991,
-              "allOf": [
-                {
-                  "minimum": 0,
-                  "maximum": 800
-                }
-              ]
+              "minimum": 0,
+              "maximum": 800
             },
             "minItems": 2,
             "maxItems": 12000
@@ -8922,13 +8910,8 @@
         "properties": {
           "answer": {
             "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991,
-            "allOf": [
-              {
-                "minimum": 0
-              }
-            ]
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -8978,14 +8961,8 @@
           },
           "rounds": {
             "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991,
-            "allOf": [
-              {
-                "minimum": 1,
-                "maximum": 3
-              }
-            ]
+            "minimum": 1,
+            "maximum": 3
           }
         },
         "required": [
@@ -9155,7 +9132,6 @@
         "properties": {
           "userId": {
             "type": "integer",
-            "minimum": -9007199254740991,
             "maximum": 9007199254740991,
             "exclusiveMinimum": 0
           }
@@ -9191,14 +9167,8 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991,
-                "allOf": [
-                  {
-                    "minimum": 0,
-                    "maximum": 10000
-                  }
-                ]
+                "minimum": 0,
+                "maximum": 10000
               },
               {
                 "type": "null"
@@ -9258,14 +9228,8 @@
           },
           "errors": {
             "type": "integer",
-            "minimum": -9007199254740991,
-            "maximum": 9007199254740991,
-            "allOf": [
-              {
-                "minimum": 0,
-                "maximum": 100000
-              }
-            ]
+            "minimum": 0,
+            "maximum": 100000
           }
         },
         "required": [
@@ -10707,14 +10671,8 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991,
-                "allOf": [
-                  {
-                    "minimum": 1,
-                    "maximum": 720
-                  }
-                ]
+                "minimum": 1,
+                "maximum": 720
               },
               {
                 "type": "null"
@@ -10725,14 +10683,8 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991,
-                "allOf": [
-                  {
-                    "minimum": 1,
-                    "maximum": 20
-                  }
-                ]
+                "minimum": 1,
+                "maximum": 20
               },
               {
                 "type": "null"
@@ -11814,14 +11766,8 @@
             "anyOf": [
               {
                 "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991,
-                "allOf": [
-                  {
-                    "minimum": 1,
-                    "maximum": 43200
-                  }
-                ]
+                "minimum": 1,
+                "maximum": 43200
               },
               {
                 "type": "null"
@@ -11940,13 +11886,8 @@
           },
           "newPassword": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 128,
-            "allOf": [
-              {
-                "minLength": 4
-              }
-            ]
+            "minLength": 4,
+            "maxLength": 128
           }
         },
         "required": [
@@ -12143,12 +12084,9 @@
           "username": {
             "type": "string",
             "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "minLength": 1,
+            "minLength": 2,
             "maxLength": 32,
             "allOf": [
-              {
-                "minLength": 2
-              },
               {
                 "pattern": "^[A-Za-z0-9_.-]*[A-Za-z0-9_]$"
               }
@@ -12156,13 +12094,8 @@
           },
           "password": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 128,
-            "allOf": [
-              {
-                "minLength": 4
-              }
-            ]
+            "minLength": 4,
+            "maxLength": 128
           }
         },
         "required": [
