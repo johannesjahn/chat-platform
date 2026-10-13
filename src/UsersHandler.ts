@@ -42,6 +42,7 @@ import {
 } from "./avatars.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { processAvatar } from "./ImageProcessing.ts";
+import { withMediaProcessingPermit } from "./MediaProcessingLimit.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
 import { authEventsTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import {
@@ -1044,7 +1045,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 message:
                   err instanceof Error ? err.message : "Invalid avatar image",
               }),
-          });
+          }).pipe(withMediaProcessingPermit);
 
           // The tokens the row points at *before* this upload — their objects
           // become orphans once the row is repointed below, so sweep them
