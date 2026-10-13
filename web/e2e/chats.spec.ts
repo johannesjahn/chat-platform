@@ -88,25 +88,25 @@ test("group chats can be created, renamed by the creator, and show all participa
   ).toBeVisible();
 
   // Only the creator can rename — the rename control shouldn't even render
-  // for B inside the group settings dialog, and the chat still shows up in
-  // B's list under the old name.
+  // for B in the chat details panel (the group settings modal below `xl`),
+  // and the chat still shows up in B's list under the old name.
   await pageB.goto("/chats");
   await expect(pageB.getByText("Playwright squad")).toBeVisible();
   await pageB.getByText("Playwright squad").click();
-  await pageB.getByRole("button", { name: "Manage group" }).click();
+  await pageB.getByRole("button", { name: "Chat details" }).click();
   await expect(pageB.getByRole("button", { name: "Rename chat" })).toHaveCount(
     0,
   );
 
-  await pageA.getByRole("button", { name: "Manage group" }).click();
+  await pageA.getByRole("button", { name: "Chat details" }).click();
   await pageA.getByRole("button", { name: "Rename chat" }).click();
   // Target the rename field specifically (placeholder) rather than a bare
   // "input" selector — the app header now also has a search input, so a
   // page-wide "input" would be ambiguous / hit the wrong field.
   await pageA.getByPlaceholder("Group name").fill("Renamed squad");
   await pageA.keyboard.press("Enter");
-  // Close the dialog so the assertion matches only the chat header title.
-  await pageA.getByRole("button", { name: "Close group settings" }).click();
+  // Close the panel so the assertion matches only the chat header title.
+  await pageA.getByRole("button", { name: "Close chat details" }).click();
   await expect(
     pageA.getByRole("main").getByText("Renamed squad"),
   ).toBeVisible();
@@ -315,7 +315,7 @@ test("the creator can add participants to a group chat, and the new participant 
     pageA.getByRole("main").getByText("2 participants"),
   ).toBeVisible();
 
-  await pageA.getByRole("button", { name: "Manage group" }).click();
+  await pageA.getByRole("button", { name: "Chat details" }).click();
   await pageA
     .getByRole("button", { name: "Add participants", exact: true })
     .click();

@@ -22,6 +22,7 @@ import {
 import { Avatar } from "@/components/Avatar";
 import { AvatarCropDialog } from "@/components/AvatarCropDialog";
 import { Button } from "@/components/ui/button";
+import { DetailsSection as Section } from "@/components/chat/DetailsSection";
 import { Collapse } from "@/components/ui/collapse";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -116,9 +117,9 @@ export function GroupManagementDialog({
   );
 }
 
-// Split out so the heavy hooks below only run while the dialog is actually
-// mounted (the wrapper returns null when closed), and so each open starts
-// from clean local state.
+// Split out so the heavy hooks in the sections only run while the dialog is
+// actually mounted (the wrapper returns null when closed), and so each open
+// starts from clean local state.
 function GroupManagementBody({
   chat,
   currentUser,
@@ -127,6 +128,81 @@ function GroupManagementBody({
   chat: Chat;
   currentUser: Session["user"];
   onClose: () => void;
+}) {
+  return (
+    <>
+      {/* Header — big group identity, participant count, close. */}
+      <div className="flex items-center gap-3 border-b border-border bg-gradient-to-b from-accent/40 to-transparent px-5 py-5">
+        <GroupIdentity chat={chat} />
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label="Close group settings"
+          onClick={onClose}
+        >
+          <X className="size-5" />
+        </Button>
+      </div>
+
+      <div className="flex flex-col gap-6 overflow-y-auto px-5 py-5">
+        <GroupSettingsSections
+          chat={chat}
+          currentUser={currentUser}
+          onLeft={onClose}
+        />
+      </div>
+    </>
+  );
+}
+
+// The group's avatar, name and member count — the top of both the modal and
+// the desktop details panel.
+export function GroupIdentity({ chat }: { chat: Chat }) {
+  const title = chat.title ?? "Group chat";
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-3">
+      {chat.avatarVariants ? (
+        <Avatar
+          name={title}
+          avatarVariants={chat.avatarVariants}
+          size="xl"
+          className="size-14"
+        />
+      ) : (
+        <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary ring-1 ring-inset ring-primary/20">
+          <Users className="size-7" />
+        </div>
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-lg font-semibold leading-tight">
+          {title}
+        </span>
+        <span className="text-sm text-muted-foreground">
+          {chat.participants.length} member
+          {chat.participants.length === 1 ? "" : "s"} · Group chat
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Everything you can do to a group chat, as stacked sections: avatar, name,
+ * members and roles, invite links, leave or delete. Rendered by the modal
+ * (below `xl`) and by the desktop chat details panel (issue #563), so there's
+ * one copy of it. Expects a parent that lays its children out with a gap.
+ *
+ * `onLeft` runs once you've left or deleted the chat, just before navigating
+ * back to `/chats`.
+ */
+export function GroupSettingsSections({
+  chat,
+  currentUser,
+  onLeft,
+}: {
+  chat: Chat;
+  currentUser: Session["user"];
+  onLeft?: () => void;
 }) {
   const chatId = chat.id;
   const queryClient = useQueryClient();
@@ -169,8 +245,9 @@ function GroupManagementBody({
   const [copiedInviteId, setCopiedInviteId] = useState<number | null>(null);
   const [avatarCropFile, setAvatarCropFile] = useState<File | null>(null);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
-  // Captured once on open so the render stays pure — good enough for showing
-  // whether an invite has lapsed; it refreshes each time the dialog reopens.
+  // Captured once on mount so the render stays pure — good enough for showing
+  // whether an invite has lapsed; it refreshes each time the dialog reopens
+  // (or the panel opens on another chat).
   const [now] = useState(() => Date.now());
 
   const addParticipantsQuery = useDebouncedValue(
@@ -359,7 +436,7 @@ function GroupManagementBody({
     try {
       await leaveChat.mutateAsync({ params: { path: { id: String(chatId) } } });
       await queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
-      onClose();
+      onLeft?.();
       await router.navigate({ to: "/chats" });
     } catch (err) {
       setActionError(errorMessage(err));
@@ -380,7 +457,7 @@ function GroupManagementBody({
         params: { path: { id: String(chatId) } },
       });
       await queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
-      onClose();
+      onLeft?.();
       await router.navigate({ to: "/chats" });
     } catch (err) {
       setActionError(errorMessage(err));
@@ -392,474 +469,433 @@ function GroupManagementBody({
 
   return (
     <>
-      {/* Header — big group identity, participant count, close. */}
-      <div className="flex items-center gap-3 border-b border-border bg-gradient-to-b from-accent/40 to-transparent px-5 py-5">
-        {chat.avatarVariants ? (
-          <Avatar
-            name={title}
-            avatarVariants={chat.avatarVariants}
-            size="xl"
-            className="size-14"
-          />
-        ) : (
-          <div className="flex size-14 items-center justify-center rounded-2xl bg-primary/15 text-primary ring-1 ring-inset ring-primary/20">
-            <Users className="size-7" />
-          </div>
-        )}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-lg font-semibold leading-tight">
-            {title}
-          </span>
-          <span className="text-sm text-muted-foreground">
-            {chat.participants.length} member
-            {chat.participants.length === 1 ? "" : "s"} · Group chat
-          </span>
-        </div>
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label="Close group settings"
-          onClick={onClose}
-        >
-          <X className="size-5" />
-        </Button>
-      </div>
+      {actionError && (
+        <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive motion-safe:animate-in motion-safe:fade-in-0">
+          {actionError}
+        </p>
+      )}
 
-      <div className="flex flex-col gap-6 overflow-y-auto px-5 py-5">
-        {actionError && (
-          <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive motion-safe:animate-in motion-safe:fade-in-0">
-            {actionError}
-          </p>
-        )}
+      {avatarCropFile && (
+        <AvatarCropDialog
+          file={avatarCropFile}
+          onClose={() => setAvatarCropFile(null)}
+          upload={(file, crop) => uploadChatAvatar(chatId, file, crop)}
+          onUploaded={async () => {
+            setAvatarCropFile(null);
+            await invalidateChat();
+            await queryClient.invalidateQueries({
+              queryKey: chatsListQueryKey,
+            });
+          }}
+        />
+      )}
 
-        {avatarCropFile && (
-          <AvatarCropDialog
-            file={avatarCropFile}
-            onClose={() => setAvatarCropFile(null)}
-            upload={(file, crop) => uploadChatAvatar(chatId, file, crop)}
-            onUploaded={async () => {
-              setAvatarCropFile(null);
-              await invalidateChat();
-              await queryClient.invalidateQueries({
-                queryKey: chatsListQueryKey,
-              });
-            }}
-          />
-        )}
-
-        {/* Group avatar */}
-        <Section
-          index={0}
-          icon={<ImageUp className="size-4" />}
-          title="Group avatar"
-          description={
-            canManage
-              ? "Shown wherever this group appears — the chat list, headers, and mentions."
-              : "Shown wherever this group appears."
-          }
-        >
-          <div className="flex items-center gap-4">
-            <Avatar
-              name={title}
-              avatarVariants={chat.avatarVariants}
-              size="xl"
-            />
-            {canManage && (
-              <div className="flex flex-1 flex-col gap-2">
-                <input
-                  ref={avatarFileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    if (!file) return;
-                    setActionError(null);
-                    if (!isAllowedAvatarFile(file)) {
-                      setActionError(
-                        "Avatars must be a JPEG, PNG, or WebP image.",
-                      );
-                      return;
-                    }
-                    if (file.size > MAX_AVATAR_UPLOAD_SIZE_BYTES) {
-                      setActionError(
-                        `File exceeds the ${formatBytes(MAX_AVATAR_UPLOAD_SIZE_BYTES)} limit`,
-                      );
-                      return;
-                    }
-                    setAvatarCropFile(file);
-                  }}
-                />
-                <div className="flex gap-2">
+      {/* Group avatar */}
+      <Section
+        index={0}
+        icon={<ImageUp className="size-4" />}
+        title="Group avatar"
+        description={
+          canManage
+            ? "Shown wherever this group appears — the chat list, headers, and mentions."
+            : "Shown wherever this group appears."
+        }
+      >
+        <div className="flex items-center gap-4">
+          <Avatar name={title} avatarVariants={chat.avatarVariants} size="xl" />
+          {canManage && (
+            <div className="flex flex-1 flex-col gap-2">
+              <input
+                ref={avatarFileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  setActionError(null);
+                  if (!isAllowedAvatarFile(file)) {
+                    setActionError(
+                      "Avatars must be a JPEG, PNG, or WebP image.",
+                    );
+                    return;
+                  }
+                  if (file.size > MAX_AVATAR_UPLOAD_SIZE_BYTES) {
+                    setActionError(
+                      `File exceeds the ${formatBytes(MAX_AVATAR_UPLOAD_SIZE_BYTES)} limit`,
+                    );
+                    return;
+                  }
+                  setAvatarCropFile(file);
+                }}
+              />
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="self-start"
+                  onClick={() => avatarFileInputRef.current?.click()}
+                >
+                  <ImageUp className="size-4" />
+                  Upload photo
+                </Button>
+                {chat.avatarVariants && (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="self-start"
-                    onClick={() => avatarFileInputRef.current?.click()}
+                    className="self-start text-destructive hover:text-destructive"
+                    disabled={deleteChatAvatar.isPending}
+                    onClick={() => void handleRemoveAvatar()}
                   >
-                    <ImageUp className="size-4" />
-                    Upload photo
+                    <Trash2 className="size-4" />
+                    Remove
                   </Button>
-                  {chat.avatarVariants && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="self-start text-destructive hover:text-destructive"
-                      disabled={deleteChatAvatar.isPending}
-                      onClick={() => void handleRemoveAvatar()}
-                    >
-                      <Trash2 className="size-4" />
-                      Remove
-                    </Button>
-                  )}
-                </div>
+                )}
               </div>
+            </div>
+          )}
+        </div>
+      </Section>
+
+      {/* Group name */}
+      <Section
+        index={1}
+        icon={<Pencil className="size-4" />}
+        title="Group name"
+        description="This is what everyone sees at the top of the conversation."
+      >
+        {renaming ? (
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleRenameSubmit();
+            }}
+          >
+            <Input
+              autoFocus
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              maxLength={100}
+              placeholder="Group name"
+            />
+            <Button
+              type="submit"
+              disabled={updateChat.isPending || !titleDraft.trim()}
+            >
+              {updateChat.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Check className="size-4" />
+              )}
+              Save
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setRenaming(false)}
+            >
+              Cancel
+            </Button>
+          </form>
+        ) : (
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/60 px-3.5 py-2.5">
+            <span className="truncate font-medium">{title}</span>
+            {canManage && (
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label="Rename chat"
+                onClick={() => {
+                  setTitleDraft(chat.title ?? "");
+                  setRenaming(true);
+                }}
+              >
+                <Pencil className="size-3.5" />
+                Rename
+              </Button>
             )}
           </div>
-        </Section>
+        )}
+      </Section>
 
-        {/* Group name */}
-        <Section
-          index={1}
-          icon={<Pencil className="size-4" />}
-          title="Group name"
-          description="This is what everyone sees at the top of the conversation."
-        >
-          {renaming ? (
-            <form
-              className="flex items-center gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void handleRenameSubmit();
-              }}
-            >
-              <Input
-                autoFocus
-                value={titleDraft}
-                onChange={(e) => setTitleDraft(e.target.value)}
-                maxLength={100}
-                placeholder="Group name"
+      {/* Members */}
+      <Section
+        index={2}
+        icon={<Users className="size-4" />}
+        title={`Members · ${chat.participants.length}`}
+        description={
+          canManage
+            ? "Promote members to admins, hand over ownership, or remove people."
+            : "Everyone currently in this conversation."
+        }
+      >
+        <ul className="flex flex-col gap-1.5">
+          {chat.participants.map((p, i) => {
+            const isOwner = chat.createdBy === p.userId;
+            const isSelf = p.userId === currentUser.id;
+            const label = userLabel(p);
+            const canRemove =
+              canManage &&
+              !isSelf &&
+              (!isOwner || myRole === "owner" || currentUser.role === "admin");
+            return (
+              <ParticipantRow
+                key={p.userId}
+                participant={p}
+                index={i}
+                isOwner={isOwner}
+                isSelf={isSelf}
+                label={label}
+                canRemove={canRemove}
+                canManageRoles={canManageRoles}
+                canClaimOwnership={canClaimOwnership}
+                updateRolePending={updateParticipantRole.isPending}
+                transferOwnershipPending={transferOwnership.isPending}
+                removePending={removeParticipant.isPending}
+                onUpdateRole={(userId, role) =>
+                  void handleUpdateParticipantRole(userId, role)
+                }
+                onTransferOwnership={(userId, label) =>
+                  void handleTransferOwnership(userId, label)
+                }
+                onRemove={(userId, label) =>
+                  void handleRemoveParticipant(userId, label)
+                }
               />
-              <Button
-                type="submit"
-                disabled={updateChat.isPending || !titleDraft.trim()}
-              >
-                {updateChat.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Check className="size-4" />
-                )}
-                Save
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setRenaming(false)}
-              >
-                Cancel
-              </Button>
-            </form>
-          ) : (
-            <div className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/60 px-3.5 py-2.5">
-              <span className="truncate font-medium">{title}</span>
-              {canManage && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  aria-label="Rename chat"
-                  onClick={() => {
-                    setTitleDraft(chat.title ?? "");
-                    setRenaming(true);
-                  }}
-                >
-                  <Pencil className="size-3.5" />
-                  Rename
-                </Button>
-              )}
-            </div>
-          )}
-        </Section>
+            );
+          })}
+        </ul>
 
-        {/* Members */}
-        <Section
-          index={2}
-          icon={<Users className="size-4" />}
-          title={`Members · ${chat.participants.length}`}
-          description={
-            canManage
-              ? "Promote members to admins, hand over ownership, or remove people."
-              : "Everyone currently in this conversation."
-          }
-        >
-          <ul className="flex flex-col gap-1.5">
-            {chat.participants.map((p, i) => {
-              const isOwner = chat.createdBy === p.userId;
-              const isSelf = p.userId === currentUser.id;
-              const label = userLabel(p);
-              const canRemove =
-                canManage &&
-                !isSelf &&
-                (!isOwner ||
-                  myRole === "owner" ||
-                  currentUser.role === "admin");
-              return (
-                <ParticipantRow
-                  key={p.userId}
-                  participant={p}
-                  index={i}
-                  isOwner={isOwner}
-                  isSelf={isSelf}
-                  label={label}
-                  canRemove={canRemove}
-                  canManageRoles={canManageRoles}
-                  canClaimOwnership={canClaimOwnership}
-                  updateRolePending={updateParticipantRole.isPending}
-                  transferOwnershipPending={transferOwnership.isPending}
-                  removePending={removeParticipant.isPending}
-                  onUpdateRole={(userId, role) =>
-                    void handleUpdateParticipantRole(userId, role)
-                  }
-                  onTransferOwnership={(userId, label) =>
-                    void handleTransferOwnership(userId, label)
-                  }
-                  onRemove={(userId, label) =>
-                    void handleRemoveParticipant(userId, label)
-                  }
-                />
-              );
-            })}
-          </ul>
-
-          {canManage && (
-            <div className="mt-1">
-              {canAddMore ? (
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  aria-label="Add participants"
-                  onClick={() => {
-                    setAddingParticipants((v) => !v);
-                    setAddParticipantsSearch("");
-                    setSelectedToAdd([]);
-                  }}
-                >
-                  <UserPlus className="size-4" />
-                  {addingParticipants ? "Cancel" : "Add people"}
-                </Button>
-              ) : (
-                <p className="text-center text-xs text-muted-foreground">
-                  This group is full ({MAX_GROUP_PARTICIPANTS} members).
-                </p>
-              )}
-
-              <Collapse open={addingParticipants && canAddMore}>
-                <div className="mt-3 flex flex-col gap-2 rounded-xl border border-border bg-background/60 p-3">
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      autoFocus
-                      value={addParticipantsSearch}
-                      onChange={(e) => setAddParticipantsSearch(e.target.value)}
-                      placeholder="Search users to add…"
-                      className="pl-9"
-                    />
-                  </div>
-                  {!addParticipantsSearchReady ? (
-                    <p className="text-xs text-muted-foreground">
-                      Type at least {MIN_USER_SEARCH_QUERY_LENGTH} characters to
-                      search.
-                    </p>
-                  ) : userSearchLoading ? (
-                    <p className="text-xs text-muted-foreground">Searching…</p>
-                  ) : candidatesToAdd.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      No matching users to add.
-                    </p>
-                  ) : (
-                    <div className="flex max-h-44 flex-wrap gap-1.5 overflow-y-auto">
-                      {candidatesToAdd.map((u) => {
-                        const isSelected = selectedToAdd.includes(u.id);
-                        return (
-                          <button
-                            key={u.id}
-                            type="button"
-                            onClick={() =>
-                              setSelectedToAdd((prev) =>
-                                isSelected
-                                  ? prev.filter((id) => id !== u.id)
-                                  : [...prev, u.id],
-                              )
-                            }
-                            className={cn(
-                              "rounded-full border px-3 py-1.5 text-xs transition-colors duration-200 motion-safe:hover:scale-[1.03]",
-                              isSelected
-                                ? "border-primary bg-primary text-primary-foreground"
-                                : "border-border bg-background/60 hover:border-primary/40",
-                            )}
-                          >
-                            {userLabel(u)}
-                            {userHandle(u) && (
-                              <span
-                                className={cn(
-                                  "ml-1",
-                                  !isSelected && "text-muted-foreground",
-                                )}
-                              >
-                                {userHandle(u)}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <Button
-                    className="self-end"
-                    disabled={
-                      selectedToAdd.length === 0 || addParticipants.isPending
-                    }
-                    onClick={() => void handleAddParticipants()}
-                  >
-                    {addParticipants.isPending && (
-                      <Loader2 className="size-4 animate-spin" />
-                    )}
-                    Add {selectedToAdd.length || ""}
-                  </Button>
-                </div>
-              </Collapse>
-            </div>
-          )}
-        </Section>
-
-        {/* Invite links */}
         {canManage && (
-          <Section
-            index={3}
-            icon={<Link2 className="size-4" />}
-            title="Invite links"
-            description="Anyone with an active link can join this chat — revoke a link to cut off access."
-          >
-            <div className="flex flex-col gap-2">
-              {invitesLoading ? (
-                <p className="text-xs text-muted-foreground">Loading…</p>
-              ) : activeInvites.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-                  No active invite links yet.
-                </p>
-              ) : (
-                <ul className="flex flex-col gap-1.5">
-                  {activeInvites.map((invite) => {
-                    const expired =
-                      invite.expiresAt !== null && invite.expiresAt <= now;
-                    const usedUp =
-                      invite.maxUses !== null &&
-                      invite.useCount >= invite.maxUses;
-                    return (
-                      <li
-                        key={invite.id}
-                        className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/60 px-3 py-2"
-                      >
-                        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-                          {invite.code.slice(0, 12)}…
-                          {(expired || usedUp) && (
-                            <span className="ml-1 text-destructive">
-                              ({expired ? "expired" : "used up"})
-                            </span>
-                          )}
-                          {invite.maxUses !== null &&
-                            ` · ${invite.useCount}/${invite.maxUses} used`}
-                        </span>
-                        <span className="flex shrink-0 items-center gap-1">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="size-8"
-                            aria-label="Copy invite link"
-                            onClick={() =>
-                              void handleCopyInviteLink(invite.id, invite.code)
-                            }
-                          >
-                            {copiedInviteId === invite.id ? (
-                              <Check className="size-4 text-green-600" />
-                            ) : (
-                              <Copy className="size-4" />
-                            )}
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="size-8 text-destructive hover:text-destructive"
-                            aria-label="Revoke invite link"
-                            disabled={revokeInvite.isPending}
-                            onClick={() => void handleRevokeInvite(invite.id)}
-                          >
-                            <X className="size-4" />
-                          </Button>
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+          <div className="mt-1">
+            {canAddMore ? (
               <Button
                 variant="outline"
                 className="w-full"
-                disabled={createInvite.isPending}
-                onClick={() => void handleCreateInvite()}
+                aria-label="Add participants"
+                onClick={() => {
+                  setAddingParticipants((v) => !v);
+                  setAddParticipantsSearch("");
+                  setSelectedToAdd([]);
+                }}
               >
-                {createInvite.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Link2 className="size-4" />
-                )}
-                Create invite link
+                <UserPlus className="size-4" />
+                {addingParticipants ? "Cancel" : "Add people"}
               </Button>
-            </div>
-          </Section>
-        )}
+            ) : (
+              <p className="text-center text-xs text-muted-foreground">
+                This group is full ({MAX_GROUP_PARTICIPANTS} members).
+              </p>
+            )}
 
-        {/* Danger zone */}
+            <Collapse open={addingParticipants && canAddMore}>
+              <div className="mt-3 flex flex-col gap-2 rounded-xl border border-border bg-background/60 p-3">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    autoFocus
+                    value={addParticipantsSearch}
+                    onChange={(e) => setAddParticipantsSearch(e.target.value)}
+                    placeholder="Search users to add…"
+                    className="pl-9"
+                  />
+                </div>
+                {!addParticipantsSearchReady ? (
+                  <p className="text-xs text-muted-foreground">
+                    Type at least {MIN_USER_SEARCH_QUERY_LENGTH} characters to
+                    search.
+                  </p>
+                ) : userSearchLoading ? (
+                  <p className="text-xs text-muted-foreground">Searching…</p>
+                ) : candidatesToAdd.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No matching users to add.
+                  </p>
+                ) : (
+                  <div className="flex max-h-44 flex-wrap gap-1.5 overflow-y-auto">
+                    {candidatesToAdd.map((u) => {
+                      const isSelected = selectedToAdd.includes(u.id);
+                      return (
+                        <button
+                          key={u.id}
+                          type="button"
+                          onClick={() =>
+                            setSelectedToAdd((prev) =>
+                              isSelected
+                                ? prev.filter((id) => id !== u.id)
+                                : [...prev, u.id],
+                            )
+                          }
+                          className={cn(
+                            "rounded-full border px-3 py-1.5 text-xs transition-colors duration-200 motion-safe:hover:scale-[1.03]",
+                            isSelected
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-border bg-background/60 hover:border-primary/40",
+                          )}
+                        >
+                          {userLabel(u)}
+                          {userHandle(u) && (
+                            <span
+                              className={cn(
+                                "ml-1",
+                                !isSelected && "text-muted-foreground",
+                              )}
+                            >
+                              {userHandle(u)}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <Button
+                  className="self-end"
+                  disabled={
+                    selectedToAdd.length === 0 || addParticipants.isPending
+                  }
+                  onClick={() => void handleAddParticipants()}
+                >
+                  {addParticipants.isPending && (
+                    <Loader2 className="size-4 animate-spin" />
+                  )}
+                  Add {selectedToAdd.length || ""}
+                </Button>
+              </div>
+            </Collapse>
+          </div>
+        )}
+      </Section>
+
+      {/* Invite links */}
+      {canManage && (
         <Section
-          index={4}
-          icon={<LogOut className="size-4" />}
-          title="Leave or delete"
-          description="Leaving removes you from the chat. Deleting removes it for everyone."
+          index={3}
+          icon={<Link2 className="size-4" />}
+          title="Invite links"
+          description="Anyone with an active link can join this chat — revoke a link to cut off access."
         >
-          <div className="flex flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 sm:flex-row">
+          <div className="flex flex-col gap-2">
+            {invitesLoading ? (
+              <p className="text-xs text-muted-foreground">Loading…</p>
+            ) : activeInvites.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+                No active invite links yet.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {activeInvites.map((invite) => {
+                  const expired =
+                    invite.expiresAt !== null && invite.expiresAt <= now;
+                  const usedUp =
+                    invite.maxUses !== null &&
+                    invite.useCount >= invite.maxUses;
+                  return (
+                    <li
+                      key={invite.id}
+                      className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/60 px-3 py-2"
+                    >
+                      <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+                        {invite.code.slice(0, 12)}…
+                        {(expired || usedUp) && (
+                          <span className="ml-1 text-destructive">
+                            ({expired ? "expired" : "used up"})
+                          </span>
+                        )}
+                        {invite.maxUses !== null &&
+                          ` · ${invite.useCount}/${invite.maxUses} used`}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-8"
+                          aria-label="Copy invite link"
+                          onClick={() =>
+                            void handleCopyInviteLink(invite.id, invite.code)
+                          }
+                        >
+                          {copiedInviteId === invite.id ? (
+                            <Check className="size-4 text-green-600" />
+                          ) : (
+                            <Copy className="size-4" />
+                          )}
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="size-8 text-destructive hover:text-destructive"
+                          aria-label="Revoke invite link"
+                          disabled={revokeInvite.isPending}
+                          onClick={() => void handleRevokeInvite(invite.id)}
+                        >
+                          <X className="size-4" />
+                        </Button>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
             <Button
               variant="outline"
-              className="flex-1"
-              disabled={leaveChat.isPending}
-              onClick={() => void handleLeave()}
+              className="w-full"
+              disabled={createInvite.isPending}
+              onClick={() => void handleCreateInvite()}
             >
-              {leaveChat.isPending ? (
+              {createInvite.isPending ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
-                <LogOut className="size-4" />
+                <Link2 className="size-4" />
               )}
-              Leave chat
+              Create invite link
             </Button>
-            {canManage && (
-              <Button
-                variant="destructive"
-                className="flex-1"
-                disabled={deleteChat.isPending}
-                onClick={() => void handleDelete()}
-              >
-                {deleteChat.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Trash2 className="size-4" />
-                )}
-                Delete chat
-              </Button>
-            )}
           </div>
         </Section>
-      </div>
+      )}
+
+      {/* Danger zone */}
+      <Section
+        index={4}
+        icon={<LogOut className="size-4" />}
+        title="Leave or delete"
+        description="Leaving removes you from the chat. Deleting removes it for everyone."
+      >
+        <div className="flex flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 @sm:flex-row">
+          <Button
+            variant="outline"
+            className="flex-1"
+            disabled={leaveChat.isPending}
+            onClick={() => void handleLeave()}
+          >
+            {leaveChat.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <LogOut className="size-4" />
+            )}
+            Leave chat
+          </Button>
+          {canManage && (
+            <Button
+              variant="destructive"
+              className="flex-1"
+              disabled={deleteChat.isPending}
+              onClick={() => void handleDelete()}
+            >
+              {deleteChat.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+              Delete chat
+            </Button>
+          )}
+        </div>
+      </Section>
     </>
   );
 }
@@ -953,12 +989,12 @@ function ParticipantRow({
             {p.role === "admin" ? (
               <>
                 <ShieldOff className="size-3.5" />
-                <span className="hidden min-[420px]:inline">Unadmin</span>
+                <span className="hidden @[26rem]:inline">Unadmin</span>
               </>
             ) : (
               <>
                 <Shield className="size-3.5" />
-                <span className="hidden min-[420px]:inline">Make admin</span>
+                <span className="hidden @[26rem]:inline">Make admin</span>
               </>
             )}
           </Button>
@@ -973,7 +1009,7 @@ function ParticipantRow({
             onClick={() => onTransferOwnership(p.userId, actionLabel)}
           >
             <Crown className="size-3.5" />
-            <span className="hidden min-[420px]:inline">Make owner</span>
+            <span className="hidden @[26rem]:inline">Make owner</span>
           </Button>
         )}
         {canRemove && (
@@ -1017,39 +1053,4 @@ function RoleBadge({
     );
   }
   return <span className="text-xs text-muted-foreground">Member</span>;
-}
-
-// A labelled, staggered-in block: an icon + heading + one-line explanation,
-// then its controls. The explanation is what makes the panel self-explanatory
-// rather than a wall of mystery icons.
-function Section({
-  index,
-  icon,
-  title,
-  description,
-  children,
-}: {
-  index: number;
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      className="flex flex-col gap-3 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2"
-      style={{ animationDelay: `${index * 70}ms` }}
-    >
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-          {icon}
-        </div>
-        <div className="flex flex-col">
-          <h3 className="text-sm font-semibold">{title}</h3>
-          <p className="text-xs text-muted-foreground">{description}</p>
-        </div>
-      </div>
-      {children}
-    </section>
-  );
 }

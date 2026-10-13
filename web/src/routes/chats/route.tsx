@@ -7,11 +7,13 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { Link2, MessagesSquare, PlusCircle, Search } from "lucide-react";
+import { ChatDetailsPanel } from "@/components/chat/ChatDetailsPanel";
 import { ChatList, type ChatListFilter } from "@/components/ChatList";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/lib/auth";
+import { useChatDetailsAsPanel, useChatDetailsOpen } from "@/lib/chatDetails";
 import { useChatsList, useChatsTwoPane, type Chat } from "@/lib/chats";
 import { useResizablePane } from "@/lib/paneWidth";
 import { cn } from "@/lib/utils";
@@ -41,6 +43,10 @@ const SHOW_OPTIONS: ReadonlyArray<{
  * chats' unread badges stay in view while typing. The whole layout fills the
  * viewport (the immersive shell, minus the phone-only parts) and each pane
  * scrolls inside itself.
+ *
+ * At `xl`+ an open conversation can also have the chat details panel as a
+ * third pane on the right (issue #563), toggled from its header and
+ * remembered per device.
  */
 function ChatsLayout() {
   const session = useSession();
@@ -52,6 +58,8 @@ function ChatsLayout() {
   const { data } = useChatsList(!!session);
   const chats = data?.pages.flatMap((page) => page.chats) ?? [];
   useChatSwitchKeys(chats, activeChatId);
+  const detailsAsPanel = useChatDetailsAsPanel();
+  const detailsOpen = useChatDetailsOpen();
 
   const [filter, setFilter] = useState<ChatListFilter>({
     query: "",
@@ -172,6 +180,9 @@ function ChatsLayout() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
         <Outlet />
       </div>
+      {detailsAsPanel && detailsOpen && activeChatId !== undefined && (
+        <ChatDetailsPanel chatId={activeChatId} currentUser={session.user} />
+      )}
     </div>
   );
 }

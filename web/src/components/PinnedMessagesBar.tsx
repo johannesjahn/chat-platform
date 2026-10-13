@@ -6,22 +6,14 @@ import { Collapse, DisclosureChevron } from "@/components/ui/collapse";
 import { $api } from "@/lib/api";
 import {
   chatPinnedQueryKey,
+  messagePreview,
   patchCachedMessage,
   usePinnedMessages,
-  type ChatMessage,
   type ChatParticipant,
 } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
 import { userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
-
-// One-line preview of what a pinned message holds — its text, or a stand-in
-// for non-text content (mirrors `parentPreviewText` in MessageBubble).
-function messagePreview(message: ChatMessage): string {
-  if (message.contentType === "image_url") return "📷 Photo";
-  if (message.contentType === "attachment") return "📎 Attachment";
-  return message.content;
-}
 
 // A collapsible banner above the message thread listing the chat's pinned
 // messages (issue #223) — chat-wide, so every participant sees the same set.

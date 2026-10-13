@@ -367,6 +367,14 @@ bar, the immersive chat shell and the phone menu stay exactly as they were.
   (`variant="docked"`) — don't fork a second chat view. `useImmersiveShell`
   is reference-counted because the layout and the conversation both hold it;
   the root's `data-app-frame`/`data-app-column` boxes are what it clamps.
+- **Chat details panel.** At `xl`+ the chats layout grows an optional third
+  pane, [`ChatDetailsPanel`](web/src/components/chat/ChatDetailsPanel.tsx)
+  (issue #563), toggled from the conversation header and remembered per
+  device ([`lib/chatDetails.ts`](web/src/lib/chatDetails.ts)); below `xl` the
+  group settings modal stays. Both render the same `GroupSettingsSections`
+  (GroupManagementDialog.tsx) — don't fork it. The panel sits outside the
+  conversation, so its "show this message" rows go through
+  `requestJumpToMessage`.
 - **Messaging dock.** [`ChatDock`](web/src/components/shell/ChatDock.tsx) +
   [`lib/chatDock.ts`](web/src/lib/chatDock.ts): docked windows on every
   non-`/chats` page at `lg`+, persisted per user and device. "Message" on a
