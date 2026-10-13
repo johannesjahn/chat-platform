@@ -17,6 +17,7 @@ import { processAudio } from "./AudioProcessing.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { processImage } from "./ImageProcessing.ts";
+import { withMediaProcessingPermit } from "./MediaProcessingLimit.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { attachments } from "./db/schema.ts";
@@ -147,7 +148,7 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
                 new UnsupportedAttachmentType({
                   message: "Uploaded file is not a valid image",
                 }),
-            });
+            }).pipe(withMediaProcessingPermit);
             uploadData = processed.data;
             uploadContentType = processed.contentType;
             size = processed.data.length;
@@ -161,7 +162,7 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
                 new UnsupportedAttachmentType({
                   message: "Uploaded file is not a valid video",
                 }),
-            });
+            }).pipe(withMediaProcessingPermit);
             uploadData = processed.data;
             uploadContentType = processed.contentType;
             size = processed.data.length;
@@ -174,7 +175,7 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
                 new UnsupportedAttachmentType({
                   message: "Uploaded file is not a valid audio file",
                 }),
-            });
+            }).pipe(withMediaProcessingPermit);
             uploadData = processed.data;
             uploadContentType = processed.contentType;
             size = processed.data.length;

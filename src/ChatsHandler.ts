@@ -50,6 +50,7 @@ import { avatarStorageKey, generateAvatarToken } from "./avatars.ts";
 import { directBlockExists, recipientsMutingSender } from "./blocks.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { processAvatar } from "./ImageProcessing.ts";
+import { withMediaProcessingPermit } from "./MediaProcessingLimit.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { messageReactionInfo, messageReactionInfoOne } from "./reactions.ts";
 import {
@@ -1364,7 +1365,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 message:
                   err instanceof Error ? err.message : "Invalid avatar image",
               }),
-          });
+          }).pipe(withMediaProcessingPermit);
 
           // Mint a fresh token per variant and push the processed bytes to
           // object storage before touching the row — same ordering rationale
