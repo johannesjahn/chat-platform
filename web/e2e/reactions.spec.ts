@@ -1,4 +1,19 @@
+import type { Locator } from "@playwright/test";
 import { expect, test } from "./fixtures";
+
+// Waits for a `<Collapse>` panel to finish opening and to stop gliding to a
+// new height. While it moves it clips its content, and acting inside it then
+// makes Playwright scroll that clipped box into view — a scroll that unwinds
+// once the panel settles, closing anything that closes on scroll (like
+// ReactionPicker's popover) out from under the next click.
+async function waitForPanelToSettle(panel: Locator) {
+  await expect(panel).toHaveAttribute("data-settled", "");
+  await expect
+    .poll(() =>
+      panel.evaluate((el) => el.getAnimations({ subtree: true }).length),
+    )
+    .toBe(0);
+}
 
 test("reacting to a chat message from the hover button adds a pill below the bubble", async ({
   browser,
@@ -282,10 +297,13 @@ test("a failed comment reaction shows a visible error instead of silently doing 
 
   const card = page.getByRole("article", { name: /^Post by / });
   await card.getByRole("button", { name: "Comments" }).click();
+  const commentsPanel = card.locator(".collapse-panel").first();
+  await waitForPanelToSettle(commentsPanel);
   // The card's own comment box, not the feed's inline desktop composer.
   await card.locator("textarea").fill("A comment to react to");
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   await expect(page.getByText("A comment to react to")).toBeVisible();
+  await waitForPanelToSettle(commentsPanel);
 
   await page.route(`${apiUrl}/comments/*/reactions`, (route) =>
     route.fulfill({
