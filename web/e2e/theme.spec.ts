@@ -29,7 +29,7 @@ test("the theme follows the OS preference by default", async ({ page }) => {
   await expect(html).toHaveClass(/\bdark\b/);
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
     "content",
-    "#0b0d13",
+    "#081221",
   );
 });
 
@@ -54,7 +54,7 @@ test("the header toggle overrides the OS and is remembered", async ({
   await expect(html).toHaveClass(/\blight\b/);
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
     "content",
-    "#f7f8fb",
+    "#f6f7fd",
   );
 });
 

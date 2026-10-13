@@ -62,7 +62,7 @@ export function useTabBadge(count: number) {
       const cy = r + 1;
       context.beginPath();
       context.arc(cx, cy, r + 2, 0, Math.PI * 2);
-      context.fillStyle = "#0b0d13";
+      context.fillStyle = "#081221";
       context.fill();
       context.beginPath();
       context.arc(cx, cy, r, 0, Math.PI * 2);

@@ -14,7 +14,13 @@ export type GradientTextProps = {
 export function GradientText({
   children,
   className,
-  colors = ["#a78bfa", "#818cf8", "#38bdf8", "#818cf8", "#a78bfa"],
+  colors = [
+    "var(--gradient-text-a)",
+    "var(--gradient-text-b)",
+    "var(--gradient-text-c)",
+    "var(--gradient-text-b)",
+    "var(--gradient-text-a)",
+  ],
   speed = 6,
 }: GradientTextProps) {
   return (

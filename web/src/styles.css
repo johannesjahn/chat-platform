@@ -8,74 +8,93 @@
    `prefers-color-scheme` — before the first paint. */
 @custom-variant dark (&:is(.dark *));
 
+/* The brand palette every token below is derived from:
+     rust        #ba2f08  oklch(0.52 0.181 34)  — brand heat: headings, glow
+     navy        #2b4162  oklch(0.373 0.064 258) — light-theme primary, dark surfaces
+     amber       #ffc100  oklch(0.844 0.173 85) — dark-theme primary
+     periwinkle  #c6caed  oklch(0.847 0.049 280) — tints, accent
+     lavender    #ada8be  oklch(0.743 0.032 296) — quiet text, borders
+   Surfaces are navy/periwinkle-tinted neutrals. Rust stays off buttons so
+   it never reads as the destructive red; navy (light) and amber (dark, with
+   navy ink) carry action instead. */
 :root {
   --radius: 0.75rem;
 
-  --background: oklch(0.985 0.004 265);
-  --foreground: oklch(0.21 0.02 265);
+  --background: oklch(0.978 0.008 280);
+  --foreground: oklch(0.25 0.05 258);
 
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.02 265);
+  --card-foreground: oklch(0.25 0.05 258);
 
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.02 265);
+  --popover-foreground: oklch(0.25 0.05 258);
 
-  --primary: oklch(0.55 0.2 277);
-  --primary-foreground: oklch(0.99 0.005 277);
+  --primary: oklch(0.373 0.064 258);
+  --primary-foreground: oklch(0.98 0.01 280);
 
-  --secondary: oklch(0.955 0.008 265);
-  --secondary-foreground: oklch(0.25 0.02 265);
+  --secondary: oklch(0.95 0.016 280);
+  --secondary-foreground: oklch(0.28 0.055 258);
 
-  --muted: oklch(0.955 0.008 265);
-  --muted-foreground: oklch(0.5 0.02 265);
+  --muted: oklch(0.95 0.016 280);
+  --muted-foreground: oklch(0.5 0.03 290);
 
-  --accent: oklch(0.94 0.025 277);
-  --accent-foreground: oklch(0.3 0.06 277);
+  --accent: oklch(0.93 0.035 280);
+  --accent-foreground: oklch(0.3 0.06 258);
 
-  --destructive: oklch(0.57 0.22 25);
+  --destructive: oklch(0.55 0.2 25);
   --destructive-foreground: oklch(0.99 0.005 25);
 
-  --border: oklch(0.9 0.008 265);
-  --input: oklch(0.88 0.01 265);
-  --ring: oklch(0.55 0.2 277);
+  --border: oklch(0.9 0.018 285);
+  --input: oklch(0.87 0.022 285);
+  --ring: oklch(0.373 0.064 258);
 
   /* The ambient body gradients (see `body` below) — fainter on a light
      page, where the same tint would read as a stain. */
-  --aurora-primary: oklch(0.62 0.19 277 / 0.09);
-  --aurora-secondary: oklch(0.72 0.14 210 / 0.07);
+  --aurora-primary: oklch(0.847 0.049 280 / 0.35);
+  --aurora-secondary: oklch(0.844 0.173 85 / 0.1);
+
+  /* GradientText headings: rust into navy, deep enough to read on the
+     light page. */
+  --gradient-text-a: oklch(0.52 0.181 34);
+  --gradient-text-b: oklch(0.6 0.15 60);
+  --gradient-text-c: oklch(0.373 0.064 258);
 }
 
 .dark {
-  --background: oklch(0.16 0.012 265);
-  --foreground: oklch(0.93 0.01 265);
+  --background: oklch(0.18 0.035 258);
+  --foreground: oklch(0.95 0.015 280);
 
-  --card: oklch(0.2 0.014 265);
-  --card-foreground: oklch(0.93 0.01 265);
+  --card: oklch(0.225 0.045 258);
+  --card-foreground: oklch(0.95 0.015 280);
 
-  --popover: oklch(0.2 0.014 265);
-  --popover-foreground: oklch(0.93 0.01 265);
+  --popover: oklch(0.225 0.045 258);
+  --popover-foreground: oklch(0.95 0.015 280);
 
-  --primary: oklch(0.62 0.19 277);
-  --primary-foreground: oklch(0.98 0.005 277);
+  --primary: oklch(0.844 0.173 85);
+  --primary-foreground: oklch(0.22 0.05 258);
 
-  --secondary: oklch(0.26 0.015 265);
-  --secondary-foreground: oklch(0.93 0.01 265);
+  --secondary: oklch(0.28 0.045 260);
+  --secondary-foreground: oklch(0.95 0.015 280);
 
-  --muted: oklch(0.26 0.015 265);
-  --muted-foreground: oklch(0.68 0.02 265);
+  --muted: oklch(0.28 0.045 260);
+  --muted-foreground: oklch(0.743 0.032 296);
 
-  --accent: oklch(0.28 0.02 277);
-  --accent-foreground: oklch(0.95 0.01 277);
+  --accent: oklch(0.31 0.055 262);
+  --accent-foreground: oklch(0.88 0.05 280);
 
-  --destructive: oklch(0.63 0.21 25);
+  --destructive: oklch(0.65 0.19 25);
   --destructive-foreground: oklch(0.98 0.005 25);
 
-  --border: oklch(0.3 0.015 265);
-  --input: oklch(0.3 0.015 265);
-  --ring: oklch(0.62 0.19 277);
+  --border: oklch(0.31 0.045 260);
+  --input: oklch(0.33 0.05 260);
+  --ring: oklch(0.844 0.173 85);
 
-  --aurora-primary: oklch(0.62 0.19 277 / 0.13);
-  --aurora-secondary: oklch(0.72 0.14 210 / 0.1);
+  --aurora-primary: oklch(0.52 0.181 34 / 0.16);
+  --aurora-secondary: oklch(0.847 0.049 280 / 0.1);
+
+  --gradient-text-a: oklch(0.844 0.173 85);
+  --gradient-text-b: oklch(0.7 0.16 45);
+  --gradient-text-c: oklch(0.847 0.049 280);
 }
 
 @theme inline {
@@ -1446,9 +1465,9 @@ html[data-app-shell="immersive"] [data-app-column] {
    ─────────────────────────────────────────────────────────────────────────── */
 
 :root {
-  --game-from: oklch(0.72 0.14 210);
-  --game-to: oklch(0.62 0.19 277);
-  --game-glow: oklch(0.62 0.19 277 / 0.35);
+  --game-from: oklch(0.52 0.181 34);
+  --game-to: oklch(0.844 0.173 85);
+  --game-glow: oklch(0.844 0.173 85 / 0.35);
   /* Podium metals, shared by every game's results and leaderboard. Deeper
      on the light theme, where they're also used as text on a white card. */
   --game-gold: oklch(0.7 0.15 80);

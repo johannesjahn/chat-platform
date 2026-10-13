@@ -82,8 +82,8 @@ export function AuthForm({
         className="opacity-70 mask-[radial-gradient(ellipse_at_center,black,transparent_75%)]"
         // Dots a step off the page background either way: the dark theme's
         // slate reads as smudges on the light one.
-        baseColor={theme === "dark" ? "#2a2f3a" : "#d5d9e4"}
-        activeColor="#6366f1"
+        baseColor={theme === "dark" ? "#24304a" : "#d5d7e8"}
+        activeColor={theme === "dark" ? "#ffc100" : "#ba2f08"}
         proximity={130}
         shockRadius={240}
       />
