@@ -612,17 +612,35 @@ html[data-app-shell="immersive"] [data-app-column] {
    once every named element is lifted out of it, i.e. the page background and
    the footer — swaps instantly underneath. Animating `root` instead would
    sweep up any chrome that isn't explicitly named, which is how the desktop
-   sidebar came to blur and slide on every click. */
-[data-app-column] {
-  view-transition-name: app-content;
+   sidebar came to blur and slide on every click.
+
+   That only applies from `lg` up, where the sidebar, dock and chat-list pane
+   exist. Below it the only chrome is the top bar, which is named on its own,
+   so phones animate `root` as before #574: Safari mispositions the snapshot
+   of the full-height page column, so the page slid in from the side and
+   snapped into place when the transition ended. */
+@media (width >= 64rem) {
+  [data-app-column] {
+    view-transition-name: app-content;
+  }
+
+  ::view-transition-old(root) {
+    display: none;
+  }
+
+  ::view-transition-new(root) {
+    animation: none;
+  }
 }
 
-::view-transition-old(root) {
-  display: none;
-}
+@media (width < 64rem) {
+  ::view-transition-old(root) {
+    animation: page-leave 0.2s cubic-bezier(0.4, 0, 1, 1) both;
+  }
 
-::view-transition-new(root) {
-  animation: none;
+  ::view-transition-new(root) {
+    animation: page-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
 }
 
 ::view-transition-old(app-content) {
