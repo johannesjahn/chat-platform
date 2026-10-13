@@ -18,6 +18,15 @@ export type ChatParticipant = components["schemas"]["ChatParticipant"];
 export type ChatMessage = components["schemas"]["Message"];
 export type MessageContentType = components["schemas"]["MessageContentType"];
 
+// One-line preview of what a message holds — its text, or a stand-in for
+// non-text content (mirrors `parentPreviewText` in MessageBubble). Used by the
+// pinned bar and the chat details panel's pinned/starred lists.
+export function messagePreview(message: ChatMessage): string {
+  if (message.contentType === "image_url") return "📷 Photo";
+  if (message.contentType === "attachment") return "📎 Attachment";
+  return message.content;
+}
+
 // Kept in sync with the server-side caps (`MAX_MESSAGE_CONTENT_LENGTH`,
 // `MAX_GROUP_PARTICIPANTS` in src/Api.ts) so the UI can show live
 // counters/limits without a round-trip.

@@ -8,7 +8,14 @@ import {
 } from "react";
 import { onlineManager, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, Loader2, Paperclip, Settings2, Users } from "lucide-react";
+import {
+  ArrowLeft,
+  Loader2,
+  PanelRight,
+  Paperclip,
+  Settings2,
+  Users,
+} from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import {
   ChatComposer,
@@ -34,6 +41,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
+import {
+  setChatDetailsOpen,
+  useChatDetailsAsPanel,
+  useChatDetailsOpen,
+  useJumpRequests,
+} from "@/lib/chatDetails";
 import {
   appendSentMessage,
   chatDetailQueryKey,
@@ -173,7 +186,12 @@ const CHAT_CARD_CLASS =
  * at two densities rather than a second chat implementation. The docked
  * variant leaves out what only makes sense as a page: the immersive shell,
  * the tab title, its own header (the dock window draws a compact one), the
- * pinned bar and group settings.
+ * pinned bar and chat details.
+ *
+ * Chat details are the group settings modal, or at `xl`+ in the two-pane
+ * messenger the details panel beside the conversation (issue #563) — that
+ * panel is the chats layout's, so this only toggles it and takes its
+ * "show this message" requests.
  *
  * Callers key it by chat id, so every hook (including the message
  * pagination window in `useChatMessages`) starts fresh per chat instead of a
@@ -275,6 +293,13 @@ export function ChatConversation({
   useImmersiveShell(!docked && !!session && (chatLoading || chat != null));
 
   const [managingGroup, setManagingGroup] = useState(false);
+  const detailsAsPanel = useChatDetailsAsPanel() && !docked;
+  const detailsOpen = useChatDetailsOpen();
+  // The group header and "Manage" open the modal, or at `xl` the panel.
+  function openDetails() {
+    if (detailsAsPanel) setChatDetailsOpen(true);
+    else setManagingGroup(true);
+  }
   // The message a reply is currently being composed against (issue #217), or
   // null when composing a normal message.
   const [replyingTo, setReplyingTo] = useState<ReplyTarget | null>(null);
@@ -554,6 +579,11 @@ export function ChatConversation({
     // there's a new target and a thread to find it in.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetMessageId, chatReady, messagesLoading]);
+
+  // A pinned, starred or media row picked in the details panel.
+  useJumpRequests(docked ? undefined : chatId, (messageId) => {
+    void jumpToMessage(messageId);
+  });
 
   // Mark everything up to the newest loaded message as read once we know
   // there's something unread — keeps this chat's badge and the nav badge live.
@@ -1093,7 +1123,7 @@ export function ChatConversation({
           ) : (
             <button
               type="button"
-              onClick={() => setManagingGroup(true)}
+              onClick={openDetails}
               className="group/hdr flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-accent/50"
             >
               {chat.avatarVariants ? (
@@ -1126,16 +1156,29 @@ export function ChatConversation({
             </button>
           )}
 
-          {chat.type === "group" && (
+          {detailsAsPanel ? (
             <Button
-              variant="outline"
-              size="sm"
-              aria-label="Manage group"
-              onClick={() => setManagingGroup(true)}
+              size="icon"
+              variant={detailsOpen ? "secondary" : "ghost"}
+              aria-label="Chat details"
+              title="Chat details"
+              aria-pressed={detailsOpen}
+              onClick={() => setChatDetailsOpen(!detailsOpen)}
             >
-              <Settings2 className="size-4" />
-              <span className="hidden sm:inline">Manage</span>
+              <PanelRight className="size-4" />
             </Button>
+          ) : (
+            chat.type === "group" && (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label="Manage group"
+                onClick={openDetails}
+              >
+                <Settings2 className="size-4" />
+                <span className="hidden sm:inline">Manage</span>
+              </Button>
+            )
           )}
         </CardHeader>
         <PinnedMessagesBar
@@ -1149,7 +1192,7 @@ export function ChatConversation({
         {composer}
       </Card>
 
-      {chat.type === "group" && (
+      {chat.type === "group" && !detailsAsPanel && (
         <GroupManagementDialog
           chat={chat}
           currentUser={session.user}

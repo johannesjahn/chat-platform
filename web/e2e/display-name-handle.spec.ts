@@ -112,9 +112,9 @@ test("user pickers and lists show the @username next to a display name", async (
     page.getByRole("button").filter({ hasText: displayName }),
   ).toContainText(handle);
 
-  // Group chat -> Manage -> Members, including who the remove button names.
+  // Group chat -> details -> Members, including who the remove button names.
   await page.goto(`/chats/${chatId}`);
-  await page.getByRole("button", { name: "Manage group" }).click();
+  await page.getByRole("button", { name: "Chat details" }).click();
   await expect(
     page.getByRole("button", { name: `Remove ${displayName} ${handle}` }),
   ).toBeVisible();

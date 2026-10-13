@@ -443,6 +443,141 @@ test("a post opens as an overlay over the feed, which keeps its place", async ({
   await expect(page.getByRole("link", { name: "Back to feed" })).toBeVisible();
 });
 
+async function groupChat(
+  request: APIRequestContext,
+  apiUrl: string,
+  from: TestUser,
+  title: string,
+  members: TestUser[],
+): Promise<number> {
+  const response = await request.post(`${apiUrl}/chats/group`, {
+    headers: as(from),
+    data: { title, participantIds: members.map((m) => m.session.user.id) },
+  });
+  expect(response.ok()).toBe(true);
+  return ((await response.json()) as { id: number }).id;
+}
+
+// Issue #563: at `xl` chat details open as a third pane beside the
+// conversation instead of a modal over it.
+test("chat details open beside the conversation, and stay open per device", async ({
+  page,
+  request,
+  apiUrl,
+  signUp,
+  createUser,
+}) => {
+  const me = await signUp(page);
+  const bob = await createUser();
+  const chatId = await directChat(request, apiUrl, bob, me);
+  const pinned = await send(request, apiUrl, bob, chatId, "Remember this one");
+  const pin = await request.post(`${apiUrl}/chats/${chatId}/pins`, {
+    headers: as(bob),
+    data: { messageId: pinned.id },
+  });
+  expect(pin.ok()).toBe(true);
+  // Enough after it that it's outside the first page the thread loads.
+  for (let i = 0; i < 35; i++) {
+    await send(request, apiUrl, bob, chatId, `Filler ${i}`);
+  }
+
+  await page.goto(`/chats/${chatId}`);
+  await expect(page.getByRole("main").getByText("Filler 34")).toBeVisible();
+  const toggle = page.getByRole("button", {
+    name: "Chat details",
+    exact: true,
+  });
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await toggle.click();
+
+  const panel = page.getByRole("complementary", { name: "Chat details" });
+  await expect(panel).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  // The other person, a way to their profile, and block/mute.
+  await expect(panel.getByText(`@${bob.username}`).first()).toBeVisible();
+  await expect(panel.getByRole("link", { name: "View profile" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Mute" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Block" })).toBeVisible();
+  // The conversation is still there beside it — no modal.
+  await expect(page.locator("[aria-modal=true]")).toHaveCount(0);
+  await expect(page.getByRole("main").getByText("Filler 34")).toBeVisible();
+
+  // A pinned message pages the thread back to it.
+  await expect(
+    panel.getByRole("heading", { name: "Pinned · 1" }),
+  ).toBeVisible();
+  await panel.getByRole("button", { name: /Remember this one/ }).click();
+  await expect(
+    page.locator(`[data-message-id="${pinned.id}"]`),
+  ).toBeInViewport();
+
+  // Remembered across a reload, and closing it is too.
+  await page.reload();
+  await expect(panel).toBeVisible();
+  await panel.getByRole("button", { name: "Close chat details" }).click();
+  await expect(panel).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("main").getByText("Filler 34")).toBeVisible();
+  await expect(panel).toHaveCount(0);
+});
+
+test("a group's settings live in the details panel at xl", async ({
+  page,
+  request,
+  apiUrl,
+  signUp,
+  createUser,
+}) => {
+  const me = await signUp(page);
+  const bob = await createUser();
+  const chatId = await groupChat(request, apiUrl, me, "Panel crew", [bob]);
+
+  await page.goto(`/chats/${chatId}`);
+  await expect(page.getByRole("button", { name: "Manage group" })).toHaveCount(
+    0,
+  );
+  await page.getByRole("button", { name: "Chat details" }).click();
+  const panel = page.getByRole("complementary", { name: "Chat details" });
+  await expect(
+    panel.getByRole("heading", { name: "Members · 2" }),
+  ).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Rename chat" }),
+  ).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Create invite link" }),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test.describe("between lg and xl", () => {
+  test.use({ viewport: { width: 1100, height: 800 } });
+
+  test("group settings stay a modal", async ({
+    page,
+    request,
+    apiUrl,
+    signUp,
+    createUser,
+  }) => {
+    const me = await signUp(page);
+    const bob = await createUser();
+    const chatId = await groupChat(request, apiUrl, me, "Modal crew", [bob]);
+
+    await page.goto(`/chats/${chatId}`);
+    await expect(
+      page.getByRole("button", { name: "Chat details" }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Manage group" }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Group settings" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("complementary", { name: "Chat details" }),
+    ).toHaveCount(0);
+  });
+});
+
 test.describe("below lg", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
