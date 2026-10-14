@@ -49,6 +49,13 @@ test("chat thread never scrolls horizontally on a phone", async ({
   const scroller = page.getByTestId("chat-scroll");
   await expect(scroller).toBeVisible();
   await expect(page.getByRole("main").getByText("hello there")).toBeVisible();
+  // Bubbles grow in from their own side (`animate-bubble-in`), so mid-way
+  // through that a row can sit a pixel past the edge — measure the layout
+  // they settle into. (With the messages warmed by the route's loader, they
+  // can still be animating when they first count as visible.)
+  await scroller.evaluate((el) =>
+    Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
+  );
 
   const { scrollWidth, clientWidth } = await scroller.evaluate((el) => ({
     scrollWidth: el.scrollWidth,

@@ -2,10 +2,36 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { PostDetail } from "@/components/PostDetail";
 import { Button } from "@/components/ui/button";
+import { $api } from "@/lib/api";
+import { postCommentsQueryOptions } from "@/lib/comments";
+import { queryClient } from "@/lib/query";
+import { warmed, warmRoute } from "@/lib/routeLoader";
 import { staticTitle } from "@/lib/title";
+import { userSummaryQueryOptions } from "@/lib/users";
 
 export const Route = createFileRoute("/posts/$id/")({
   head: () => staticTitle("Post"),
+  // The post, its author's name and the first page of comments, with the
+  // same options `PostDetail` and `CommentsSection` read them with.
+  loader: ({ params }) =>
+    warmRoute(() => {
+      const post = $api.queryOptions("get", "/posts/{id}", {
+        params: { path: { id: params.id } },
+      });
+      const comments = postCommentsQueryOptions(Number(params.id));
+      return [
+        warmed(post.queryKey, queryClient.ensureQueryData(post)).then(
+          (data) => {
+            const author = userSummaryQueryOptions(data.authorId);
+            return warmed(author.queryKey, queryClient.ensureQueryData(author));
+          },
+        ),
+        warmed(
+          comments.queryKey,
+          queryClient.ensureInfiniteQueryData(comments),
+        ),
+      ];
+    }),
   component: PostDetailPage,
 });
 

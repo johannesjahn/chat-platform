@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { onlineManager, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Loader2,
@@ -382,8 +382,11 @@ export function ChatConversation({
   // A later message only pulls the view down when the user is already at the
   // bottom (or sent it themselves) — otherwise someone reading back through
   // the history would get yanked away from what they're reading.
+  // The messages can be there before the thread is (the route's loader warms
+  // them alongside the chat), so nothing counts as seen until `scrollRef`
+  // is — otherwise the opening jump would be spent on a missing element.
   useLayoutEffect(() => {
-    if (newestMessageId == null) return;
+    if (newestMessageId == null || !scrollRef.current) return;
     if (lastMessageIdRef.current === newestMessageId) return;
     lastMessageIdRef.current = newestMessageId;
     const isInitial = !initializedRef.current;
@@ -393,7 +396,7 @@ export function ChatConversation({
     } else if (atBottomRef.current || newestMessageSenderId === myUserId) {
       scrollToBottom("smooth");
     }
-  }, [newestMessageId, newestMessageSenderId, myUserId]);
+  }, [newestMessageId, newestMessageSenderId, myUserId, chatReady]);
 
   // Content that grows *after* it was first laid out — an image finishing its
   // load, the composer expanding to a second line, the pinned bar opening —
@@ -412,6 +415,25 @@ export function ChatConversation({
     observer.observe(content);
     return () => observer.disconnect();
   }, [chatReady]);
+
+  // The router's scroll restoration (`scrollRestoration` in router.tsx)
+  // puts every element it saw scroll back where it was once a navigation
+  // renders — the thread included, at an offset from an older, shorter
+  // window. With the messages already warmed by the route's loader, the
+  // opening jump has happened by then, so a thread that's following the
+  // newest message is pinned back down after the router is done. (Its own
+  // `onRendered` listener was registered first, so it runs first.)
+  const router = useRouter();
+  useEffect(
+    () =>
+      router.subscribe("onRendered", () => {
+        const scroller = scrollRef.current;
+        if (!scroller || !atBottomRef.current) return;
+        scroller.scrollTop = scroller.scrollHeight;
+        lastScrollTopRef.current = scroller.scrollTop;
+      }),
+    [router],
+  );
 
   // A message just queued offline appends below the loaded history the same
   // way a real new message would — scroll down to reveal it.

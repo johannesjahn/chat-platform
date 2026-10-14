@@ -14,7 +14,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { $api } from "@/lib/api";
-import { getSession, useSession } from "@/lib/auth";
+import { useSession } from "@/lib/auth";
 import { useStartDirectChat } from "@/lib/directChat";
 import { errorMessage } from "@/lib/errors";
 import {
@@ -24,13 +24,10 @@ import {
   userPostsQueryOptions,
 } from "@/lib/posts";
 import { queryClient } from "@/lib/query";
+import { warmed, warmRoute } from "@/lib/routeLoader";
 import { useUserStatus } from "@/lib/status";
 import { staticTitle, usePageTitle } from "@/lib/title";
 import { userLabel } from "@/lib/users";
-
-// How long a navigation may wait on the loader below before the page is
-// shown anyway, with its skeletons, as it was before the loader existed.
-const PROFILE_LOADER_WAIT_MS = 400;
 
 export const Route = createFileRoute("/users/$id")({
   head: () => staticTitle("Profile"),
@@ -39,27 +36,22 @@ export const Route = createFileRoute("/users/$id")({
   // across reloads, so a first visit swapped in skeletons and a spinner and
   // then replaced them mid view transition — the page blinked as it landed.
   // Warming them here (also on hover/touch, via `defaultPreload: "intent"`)
-  // lets the transition carry the finished page. Errors are left to the
-  // component's own queries, which show them as before; the wait is capped
-  // so a slow network never stalls the tap.
-  loader: async ({ params }) => {
-    if (!getSession()) return;
-    const warm = Promise.all([
+  // lets the transition carry the finished page (see lib/routeLoader.ts).
+  loader: ({ params }) =>
+    warmRoute(() => [
       queryClient.ensureQueryData(
         $api.queryOptions("get", "/users/{id}", {
           params: { path: { id: params.id } },
         }),
       ),
       queryClient.ensureQueryData($api.queryOptions("get", "/users/me/blocks")),
-      queryClient.ensureInfiniteQueryData(
-        userPostsQueryOptions(Number(params.id)),
+      warmed(
+        userPostsQueryOptions(Number(params.id)).queryKey,
+        queryClient.ensureInfiniteQueryData(
+          userPostsQueryOptions(Number(params.id)),
+        ),
       ),
-    ]).catch(() => undefined);
-    await Promise.race([
-      warm,
-      new Promise((resolve) => setTimeout(resolve, PROFILE_LOADER_WAIT_MS)),
-    ]);
-  },
+    ]),
   component: UserProfilePage,
 });
 

@@ -31,8 +31,19 @@ import {
   usePendingPosts,
 } from "@/lib/offlineQueue";
 import { useOnlineStatus } from "@/lib/online";
-import { postsFeedQueryKey, usePostsFeed } from "@/lib/posts";
-import { useUserSummariesById, userHandle, userLabel } from "@/lib/users";
+import {
+  postsFeedQueryKey,
+  postsFeedQueryOptions,
+  usePostsFeed,
+} from "@/lib/posts";
+import { queryClient } from "@/lib/query";
+import { warmed, warmRoute } from "@/lib/routeLoader";
+import {
+  useUserSummariesById,
+  userHandle,
+  userLabel,
+  userSummaryQueryOptions,
+} from "@/lib/users";
 import { staticTitle } from "@/lib/title";
 
 type FeedSearch = {
@@ -47,6 +58,29 @@ export const Route = createFileRoute("/")({
     return Number.isInteger(post) && post > 0 ? { post } : {};
   },
   head: () => staticTitle("Feed"),
+  // The feed's first page, then the authors its cards are labelled with.
+  loader: () =>
+    warmRoute(() => {
+      const feed = postsFeedQueryOptions();
+      return [
+        warmed(feed.queryKey, queryClient.ensureInfiniteQueryData(feed)).then(
+          (data) => {
+            const authorIds = new Set(
+              data.pages.flatMap((page) => page.posts.map((p) => p.authorId)),
+            );
+            return Promise.all(
+              [...authorIds].map((id) => {
+                const author = userSummaryQueryOptions(id);
+                return warmed(
+                  author.queryKey,
+                  queryClient.ensureQueryData(author),
+                );
+              }),
+            );
+          },
+        ),
+      ];
+    }),
   component: PostsFeedPage,
 });
 

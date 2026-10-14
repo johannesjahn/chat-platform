@@ -43,6 +43,14 @@ test(
     await expect(chatRow.getByTestId("unread-badge")).toHaveText("1");
 
     // ...and once opened, the message is visible and the badge disappears.
+    // The chat is marked read as it opens; with its messages already warmed
+    // by the route's loader (issue #605) that can be the same instant they
+    // appear, so wait for it rather than reloading over the request.
+    const markedRead = pageB.waitForResponse(
+      (res) =>
+        /\/chats\/\d+\/read$/.test(new URL(res.url()).pathname) &&
+        res.request().method() === "POST",
+    );
     await chatRow.click();
     await expect(pageB).toHaveURL(/\/chats\/\d+/);
     await expect(
@@ -50,6 +58,7 @@ test(
         .getByRole("main")
         .getByText("Hey there, this is a message from the e2e suite"),
     ).toBeVisible();
+    await markedRead;
     await pageB.goto("/chats");
     await expect(chatRow.getByTestId("unread-badge")).toHaveCount(0);
 

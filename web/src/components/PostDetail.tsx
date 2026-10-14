@@ -15,6 +15,7 @@ import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { errorMessage, isNotFoundError } from "@/lib/errors";
 import { postsFeedQueryKey } from "@/lib/posts";
+import { refetchUnlessWarmed } from "@/lib/routeLoader";
 import { useUserSummariesById, userHandle, userLabel } from "@/lib/users";
 import { usePageTitle, titleExcerpt } from "@/lib/title";
 
@@ -49,7 +50,8 @@ export function PostDetail({
     "get",
     "/posts/{id}",
     { params: { path: { id } } },
-    { enabled: !!session },
+    // Warmed by the post route's loader (routes/posts/$id/index.tsx).
+    { enabled: !!session, refetchOnMount: refetchUnlessWarmed },
   );
 
   const authorById = useUserSummariesById(

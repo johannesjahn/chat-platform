@@ -138,6 +138,27 @@ jobs:
         run: bun run typecheck
         working-directory: web
 
+  # Frontend unit tests (`web/src/**/*.test.ts`, Bun's runner) — scoped to
+  # ./src so it doesn't also pick up Playwright's `e2e/*.spec.ts`.
+  web-unit:
+    name: Web unit tests
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          web: true
+
+      - name: Run web unit tests
+        run: bun run test
+        working-directory: web
+
   build-web:
     name: Web production build
     needs: changes
@@ -616,6 +637,7 @@ jobs:
       - changes
       - lint
       - typecheck
+      - web-unit
       - build-web
       - openapi
       - audit

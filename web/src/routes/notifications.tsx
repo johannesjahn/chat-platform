@@ -23,18 +23,27 @@ import { useSession } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { useMediaQuery } from "@/lib/media";
 import {
+  notificationsListQueryOptions,
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
   useNotifications,
   type Notification,
   type NotificationType,
 } from "@/lib/notifications";
+import { queryClient } from "@/lib/query";
+import { warmed, warmRoute } from "@/lib/routeLoader";
 import { staticTitle } from "@/lib/title";
 
 // No count of its own in the title: the root's tab badge (lib/tabBadge.ts)
 // already puts the unread total in front of every page's.
 export const Route = createFileRoute("/notifications")({
   head: () => staticTitle("Notifications"),
+  // The inbox's first page (which also brings the unread count along).
+  loader: () =>
+    warmRoute(() => {
+      const list = notificationsListQueryOptions(queryClient);
+      return [warmed(list.queryKey, queryClient.ensureInfiniteQueryData(list))];
+    }),
   component: NotificationsPage,
 });
 

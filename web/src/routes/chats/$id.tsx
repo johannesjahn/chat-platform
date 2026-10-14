@@ -1,5 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ChatConversation } from "@/components/chat/ChatConversation";
+import { chatDetailQueryOptions, warmChatMessages } from "@/lib/chats";
+import { queryClient } from "@/lib/query";
+import { warmed, warmRoute } from "@/lib/routeLoader";
 import { staticTitle } from "@/lib/title";
 
 // `?message=<id>` opens the chat scrolled to (and highlighting) that message
@@ -12,6 +15,17 @@ export const Route = createFileRoute("/chats/$id")({
   validateSearch: (search: Record<string, unknown>): ChatSearch => {
     const message = Number(search.message);
     return Number.isInteger(message) && message > 0 ? { message } : {};
+  },
+  // The chat itself and its newest messages — the window
+  // `useChatMessages` then adopts rather than fetching again.
+  loader: ({ params }) => {
+    const chatId = Number(params.id);
+    if (!Number.isInteger(chatId)) return;
+    const detail = chatDetailQueryOptions(chatId);
+    return warmRoute(() => [
+      warmed(detail.queryKey, queryClient.ensureQueryData(detail)),
+      warmChatMessages(queryClient, chatId),
+    ]);
   },
   component: ChatViewPage,
 });
