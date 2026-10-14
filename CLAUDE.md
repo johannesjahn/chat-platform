@@ -512,6 +512,13 @@ regenerated from scratch.
   _is_ honored — the run fails once line or function coverage drops below
   it, so CI's `unit` job enforces coverage as a regression gate, not just a
   report, and uploads `coverage/` as the `coverage-report` build artifact.
+- **Frontend unit** — `cd web && bun run test` (`bun test ./src`, scoped so
+  it doesn't pick up Playwright's `e2e/*.spec.ts`) runs `web/src/**/*.test.ts`
+  — plain-logic modules such as the route-loader freshness rules in
+  [`web/src/lib/routeLoader.test.ts`](web/src/lib/routeLoader.test.ts). No
+  DOM; stub browser-only modules (e.g. `./auth`) with `mock.module`, and
+  start the file with `/// <reference types="bun" />`, since the web
+  tsconfig only loads `vite/client` types. CI runs it as the `web-unit` job.
 - **E2E** — `cd web && bun run test:e2e` (Playwright, Chromium). The Playwright
   `webServer` config boots the _real_ backend (`bun run start`, cwd `..`, with a
   test `JWT_SECRET`) and the Vite dev server, then drives the browser against
@@ -549,8 +556,9 @@ run it (`bun test ./src`) after touching any endpoint signature.
 ## CI
 
 [.github/workflows/ci.yml](.github/workflows/ci.yml) runs on pushes to `main`
-and all PRs, with five parallel jobs: **lint** (`format:check` + `lint`),
-**typecheck** (backend + web; generates the route tree first), **openapi**
+and all PRs, with parallel jobs including: **lint** (`format:check` + `lint`),
+**typecheck** (backend + web; generates the route tree first), **web-unit**
+(`cd web && bun run test` — see Testing above), **openapi**
 (regenerates `openapi.json` and `web/src/lib/api-types.ts` via `gen:types` and
 fails if that produces a diff, i.e. catches a backend API change whose
 generated spec/types weren't regenerated and committed), **unit**
