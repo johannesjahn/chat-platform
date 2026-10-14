@@ -1,5 +1,7 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import {
+  infiniteQueryOptions,
+  queryOptions,
   useInfiniteQuery,
   useQuery,
   useQueryClient,
@@ -10,6 +12,7 @@ import type { components } from "./api-types";
 import { useSession } from "./auth";
 import { recordChatVersion } from "./chatVersions";
 import { useIsDesktop } from "./media";
+import { isFreshlyWarmed, refetchUnlessWarmed, warmed } from "./routeLoader";
 import { userLabel } from "./users";
 
 export type Chat = components["schemas"]["Chat"];
@@ -83,10 +86,17 @@ export function useChatsTwoPane(): boolean {
 // cursor for the next one, and `fetchNextPage` walks forward. Callers that
 // just want everything loaded so far (e.g. the unread badge) can flatten
 // `data.pages`.
+//
+// The options are shared with the chats layout's loader (see
+// routes/chats/route.tsx).
 export function useChatsList(enabled: boolean) {
-  return useInfiniteQuery({
+  return useInfiniteQuery({ ...chatsListQueryOptions(), enabled });
+}
+
+export function chatsListQueryOptions() {
+  return infiniteQueryOptions({
     queryKey: chatsListQueryKey,
-    enabled,
+    refetchOnMount: refetchUnlessWarmed,
     initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam, signal }) => {
       const { data, error } = await fetchClient.GET("/chats", {
@@ -194,10 +204,18 @@ export function useTotalUnreadCount(enabled: boolean): number {
 }
 
 export function useChatDetail(chatId: number | undefined, enabled: boolean) {
+  // Without a chat it's disabled, so the placeholder id is never fetched.
   return useQuery({
-    queryKey:
-      chatId != null ? chatDetailQueryKey(chatId) : ["chats", "detail", "none"],
+    ...chatDetailQueryOptions(chatId ?? -1),
     enabled: enabled && chatId != null,
+  });
+}
+
+// Shared with the conversation route's loader (see routes/chats/$id.tsx).
+export function chatDetailQueryOptions(chatId: number) {
+  return queryOptions({
+    queryKey: chatDetailQueryKey(chatId),
+    refetchOnMount: refetchUnlessWarmed,
     queryFn: async () => {
       const { data, error } = await fetchClient.GET("/chats/{id}", {
         params: { path: { id: String(chatId) } },
@@ -281,7 +299,37 @@ async function fetchMessagesPage(
 type ChatMessagesPage = {
   messages: ChatMessage[];
   hasEarlier: boolean;
+  // The cursors bounding `messages`, so a mount that adopts a window it
+  // didn't fetch itself (see `useChatMessages`) can page on from it.
+  // Optional: a window persisted before they were stored has none.
+  earliestCursor?: string | null;
+  latestCursor?: string | null;
 };
+
+// Warms a chat's newest window for its route's loader (see
+// routes/chats/$id.tsx) — the same first page `useChatMessages` fetches on
+// a fresh mount, which then adopts it. A window already cached is left as
+// it is.
+export function warmChatMessages(queryClient: QueryClient, chatId: number) {
+  const queryKey = chatMessagesQueryKey(chatId);
+  return warmed(
+    queryKey,
+    queryClient.ensureQueryData<ChatMessagesPage>({
+      queryKey,
+      queryFn: async () => {
+        const page = await fetchMessagesPage(chatId, {
+          limit: MESSAGES_PAGE_SIZE,
+        });
+        return {
+          messages: page.messages,
+          hasEarlier: page.hasEarlier,
+          earliestCursor: page.earliestCursor,
+          latestCursor: page.latestCursor,
+        };
+      },
+    }),
+  );
+}
 
 // Applies `update` to a single message in the cached window for `chatId`,
 // without a refetch — mirrors `patchCachedPost` in lib/posts.ts. Used to
@@ -356,10 +404,24 @@ export function appendSentMessage(
 // below, never during render — so the caller must mount a fresh component
 // instance per chat (e.g. `<ChatView key={chatId} .../>`) rather than expect
 // this hook to reset itself when `chatId` changes.
+//
+// A mount starts from the cached window's cursors when that's the window
+// the route's loader just fetched — which, by the same rule, it doesn't
+// refetch on mount (`refetchUnlessWarmed`). Otherwise it starts with none,
+// and the mount's refetch opens a new window as before.
 export function useChatMessages(chatId: number | undefined, enabled: boolean) {
   const queryClient = useQueryClient();
-  const oldestCursorRef = useRef<string | null>(null);
-  const newestCursorRef = useRef<string | null>(null);
+  const [adopted] = useState(() => {
+    if (chatId == null) return undefined;
+    const query = queryClient
+      .getQueryCache()
+      .find<ChatMessagesPage>({ queryKey: chatMessagesQueryKey(chatId) });
+    return query && isFreshlyWarmed(query) ? query.state.data : undefined;
+  });
+  const oldestCursorRef = useRef<string | null>(
+    adopted?.earliestCursor ?? null,
+  );
+  const newestCursorRef = useRef<string | null>(adopted?.latestCursor ?? null);
   // Set by `loadEarlier` right before it triggers a refetch, and always
   // cleared by the queryFn below — distinguishes "the user just asked to
   // page backward" from "something else (the initial load, or a
@@ -377,9 +439,15 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       ? chatMessagesQueryKey(chatId)
       : (["chats", "messages", "none"] as const);
 
+  const cursors = () => ({
+    earliestCursor: oldestCursorRef.current,
+    latestCursor: newestCursorRef.current,
+  });
+
   const query = useQuery({
     queryKey,
     enabled: enabled && chatId != null,
+    refetchOnMount: refetchUnlessWarmed,
     queryFn: async (): Promise<ChatMessagesPage> => {
       const id = chatId!;
       const isLoadEarlierFetch = isLoadEarlierFetchRef.current;
@@ -389,7 +457,8 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       // rather than whether the query cache happens to have data — the
       // cache can outlive the instance (it survives for the default 5min
       // `gcTime` after `ChatView` unmounts, e.g. navigating to the chat list
-      // and back), but the refs are reset on every fresh mount. Using `prev`
+      // and back), but the refs start empty on a fresh mount (unless it
+      // adopted a fresh window, which it then really has). Using `prev`
       // here instead would treat "reopening a chat visited earlier this
       // session" the same as "re-anchoring after outgrowing
       // MESSAGES_MAX_LIMIT", fetching a 100-message window on every reopen
@@ -405,6 +474,7 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
         return {
           messages: [...page.messages, ...prev.messages],
           hasEarlier: page.hasEarlier,
+          ...cursors(),
         };
       }
 
@@ -427,6 +497,7 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
           return {
             messages: [...prev.messages, ...newMessages],
             hasEarlier: prev.hasEarlier,
+            ...cursors(),
           };
         }
         // Falls through to a fresh newest-window fetch below — see the
@@ -444,7 +515,11 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       const page = await fetchMessagesPage(id, { limit });
       oldestCursorRef.current = page.earliestCursor;
       newestCursorRef.current = page.latestCursor;
-      return { messages: page.messages, hasEarlier: page.hasEarlier };
+      return {
+        messages: page.messages,
+        hasEarlier: page.hasEarlier,
+        ...cursors(),
+      };
     },
   });
 

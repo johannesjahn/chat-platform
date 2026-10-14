@@ -14,12 +14,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useSession } from "@/lib/auth";
 import { useChatDetailsAsPanel, useChatDetailsOpen } from "@/lib/chatDetails";
-import { useChatsList, useChatsTwoPane, type Chat } from "@/lib/chats";
+import {
+  chatsListQueryOptions,
+  useChatsList,
+  useChatsTwoPane,
+  type Chat,
+} from "@/lib/chats";
 import { useResizablePane } from "@/lib/paneWidth";
+import { queryClient } from "@/lib/query";
+import { warmed, warmRoute } from "@/lib/routeLoader";
 import { cn } from "@/lib/utils";
 import { useImmersiveShell } from "@/lib/viewport";
 
 export const Route = createFileRoute("/chats")({
+  // The chat list — the left pane at `lg`+, the whole `/chats` page below.
+  // Runs beside the child route's loader, not before it.
+  loader: () =>
+    warmRoute(() => {
+      const list = chatsListQueryOptions();
+      return [warmed(list.queryKey, queryClient.ensureInfiniteQueryData(list))];
+    }),
   component: ChatsLayout,
 });
 

@@ -1,6 +1,11 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
+import { refetchUnlessWarmed } from "./routeLoader";
 
 export type Comment = components["schemas"]["Comment"];
 
@@ -26,11 +31,16 @@ export const commentQueryKey = (commentId: number) =>
   ["comments", "one", commentId] as const;
 
 // Oldest-first, keyset-paginated top-level comments on a post — replies are
-// fetched separately per comment via `useReplies`.
+// fetched separately per comment via `useReplies`. The options are shared
+// with the post route's loader (see routes/posts/$id/index.tsx).
 export function useComments(postId: number, enabled: boolean) {
-  return useInfiniteQuery({
+  return useInfiniteQuery({ ...postCommentsQueryOptions(postId), enabled });
+}
+
+export function postCommentsQueryOptions(postId: number) {
+  return infiniteQueryOptions({
     queryKey: postCommentsQueryKey(postId),
-    enabled,
+    refetchOnMount: refetchUnlessWarmed,
     initialPageParam: null as string | null,
     queryFn: async ({ pageParam, signal }) => {
       const { data, error } = await fetchClient.GET("/posts/{id}/comments", {

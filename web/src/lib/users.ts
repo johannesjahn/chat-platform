@@ -1,6 +1,7 @@
-import { useQueries } from "@tanstack/react-query";
+import { queryOptions, useQueries } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
+import { refetchUnlessWarmed } from "./routeLoader";
 
 export type UserSummary = {
   username: string;
@@ -60,18 +61,7 @@ export function useUserSummariesById(
   const uniqueIds = [...new Set(ids)];
   const results = useQueries({
     queries: uniqueIds.map((id) => ({
-      queryKey: [
-        "get",
-        "/users/{id}",
-        { params: { path: { id: String(id) } } },
-      ] as const,
-      queryFn: async () => {
-        const { data, error } = await fetchClient.GET("/users/{id}", {
-          params: { path: { id: String(id) } },
-        });
-        if (error) throw error;
-        return data;
-      },
+      ...userSummaryQueryOptions(id),
       enabled,
     })),
   });
@@ -87,4 +77,25 @@ export function useUserSummariesById(
       });
   }
   return summaryById;
+}
+
+// One `GET /users/{id}`, keyed like `$api.useQuery("get", "/users/{id}", ...)`
+// so the two share a cache entry. Route loaders warm the authors a page is
+// about to label with it (see routes/index.tsx).
+export function userSummaryQueryOptions(id: number) {
+  return queryOptions({
+    queryKey: [
+      "get",
+      "/users/{id}",
+      { params: { path: { id: String(id) } } },
+    ] as const,
+    refetchOnMount: refetchUnlessWarmed,
+    queryFn: async () => {
+      const { data, error } = await fetchClient.GET("/users/{id}", {
+        params: { path: { id: String(id) } },
+      });
+      if (error) throw error;
+      return data;
+    },
+  });
 }

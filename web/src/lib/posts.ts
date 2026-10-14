@@ -6,6 +6,7 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
+import { refetchUnlessWarmed } from "./routeLoader";
 
 export type Post = components["schemas"]["Post"];
 export type PostContentType = components["schemas"]["PostContentType"];
@@ -96,10 +97,17 @@ export function patchCachedPost(
 // The server paginates with a keyset cursor rather than offset/limit (issue
 // #50), so `pageParam` carries the opaque cursor for the next page (`null`
 // for the first) instead of a numeric offset.
+//
+// The options are shared with the feed route's loader, which warms the first
+// page before the page is swapped in (see routes/index.tsx).
 export function usePostsFeed(enabled: boolean) {
-  return useInfiniteQuery({
+  return useInfiniteQuery({ ...postsFeedQueryOptions(), enabled });
+}
+
+export function postsFeedQueryOptions() {
+  return infiniteQueryOptions({
     queryKey: postsFeedQueryKey,
-    enabled,
+    refetchOnMount: refetchUnlessWarmed,
     initialPageParam: null as string | null,
     queryFn: async ({ pageParam, signal }) => {
       const limit =
@@ -135,6 +143,7 @@ export function useUserPosts(userId: number, enabled: boolean) {
 export function userPostsQueryOptions(userId: number) {
   return infiniteQueryOptions({
     queryKey: userPostsQueryKey(userId),
+    refetchOnMount: refetchUnlessWarmed,
     initialPageParam: null as string | null,
     queryFn: async ({ pageParam, signal }) => {
       const limit =

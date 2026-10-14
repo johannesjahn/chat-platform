@@ -201,6 +201,10 @@ test("a feed refetch keeps attachment images as they are instead of reloading th
   // placeholder and download again once that refetch lands.
   await page.getByRole("link", { name: "Chats" }).first().click();
   await expect(page).toHaveURL("/chats");
+  // The URL changes as the navigation starts, but its route loader can hold
+  // the page for a moment (issue #605) — wait until the feed is really gone,
+  // or going back would just cancel the navigation, never remounting it.
+  await expect(page.getByText("Select a conversation")).toBeVisible();
   const remounted = page.waitForResponse(
     (res) => new URL(res.url()).pathname === "/posts" && res.ok(),
   );

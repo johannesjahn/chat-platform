@@ -1,4 +1,5 @@
 import {
+  infiniteQueryOptions,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
+import { refetchUnlessWarmed } from "./routeLoader";
 
 // In-app notifications (issue #317): the header bell's badge and the
 // `/notifications` inbox. Both refetch on the id-less
@@ -53,8 +55,16 @@ export function useUnreadNotificationCount(enabled: boolean): number {
 export function useNotifications(enabled: boolean) {
   const queryClient = useQueryClient();
   return useInfiniteQuery({
-    queryKey: notificationsListQueryKey,
+    ...notificationsListQueryOptions(queryClient),
     enabled,
+  });
+}
+
+// Shared with the inbox route's loader (see routes/notifications.tsx).
+export function notificationsListQueryOptions(queryClient: QueryClient) {
+  return infiniteQueryOptions({
+    queryKey: notificationsListQueryKey,
+    refetchOnMount: refetchUnlessWarmed,
     initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam, signal }) => {
       const { data, error } = await fetchClient.GET("/notifications", {
