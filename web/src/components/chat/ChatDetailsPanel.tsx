@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { skipToken, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
   FileText,
@@ -25,8 +24,8 @@ import type { Session } from "@/lib/api";
 import { attachmentKind, formatBytes } from "@/lib/attachments";
 import { requestJumpToMessage, setChatDetailsOpen } from "@/lib/chatDetails";
 import {
-  chatMessagesQueryKey,
   messagePreview,
+  useCachedChatMessages,
   usePinnedMessages,
   useStarredMessages,
   useChatDetail,
@@ -294,10 +293,7 @@ function MessageList({
 // back in the thread is what brings older ones in. Read straight from the
 // conversation's message cache rather than fetching a second window of it.
 function SharedMediaSection({ chatId }: { chatId: number }) {
-  const { data } = useQuery<{ messages: ChatMessage[] }>({
-    queryKey: chatMessagesQueryKey(chatId),
-    queryFn: skipToken,
-  });
+  const data = useCachedChatMessages(chatId);
   const newestFirst = [...(data?.messages ?? [])].reverse();
   const images = newestFirst
     .flatMap((message) => {

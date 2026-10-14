@@ -435,6 +435,60 @@ test("a message sent by one user appears on the other's already-open chat via th
   await contextB.close();
 });
 
+test("the chat details panel doesn't break the open conversation's realtime refetch (issue #617)", async ({
+  browser,
+  injectApiUrl,
+  signUp,
+}) => {
+  const contextA = await browser.newContext();
+  await injectApiUrl(contextA);
+  const pageA = await contextA.newPage();
+  const { username: usernameA } = await signUp(pageA);
+
+  const contextB = await browser.newContext();
+  await injectApiUrl(contextB);
+  const pageB = await contextB.newPage();
+  const { username: usernameB } = await signUp(pageB);
+  const skipTokenErrors: string[] = [];
+  pageB.on("console", (message) => {
+    if (message.text().includes("skipToken")) {
+      skipTokenErrors.push(message.text());
+    }
+  });
+
+  await pageA.goto("/chats/new");
+  await pageA.getByRole("button", { name: "Direct message" }).click();
+  await pageA.fill("#user-search", usernameB);
+  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+  const chatId = pageA.url().split("/").pop();
+
+  // B opens the conversation, *then* the details panel (at `xl` — the
+  // default 1280px viewport), so the panel's read of the message window is
+  // the last thing to touch that query before A's message invalidates it.
+  await pageB.goto(`/chats/${chatId}`);
+  await expect(
+    pageB.getByRole("main").getByText(`@${usernameA}`),
+  ).toBeVisible();
+  await pageB.getByRole("button", { name: "Chat details" }).click();
+  await expect(
+    pageB.getByRole("button", { name: "Close chat details" }),
+  ).toBeVisible();
+
+  await pageA.fill("textarea", "Sent while B has the details panel open");
+  await pageA.keyboard.press("Enter");
+
+  await expect(
+    pageB
+      .getByRole("main")
+      .getByText("Sent while B has the details panel open"),
+  ).toBeVisible({ timeout: 10_000 });
+  expect(skipTokenErrors).toEqual([]);
+
+  await contextA.close();
+  await contextB.close();
+});
+
 test("sending a message doesn't leave a duplicate copy in the sender's own view (issue #203)", async ({
   browser,
   injectApiUrl,
