@@ -33,6 +33,24 @@ server of its own. Host it anywhere (CDN, object storage, nginx), with one rule:
 **serve `index.html` as the fallback for unknown paths** so client-side routes
 like `/login` resolve. `bun run preview` serves the build locally.
 
+### Caching
+
+[`public/_headers`](public/_headers) (copied into `dist/client/`) sets
+`Cache-Control` on the Cloudflare deploy. Any other host needs the same
+headers:
+
+| Path                                                                                                 | `Cache-Control`                       |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `/assets/*`, `/workbox-*.js` (content-hashed)                                                        | `public, max-age=31536000, immutable` |
+| `/favicon*`, `/logo.*`                                                                               | `public, max-age=86400`               |
+| everything else: `index.html` (and so every SPA-fallback deep link), `sw.js`, `manifest.webmanifest` | `no-cache`                            |
+
+Never long-cache `index.html` or `sw.js`. The PWA auto-updates
+(`registerType: "autoUpdate"`) only once the browser sees a new `sw.js`, and
+the new shell points at the new hashed assets. Match deep links by request
+path, not by the file that answers them. A deep link is answered by
+`index.html` but requested as e.g. `/chats/123`, so it needs `no-cache` too.
+
 ## Deploy (static host + separate backend)
 
 Two settings must line up, one per side:
