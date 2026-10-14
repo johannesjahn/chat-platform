@@ -272,6 +272,8 @@ test("a chat refetch keeps attachment images as they are instead of reloading th
   // image must come back under the URL it already had.
   await page.getByRole("link", { name: "Chats" }).first().click();
   await expect(page).toHaveURL("/chats");
+  // As above: let the chat actually close before reopening it.
+  await expect(page.getByText("Select a conversation")).toBeVisible();
   const reopened = page.waitForResponse(isMessagesFetch);
   await page.locator(`a[href="/chats/${chatId}"]`).click();
   await expect(page).toHaveURL(`/chats/${chatId}`);
