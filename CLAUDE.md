@@ -608,7 +608,10 @@ generated spec/types weren't regenerated and committed), **unit**
 (`bun run test:coverage`, which includes `src/openapi.test.ts` validating the
 spec against the `ChatApi` definition, enforces `bunfig.toml`'s coverage
 thresholds, and uploads the `coverage-report` artifact — see Testing above),
-and **e2e** (Playwright). The Bun version is pinned once via the
+**e2e** (Playwright), and **e2e-stress** (PRs only: re-runs just the
+`web/e2e/**/*.spec.ts` files the PR adds or edits with `--repeat-each=5`,
+`--retries=0` and every core busy, to catch timing flakes that pass a single
+run — issue #619; skipped when no spec changed). The Bun version is pinned once via the
 workflow-level `BUN_VERSION` env var.
 
 **Path filters** (issue #492): on PRs, a leading `changes` job
