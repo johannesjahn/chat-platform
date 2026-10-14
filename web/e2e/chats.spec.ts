@@ -2,61 +2,61 @@ import type { WebSocketRoute } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { fakeOnScreenKeyboard } from "./helpers";
 
-test("starting a direct chat, sending a message, and seeing it marked read", async ({
-  browser,
-  injectApiUrl,
-  signUp,
-}) => {
-  const contextA = await browser.newContext();
-  await injectApiUrl(contextA);
-  const pageA = await contextA.newPage();
-  const { username: usernameA } = await signUp(pageA);
+test(
+  "starting a direct chat, sending a message, and seeing it marked read",
+  { tag: "@layout" },
+  async ({ browser, injectApiUrl, signUp }) => {
+    const contextA = await browser.newContext();
+    await injectApiUrl(contextA);
+    const pageA = await contextA.newPage();
+    const { username: usernameA } = await signUp(pageA);
 
-  const contextB = await browser.newContext();
-  await injectApiUrl(contextB);
-  const pageB = await contextB.newPage();
-  const { username: usernameB } = await signUp(pageB);
+    const contextB = await browser.newContext();
+    await injectApiUrl(contextB);
+    const pageB = await contextB.newPage();
+    const { username: usernameB } = await signUp(pageB);
 
-  // A starts a direct chat with B from the "New chat" picker.
-  await pageA.goto("/chats/new");
-  await pageA.getByRole("button", { name: "Direct message" }).click();
-  await pageA.fill("#user-search", usernameB);
-  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
-  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+    // A starts a direct chat with B from the "New chat" picker.
+    await pageA.goto("/chats/new");
+    await pageA.getByRole("button", { name: "Direct message" }).click();
+    await pageA.fill("#user-search", usernameB);
+    await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+    await expect(pageA).toHaveURL(/\/chats\/\d+/);
 
-  await pageA.fill(
-    "textarea",
-    "Hey there, this is a message from the e2e suite",
-  );
-  await pageA.keyboard.press("Enter");
-  await expect(
-    pageA
-      .getByRole("main")
-      .getByText("Hey there, this is a message from the e2e suite"),
-  ).toBeVisible();
+    await pageA.fill(
+      "textarea",
+      "Hey there, this is a message from the e2e suite",
+    );
+    await pageA.keyboard.press("Enter");
+    await expect(
+      pageA
+        .getByRole("main")
+        .getByText("Hey there, this is a message from the e2e suite"),
+    ).toBeVisible();
 
-  // B sees the chat show up in their list with an unread badge...
-  await pageB.goto("/chats");
-  const chatRow = pageB.getByRole("link", {
-    name: new RegExp(`@${usernameA}`),
-  });
-  await expect(chatRow).toBeVisible();
-  await expect(chatRow.getByTestId("unread-badge")).toHaveText("1");
+    // B sees the chat show up in their list with an unread badge...
+    await pageB.goto("/chats");
+    const chatRow = pageB.getByRole("link", {
+      name: new RegExp(`@${usernameA}`),
+    });
+    await expect(chatRow).toBeVisible();
+    await expect(chatRow.getByTestId("unread-badge")).toHaveText("1");
 
-  // ...and once opened, the message is visible and the badge disappears.
-  await chatRow.click();
-  await expect(pageB).toHaveURL(/\/chats\/\d+/);
-  await expect(
-    pageB
-      .getByRole("main")
-      .getByText("Hey there, this is a message from the e2e suite"),
-  ).toBeVisible();
-  await pageB.goto("/chats");
-  await expect(chatRow.getByTestId("unread-badge")).toHaveCount(0);
+    // ...and once opened, the message is visible and the badge disappears.
+    await chatRow.click();
+    await expect(pageB).toHaveURL(/\/chats\/\d+/);
+    await expect(
+      pageB
+        .getByRole("main")
+        .getByText("Hey there, this is a message from the e2e suite"),
+    ).toBeVisible();
+    await pageB.goto("/chats");
+    await expect(chatRow.getByTestId("unread-badge")).toHaveCount(0);
 
-  await contextA.close();
-  await contextB.close();
-});
+    await contextA.close();
+    await contextB.close();
+  },
+);
 
 test("group chats can be created, renamed by the creator, and show all participants", async ({
   browser,
@@ -200,84 +200,86 @@ test("a user can redeem a group invite through the join page and via a direct in
   await contextC.close();
 });
 
-test("messages are grouped under a sticky day separator (issue #307)", async ({
-  browser,
-  injectApiUrl,
-  signUp,
-}) => {
-  const contextA = await browser.newContext();
-  await injectApiUrl(contextA);
-  const pageA = await contextA.newPage();
-  await signUp(pageA);
+test(
+  "messages are grouped under a sticky day separator (issue #307)",
+  { tag: "@layout" },
+  async ({ browser, injectApiUrl, signUp }) => {
+    const contextA = await browser.newContext();
+    await injectApiUrl(contextA);
+    const pageA = await contextA.newPage();
+    await signUp(pageA);
 
-  const contextB = await browser.newContext();
-  await injectApiUrl(contextB);
-  const pageB = await contextB.newPage();
-  const { username: usernameB } = await signUp(pageB);
+    const contextB = await browser.newContext();
+    await injectApiUrl(contextB);
+    const pageB = await contextB.newPage();
+    const { username: usernameB } = await signUp(pageB);
 
-  await pageA.goto("/chats/new");
-  await pageA.getByRole("button", { name: "Direct message" }).click();
-  await pageA.fill("#user-search", usernameB);
-  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
-  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+    await pageA.goto("/chats/new");
+    await pageA.getByRole("button", { name: "Direct message" }).click();
+    await pageA.fill("#user-search", usernameB);
+    await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+    await expect(pageA).toHaveURL(/\/chats\/\d+/);
 
-  await pageA.fill("textarea", "First message of the day");
-  await pageA.keyboard.press("Enter");
-  await expect(
-    pageA.getByRole("main").getByText("First message of the day"),
-  ).toBeVisible();
+    await pageA.fill("textarea", "First message of the day");
+    await pageA.keyboard.press("Enter");
+    await expect(
+      pageA.getByRole("main").getByText("First message of the day"),
+    ).toBeVisible();
 
-  // A single separator labelled "Today" is inserted ahead of the first
-  // message — all of today's messages share one day, so there's exactly one.
-  const separators = pageA.getByTestId("date-separator");
-  await expect(separators).toHaveCount(1);
-  await expect(separators.first()).toHaveText("Today");
+    // A single separator labelled "Today" is inserted ahead of the first
+    // message — all of today's messages share one day, so there's exactly one.
+    const separators = pageA.getByTestId("date-separator");
+    await expect(separators).toHaveCount(1);
+    await expect(separators.first()).toHaveText("Today");
 
-  // Sending another message the same day doesn't add a second separator.
-  await pageA.fill("textarea", "Second message, same day");
-  await pageA.keyboard.press("Enter");
-  await expect(
-    pageA.getByRole("main").getByText("Second message, same day"),
-  ).toBeVisible();
-  await expect(separators).toHaveCount(1);
+    // Sending another message the same day doesn't add a second separator.
+    await pageA.fill("textarea", "Second message, same day");
+    await pageA.keyboard.press("Enter");
+    await expect(
+      pageA.getByRole("main").getByText("Second message, same day"),
+    ).toBeVisible();
+    await expect(separators).toHaveCount(1);
 
-  await contextA.close();
-  await contextB.close();
-});
+    await contextA.close();
+    await contextB.close();
+  },
+);
 
-test("long messages are collapsed behind a Show more toggle", async ({
-  browser,
-  injectApiUrl,
-  signUp,
-}) => {
-  const contextA = await browser.newContext();
-  await injectApiUrl(contextA);
-  const pageA = await contextA.newPage();
-  await signUp(pageA);
+test(
+  "long messages are collapsed behind a Show more toggle",
+  { tag: "@layout" },
+  async ({ browser, injectApiUrl, signUp }) => {
+    const contextA = await browser.newContext();
+    await injectApiUrl(contextA);
+    const pageA = await contextA.newPage();
+    await signUp(pageA);
 
-  const contextB = await browser.newContext();
-  await injectApiUrl(contextB);
-  const pageB = await contextB.newPage();
-  const { username: usernameB } = await signUp(pageB);
+    const contextB = await browser.newContext();
+    await injectApiUrl(contextB);
+    const pageB = await contextB.newPage();
+    const { username: usernameB } = await signUp(pageB);
 
-  await pageA.goto("/chats/new");
-  await pageA.getByRole("button", { name: "Direct message" }).click();
-  await pageA.fill("#user-search", usernameB);
-  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
-  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+    await pageA.goto("/chats/new");
+    await pageA.getByRole("button", { name: "Direct message" }).click();
+    await pageA.fill("#user-search", usernameB);
+    await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+    await expect(pageA).toHaveURL(/\/chats\/\d+/);
 
-  const longContent = "Lorem ipsum dolor sit amet. ".repeat(20);
-  await pageA.fill("textarea", longContent);
-  await pageA.keyboard.press("Enter");
+    const longContent = "Lorem ipsum dolor sit amet. ".repeat(20);
+    await pageA.fill("textarea", longContent);
+    await pageA.keyboard.press("Enter");
 
-  const showMore = pageA.getByRole("button", { name: "Show more" });
-  await expect(showMore).toBeVisible();
-  await showMore.click();
-  await expect(pageA.getByRole("button", { name: "Show less" })).toBeVisible();
+    const showMore = pageA.getByRole("button", { name: "Show more" });
+    await expect(showMore).toBeVisible();
+    await showMore.click();
+    await expect(
+      pageA.getByRole("button", { name: "Show less" }),
+    ).toBeVisible();
 
-  await contextA.close();
-  await contextB.close();
-});
+    await contextA.close();
+    await contextB.close();
+  },
+);
 
 test("the creator can add participants to a group chat, and the new participant sees it in their list", async ({
   browser,
@@ -786,82 +788,85 @@ test("a client that missed a chat_updated push while its socket was down catches
   await contextB.close();
 });
 
-test("a long conversation fits the viewport and opens scrolled to the newest message", async ({
-  page,
-  request,
-  apiUrl,
-  createUser,
-  signUp,
-}) => {
-  test.setTimeout(90_000);
+test(
+  "a long conversation fits the viewport and opens scrolled to the newest message",
+  { tag: "@layout" },
+  async ({ page, request, apiUrl, createUser, signUp }) => {
+    test.setTimeout(90_000);
 
-  await signUp(page);
+    await signUp(page);
 
-  const { username: otherUsername } = await createUser();
+    const { username: otherUsername } = await createUser();
 
-  await page.goto("/chats/new");
-  await page.getByRole("button", { name: "Direct message" }).click();
-  await page.fill("#user-search", otherUsername);
-  await page.getByRole("button", { name: `@${otherUsername}` }).click();
-  await expect(page).toHaveURL(/\/chats\/\d+/);
-  const chatId = page.url().split("/").pop();
+    await page.goto("/chats/new");
+    await page.getByRole("button", { name: "Direct message" }).click();
+    await page.fill("#user-search", otherUsername);
+    await page.getByRole("button", { name: `@${otherUsername}` }).click();
+    await expect(page).toHaveURL(/\/chats\/\d+/);
+    const chatId = page.url().split("/").pop();
 
-  const session = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
-  );
-  // Comfortably more than fits on one screen, so the thread has to scroll.
-  for (let i = 0; i < 30; i++) {
-    const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
-      headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: {
-        contentType: "text",
-        content: `Seeded message ${i} — long enough to wrap onto more than one line in the bubble.`,
-      },
-    });
-    expect(response.ok()).toBe(true);
-  }
+    const session = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+    );
+    // Comfortably more than fits on one screen, so the thread has to scroll.
+    for (let i = 0; i < 30; i++) {
+      const response = await request.post(
+        `${apiUrl}/chats/${chatId}/messages`,
+        {
+          headers: { Authorization: `Bearer ${session.accessToken}` },
+          data: {
+            contentType: "text",
+            content: `Seeded message ${i} — long enough to wrap onto more than one line in the bubble.`,
+          },
+        },
+      );
+      expect(response.ok()).toBe(true);
+    }
 
-  await page.reload();
-  await expect(
-    page.getByRole("main").getByText("Seeded message 29"),
-  ).toBeVisible();
-  // The composer's auto-size and the message-in animations settle a beat
-  // after the thread first paints — the assertions below are about where
-  // things end up once they have.
-  await page.waitForTimeout(1_000);
+    await page.reload();
+    await expect(
+      page.getByRole("main").getByText("Seeded message 29"),
+    ).toBeVisible();
+    // The composer's auto-size and the message-in animations settle a beat
+    // after the thread first paints — the assertions below are about where
+    // things end up once they have.
+    await page.waitForTimeout(1_000);
 
-  // The whole conversation lives inside the viewport: the page itself must
-  // not scroll, or the composer ends up below the fold and the thread has to
-  // be chased with the *window* scrollbar — the fill-the-screen layout issue
-  // #321 asked for, which `flex-1` alone silently didn't deliver.
-  const pageScrollable = await page.evaluate(
-    () =>
-      document.documentElement.scrollHeight >
-      document.documentElement.clientHeight + 1,
-  );
-  expect(pageScrollable).toBe(false);
+    // The whole conversation lives inside the viewport: the page itself must
+    // not scroll, or the composer ends up below the fold and the thread has to
+    // be chased with the *window* scrollbar — the fill-the-screen layout issue
+    // #321 asked for, which `flex-1` alone silently didn't deliver.
+    const pageScrollable = await page.evaluate(
+      () =>
+        document.documentElement.scrollHeight >
+        document.documentElement.clientHeight + 1,
+    );
+    expect(pageScrollable).toBe(false);
 
-  // ...and the thread's own scroll container is what scrolls, parked at the
-  // bottom so the newest message is the one on screen.
-  const scrollState = await page.getByTestId("chat-scroll").evaluate((el) => ({
-    scrollable: el.scrollHeight > el.clientHeight,
-    distanceFromBottom: Math.round(
-      el.scrollHeight - el.scrollTop - el.clientHeight,
-    ),
-  }));
-  expect(scrollState.scrollable).toBe(true);
-  expect(scrollState.distanceFromBottom).toBeLessThanOrEqual(24);
+    // ...and the thread's own scroll container is what scrolls, parked at the
+    // bottom so the newest message is the one on screen.
+    const scrollState = await page
+      .getByTestId("chat-scroll")
+      .evaluate((el) => ({
+        scrollable: el.scrollHeight > el.clientHeight,
+        distanceFromBottom: Math.round(
+          el.scrollHeight - el.scrollTop - el.clientHeight,
+        ),
+      }));
+    expect(scrollState.scrollable).toBe(true);
+    expect(scrollState.distanceFromBottom).toBeLessThanOrEqual(24);
 
-  // The newest bubble is genuinely on screen, not just scrolled-to in theory.
-  const viewportHeight = page.viewportSize()!.height;
-  const newest = await page
-    .getByRole("main")
-    .getByText("Seeded message 29")
-    .boundingBox();
-  expect(newest).not.toBeNull();
-  expect(newest!.y).toBeGreaterThanOrEqual(0);
-  expect(newest!.y + newest!.height).toBeLessThanOrEqual(viewportHeight);
-});
+    // The newest bubble is genuinely on screen, not just scrolled-to in theory.
+    const viewportHeight = page.viewportSize()!.height;
+    const newest = await page
+      .getByRole("main")
+      .getByText("Seeded message 29")
+      .boundingBox();
+    expect(newest).not.toBeNull();
+    expect(newest!.y).toBeGreaterThanOrEqual(0);
+    expect(newest!.y + newest!.height).toBeLessThanOrEqual(viewportHeight);
+  },
+);
 
 test("the empty composer is one line tall and only grows once there's something to grow for", async ({
   page,
@@ -945,72 +950,74 @@ test("the empty composer is one line tall and only grows once there's something 
   );
 });
 
-test("the composer's extra send modes collapse into one attach button", async ({
-  page,
-  createUser,
-  signUp,
-}) => {
-  await signUp(page);
+test(
+  "the composer's extra send modes collapse into one attach button",
+  { tag: "@layout" },
+  async ({ page, createUser, signUp }) => {
+    await signUp(page);
 
-  const { username: otherUsername } = await createUser();
+    const { username: otherUsername } = await createUser();
 
-  await page.goto("/chats/new");
-  await page.getByRole("button", { name: "Direct message" }).click();
-  await page.fill("#user-search", otherUsername);
-  await page.getByRole("button", { name: `@${otherUsername}` }).click();
-  await expect(page).toHaveURL(/\/chats\/\d+/);
-  await expect(
-    page.getByRole("main").getByText("No messages yet"),
-  ).toBeVisible();
+    await page.goto("/chats/new");
+    await page.getByRole("button", { name: "Direct message" }).click();
+    await page.fill("#user-search", otherUsername);
+    await page.getByRole("button", { name: `@${otherUsername}` }).click();
+    await expect(page).toHaveURL(/\/chats\/\d+/);
+    await expect(
+      page.getByRole("main").getByText("No messages yet"),
+    ).toBeVisible();
 
-  // The row of four permanently-visible mode buttons is gone; one trigger
-  // stands in for all of them.
-  const attach = page.getByRole("button", { name: "Attach" });
-  await expect(attach).toBeVisible();
-  await expect(page.getByRole("button", { name: "Image message" })).toHaveCount(
-    0,
-  );
+    // The row of four permanently-visible mode buttons is gone; one trigger
+    // stands in for all of them.
+    const attach = page.getByRole("button", { name: "Attach" });
+    await expect(attach).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Image message" }),
+    ).toHaveCount(0);
 
-  // Nothing typed, so the trailing action is a microphone — the arrangement
-  // every chat app has settled on. Typing turns it into send.
-  await expect(
-    page.getByRole("button", { name: "Record a voice message" }),
-  ).toBeVisible();
-  await page.fill("textarea", "something to send");
-  await expect(
-    page.getByRole("button", { name: "Send message" }),
-  ).toBeVisible();
-  await page.fill("textarea", "");
+    // Nothing typed, so the trailing action is a microphone — the arrangement
+    // every chat app has settled on. Typing turns it into send.
+    await expect(
+      page.getByRole("button", { name: "Record a voice message" }),
+    ).toBeVisible();
+    await page.fill("textarea", "something to send");
+    await expect(
+      page.getByRole("button", { name: "Send message" }),
+    ).toBeVisible();
+    await page.fill("textarea", "");
 
-  // Tap one opens the sheet; tap two on "File" opens the OS file picker
-  // itself, rather than parking the user in front of a drop zone.
-  const menu = page.getByRole("menu", { name: "Attach" });
-  await attach.click();
-  await expect(menu).toBeVisible();
-  const chooser = page.waitForEvent("filechooser");
-  await menu.getByRole("menuitem", { name: /^File/ }).click();
-  await chooser;
-  await expect(menu).toHaveCount(0);
+    // Tap one opens the sheet; tap two on "File" opens the OS file picker
+    // itself, rather than parking the user in front of a drop zone.
+    const menu = page.getByRole("menu", { name: "Attach" });
+    await attach.click();
+    await expect(menu).toBeVisible();
+    const chooser = page.waitForEvent("filechooser");
+    await menu.getByRole("menuitem", { name: /^File/ }).click();
+    await chooser;
+    await expect(menu).toHaveCount(0);
 
-  // Escape closes the sheet without picking anything.
-  await attach.click();
-  await expect(menu).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(menu).toHaveCount(0);
+    // Escape closes the sheet without picking anything.
+    await attach.click();
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
 
-  // "Photo" swaps the message field for a link field with the caret already
-  // in it, and the same trigger — now a cross — backs out of that mode.
-  await page.fill("textarea", "a half-written message");
-  await attach.click();
-  await menu.getByRole("menuitem", { name: /^Photo/ }).click();
-  const linkField = page.getByRole("textbox", { name: "Image link" });
-  await expect(linkField).toBeFocused();
-  await expect(linkField).toHaveValue("");
-  await page.getByRole("button", { name: "Cancel photo link" }).click();
-  // ...handing the half-written message back, rather than throwing away the
-  // draft the link field was borrowing its state from.
-  await expect(page.locator("textarea")).toHaveValue("a half-written message");
-});
+    // "Photo" swaps the message field for a link field with the caret already
+    // in it, and the same trigger — now a cross — backs out of that mode.
+    await page.fill("textarea", "a half-written message");
+    await attach.click();
+    await menu.getByRole("menuitem", { name: /^Photo/ }).click();
+    const linkField = page.getByRole("textbox", { name: "Image link" });
+    await expect(linkField).toBeFocused();
+    await expect(linkField).toHaveValue("");
+    await page.getByRole("button", { name: "Cancel photo link" }).click();
+    // ...handing the half-written message back, rather than throwing away the
+    // draft the link field was borrowing its state from.
+    await expect(page.locator("textarea")).toHaveValue(
+      "a half-written message",
+    );
+  },
+);
 
 test("the chat fits the *visual* viewport, not the layout viewport the keyboard lies about", async ({
   page,
@@ -1259,95 +1266,96 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
     .toBeLessThanOrEqual(400);
 });
 
-test("clicking a reply's quoted snippet jumps the thread to the message it answers", async ({
-  page,
-  request,
-  apiUrl,
-  createUser,
-  signUp,
-}) => {
-  // Seeding more than a full page of messages one HTTP request at a time
-  // (below) doesn't reliably fit the default 30s test timeout.
-  test.setTimeout(60_000);
+test(
+  "clicking a reply's quoted snippet jumps the thread to the message it answers",
+  { tag: "@layout" },
+  async ({ page, request, apiUrl, createUser, signUp }) => {
+    // Seeding more than a full page of messages one HTTP request at a time
+    // (below) doesn't reliably fit the default 30s test timeout.
+    test.setTimeout(60_000);
 
-  await signUp(page);
+    await signUp(page);
 
-  // B only has to exist for A to start a direct chat with them — the whole
-  // flow under test happens in A's window.
-  const { username: otherUsername } = await createUser();
+    // B only has to exist for A to start a direct chat with them — the whole
+    // flow under test happens in A's window.
+    const { username: otherUsername } = await createUser();
 
-  await page.goto("/chats/new");
-  await page.getByRole("button", { name: "Direct message" }).click();
-  await page.fill("#user-search", otherUsername);
-  await page.getByRole("button", { name: `@${otherUsername}` }).click();
-  await expect(page).toHaveURL(/\/chats\/\d+/);
-  const chatId = page.url().split("/").pop();
+    await page.goto("/chats/new");
+    await page.getByRole("button", { name: "Direct message" }).click();
+    await page.fill("#user-search", otherUsername);
+    await page.getByRole("button", { name: `@${otherUsername}` }).click();
+    await expect(page).toHaveURL(/\/chats\/\d+/);
+    const chatId = page.url().split("/").pop();
 
-  const session = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
-  );
-  // Seeding over HTTP rather than through the composer: this test needs more
-  // than a page of history, and a few dozen round trips through the UI are a
-  // few dozen chances to be slow for no extra coverage.
-  const post = async (body: Record<string, unknown>) => {
-    const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
-      headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: body,
+    const session = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+    );
+    // Seeding over HTTP rather than through the composer: this test needs more
+    // than a page of history, and a few dozen round trips through the UI are a
+    // few dozen chances to be slow for no extra coverage.
+    const post = async (body: Record<string, unknown>) => {
+      const response = await request.post(
+        `${apiUrl}/chats/${chatId}/messages`,
+        {
+          headers: { Authorization: `Bearer ${session.accessToken}` },
+          data: body,
+        },
+      );
+      expect(response.ok()).toBe(true);
+      return (await response.json()) as { id: number };
+    };
+
+    // Seed from *outside* the conversation: the query cache is persisted to
+    // localStorage (see lib/query.ts), so a page that watched these messages
+    // arrive would still have every one of them in hand after a reload — and
+    // this test needs a chat opened cold, holding only its newest page.
+    await page.goto("/chats");
+
+    const anchorText = "Which of these two dates works better for you?";
+    const anchor = await post({ contentType: "text", content: anchorText });
+    // Enough conversation between the anchor and its reply that the anchor
+    // falls outside the 30-message page the chat opens with.
+    for (let i = 1; i <= 31; i++) {
+      await post({ contentType: "text", content: `Filler message ${i}` });
+    }
+    const replyText = "The second one, definitely";
+    await post({
+      contentType: "text",
+      content: replyText,
+      parentMessageId: anchor.id,
     });
-    expect(response.ok()).toBe(true);
-    return (await response.json()) as { id: number };
-  };
 
-  // Seed from *outside* the conversation: the query cache is persisted to
-  // localStorage (see lib/query.ts), so a page that watched these messages
-  // arrive would still have every one of them in hand after a reload — and
-  // this test needs a chat opened cold, holding only its newest page.
-  await page.goto("/chats");
+    await page.goto(`/chats/${chatId}`);
+    const replyBubble = page
+      .locator("[data-message-id]")
+      .filter({ hasText: replyText });
+    await expect(replyBubble).toBeVisible();
 
-  const anchorText = "Which of these two dates works better for you?";
-  const anchor = await post({ contentType: "text", content: anchorText });
-  // Enough conversation between the anchor and its reply that the anchor
-  // falls outside the 30-message page the chat opens with.
-  for (let i = 1; i <= 31; i++) {
-    await post({ contentType: "text", content: `Filler message ${i}` });
-  }
-  const replyText = "The second one, definitely";
-  await post({
-    contentType: "text",
-    content: replyText,
-    parentMessageId: anchor.id,
-  });
+    const anchorBubble = page.locator(`[data-message-id="${anchor.id}"]`);
+    const quote = replyBubble.getByRole("button", {
+      name: /^Go to the message from/,
+    });
 
-  await page.goto(`/chats/${chatId}`);
-  const replyBubble = page
-    .locator("[data-message-id]")
-    .filter({ hasText: replyText });
-  await expect(replyBubble).toBeVisible();
+    // The message being answered is older than everything the chat loaded, so
+    // the click has to page earlier history back in before it has anything to
+    // scroll to.
+    await expect(anchorBubble).toHaveCount(0);
+    await quote.click();
+    await expect(anchorBubble).toBeInViewport();
+    // …and is highlighted once it gets there, so it's clear which message the
+    // jump landed on. The highlight clears itself again afterwards.
+    const highlight = anchorBubble.getByTestId("jump-highlight");
+    await expect(highlight).toBeVisible();
+    await expect(highlight).toHaveCSS("animation-name", "jump-flash");
+    await expect(highlight).toHaveCount(0);
 
-  const anchorBubble = page.locator(`[data-message-id="${anchor.id}"]`);
-  const quote = replyBubble.getByRole("button", {
-    name: /^Go to the message from/,
-  });
-
-  // The message being answered is older than everything the chat loaded, so
-  // the click has to page earlier history back in before it has anything to
-  // scroll to.
-  await expect(anchorBubble).toHaveCount(0);
-  await quote.click();
-  await expect(anchorBubble).toBeInViewport();
-  // …and is highlighted once it gets there, so it's clear which message the
-  // jump landed on. The highlight clears itself again afterwards.
-  const highlight = anchorBubble.getByTestId("jump-highlight");
-  await expect(highlight).toBeVisible();
-  await expect(highlight).toHaveCSS("animation-name", "jump-flash");
-  await expect(highlight).toHaveCount(0);
-
-  // And once it *is* loaded, a jump from the bottom of the thread is a plain
-  // scroll — no further fetching.
-  const thread = page.getByTestId("chat-scroll");
-  await thread.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
-  await expect(anchorBubble).not.toBeInViewport();
-  await quote.click();
-  await expect(anchorBubble).toBeInViewport();
-  await expect(highlight).toBeVisible();
-});
+    // And once it *is* loaded, a jump from the bottom of the thread is a plain
+    // scroll — no further fetching.
+    const thread = page.getByTestId("chat-scroll");
+    await thread.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+    await expect(anchorBubble).not.toBeInViewport();
+    await quote.click();
+    await expect(anchorBubble).toBeInViewport();
+    await expect(highlight).toBeVisible();
+  },
+);

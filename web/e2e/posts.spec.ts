@@ -1,62 +1,61 @@
 import { expect, test } from "./fixtures";
 import { makeSolidPng } from "./helpers";
 
-test("creating a post shows it in the feed, and infinite scroll loads more posts in batches of 5 then 3", async ({
-  page,
-  request,
-  apiUrl,
-  signUp,
-}) => {
-  await signUp(page);
+test(
+  "creating a post shows it in the feed, and infinite scroll loads more posts in batches of 5 then 3",
+  { tag: "@layout" },
+  async ({ page, request, apiUrl, signUp }) => {
+    await signUp(page);
 
-  // Create the first post through the actual "New post" page.
-  await page.goto("/posts/new");
-  await page.getByRole("button", { name: "Text" }).click();
-  await page.fill("#content", "My first post from the UI");
-  await page.getByRole("button", { name: "Post" }).click();
-  await expect(page).toHaveURL("/");
-  await expect(page.getByText("My first post from the UI")).toBeVisible();
+    // Create the first post through the actual "New post" page.
+    await page.goto("/posts/new");
+    await page.getByRole("button", { name: "Text" }).click();
+    await page.fill("#content", "My first post from the UI");
+    await page.getByRole("button", { name: "Post" }).click();
+    await expect(page).toHaveURL("/");
+    await expect(page.getByText("My first post from the UI")).toBeVisible();
 
-  // Seed 7 more posts directly against the API — 8 total is enough to
-  // exercise two infinite-scroll batches (5 up front, 3 more on scroll).
-  //
-  // Each seeded post is deliberately tall (several short lines, still well
-  // under PostCard's 500-char collapse threshold so it renders in full).
-  // The feed's IntersectionObserver eagerly prefetches the next batch while
-  // the sentinel is within 400px of the viewport (see web/src/routes/
-  // index.tsx), so if the first 5 cards didn't overflow the viewport the
-  // sentinel would be visible on load and batch 2 would auto-load before we
-  // could observe the 5-post state — making `toHaveCount(5)` racily flaky.
-  // Tall cards push the sentinel out of the prefetch zone, so the second
-  // batch only loads on the explicit scroll below, which is the whole point
-  // of this test.
-  const session = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
-  );
-  for (let i = 0; i < 7; i++) {
-    const content = Array.from(
-      { length: 8 },
-      (_, line) => `Seeded post ${i} line ${line}`,
-    ).join("\n");
-    const response = await request.post(`${apiUrl}/posts`, {
-      headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: { contentType: "text", content },
-    });
-    expect(response.ok()).toBe(true);
-  }
+    // Seed 7 more posts directly against the API — 8 total is enough to
+    // exercise two infinite-scroll batches (5 up front, 3 more on scroll).
+    //
+    // Each seeded post is deliberately tall (several short lines, still well
+    // under PostCard's 500-char collapse threshold so it renders in full).
+    // The feed's IntersectionObserver eagerly prefetches the next batch while
+    // the sentinel is within 400px of the viewport (see web/src/routes/
+    // index.tsx), so if the first 5 cards didn't overflow the viewport the
+    // sentinel would be visible on load and batch 2 would auto-load before we
+    // could observe the 5-post state — making `toHaveCount(5)` racily flaky.
+    // Tall cards push the sentinel out of the prefetch zone, so the second
+    // batch only loads on the explicit scroll below, which is the whole point
+    // of this test.
+    const session = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+    );
+    for (let i = 0; i < 7; i++) {
+      const content = Array.from(
+        { length: 8 },
+        (_, line) => `Seeded post ${i} line ${line}`,
+      ).join("\n");
+      const response = await request.post(`${apiUrl}/posts`, {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+        data: { contentType: "text", content },
+      });
+      expect(response.ok()).toBe(true);
+    }
 
-  await page.reload();
+    await page.reload();
 
-  const articles = page.getByRole("article");
-  await expect(articles).toHaveCount(5);
+    const articles = page.getByRole("article");
+    await expect(articles).toHaveCount(5);
 
-  // Scroll to the bottom to trigger the next infinite-scroll batch.
-  await page.getByTestId("feed-sentinel").scrollIntoViewIfNeeded();
-  await expect(articles).toHaveCount(8);
+    // Scroll to the bottom to trigger the next infinite-scroll batch.
+    await page.getByTestId("feed-sentinel").scrollIntoViewIfNeeded();
+    await expect(articles).toHaveCount(8);
 
-  // All 8 posts are loaded — no more batches left to fetch.
-  await expect(page.getByText("You're all caught up.")).toBeVisible();
-});
+    // All 8 posts are loaded — no more batches left to fetch.
+    await expect(page.getByText("You're all caught up.")).toBeVisible();
+  },
+);
 
 test("a post created by one user appears live in another user's already-open feed", async ({
   browser,
@@ -155,225 +154,227 @@ test("edit is only available to a post's author, both in the UI and when navigat
   await contextB.close();
 });
 
-test("long posts are collapsed behind a Show more toggle", async ({
-  page,
-  request,
-  apiUrl,
-  signUp,
-}) => {
-  const { username } = await signUp(page);
+test(
+  "long posts are collapsed behind a Show more toggle",
+  { tag: "@layout" },
+  async ({ page, request, apiUrl, signUp }) => {
+    const { username } = await signUp(page);
 
-  // Longer than PostCard's 500-char collapse threshold — created directly
-  // against the API since the point is to check the feed's rendering, not
-  // the "new post" form.
-  const longContent = "Lorem ipsum dolor sit amet.".repeat(30);
-  const session = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
-  );
-  const response = await request.post(`${apiUrl}/posts`, {
-    headers: { Authorization: `Bearer ${session.accessToken}` },
-    data: { contentType: "text", content: longContent },
-  });
-  expect(response.ok()).toBe(true);
+    // Longer than PostCard's 500-char collapse threshold — created directly
+    // against the API since the point is to check the feed's rendering, not
+    // the "new post" form.
+    const longContent = "Lorem ipsum dolor sit amet.".repeat(30);
+    const session = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+    );
+    const response = await request.post(`${apiUrl}/posts`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      data: { contentType: "text", content: longContent },
+    });
+    expect(response.ok()).toBe(true);
 
-  await page.goto("/");
-  const card = page.getByRole("article", { name: `Post by @${username}` });
-  await expect(card).toBeVisible();
+    await page.goto("/");
+    const card = page.getByRole("article", { name: `Post by @${username}` });
+    await expect(card).toBeVisible();
 
-  const showMore = card.getByRole("button", { name: "Show more" });
-  await expect(showMore).toBeVisible();
-  await expect(card.getByRole("button", { name: "Show less" })).toHaveCount(0);
+    const showMore = card.getByRole("button", { name: "Show more" });
+    await expect(showMore).toBeVisible();
+    await expect(card.getByRole("button", { name: "Show less" })).toHaveCount(
+      0,
+    );
 
-  await showMore.click();
-  await expect(card.getByRole("button", { name: "Show less" })).toBeVisible();
-  await expect(card.getByRole("button", { name: "Show more" })).toHaveCount(0);
+    await showMore.click();
+    await expect(card.getByRole("button", { name: "Show less" })).toBeVisible();
+    await expect(card.getByRole("button", { name: "Show more" })).toHaveCount(
+      0,
+    );
 
-  await card.getByRole("button", { name: "Show less" }).click();
-  await expect(showMore).toBeVisible();
+    await card.getByRole("button", { name: "Show less" }).click();
+    await expect(showMore).toBeVisible();
 
-  // The post's own page is for reading all of it — no clamp there (#527).
-  const postId = await card.getAttribute("data-post-id");
-  await page.goto(`/posts/${postId}`);
-  const detail = page.getByRole("article", { name: `Post by @${username}` });
-  const body = detail.locator("p", { hasText: longContent });
-  await expect(body).toBeVisible();
-  await expect(body).not.toHaveClass(/line-clamp/);
-  await expect(detail.getByRole("button", { name: "Show more" })).toHaveCount(
-    0,
-  );
-});
+    // The post's own page is for reading all of it — no clamp there (#527).
+    const postId = await card.getAttribute("data-post-id");
+    await page.goto(`/posts/${postId}`);
+    const detail = page.getByRole("article", { name: `Post by @${username}` });
+    const body = detail.locator("p", { hasText: longContent });
+    await expect(body).toBeVisible();
+    await expect(body).not.toHaveClass(/line-clamp/);
+    await expect(detail.getByRole("button", { name: "Show more" })).toHaveCount(
+      0,
+    );
+  },
+);
 
-test("clicking a feed image post opens it full-size in a lightbox", async ({
-  page,
-  request,
-  apiUrl,
-  signUp,
-}) => {
-  const { username } = await signUp(page);
+test(
+  "clicking a feed image post opens it full-size in a lightbox",
+  { tag: "@layout" },
+  async ({ page, request, apiUrl, signUp }) => {
+    const { username } = await signUp(page);
 
-  // Seed an image post directly against the API — the point here is the
-  // feed's lightbox behavior, not the "new post" upload flow. The host is on
-  // the backend's image-URL allowlist (see ALLOWED_IMAGE_HOST_DOMAINS); the
-  // image itself never has to load for the card's click target to exist.
-  const session = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
-  );
-  const response = await request.post(`${apiUrl}/posts`, {
-    headers: { Authorization: `Bearer ${session.accessToken}` },
-    data: {
-      contentType: "image_url",
-      content: "https://picsum.photos/seed/lightbox/600/800",
-    },
-  });
-  expect(response.ok()).toBe(true);
-
-  await page.goto("/");
-  const card = page.getByRole("article", { name: `Post by @${username}` });
-  await expect(card).toBeVisible();
-
-  // No lightbox until the image is clicked.
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-
-  await card.getByRole("button", { name: "View image full-size" }).click();
-  const lightbox = page.getByRole("dialog", { name: "Image" });
-  await expect(lightbox).toBeVisible();
-
-  // Esc closes it again.
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-});
-
-test("the full-screen viewer zooms and pans an image past its on-page size", async ({
-  page,
-  request,
-  apiUrl,
-  signUp,
-}) => {
-  await signUp(page);
-  const session = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
-  );
-  const headers = { Authorization: `Bearer ${session.accessToken}` };
-
-  // An attachment post (rather than an image-URL one) so the image is served
-  // by the test backend and actually decodes in the browser — the viewer's
-  // zoom math is driven by the image's natural size, so it needs a real one.
-  // Tall and narrow: at fit scale it's letterboxed, and one zoom step makes
-  // it overflow vertically, which is what gives the pan something to do.
-  const upload = await request.post(`${apiUrl}/attachments`, {
-    headers,
-    multipart: {
-      file: {
-        name: "tall.png",
-        mimeType: "image/png",
-        buffer: makeSolidPng(400, 1200, [90, 130, 220]),
+    // Seed an image post directly against the API — the point here is the
+    // feed's lightbox behavior, not the "new post" upload flow. The host is on
+    // the backend's image-URL allowlist (see ALLOWED_IMAGE_HOST_DOMAINS); the
+    // image itself never has to load for the card's click target to exist.
+    const session = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+    );
+    const response = await request.post(`${apiUrl}/posts`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      data: {
+        contentType: "image_url",
+        content: "https://picsum.photos/seed/lightbox/600/800",
       },
-    },
-  });
-  expect(upload.ok()).toBe(true);
-  const attachment = await upload.json();
-  const post = await request.post(`${apiUrl}/posts`, {
-    headers,
-    data: {
-      contentType: "attachment",
-      // The composer sends the filename as the post's content for
-      // attachment posts (see ChatComposer/PostForm) — mirrored here.
-      content: attachment.filename,
-      attachmentId: attachment.id,
-    },
-  });
-  expect(post.ok()).toBe(true);
+    });
+    expect(response.ok()).toBe(true);
 
-  await page.goto("/");
-  await page
-    .getByRole("button", { name: "View tall.png full-size" })
-    .first()
-    .click();
+    await page.goto("/");
+    const card = page.getByRole("article", { name: `Post by @${username}` });
+    await expect(card).toBeVisible();
 
-  const viewer = page.getByRole("dialog", { name: "tall.png" });
-  const image = viewer.getByRole("img", { name: "tall.png" });
-  await expect(image).toBeVisible();
+    // No lightbox until the image is clicked.
+    await expect(page.getByRole("dialog")).toHaveCount(0);
 
-  const viewport = page.viewportSize()!;
-  const box = async () => (await image.boundingBox())!;
-  const roundedHeight = async () => Math.round((await box()).height);
+    await card.getByRole("button", { name: "View image full-size" }).click();
+    const lightbox = page.getByRole("dialog", { name: "Image" });
+    await expect(lightbox).toBeVisible();
 
-  // It opens fit to the *screen* — a 400x1200 image in a 1280x720 viewport
-  // is letterboxed to exactly the viewport height (and 400px wide in the
-  // feed card it came from, so this is already several times bigger).
-  await expect.poll(roundedHeight).toBe(viewport.height);
-  const fit = await box();
+    // Esc closes it again.
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  },
+);
 
-  // Zooming in makes it genuinely bigger than the fitted view...
-  await viewer.getByRole("button", { name: "Zoom in" }).click();
-  await expect
-    .poll(async () => (await box()).width)
-    .toBeGreaterThan(fit.width * 1.3);
-  const zoomed = await box();
+test(
+  "the full-screen viewer zooms and pans an image past its on-page size",
+  { tag: "@layout" },
+  async ({ page, request, apiUrl, signUp }) => {
+    await signUp(page);
+    const session = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+    );
+    const headers = { Authorization: `Bearer ${session.accessToken}` };
 
-  // ...and now that it overflows the viewport, the wheel scrolls it, which
-  // the old fit-only viewer couldn't do at all.
-  await page.mouse.move(viewport.width / 2, viewport.height / 2);
-  await page.mouse.wheel(0, 250);
-  await expect
-    .poll(async () => Math.round((await box()).y))
-    .toBeLessThan(Math.round(zoomed.y));
+    // An attachment post (rather than an image-URL one) so the image is served
+    // by the test backend and actually decodes in the browser — the viewer's
+    // zoom math is driven by the image's natural size, so it needs a real one.
+    // Tall and narrow: at fit scale it's letterboxed, and one zoom step makes
+    // it overflow vertically, which is what gives the pan something to do.
+    const upload = await request.post(`${apiUrl}/attachments`, {
+      headers,
+      multipart: {
+        file: {
+          name: "tall.png",
+          mimeType: "image/png",
+          buffer: makeSolidPng(400, 1200, [90, 130, 220]),
+        },
+      },
+    });
+    expect(upload.ok()).toBe(true);
+    const attachment = await upload.json();
+    const post = await request.post(`${apiUrl}/posts`, {
+      headers,
+      data: {
+        contentType: "attachment",
+        // The composer sends the filename as the post's content for
+        // attachment posts (see ChatComposer/PostForm) — mirrored here.
+        content: attachment.filename,
+        attachmentId: attachment.id,
+      },
+    });
+    expect(post.ok()).toBe(true);
 
-  // "0" resets to the fitted view, where zooming out is a no-op again.
-  const zoomOut = viewer.getByRole("button", { name: "Zoom out" });
-  await expect(zoomOut).toBeEnabled();
-  await page.keyboard.press("0");
-  await expect.poll(roundedHeight).toBe(viewport.height);
-  await expect(zoomOut).toBeDisabled();
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "View tall.png full-size" })
+      .first()
+      .click();
 
-  // Finally, a drag down from the fitted view throws the viewer away —
-  // the mobile-style dismissal, which works with a mouse too.
-  await page.mouse.move(viewport.width / 2, viewport.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(viewport.width / 2, viewport.height / 2 + 260, {
-    steps: 10,
-  });
-  await page.mouse.up();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-});
+    const viewer = page.getByRole("dialog", { name: "tall.png" });
+    const image = viewer.getByRole("img", { name: "tall.png" });
+    await expect(image).toBeVisible();
 
-test("deleting a post asks in an in-app dialog, and cancelling keeps it", async ({
-  page,
-  signUp,
-}) => {
-  await signUp(page);
+    const viewport = page.viewportSize()!;
+    const box = async () => (await image.boundingBox())!;
+    const roundedHeight = async () => Math.round((await box()).height);
 
-  // Any native `confirm()` would be auto-dismissed by Playwright — fail
-  // loudly instead, since the app should never raise one (issue #507).
-  page.on("dialog", (dialog) => {
-    throw new Error(`Unexpected native dialog: ${dialog.message()}`);
-  });
+    // It opens fit to the *screen* — a 400x1200 image in a 1280x720 viewport
+    // is letterboxed to exactly the viewport height (and 400px wide in the
+    // feed card it came from, so this is already several times bigger).
+    await expect.poll(roundedHeight).toBe(viewport.height);
+    const fit = await box();
 
-  await page.goto("/posts/new");
-  await page.getByRole("button", { name: "Text" }).click();
-  await page.fill("#content", "A post to delete");
-  await page.getByRole("button", { name: "Post" }).click();
-  await expect(page).toHaveURL("/");
-  const post = page
-    .getByRole("article")
-    .filter({ hasText: "A post to delete" });
-  await expect(post).toBeVisible();
+    // Zooming in makes it genuinely bigger than the fitted view...
+    await viewer.getByRole("button", { name: "Zoom in" }).click();
+    await expect
+      .poll(async () => (await box()).width)
+      .toBeGreaterThan(fit.width * 1.3);
+    const zoomed = await box();
 
-  // Cancel (via Escape) leaves the post where it was.
-  await post.getByRole("button", { name: "Delete post" }).click();
-  const dialog = page.getByRole("alertdialog", { name: "Delete this post?" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(dialog).toHaveCount(0);
-  await expect(post).toBeVisible();
+    // ...and now that it overflows the viewport, the wheel scrolls it, which
+    // the old fit-only viewer couldn't do at all.
+    await page.mouse.move(viewport.width / 2, viewport.height / 2);
+    await page.mouse.wheel(0, 250);
+    await expect
+      .poll(async () => Math.round((await box()).y))
+      .toBeLessThan(Math.round(zoomed.y));
 
-  // Confirming deletes it.
-  await post.getByRole("button", { name: "Delete post" }).click();
-  await dialog.getByRole("button", { name: "Delete post" }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect(post).toHaveCount(0);
-});
+    // "0" resets to the fitted view, where zooming out is a no-op again.
+    const zoomOut = viewer.getByRole("button", { name: "Zoom out" });
+    await expect(zoomOut).toBeEnabled();
+    await page.keyboard.press("0");
+    await expect.poll(roundedHeight).toBe(viewport.height);
+    await expect(zoomOut).toBeDisabled();
+
+    // Finally, a drag down from the fitted view throws the viewer away —
+    // the mobile-style dismissal, which works with a mouse too.
+    await page.mouse.move(viewport.width / 2, viewport.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(viewport.width / 2, viewport.height / 2 + 260, {
+      steps: 10,
+    });
+    await page.mouse.up();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  },
+);
+
+test(
+  "deleting a post asks in an in-app dialog, and cancelling keeps it",
+  { tag: "@layout" },
+  async ({ page, signUp }) => {
+    await signUp(page);
+
+    // Any native `confirm()` would be auto-dismissed by Playwright — fail
+    // loudly instead, since the app should never raise one (issue #507).
+    page.on("dialog", (dialog) => {
+      throw new Error(`Unexpected native dialog: ${dialog.message()}`);
+    });
+
+    await page.goto("/posts/new");
+    await page.getByRole("button", { name: "Text" }).click();
+    await page.fill("#content", "A post to delete");
+    await page.getByRole("button", { name: "Post" }).click();
+    await expect(page).toHaveURL("/");
+    const post = page
+      .getByRole("article")
+      .filter({ hasText: "A post to delete" });
+    await expect(post).toBeVisible();
+
+    // Cancel (via Escape) leaves the post where it was.
+    await post.getByRole("button", { name: "Delete post" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Delete this post?" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(post).toBeVisible();
+
+    // Confirming deletes it.
+    await post.getByRole("button", { name: "Delete post" }).click();
+    await dialog.getByRole("button", { name: "Delete post" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(post).toHaveCount(0);
+  },
+);
 
 test("switching post type keeps a separate draft per type (issue #524)", async ({
   page,
