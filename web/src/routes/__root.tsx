@@ -37,11 +37,17 @@ import { Collapse } from "@/components/ui/collapse";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { HeaderSearch } from "@/components/HeaderSearch";
 import { OfflineBanner } from "@/components/OfflineBanner";
+import { SessionPlaceholder } from "@/components/SessionPlaceholder";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Skeleton } from "@/components/ui/skeleton";
 import { KeyboardShortcuts } from "@/components/shell/KeyboardShortcuts";
 import { VersionFooter } from "@/components/VersionFooter";
 import { logout } from "../lib/api";
-import { useSession } from "../lib/auth";
+import {
+  SESSION_BOOT_SCRIPT,
+  useSession,
+  useSessionPending,
+} from "../lib/auth";
 import { useBrowserNotifications } from "../lib/browserNotifications";
 import { useDockUser } from "../lib/chatDock";
 import { lazyNamed, type PreloadableComponent, whenIdle } from "../lib/lazy";
@@ -321,6 +327,7 @@ function Nav({
   onLogout: (() => void) | undefined;
 }) {
   const redirect = useRedirectHere();
+  const sessionPending = useSessionPending();
   const menuId = useId();
   // The phone menu remembers the location it was opened on rather than a
   // bare boolean, so any navigation — a menu link, a search submit, the
@@ -436,7 +443,14 @@ function Nav({
       </div>
       {session && <HeaderSearch className="hidden sm:block" />}
       <div className="flex items-center gap-2 sm:gap-3">
-        {session ? (
+        {sessionPending ? (
+          // The prerendered shell (issue #603): a signed-in reader gets
+          // placeholders the size of their actions, never "Log in".
+          <SessionPlaceholder
+            signedIn={<NavActionsSkeleton />}
+            signedOut={<SignedOutNavActions redirect={redirect} />}
+          />
+        ) : session ? (
           <>
             <Link
               to="/users/$id"
@@ -495,18 +509,7 @@ function Nav({
             </Button>
           </>
         ) : (
-          <>
-            <Button asChild variant="ghost" size="sm">
-              <Link to="/login" search={{ redirect }}>
-                Log in
-              </Link>
-            </Button>
-            <Button asChild size="sm" className="hidden sm:inline-flex">
-              <Link to="/register" search={{ redirect }}>
-                Register
-              </Link>
-            </Button>
-          </>
+          <SignedOutNavActions redirect={redirect} />
         )}
         {/* Below `sm` the bar is one row with no room to spare (issue
             #494), so there the toggle lives in the menu panel instead. */}
@@ -579,6 +582,36 @@ function Nav({
   );
 }
 
+function SignedOutNavActions({ redirect }: { redirect: string | undefined }) {
+  return (
+    <>
+      <Button asChild variant="ghost" size="sm">
+        <Link to="/login" search={{ redirect }}>
+          Log in
+        </Link>
+      </Button>
+      <Button asChild size="sm" className="hidden sm:inline-flex">
+        <Link to="/register" search={{ redirect }}>
+          Register
+        </Link>
+      </Button>
+    </>
+  );
+}
+
+// Stands in for the signed-in actions — name, bell, settings, log out —
+// at their sizes and breakpoints, so nothing shifts once they render.
+function NavActionsSkeleton() {
+  return (
+    <>
+      <Skeleton className="hidden h-4 w-20 sm:block" />
+      <Skeleton className="size-9" />
+      <Skeleton className="hidden size-9 sm:block" />
+      <Skeleton className="hidden h-8 w-24 sm:block" />
+    </>
+  );
+}
+
 // A full-width row in the phone menu panel.
 function MenuLink({
   to,
@@ -607,11 +640,15 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
     // boot script sets them before the first paint, from the stored choice
     // or `prefers-color-scheme` (issue #315). React never renders them, so
     // nothing resets or duplicates them; the hydration warning is
-    // suppressed for the <html> attribute mismatch.
+    // suppressed for the <html> attribute mismatch. `data-session` is the
+    // same kind of attribute, owned by lib/auth.ts (issue #603).
     <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+        {/* Marks <html> signed in or out before the first paint, so the
+            prerendered shell shows the right placeholders (issue #603). */}
+        <script dangerouslySetInnerHTML={{ __html: SESSION_BOOT_SCRIPT }} />
       </head>
       {/* `--app-height` is the visual viewport — what's actually on screen
           once the keyboard and the dynamic toolbar have had their say — with
