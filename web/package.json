@@ -7,6 +7,7 @@
     "dev": "vite dev --port 3001",
     "build": "vite build && vite build --config vite.pwa.config.ts",
     "preview": "vite preview --port 3001",
+    "analyze": "vite build --sourcemap && bun scripts/analyze-bundle.ts",
     "gen:routes": "tsr generate",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",

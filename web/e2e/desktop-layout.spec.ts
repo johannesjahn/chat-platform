@@ -284,6 +284,24 @@ test("Ctrl+K jumps to a chat, and / searches", async ({
   await expect(page).toHaveURL("/search?q=falcon");
 });
 
+test("? opens the shortcut sheet on the first press", async ({
+  page,
+  signUp,
+}) => {
+  // Issue #604: the sheet is a lazy chunk, but the key handler isn't — the
+  // first press right after load opens it, without waiting for the idle
+  // preload to have warmed it.
+  await signUp(page);
+  await page.goto("/");
+  await expect(sidebar(page)).toBeVisible();
+  await page.keyboard.press("?");
+  const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Close" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toHaveCount(0);
+});
+
 test("a file dropped on the conversation becomes the attachment, and ↑ edits your last message", async ({
   page,
   request,

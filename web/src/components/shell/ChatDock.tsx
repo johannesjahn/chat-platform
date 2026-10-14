@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useState, useSyncExternalStore } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import {
   ChevronUp,
   Maximize2,
@@ -14,14 +14,12 @@ import { TypingDots } from "@/components/reactbits/TypingDots";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
 import type { Session } from "@/lib/api";
-import { useSession } from "@/lib/auth";
 import {
   closeDockedChat,
   openDockedChat,
   setDockedChatMinimized,
   setDockListOpen,
   useChatDock,
-  useDockUser,
   type DockWindow,
 } from "@/lib/chatDock";
 import {
@@ -32,7 +30,6 @@ import {
   useTotalUnreadCount,
   type Chat,
 } from "@/lib/chats";
-import { useIsDesktop } from "@/lib/media";
 import { useIsOnline } from "@/lib/presence";
 import { useTypingUsers } from "@/lib/typing";
 import { cn } from "@/lib/utils";
@@ -78,19 +75,11 @@ function visibleWindowCount(viewport: number): number {
  * does, at its docked density, so reading a message there marks it read
  * exactly as the full view would. Hidden on `/chats/*` (the two-pane view
  * already is the messenger) and below `lg` (the phone layout keeps the
- * immersive full-page chat).
+ * immersive full-page chat) — that gate is `ChatDockSlot` in __root.tsx,
+ * which only loads this module, and with it the whole conversation view,
+ * once the dock is actually shown (issue #604).
  */
-export function ChatDock() {
-  const session = useSession();
-  const isDesktop = useIsDesktop();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  useDockUser(session?.user.id ?? null);
-  const onChats = pathname === "/chats" || pathname.startsWith("/chats/");
-  if (!session || !isDesktop || onChats) return null;
-  return <Dock session={session} />;
-}
-
-function Dock({ session }: { session: Session }) {
+export function ChatDock({ session }: { session: Session }) {
   const { windows, listOpen } = useChatDock();
   const viewport = useWindowWidth();
   const visible = windows.slice(0, visibleWindowCount(viewport));

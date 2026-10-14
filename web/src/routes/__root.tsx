@@ -21,7 +21,14 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import {
+  type ComponentType,
+  type ReactNode,
+  Suspense,
+  useEffect,
+  useId,
+  useState,
+} from "react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { NavIcon } from "@/components/NavIcon";
 import { GradientText } from "@/components/reactbits/GradientText";
@@ -30,28 +37,62 @@ import { Collapse } from "@/components/ui/collapse";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { HeaderSearch } from "@/components/HeaderSearch";
 import { OfflineBanner } from "@/components/OfflineBanner";
-import { PwaUpdatePrompt } from "@/components/PwaUpdatePrompt";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { ChatDock } from "@/components/shell/ChatDock";
-import { CommandPalette } from "@/components/shell/CommandPalette";
-import { DesktopSidebar } from "@/components/shell/DesktopSidebar";
 import { KeyboardShortcuts } from "@/components/shell/KeyboardShortcuts";
 import { VersionFooter } from "@/components/VersionFooter";
 import { logout } from "../lib/api";
 import { useSession } from "../lib/auth";
 import { useBrowserNotifications } from "../lib/browserNotifications";
-import { useIsDesktop } from "../lib/media";
+import { useDockUser } from "../lib/chatDock";
+import { lazyNamed, type PreloadableComponent, whenIdle } from "../lib/lazy";
+import { DESKTOP_MEDIA_QUERY, useIsDesktop } from "../lib/media";
 import { useChatsList, useTotalUnreadCount } from "../lib/chats";
 import { useUnreadNotificationCount } from "../lib/notifications";
 import { OfflineQueueSync } from "../lib/offlineQueue";
 import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
 import { useRedirectHere } from "../lib/redirect";
+import { type ShellOverlay, useOverlayOpen } from "../lib/shell";
 import { useTabBadge } from "../lib/tabBadge";
 import { THEME_BOOT_SCRIPT } from "../lib/theme";
 import { userLabel } from "../lib/users";
 import { useAppHeight } from "../lib/viewport";
 import appCss from "../styles.css?url";
+
+// Shell pieces kept out of the entry chunk (issue #604): every cold load
+// downloads, parses and runs that chunk before hydrating, on every route,
+// while these render nothing until they're used, or only on one layout.
+// The dock alone drags in the whole conversation view (bubbles, composer,
+// lightbox, group settings).
+const DesktopSidebar = lazyNamed(
+  () => import("@/components/shell/DesktopSidebar"),
+  "DesktopSidebar",
+);
+const ChatDock = lazyNamed(
+  () => import("@/components/shell/ChatDock"),
+  "ChatDock",
+);
+const CommandPalette = lazyNamed(
+  () => import("@/components/shell/CommandPalette"),
+  "CommandPalette",
+);
+const ShortcutsDialog = lazyNamed(
+  () => import("@/components/shell/ShortcutsDialog"),
+  "ShortcutsDialog",
+);
+const PwaUpdatePrompt = lazyNamed(
+  () => import("@/components/PwaUpdatePrompt"),
+  "PwaUpdatePrompt",
+);
+
+// On a desktop-width window, start fetching the sidebar as soon as this
+// module runs — alongside hydration rather than after it.
+if (
+  typeof window !== "undefined" &&
+  window.matchMedia(DESKTOP_MEDIA_QUERY).matches
+) {
+  DesktopSidebar.preload().catch(() => {});
+}
 
 export const Route = createRootRoute({
   head: () => ({
@@ -116,9 +157,12 @@ function RootComponent() {
             </div>
           </div>
           <VersionFooter />
-          <ChatDock />
-          <PwaUpdatePrompt />
-          <CommandPalette />
+          <ChatDockSlot />
+          <Suspense fallback={null}>
+            <PwaUpdatePrompt />
+          </Suspense>
+          <LazyOverlay overlay="palette" component={CommandPalette} />
+          <LazyOverlay overlay="shortcuts" component={ShortcutsDialog} />
           <KeyboardShortcuts />
         </ConfirmProvider>
       </PersistQueryClientProvider>
@@ -152,12 +196,63 @@ function SkipLink() {
   );
 }
 
+// The desktop messaging dock's gate (issue #554): signed in, at `lg`+, and
+// off `/chats/*`. It lives here rather than in ChatDock.tsx so the dock —
+// and the conversation view it renders — is only fetched once it's shown
+// (issue #604). The dock is `fixed`, so it arriving a beat later moves
+// nothing on the page.
+function ChatDockSlot() {
+  const session = useSession();
+  const isDesktop = useIsDesktop();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  useDockUser(session?.user.id ?? null);
+  const onChats = pathname === "/chats" || pathname.startsWith("/chats/");
+  if (!session || !isDesktop || onChats) return null;
+  return (
+    <Suspense fallback={null}>
+      <ChatDock session={session} />
+    </Suspense>
+  );
+}
+
+// Mounts a lazily loaded shell overlay (the palette, the shortcut sheet)
+// the first time the overlay store opens it, and keeps it mounted after so
+// it can play its close animation (issue #604). The global key handler
+// stays eager and only flips the store, so the first keypress still opens
+// it — and its chunk is warmed on idle, so that's rarely a network wait.
+function LazyOverlay({
+  overlay,
+  component: Overlay,
+}: {
+  overlay: ShellOverlay;
+  component: PreloadableComponent<ComponentType>;
+}) {
+  const open = useOverlayOpen(overlay);
+  const [wanted, setWanted] = useState(open);
+  if (open && !wanted) setWanted(true);
+  useEffect(
+    () => whenIdle(() => void Overlay.preload().catch(() => {})),
+    [Overlay],
+  );
+  if (!wanted) return null;
+  return (
+    <Suspense fallback={null}>
+      <Overlay />
+    </Suspense>
+  );
+}
+
 // Owns what both navigations share — the realtime socket, the unread counts
 // (and with them the tab badge), logging out — and renders whichever of the
 // phone/tablet top bar and the desktop sidebar fits the window. Only one is
 // mounted, so there's never a second, hidden copy of every link and name in
 // the document; the bar's `lg:hidden` and the sidebar's `hidden lg:flex`
 // still hold the line for the first frame, before the media query is read.
+//
+// The phone bar is the prerendered, mobile-first default, so it stays in
+// the entry chunk; the sidebar is a lazy chunk (issue #604). Until it's in,
+// `SidebarSpace` holds its width — in the prerendered shell too, where it's
+// rendered beside the bar — so the page never shifts sideways when it lands.
 function AppNavigation() {
   const session = useSession();
   const router = useRouter();
@@ -185,19 +280,32 @@ function AppNavigation() {
     : undefined;
 
   return isDesktop ? (
-    <DesktopSidebar
-      session={session}
-      unreadChats={unreadCount}
-      unreadNotifications={unreadNotifications}
-      onLogout={onLogout}
-    />
+    <Suspense fallback={<SidebarSpace />}>
+      <DesktopSidebar
+        session={session}
+        unreadChats={unreadCount}
+        unreadNotifications={unreadNotifications}
+        onLogout={onLogout}
+      />
+    </Suspense>
   ) : (
-    <Nav
-      session={session}
-      unreadCount={unreadCount}
-      unreadNotifications={unreadNotifications}
-      onLogout={onLogout}
-    />
+    <>
+      <Nav
+        session={session}
+        unreadCount={unreadCount}
+        unreadNotifications={unreadNotifications}
+        onLogout={onLogout}
+      />
+      <SidebarSpace />
+    </>
+  );
+}
+
+// An empty stand-in exactly as wide as the desktop sidebar (`w-[4.75rem]
+// xl:w-64` on its <nav>), shown only from `lg` up.
+function SidebarSpace() {
+  return (
+    <div aria-hidden className="hidden w-[4.75rem] shrink-0 lg:block xl:w-64" />
   );
 }
 
