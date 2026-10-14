@@ -413,6 +413,49 @@ controls like the account menu or the bell aren't on a phone). Leave it untagged
 if it sets its own viewport. To run just one layout locally, use
 `bun run test:e2e --project=phone`.
 
+## Route loaders
+
+The feed (`/`), `/chats`, `/chats/$id`, `/posts/$id`, `/notifications` and
+the profile (`/users/$id`) warm the queries they render in a TanStack Router
+`loader` (issue #605), so with `defaultPreload: "intent"` their requests start
+on hover/touch rather than after the component mounts. The helpers live in
+[`web/src/lib/routeLoader.ts`](web/src/lib/routeLoader.ts). A new loader that
+skips one of these rules quietly brings back double fetches or broken paging:
+
+- **One options builder, shared.** The loader and the component build their
+  query from the same function — `postsFeedQueryOptions()`,
+  `chatDetailQueryOptions(id)`, `notificationsListQueryOptions(…)` and so on —
+  so the component reads exactly the cache entry the loader warmed.
+- **`warmRoute` + `warmed`.** A loader body is `warmRoute(() => [...])`, which
+  skips signed-out visitors, caps the wait at `ROUTE_LOADER_WAIT_MS` (400ms,
+  so a slow API never stalls a tap) and swallows errors, leaving them to the
+  page's own queries. Each `ensureQueryData`/`ensureInfiniteQueryData` in it
+  is wrapped in `warmed(queryKey, …)`, which records that the loader actually
+  fetched (data that was already cached isn't recorded).
+- **`refetchOnMount: refetchUnlessWarmed`** on the component's query (set in
+  the shared options builder). Without it React Query's default
+  `staleTime: 0` refetches on mount what the loader just fetched. It only
+  skips that mount refetch, for a few seconds — focus/reconnect refetches and
+  realtime invalidations behave as before. `warmed` and `refetchUnlessWarmed`
+  come as a pair: a query warmed without them is still refetched on mount.
+- **State outside the cache needs more.** `useChatMessages` keeps its paging
+  cursors in refs, so the cached window also stores
+  `earliestCursor`/`latestCursor`, and a mount that finds a freshly warmed
+  window (`isFreshlyWarmed`) adopts them — see `warmChatMessages` in
+  [`web/src/lib/chats.ts`](web/src/lib/chats.ts). Any other hook with such
+  state has to do the same, or it pages from the wrong place.
+- **The socket's first connect refetches anyway.** On every (re)connect,
+  including the first, `realtimeSocket.ts` invalidates every event-driven
+  query to self-heal missed events. That's expected — and why loader tests
+  measure _client-side_ navigations, not full page loads.
+
+**Testing:** the freshness rules are unit-tested in
+[`web/src/lib/routeLoader.test.ts`](web/src/lib/routeLoader.test.ts); the
+end-to-end behaviour in
+[`web/e2e/route-loaders.spec.ts`](web/e2e/route-loaders.spec.ts) — start from
+`openSettled` (empty cache, app up, socket connected and its refetches back),
+hover the link first, then count the requests the navigation sends.
+
 ## Notifications
 
 In-app notifications (issue #317) — the header bell and the `/notifications`
