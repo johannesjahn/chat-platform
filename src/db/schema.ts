@@ -65,6 +65,12 @@ export const users = pgTable(
     statusText: text("status_text"),
     statusEmoji: text("status_emoji"),
     statusExpiresAt: timestamp("status_expires_at", { mode: "date" }),
+    // Free-form "about" text shown on the profile page (issue #322), null
+    // when unset. Length is bounded at the API (`MAX_BIO_LENGTH` in Api.ts),
+    // not here, matching `displayName`/`statusText`. Nullable with no default,
+    // so adding it is expand-only: replicas still on the old code simply
+    // never read or write it.
+    bio: text("bio"),
     // Signup time. Added for the admin dashboard (signup timeline and the
     // "new users" activity windows) — until then nothing recorded when an
     // account was created, and `id` ordering only gives relative order, not

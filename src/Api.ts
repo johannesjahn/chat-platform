@@ -120,6 +120,16 @@ export const User = Schema.Struct({
 }).annotate({ identifier: "User" });
 export type User = typeof User.Type;
 
+// A `User` plus the fields only the profile itself shows (issue #322) —
+// returned by `getUser` and `updateProfile` rather than folded into `User`,
+// so the many list endpoints (search, members, notifications, leaderboards)
+// don't carry every bio along. `bio` is null when unset.
+export const UserProfile = Schema.Struct({
+  ...User.fields,
+  bio: Schema.NullOr(Schema.String),
+}).annotate({ identifier: "UserProfile" });
+export type UserProfile = typeof UserProfile.Type;
+
 // Sensible cap on username length (issue #46) — mirrors common site limits
 // (Discord uses 32, GitHub 39) and keeps the value small enough to embed in
 // JWT claims and UI without an unbounded storage/DoS risk.
@@ -159,6 +169,14 @@ export const MAX_DISPLAY_NAME_LENGTH = 64;
 
 const DisplayName = Schema.Trimmed.check(Schema.isNonEmpty()).check(
   Schema.isMaxLength(MAX_DISPLAY_NAME_LENGTH),
+);
+
+// Short like a social-profile bio (issue #322) — a line or two about who
+// someone is, not a post.
+export const MAX_BIO_LENGTH = 160;
+
+const Bio = Schema.Trimmed.check(Schema.isNonEmpty()).check(
+  Schema.isMaxLength(MAX_BIO_LENGTH),
 );
 
 // A generous ceiling — long enough for any real passphrase, but bounded so a
@@ -235,9 +253,13 @@ export const ChangePasswordBody = Schema.Struct({
 // rather than a partial patch — `displayName`/`avatarUrl` are nullable so a
 // caller can explicitly clear either back to "unset". Username is not
 // editable here — it's assigned at registration and immutable thereafter.
+// `bio` (issue #322) is the one exception to full-replace: omitting it leaves
+// the stored bio untouched (null still clears it), so a client built before
+// the field existed — e.g. an old tab mid-rollout — can't wipe it on save.
 export const UpdateProfileBody = Schema.Struct({
   displayName: Schema.NullOr(DisplayName),
   avatarUrl: Schema.NullOr(AvatarUrl),
+  bio: Schema.optional(Schema.NullOr(Bio)),
 }).annotate({ identifier: "UpdateProfileBody" });
 
 // Deleting an account is irreversible, so — like `changePassword` — it
@@ -1216,7 +1238,7 @@ const UsersGroup = HttpApiGroup.make("users")
   .add(
     HttpApiEndpoint.get("getUser", "/users/:id", {
       params: { id: Schema.Int },
-      success: User,
+      success: UserProfile,
       error: NotFound,
     }).middleware(Authentication),
   )
@@ -1277,11 +1299,12 @@ const UsersGroup = HttpApiGroup.make("users")
   )
   .add(
     // Updates the current user's own profile — display name and avatar URL
-    // (issue #67). Full-replace like `updatePost`/`updateChat`. Username is
-    // not editable through this endpoint.
+    // (issue #67), and bio (issue #322). Full-replace like
+    // `updatePost`/`updateChat`, except that an omitted `bio` is kept.
+    // Username is not editable through this endpoint.
     HttpApiEndpoint.put("updateProfile", "/users/me", {
       payload: UpdateProfileBody,
-      success: User,
+      success: UserProfile,
     }).middleware(Authentication),
   )
   .add(

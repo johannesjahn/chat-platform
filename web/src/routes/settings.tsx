@@ -31,9 +31,11 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   $api,
   blocksQueryKey,
+  MAX_BIO_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_STATUS_EMOJI_LENGTH,
   MAX_STATUS_TEXT_LENGTH,
@@ -569,6 +571,18 @@ function EditProfileCard() {
   const [avatarVariants, setAvatarVariants] = useState<AvatarVariants | null>(
     session?.user.avatarVariants ?? null,
   );
+  // The session's `User` carries no bio (issue #322) — it comes from the
+  // profile itself, the same `GET /users/{id}` query the profile page reads.
+  // `bioDraft` stays null until the field is edited, so the textarea shows
+  // the stored bio once it loads, and a save before then leaves it alone.
+  const ownProfile = $api.useQuery(
+    "get",
+    "/users/{id}",
+    { params: { path: { id: String(session?.user.id ?? "") } } },
+    { enabled: !!session },
+  );
+  const [bioDraft, setBioDraft] = useState<string | null>(null);
+  const bio = bioDraft ?? ownProfile.data?.bio ?? "";
   const [cropFile, setCropFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -601,7 +615,9 @@ function EditProfileCard() {
     <Card className="w-full motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
       <CardHeader>
         <CardTitle>Edit profile</CardTitle>
-        <CardDescription>Update your display name and avatar.</CardDescription>
+        <CardDescription>
+          Update your display name, avatar, and bio.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {error && (
@@ -641,6 +657,8 @@ function EditProfileCard() {
                 body: {
                   displayName: displayName.trim() || null,
                   avatarUrl: avatarUrl.trim() || null,
+                  // Omitted (kept as-is) unless the field was edited.
+                  ...(bioDraft !== null && { bio: bioDraft.trim() || null }),
                 },
               });
               setSession({ ...session, user: updated });
@@ -649,6 +667,10 @@ function EditProfileCard() {
               // rather than leaving a stale preview.
               setAvatarVariants(updated.avatarVariants);
               await queryClient.invalidateQueries({ queryKey: usersQueryKey });
+              await queryClient.invalidateQueries({
+                queryKey: ["get", "/users/{id}"],
+              });
+              setBioDraft(null);
               setSuccess(true);
             } catch (err) {
               setError(errorMessage(err));
@@ -741,6 +763,23 @@ function EditProfileCard() {
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               maxLength={MAX_DISPLAY_NAME_LENGTH}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <Label htmlFor="bio">Bio</Label>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {bio.length}/{MAX_BIO_LENGTH}
+              </span>
+            </div>
+            <Textarea
+              id="bio"
+              placeholder="A line or two about yourself (optional)"
+              value={bio}
+              onChange={(e) => setBioDraft(e.target.value)}
+              maxLength={MAX_BIO_LENGTH}
+              rows={3}
+              className="min-h-20 resize-none"
             />
           </div>
           <Button

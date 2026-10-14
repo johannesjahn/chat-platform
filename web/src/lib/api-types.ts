@@ -1990,9 +1990,22 @@ export interface components {
         DeleteAccountBody: {
             password: string;
         };
+        UserProfile: {
+            id: number;
+            username: string;
+            displayName: string | null;
+            avatarUrl: string | null;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
+            role: components["schemas"]["UserRole"];
+            statusText: string | null;
+            statusEmoji: string | null;
+            statusExpiresAt: number | null;
+            bio: string | null;
+        };
         UpdateProfileBody: {
             displayName: string | null;
             avatarUrl: string | null;
+            bio?: (string | null) | null;
         };
         RefreshResponse: {
             accessToken: string;
@@ -2154,13 +2167,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description User */
+            /** @description UserProfile */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["User"];
+                    "application/json": components["schemas"]["UserProfile"];
                 };
             };
             /** @description HttpApiDecodeError */
@@ -2548,13 +2561,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description User */
+            /** @description UserProfile */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["User"];
+                    "application/json": components["schemas"]["UserProfile"];
                 };
             };
             /** @description HttpApiDecodeError */

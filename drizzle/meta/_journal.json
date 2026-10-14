@@ -225,6 +225,13 @@
       "when": 1791529666485,
       "tag": "0031_message_client_id",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791985486872,
+      "tag": "0032_user_bio",
+      "breakpoints": true
     }
   ]
 }

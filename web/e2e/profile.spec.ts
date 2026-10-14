@@ -71,3 +71,27 @@ test("a user's own profile shows 'Your posts' with no Message button", async ({
   await expect(page.getByText("My own post")).toBeVisible();
   await expect(page.getByRole("button", { name: "Message" })).toHaveCount(0);
 });
+
+test("a bio set in Settings shows on the profile and survives a reload of Settings", async ({
+  page,
+  signUp,
+}) => {
+  await signUp(page);
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+
+  await page.goto("/settings");
+  await page.getByLabel("Bio").fill("Coffee, climbing and compilers.");
+  await page.getByRole("button", { name: "Save profile" }).click();
+  await expect(page.getByText("Profile updated.")).toBeVisible();
+
+  await page.goto(`/users/${session.user.id}`);
+  await expect(page.getByText("Coffee, climbing and compilers.")).toBeVisible();
+
+  // The field is seeded from the stored profile, not just local state.
+  await page.goto("/settings");
+  await expect(page.getByLabel("Bio")).toHaveValue(
+    "Coffee, climbing and compilers.",
+  );
+});
