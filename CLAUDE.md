@@ -405,7 +405,13 @@ newest message, so assert conversation text through `page.getByRole("main")`.
 Use the `logOut`/`goToOwnProfile`/`openSearchBox`/`openAccountMenuItem`
 helpers in `web/e2e/helpers.ts` rather than reaching for top-bar controls,
 and [`desktop-layout.spec.ts`](web/e2e/desktop-layout.spec.ts) covers the
-wide (1440px) and phone (390px) layouts.
+wide (1440px) and phone (390px) layouts. Tests tagged `@layout`
+(`test(title, { tag: "@layout" }, …)`) also run in the `phone` (Pixel 7) and
+`wide` (1440×900) Playwright projects (issue #566). Tag a test whose assertions
+depend on the viewport, but only if it uses UI that every layout has (desktop-only
+controls like the account menu or the bell aren't on a phone). Leave it untagged
+if it sets its own viewport. To run just one layout locally, use
+`bun run test:e2e --project=phone`.
 
 ## Notifications
 

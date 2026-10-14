@@ -15,59 +15,59 @@ async function waitForPanelToSettle(panel: Locator) {
     .toBe(0);
 }
 
-test("reacting to a chat message from the hover button adds a pill below the bubble", async ({
-  browser,
-  injectApiUrl,
-  signUp,
-}) => {
-  // A direct chat needs a second user to exist, but only A drives the UI —
-  // A reacts to their own message (any participant may react, so the sender
-  // reacting to their own message is a valid case and keeps the test to a
-  // single page).
-  const contextA = await browser.newContext();
-  await injectApiUrl(contextA);
-  const pageA = await contextA.newPage();
-  await signUp(pageA);
+test(
+  "reacting to a chat message from the hover button adds a pill below the bubble",
+  { tag: "@layout" },
+  async ({ browser, injectApiUrl, signUp }) => {
+    // A direct chat needs a second user to exist, but only A drives the UI —
+    // A reacts to their own message (any participant may react, so the sender
+    // reacting to their own message is a valid case and keeps the test to a
+    // single page).
+    const contextA = await browser.newContext();
+    await injectApiUrl(contextA);
+    const pageA = await contextA.newPage();
+    await signUp(pageA);
 
-  const contextB = await browser.newContext();
-  await injectApiUrl(contextB);
-  const pageB = await contextB.newPage();
-  const { username: usernameB } = await signUp(pageB);
+    const contextB = await browser.newContext();
+    await injectApiUrl(contextB);
+    const pageB = await contextB.newPage();
+    const { username: usernameB } = await signUp(pageB);
 
-  await pageA.goto("/chats/new");
-  await pageA.getByRole("button", { name: "Direct message" }).click();
-  await pageA.fill("#user-search", usernameB);
-  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
-  await expect(pageA).toHaveURL(/\/chats\/\d+/);
+    await pageA.goto("/chats/new");
+    await pageA.getByRole("button", { name: "Direct message" }).click();
+    await pageA.fill("#user-search", usernameB);
+    await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+    await expect(pageA).toHaveURL(/\/chats\/\d+/);
 
-  await pageA.fill("textarea", "React to this chat message");
-  await pageA.keyboard.press("Enter");
-  const bubble = pageA
-    .locator("[data-message-id]")
-    .filter({ hasText: "React to this chat message" });
-  await expect(bubble).toBeVisible();
+    await pageA.fill("textarea", "React to this chat message");
+    await pageA.keyboard.press("Enter");
+    const bubble = pageA
+      .locator("[data-message-id]")
+      .filter({ hasText: "React to this chat message" });
+    await expect(bubble).toBeVisible();
 
-  // The "add a reaction" trigger only appears on hover, beside the bubble —
-  // the same hover-only affordance as the edit/delete buttons — rather than
-  // occupying permanent space below every message.
-  await bubble.hover();
-  await bubble.getByRole("button", { name: "Add a reaction" }).click();
-  await pageA.getByRole("button", { name: "React with 👍" }).click();
+    // The "add a reaction" trigger only appears on hover, beside the bubble —
+    // the same hover-only affordance as the edit/delete buttons — rather than
+    // occupying permanent space below every message.
+    await bubble.hover();
+    await bubble.getByRole("button", { name: "Add a reaction" }).click();
+    await pageA.getByRole("button", { name: "React with 👍" }).click();
 
-  const pill = bubble.getByRole("button", { name: "Remove 👍 reaction" });
-  await expect(pill).toBeVisible();
-  await expect(pill).toHaveText("👍1");
+    const pill = bubble.getByRole("button", { name: "Remove 👍 reaction" });
+    await expect(pill).toBeVisible();
+    await expect(pill).toHaveText("👍1");
 
-  // Toggling it back off removes the pill entirely, so no empty reaction row
-  // is left behind under the bubble.
-  await pill.click();
-  await expect(
-    bubble.getByRole("button", { name: "Remove 👍 reaction" }),
-  ).toHaveCount(0);
+    // Toggling it back off removes the pill entirely, so no empty reaction row
+    // is left behind under the bubble.
+    await pill.click();
+    await expect(
+      bubble.getByRole("button", { name: "Remove 👍 reaction" }),
+    ).toHaveCount(0);
 
-  await contextA.close();
-  await contextB.close();
-});
+    await contextA.close();
+    await contextB.close();
+  },
+);
 
 test("long-pressing a chat message on touch opens the reaction picker (issue #309)", async ({
   browser,
@@ -165,81 +165,82 @@ test("long-pressing a chat message on touch opens the reaction picker (issue #30
   await contextB.close();
 });
 
-test("a group chat shows the sender's avatar beside their message", async ({
-  browser,
-  injectApiUrl,
-  signUp,
-}) => {
-  const contextA = await browser.newContext();
-  await injectApiUrl(contextA);
-  const pageA = await contextA.newPage();
-  const { username: usernameA } = await signUp(pageA);
+test(
+  "a group chat shows the sender's avatar beside their message",
+  { tag: "@layout" },
+  async ({ browser, injectApiUrl, signUp }) => {
+    const contextA = await browser.newContext();
+    await injectApiUrl(contextA);
+    const pageA = await contextA.newPage();
+    const { username: usernameA } = await signUp(pageA);
 
-  const contextB = await browser.newContext();
-  await injectApiUrl(contextB);
-  const pageB = await contextB.newPage();
-  const { username: usernameB } = await signUp(pageB);
+    const contextB = await browser.newContext();
+    await injectApiUrl(contextB);
+    const pageB = await contextB.newPage();
+    const { username: usernameB } = await signUp(pageB);
 
-  await pageA.goto("/chats/new");
-  await pageA.getByRole("button", { name: "Group chat" }).click();
-  await pageA.fill("#group-title", "Avatar squad");
-  await pageA.fill("#user-search", usernameB);
-  await pageA.getByRole("button", { name: `@${usernameB}` }).click();
-  await pageA.getByRole("button", { name: /^Create group/ }).click();
-  await expect(pageA).toHaveURL(/\/chats\/\d+/);
-  const chatId = pageA.url().split("/").pop();
+    await pageA.goto("/chats/new");
+    await pageA.getByRole("button", { name: "Group chat" }).click();
+    await pageA.fill("#group-title", "Avatar squad");
+    await pageA.fill("#user-search", usernameB);
+    await pageA.getByRole("button", { name: `@${usernameB}` }).click();
+    await pageA.getByRole("button", { name: /^Create group/ }).click();
+    await expect(pageA).toHaveURL(/\/chats\/\d+/);
+    const chatId = pageA.url().split("/").pop();
 
-  await pageA.fill("textarea", "Hello from A in the group");
-  await pageA.keyboard.press("Enter");
-  await expect(
-    pageA.getByRole("main").getByText("Hello from A in the group"),
-  ).toBeVisible();
+    await pageA.fill("textarea", "Hello from A in the group");
+    await pageA.keyboard.press("Enter");
+    await expect(
+      pageA.getByRole("main").getByText("Hello from A in the group"),
+    ).toBeVisible();
 
-  // B opens the group and sees A's incoming message with A's avatar linked to
-  // A's profile next to it — the affordance that makes the sender identifiable
-  // at a glance in a group. B's own messages don't get an avatar, so this link
-  // is unambiguous.
-  await pageB.goto(`/chats/${chatId}`);
-  await expect(
-    pageB.getByRole("main").getByText("Hello from A in the group"),
-  ).toBeVisible();
-  await expect(
-    pageB.getByRole("link", { name: `@${usernameA}'s profile` }),
-  ).toBeVisible();
+    // B opens the group and sees A's incoming message with A's avatar linked to
+    // A's profile next to it — the affordance that makes the sender identifiable
+    // at a glance in a group. B's own messages don't get an avatar, so this link
+    // is unambiguous.
+    await pageB.goto(`/chats/${chatId}`);
+    await expect(
+      pageB.getByRole("main").getByText("Hello from A in the group"),
+    ).toBeVisible();
+    await expect(
+      pageB.getByRole("link", { name: `@${usernameA}'s profile` }),
+    ).toBeVisible();
 
-  await contextA.close();
-  await contextB.close();
-});
+    await contextA.close();
+    await contextB.close();
+  },
+);
 
-test("adding and removing a reaction on a post updates the pill through the real API", async ({
-  page,
-  signUp,
-}) => {
-  await signUp(page);
-  await page.goto("/posts/new");
-  await page.getByRole("button", { name: "Text" }).click();
-  await page.fill("#content", "React to this post");
-  await page.getByRole("button", { name: "Post" }).click();
-  await expect(page).toHaveURL("/");
+test(
+  "adding and removing a reaction on a post updates the pill through the real API",
+  { tag: "@layout" },
+  async ({ page, signUp }) => {
+    await signUp(page);
+    await page.goto("/posts/new");
+    await page.getByRole("button", { name: "Text" }).click();
+    await page.fill("#content", "React to this post");
+    await page.getByRole("button", { name: "Post" }).click();
+    await expect(page).toHaveURL("/");
 
-  const card = page.getByRole("article", { name: /^Post by / });
-  await card.getByRole("button", { name: "Add a reaction" }).click();
-  await page.getByRole("button", { name: "React with 👍" }).click();
+    const card = page.getByRole("article", { name: /^Post by / });
+    await card.getByRole("button", { name: "Add a reaction" }).click();
+    await page.getByRole("button", { name: "React with 👍" }).click();
 
-  const pill = card.getByRole("button", { name: "Remove 👍 reaction" });
-  await expect(pill).toBeVisible();
-  await expect(pill).toHaveText("👍1");
+    const pill = card.getByRole("button", { name: "Remove 👍 reaction" });
+    await expect(pill).toBeVisible();
+    await expect(pill).toHaveText("👍1");
 
-  await pill.click();
-  // Count drops back to zero, so the pill disappears entirely rather than
-  // flipping to an "Add" state.
-  await expect(
-    card.getByRole("button", { name: "Remove 👍 reaction" }),
-  ).toHaveCount(0);
-  await expect(
-    card.getByRole("button", { name: "Add 👍 reaction" }),
-  ).toHaveCount(0);
-});
+    await pill.click();
+    // Count drops back to zero, so the pill disappears entirely rather than
+    // flipping to an "Add" state.
+    await expect(
+      card.getByRole("button", { name: "Remove 👍 reaction" }),
+    ).toHaveCount(0);
+    await expect(
+      card.getByRole("button", { name: "Add 👍 reaction" }),
+    ).toHaveCount(0);
+  },
+);
 
 test("a failed post reaction shows a visible error instead of silently doing nothing (issue #233)", async ({
   page,
