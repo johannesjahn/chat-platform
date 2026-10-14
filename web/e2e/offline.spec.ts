@@ -24,6 +24,15 @@ test("losing connectivity mid-session keeps already-loaded messages on screen an
 
   await pageA.fill("textarea", "Message loaded before going offline");
   await pageA.keyboard.press("Enter");
+  // Wait for the send to actually land before going offline. A bare
+  // `getByText` check isn't enough: React mirrors a controlled textarea's
+  // value into its text content, so the composer itself matches while the
+  // POST is still in flight — going offline then fails the request and the
+  // message is queued (lib/offlineQueue.ts, its own storage) instead of
+  // ever reaching the cached window this test checks (issue #620). The
+  // composer is only cleared once the send resolved.
+  await expect(pageA.locator("textarea")).toHaveValue("");
+  await expect(pageA.getByTestId("pending-message")).toHaveCount(0);
   await expect(
     pageA.getByRole("main").getByText("Message loaded before going offline"),
   ).toBeVisible();
