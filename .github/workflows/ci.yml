@@ -43,6 +43,8 @@ jobs:
       deps: ${{ steps.filter.outputs.deps }}
       chart: ${{ steps.filter.outputs.chart }}
       observability: ${{ steps.filter.outputs.observability }}
+      e2e_specs: ${{ steps.filter.outputs.e2e_specs }}
+      e2e_specs_files: ${{ steps.filter.outputs.e2e_specs_files }}
     steps:
       # On pull_request the action lists the changed files through the API,
       # so no checkout is needed.
@@ -50,6 +52,9 @@ jobs:
         id: filter
         if: github.event_name == 'pull_request'
         with:
+          # Exposes each filter's matched paths as `<filter>_files`, which
+          # e2e-stress reads to know which specs to repeat.
+          list-files: json
           # Every filter includes `ci`, so a workflow or composite-action
           # change still runs everything.
           filters: |
@@ -92,6 +97,11 @@ jobs:
             observability:
               - *ci
               - k8s/observability/**
+            # Deliberately no `*ci`: e2e-stress repeats exactly these files,
+            # so a workflow-only change has nothing for it to run. Deleted
+            # specs are left out — there's nothing left to run.
+            e2e_specs:
+              - added|modified: web/e2e/**/*.spec.ts
 
   lint:
     name: Lint & format
@@ -573,39 +583,8 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
           web: true
 
-      # Only the browser binary (Chromium) is cacheable across runs — the
-      # system deps below are apt packages on an ephemeral, fresh-each-run
-      # runner VM, so there's nothing to persist for those. Keyed on
-      # web/bun.lock, which pins the @playwright/test (and thus browser)
-      # version, so a version bump naturally busts the cache.
-      - name: Cache Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
-
-      # The hosted runner image ships third-party apt sources (Google Chrome,
-      # Microsoft) that nothing here installs from — every package below comes
-      # from the Ubuntu archive. When one of those repos serves a stale or
-      # mid-rotation index, `apt-get update` still exits 100 and takes the job
-      # down with it (CI run #822 on main: "Hash Sum mismatch" on
-      # dl.google.com's Packages.gz failed this job and all three e2e shards).
-      # Drop those lists first so an unrelated repo can't break the build; the
-      # globs cover both the .list and deb822 .sources spellings, and `-f`
-      # keeps this a no-op if a future image ships neither.
-      - name: Remove unused third-party apt sources
-        run: sudo rm -fv /etc/apt/sources.list.d/*google* /etc/apt/sources.list.d/*microsoft*
-
-      # Split from browser install: `playwright install` skips re-downloading
-      # a browser already present in the cache above, so only this step's
-      # apt-get work runs unconditionally on every shard.
-      - name: Install Playwright system dependencies
-        run: bunx playwright install-deps chromium
-        working-directory: web
-
-      - name: Install Playwright browser
-        run: bunx playwright install chromium
-        working-directory: web
+      - name: Set up Playwright
+        uses: ./.github/actions/setup-playwright
 
       # Each test boots its own backend process (see web/e2e/backend.ts), so
       # running everything on one runner means all shards' backends and
@@ -620,6 +599,55 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-traces-${{ matrix.shard }}
+          path: web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Timing flakes mostly show up only under parallel load: a spec can pass
+  # every single run and still fail intermittently on main (issue #619). So
+  # on a PR, the specs it adds or edits run again here, several times over
+  # and with every core busy, with retries off — one failed repetition fails
+  # the job. Limited to the changed specs so the cost stays bounded, and
+  # skipped entirely (no runner at all) when a PR touches none.
+  e2e-stress:
+    name: E2E stress (changed specs)
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.e2e_specs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          web: true
+
+      - name: Set up Playwright
+        uses: ./.github/actions/setup-playwright
+
+      # The changed paths are repo-relative; Playwright runs from web/, so
+      # strip the prefix. They're passed through the environment and read as
+      # JSON, never spliced into the script, so a file name can't inject
+      # shell. Every project runs, so a changed `@layout` test is also
+      # repeated on the phone and wide layouts.
+      - name: Repeat changed specs under load
+        env:
+          SPECS: ${{ needs.changes.outputs.e2e_specs_files }}
+          REPEAT_EACH: 5
+        run: |
+          mapfile -t specs < <(jq -r '.[] | sub("^web/"; "")' <<< "$SPECS")
+          echo "Repeating each of these ${REPEAT_EACH} times:"
+          printf '  %s\n' "${specs[@]}"
+          bun run test:e2e --repeat-each="$REPEAT_EACH" --retries=0 --workers=100% "${specs[@]}"
+        working-directory: web
+
+      - name: Upload Playwright traces
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-traces-stress
           path: web/test-results/
           if-no-files-found: ignore
           retention-days: 7
@@ -648,6 +676,7 @@ jobs:
       - migrate-postgres
       - docker
       - e2e
+      - e2e-stress
     steps:
       - name: Fail if any job failed or was cancelled
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
