@@ -16,11 +16,12 @@ import { PostOverlay } from "@/components/feed/PostOverlay";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PendingPostCard } from "@/components/PendingPostCard";
 import { PostCard, PostCardSkeleton } from "@/components/PostCard";
+import { SessionPlaceholder } from "@/components/SessionPlaceholder";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api } from "@/lib/api";
-import { useSession } from "@/lib/auth";
+import { useSession, useSessionPending } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
 import { useIsDesktop, useMediaQuery } from "@/lib/media";
 import {
@@ -51,6 +52,7 @@ export const Route = createFileRoute("/")({
 
 function PostsFeedPage() {
   const session = useSession();
+  const sessionPending = useSessionPending();
   const queryClient = useQueryClient();
   const isOnline = useOnlineStatus();
   // Tailwind's `xl` — where the right rail fits beside the feed column.
@@ -180,17 +182,26 @@ function PostsFeedPage() {
           </ul>
         )}
 
-        {!session ? (
+        {sessionPending ? (
+          // Rendered during hydration, before the session can be read
+          // (issue #603): a signed-in reader sees the loading cards, not
+          // the login prompt.
+          <SessionPlaceholder
+            signedIn={<FeedSkeleton />}
+            signedOut={
+              <LoginPrompt
+                title="Log in to see the feed"
+                description="Posts are only visible to signed-in users."
+              />
+            }
+          />
+        ) : !session ? (
           <LoginPrompt
             title="Log in to see the feed"
             description="Posts are only visible to signed-in users."
           />
         ) : isLoading ? (
-          <div className="flex w-full flex-col items-center gap-6">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <PostCardSkeleton key={i} />
-            ))}
-          </div>
+          <FeedSkeleton />
         ) : posts.length === 0 && error && !(error instanceof Error) ? (
           // A decoded API error body (not a raw `Error`) only happens for a
           // real server-side failure — a network-level failure (offline,
@@ -283,5 +294,15 @@ function PostsFeedPage() {
         )
       )}
     </main>
+  );
+}
+
+function FeedSkeleton() {
+  return (
+    <div className="flex w-full flex-col items-center gap-6">
+      {Array.from({ length: 3 }).map((_, i) => (
+        <PostCardSkeleton key={i} />
+      ))}
+    </div>
   );
 }
