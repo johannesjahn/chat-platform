@@ -4,7 +4,11 @@ import { expect, test } from "./fixtures";
 
 test("an unknown URL shows the 404 page with a way back to the feed", async ({
   page,
+  allowConsoleErrors,
 }) => {
+  // The dev server answers the document request itself with a 404, which
+  // Chromium logs — that's the status this page is meant to have.
+  allowConsoleErrors("the server responded with a status of 404");
   await page.goto("/does-not-exist");
   const main = page.getByRole("main");
   await expect(main.getByText("Page not found")).toBeVisible();

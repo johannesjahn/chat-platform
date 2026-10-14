@@ -566,6 +566,13 @@ regenerated from scratch.
   `webServer` config boots the _real_ backend (`bun run start`, cwd `..`, with a
   test `JWT_SECRET`) and the Vite dev server, then drives the browser against
   them. Configured in [web/playwright.config.ts](web/playwright.config.ts).
+  A test fails if any of its pages logs a `console.error` or an uncaught
+  error/rejection (issue #618, the `consoleErrors` fixture in
+  [web/e2e/fixtures.ts](web/e2e/fixtures.ts)). Fix what it reports; expected
+  noise goes in the commented `CONSOLE_ERROR_ALLOWLIST` there, and a test
+  that provokes an error on purpose allows it for itself with
+  `allowConsoleErrors(pattern)`. Extra contexts are only watched if they go
+  through `injectApiUrl`, which they already must.
 
 ## Code generation
 

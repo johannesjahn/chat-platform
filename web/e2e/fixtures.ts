@@ -1,4 +1,4 @@
-import type { BrowserContext, Page } from "@playwright/test";
+import type { BrowserContext, ConsoleMessage, Page } from "@playwright/test";
 import { test as base } from "@playwright/test";
 import type { components } from "../src/lib/api-types";
 import { startTestBackend } from "./backend";
@@ -7,6 +7,61 @@ import { randomUsername } from "./helpers";
 type Session = components["schemas"]["LoginResponse"];
 
 type InjectApiUrl = (context: BrowserContext) => Promise<void>;
+
+type ErrorPattern = string | RegExp;
+
+// Browser console errors and unhandled rejections that are expected noise
+// rather than bugs (issue #618). Anything a page logs that isn't matched
+// here fails the test — so give every entry a reason. A test whose subject
+// *is* an error should extend the list for itself with `allowConsoleErrors`
+// rather than adding to it here.
+const CONSOLE_ERROR_ALLOWLIST: readonly ErrorPattern[] = [
+  // Taking a context offline (`context.setOffline`) or aborting a route
+  // (`route.abort`) makes Chromium log each request it kills — the
+  // realtime socket's reconnects and the offline specs' aborted API calls.
+  /^Failed to load resource: net::ERR_(INTERNET_DISCONNECTED|FAILED)$/,
+];
+
+type ConsoleErrors = {
+  allow: (patterns: ErrorPattern[]) => void;
+  watch: (context: BrowserContext, apiUrl: string) => void;
+  stop: () => void;
+};
+
+function matches(text: string, pattern: ErrorPattern): boolean {
+  return typeof pattern === "string"
+    ? text.includes(pattern)
+    : pattern.test(text);
+}
+
+// React logs through printf-style formats (`Encountered two children with
+// the same key, \`%s\`…`), and `message.text()` leaves those unfilled. Fill
+// them from the arguments' previews (a primitive's preview is its value), so
+// a failure names the key, the component, and so on.
+function formatConsoleMessage(message: ConsoleMessage): string {
+  const [format, ...args] = message.args().map((arg) => arg.toString());
+  if (format === undefined || !/%[sdifoOc]/.test(format)) {
+    return message.text();
+  }
+  let next = 0;
+  return format.replace(/%[sdifoOc]/g, (spec) =>
+    spec === "%c" ? (next++, "") : (args[next++] ?? spec),
+  );
+}
+
+// Chromium logs every non-2xx response as a console error ("Failed to load
+// resource: the server responded with a status of 404 …"). From the API
+// that's the app's own business — a 401 on a bad login, a 404 on a deleted
+// post, a 400 a test fulfils on purpose — and the app surfaces it itself.
+// The same message for one of the dev server's own assets is a real bug.
+function isApiResponseError(message: ConsoleMessage, apiUrl: string): boolean {
+  return (
+    message
+      .text()
+      .startsWith("Failed to load resource: the server responded") &&
+    message.location().url.startsWith(apiUrl)
+  );
+}
 
 export type TestUser = {
   username: string;
@@ -53,6 +108,8 @@ async function postJson(url: string, body: unknown): Promise<Response> {
 export const test = base.extend<{
   apiUrl: string;
   injectApiUrl: InjectApiUrl;
+  consoleErrors: ConsoleErrors;
+  allowConsoleErrors: (...patterns: ErrorPattern[]) => void;
   createUser: () => Promise<TestUser>;
   signUp: (page: Page) => Promise<TestUser>;
 }>({
@@ -61,13 +118,75 @@ export const test = base.extend<{
     await use(backend.apiUrl);
     await backend.stop();
   },
-  injectApiUrl: async ({ apiUrl }, use) => {
+  // Collects `console.error`s and uncaught errors/rejections (`pageerror`)
+  // from every page of every context that goes through `injectApiUrl`, and
+  // fails the test at teardown with their text if any aren't allowlisted.
+  consoleErrors: [
+    async ({}, use) => {
+      // `text` is what patterns match against; `report` is what a failure
+      // prints (with the source location or stack).
+      const errors: { text: string; report: string }[] = [];
+      const allowed: ErrorPattern[] = [...CONSOLE_ERROR_ALLOWLIST];
+      let stopped = false;
+      await use({
+        allow: (patterns) => allowed.push(...patterns),
+        stop: () => {
+          stopped = true;
+        },
+        watch: (context, apiUrl) => {
+          const onPage = (page: Page) => {
+            page.on("console", (message) => {
+              if (stopped || message.type() !== "error") return;
+              if (isApiResponseError(message, apiUrl)) return;
+              const { url, lineNumber } = message.location();
+              const text = formatConsoleMessage(message);
+              errors.push({
+                text,
+                report: `console.error at ${url}:${lineNumber}: ${text}`,
+              });
+            });
+            page.on("pageerror", (error) => {
+              if (stopped) return;
+              errors.push({
+                text: error.message,
+                // A DOMException (an aborted fetch, a skipped view
+                // transition) arrives with an empty `stack`.
+                report: `Uncaught ${error.stack || String(error)}`,
+              });
+            });
+          };
+          context.pages().forEach(onPage);
+          context.on("page", onPage);
+        },
+      });
+      const unexpected = errors.filter(
+        ({ text }) => !allowed.some((pattern) => matches(text, pattern)),
+      );
+      if (unexpected.length > 0) {
+        throw new Error(
+          `The browser logged ${unexpected.length} unexpected error(s) — fix them, or allowlist expected ones in e2e/fixtures.ts (or per test with allowConsoleErrors):\n\n${unexpected.map(({ report }) => report).join("\n\n")}`,
+        );
+      }
+    },
+    { auto: true },
+  ],
+  // Lets one test accept errors it provokes on purpose, e.g.
+  // `allowConsoleErrors(/Something failed/)`, or `/./` to opt out entirely.
+  allowConsoleErrors: async ({ consoleErrors }, use) => {
+    await use((...patterns) => consoleErrors.allow(patterns));
+  },
+  injectApiUrl: async ({ apiUrl, consoleErrors }, use) => {
     await use(async (context) => {
+      consoleErrors.watch(context, apiUrl);
       await context.addInitScript((url) => {
         (window as unknown as { __E2E_API_URL__?: string }).__E2E_API_URL__ =
           url;
       }, apiUrl);
     });
+    // The test is over. Playwright closes the default context only after
+    // `apiUrl` has stopped the backend, so whatever its pages log from here
+    // on (refused requests, a dropped socket) is teardown, not the test.
+    consoleErrors.stop();
   },
   context: async ({ context, injectApiUrl }, use) => {
     await injectApiUrl(context);

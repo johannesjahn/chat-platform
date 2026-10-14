@@ -135,18 +135,28 @@ export function useRealtimeSocket(enabled: boolean): void {
     let reconnectDelay = RECONNECT_BASE_MS;
     let stopped = false;
 
+    function scheduleReconnect() {
+      reconnectTimer = setTimeout(() => {
+        reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+        void connect();
+      }, reconnectDelay);
+    }
+
     async function connect() {
       // Mint a short-lived, single-use ticket over authenticated REST (see
       // src/WsTicket.ts) rather than putting the long-lived access token
       // itself on the `/ws` URL, where it'd be liable to end up in access
-      // logs, proxy logs, or browser history (see issue #26).
-      const { data, error } = await fetchClient.POST("/realtime/ws-ticket");
+      // logs, proxy logs, or browser history (see issue #26). A network
+      // failure (offline, server unreachable) rejects rather than returning
+      // an `error`; it gets the same backoff — left to reject, it surfaced
+      // as an unhandled rejection and ended the reconnect loop (issue #618).
+      const result = await fetchClient
+        .POST("/realtime/ws-ticket")
+        .catch(() => null);
       if (stopped) return;
-      if (error || !data) {
-        reconnectTimer = setTimeout(() => {
-          reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
-          void connect();
-        }, reconnectDelay);
+      const data = result?.data;
+      if (!data) {
+        scheduleReconnect();
         return;
       }
 
@@ -407,10 +417,7 @@ export function useRealtimeSocket(enabled: boolean): void {
       socket.onclose = () => {
         if (pingTimer) clearInterval(pingTimer);
         if (stopped) return;
-        reconnectTimer = setTimeout(() => {
-          reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
-          void connect();
-        }, reconnectDelay);
+        scheduleReconnect();
       };
     }
 

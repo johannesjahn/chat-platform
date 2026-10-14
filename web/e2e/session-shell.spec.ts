@@ -10,6 +10,10 @@ import { logOut } from "./helpers";
 // Reloads with every script request refused, so what's on screen is the
 // shell as the boot scripts left it — React never gets to hydrate it. The
 // shell's nav is the phone bar (`lg:hidden`), hence the phone viewport.
+// The app's entry import fails as a result, which is the point — callers
+// allow that error (see `allowConsoleErrors` in fixtures.ts).
+const BLOCKED_ENTRY = /Failed to fetch dynamically imported module/;
+
 async function reloadShellOnly(page: Page) {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route("**/*", (route) =>
@@ -26,7 +30,9 @@ const loginLink = (page: Page) =>
 test("a signed-in reader never sees the signed-out shell before hydration", async ({
   page,
   signUp,
+  allowConsoleErrors,
 }) => {
+  allowConsoleErrors(BLOCKED_ENTRY);
   await signUp(page);
   await reloadShellOnly(page);
 
@@ -39,7 +45,9 @@ test("a signed-in reader never sees the signed-out shell before hydration", asyn
 
 test("a signed-out reader gets the signed-out shell straight away", async ({
   page,
+  allowConsoleErrors,
 }) => {
+  allowConsoleErrors(BLOCKED_ENTRY);
   await page.goto("/");
   await reloadShellOnly(page);
 
