@@ -237,6 +237,13 @@ export const toPublicUser = (row: UserRow) => ({
   ...effectiveStatus(row),
 });
 
+// `getUser`/`updateProfile` return the profile view (issue #322): the public
+// user plus its bio.
+const toUserProfile = (row: UserRow & { bio: string | null }) => ({
+  ...toPublicUser(row),
+  bio: row.bio,
+});
+
 // The `users` columns every "return a public User" query selects, folded into
 // the API shape by `toPublicUser`. Named so the block/mute handlers below (and
 // GamesHandler.ts) can select the same set off a join against `users` without
@@ -467,6 +474,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 statusText: users.statusText,
                 statusEmoji: users.statusEmoji,
                 statusExpiresAt: users.statusExpiresAt,
+                bio: users.bio,
               })
               .from(users)
               .where(eq(users.id, id))
@@ -476,7 +484,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             return yield* Effect.fail(
               new NotFound({ message: `User ${id} not found` }),
             );
-          return toPublicUser(rows[0]);
+          return toUserProfile(rows[0]);
         }),
       )
       .handle("listUserPosts", ({ params: { id }, query: urlParams }) =>
@@ -975,6 +983,9 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 avatarSmallKey: null,
                 avatarMediumKey: null,
                 avatarLargeKey: null,
+                // Omitted means "keep" (see UpdateProfileBody in Api.ts) —
+                // Drizzle leaves an `undefined` column out of the SET list.
+                bio: payload.bio,
               })
               .where(eq(users.id, currentUser.id))
               .returning({
@@ -989,6 +1000,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
                 statusText: users.statusText,
                 statusEmoji: users.statusEmoji,
                 statusExpiresAt: users.statusExpiresAt,
+                bio: users.bio,
               }),
           ).pipe(Effect.orDie);
           const updated = rows[0];
@@ -1000,7 +1012,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             prev?.avatarMediumKey ?? null,
             prev?.avatarLargeKey ?? null,
           ]);
-          return toPublicUser(updated);
+          return toUserProfile(updated);
         }),
       )
       .handle("uploadAvatar", ({ payload }) =>

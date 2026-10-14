@@ -260,6 +260,13 @@ function UserProfilePage() {
                 </Button>
               )}
             </CardHeader>
+            {user.bio && (
+              <CardContent>
+                <p className="whitespace-pre-line break-words text-sm">
+                  {user.bio}
+                </p>
+              </CardContent>
+            )}
             {!isSelf && (
               <CardContent className="flex flex-col gap-2 border-t border-border pt-4">
                 {messageError && (

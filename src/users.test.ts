@@ -4,6 +4,7 @@ import { HttpApiClient } from "effect/http-api";
 import { Duration, Effect, Metric } from "effect";
 import {
   ChatApi,
+  MAX_BIO_LENGTH,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_PASSWORD_LENGTH,
   MAX_STATUS_EMOJI_LENGTH,
@@ -561,7 +562,7 @@ test("getUser returns the correct user after registration", () =>
       const fetched = yield* authed.users.getUser({
         params: { id: created.id },
       });
-      expect(fetched).toEqual(created);
+      expect(fetched).toEqual({ ...created, bio: null });
     }),
   ));
 
@@ -1658,6 +1659,7 @@ test("updateProfile updates displayName and avatarUrl, reflected by getUser, wit
         statusText: null,
         statusEmoji: null,
         statusExpiresAt: null,
+        bio: null,
       });
 
       const fetched = yield* authed.users.getUser({
@@ -1736,6 +1738,108 @@ test("updateProfile clears displayName and avatarUrl when set to null after bein
       });
       expect(cleared.displayName).toBeNull();
       expect(cleared.avatarUrl).toBeNull();
+    }),
+  ));
+
+test("updateProfile sets a bio, shown to other users by getUser", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const created = yield* c.users.register({
+        payload: { username: "beatrix", password: "pw-beatrix" },
+      });
+      yield* c.users.register({
+        payload: { username: "viewer", password: "pw-viewer" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "beatrix", password: "pw-beatrix" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      const updated = yield* authed.users.updateProfile({
+        payload: {
+          displayName: null,
+          avatarUrl: null,
+          bio: "Coffee, climbing\nand compilers.",
+        },
+      });
+      expect(updated.bio).toBe("Coffee, climbing\nand compilers.");
+
+      const viewerLogin = yield* c.users.login({
+        payload: { username: "viewer", password: "pw-viewer" },
+      });
+      const viewer = yield* makeAuthedClient(viewerLogin.accessToken);
+      const fetched = yield* viewer.users.getUser({
+        params: { id: created.id },
+      });
+      expect(fetched.bio).toBe("Coffee, climbing\nand compilers.");
+    }),
+  ));
+
+test("updateProfile keeps the bio when it's omitted and clears it on null", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "cornelia", password: "pw-cornelia" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "cornelia", password: "pw-cornelia" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      yield* authed.users.updateProfile({
+        payload: { displayName: null, avatarUrl: null, bio: "Hi there" },
+      });
+      // A client that predates the field sends no `bio` — that mustn't wipe it.
+      const kept = yield* authed.users.updateProfile({
+        payload: { displayName: "Cornelia", avatarUrl: null },
+      });
+      expect(kept.displayName).toBe("Cornelia");
+      expect(kept.bio).toBe("Hi there");
+
+      const cleared = yield* authed.users.updateProfile({
+        payload: { displayName: "Cornelia", avatarUrl: null, bio: null },
+      });
+      expect(cleared.bio).toBeNull();
+    }),
+  ));
+
+test("updateProfile rejects a bio over the maximum length or blank", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "desmond", password: "pw-desmond" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "desmond", password: "pw-desmond" },
+      });
+      const authed = yield* makeAuthedClient(accessToken);
+
+      yield* authed.users
+        .updateProfile({
+          payload: {
+            displayName: null,
+            avatarUrl: null,
+            bio: "a".repeat(MAX_BIO_LENGTH + 1),
+          },
+        })
+        .pipe(Effect.flip);
+      yield* authed.users
+        .updateProfile({
+          payload: { displayName: null, avatarUrl: null, bio: "" },
+        })
+        .pipe(Effect.flip);
+      // Exactly at the cap is fine.
+      const atCap = yield* authed.users.updateProfile({
+        payload: {
+          displayName: null,
+          avatarUrl: null,
+          bio: "a".repeat(MAX_BIO_LENGTH),
+        },
+      });
+      expect(atCap.bio).toHaveLength(MAX_BIO_LENGTH);
     }),
   ));
 
