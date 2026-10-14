@@ -27,6 +27,10 @@ export function getSession(): Session | null {
       window.localStorage.removeItem(STORAGE_KEY);
     }
     cache = { raw, value };
+    // Every change funnels through here — set/cleared in this tab, another
+    // tab's `storage` event, or unreadable data dropped above — so this keeps
+    // the boot script's marker true for the page's lifetime.
+    markSession(value !== null);
   }
   return cache.value;
 }
@@ -56,12 +60,21 @@ function isSession(value: unknown): value is Session {
 
 export function setSession(session: Session): void {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  markSession(true);
   emit();
 }
 
 export function clearSession(): void {
   window.localStorage.removeItem(STORAGE_KEY);
+  markSession(false);
   emit();
+}
+
+// `data-session` on <html>: whether a session is stored, set before the
+// first paint by `SESSION_BOOT_SCRIPT` and kept current from here. CSS keys
+// the prerendered shell's placeholders off it (see `SessionPlaceholder`).
+function markSession(signedIn: boolean): void {
+  document.documentElement.dataset.session = signedIn ? "in" : "out";
 }
 
 function emit(): void {
@@ -84,3 +97,30 @@ export function useSession(): Session | null {
   // Server snapshot is always null — the session lives only in the browser.
   return useSyncExternalStore(subscribeSession, getSession, () => null);
 }
+
+const subscribeNever = () => () => {};
+
+// True while React is still hydrating the prerendered SPA shell (and during
+// the prerender itself): `useSession()` then reports the server snapshot,
+// null, whoever is signed in, so a "signed out" render there may be wrong.
+// Session-dependent UI renders `SessionPlaceholder` for that pass instead
+// (issue #603); any later render — a fresh mount, the re-render right after
+// hydration — knows the real session.
+export function useSessionPending(): boolean {
+  return useSyncExternalStore(
+    subscribeNever,
+    () => false,
+    () => true,
+  );
+}
+
+// Runs inline in <head> next to the theme's boot script, so the marker is on
+// <html> before anything paints. It stands alone (it can't import this
+// module), so it repeats `isSession` in miniature with the storage key
+// written out literally — keep it in step with `STORAGE_KEY` and
+// `isSession`. Storage that throws reads as signed out.
+export const SESSION_BOOT_SCRIPT =
+  '(function(){var s=false;try{var v=JSON.parse(localStorage.getItem("chat-platform-session"));' +
+  's=!!v&&typeof v.accessToken==="string"&&typeof v.refreshToken==="string"&&' +
+  '!!v.user&&typeof v.user.id==="number"&&typeof v.user.username==="string";}catch(e){}' +
+  'document.documentElement.setAttribute("data-session",s?"in":"out");})();';

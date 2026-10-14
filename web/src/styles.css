@@ -296,6 +296,16 @@ html[data-app-shell="immersive"] [data-app-column] {
   }
 }
 
+/* The prerendered shell can't know the session, so session-dependent UI
+   renders both a signed-in and a signed-out variant until hydration (see
+   SessionPlaceholder.tsx); the boot script's `data-session` marker on <html>
+   picks one before the first paint (issue #603). Anything but a definite
+   "in" — no marker at all included — shows the signed-out one. */
+html:not([data-session="in"]) [data-session-only="in"],
+html[data-session="in"] [data-session-only="out"] {
+  display: none;
+}
+
 @keyframes aurora-drift {
   0% {
     transform: translate3d(-4%, -2%, 0) scale(1);
