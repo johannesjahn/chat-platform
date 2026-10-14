@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import {
   infiniteQueryOptions,
   queryOptions,
@@ -329,6 +329,27 @@ export function warmChatMessages(queryClient: QueryClient, chatId: number) {
       },
     }),
   );
+}
+
+// Reads the window `useChatMessages` holds for `chatId` straight off the
+// cache, for UI beside the conversation (the details panel's shared media).
+// Deliberately not a `useQuery`: every observer writes its options into the
+// shared query, and an invalidation refetch runs whichever `queryFn` was
+// written last — a read-only observer's `skipToken` would turn the
+// conversation's realtime refetches into errors (issue #617). Subscribing to
+// the cache adds no observer, so the conversation's `queryFn` stays the
+// query's only one.
+export function useCachedChatMessages(
+  chatId: number,
+): ChatMessagesPage | undefined {
+  const queryClient = useQueryClient();
+  const subscribe = useCallback(
+    (onChange: () => void) => queryClient.getQueryCache().subscribe(onChange),
+    [queryClient],
+  );
+  const getSnapshot = () =>
+    queryClient.getQueryData<ChatMessagesPage>(chatMessagesQueryKey(chatId));
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
 // Applies `update` to a single message in the cached window for `chatId`,
