@@ -208,6 +208,10 @@ the Worker named in `web/wrangler.jsonc` (`chat-platform`) on first run.
   `assets.not_found_handling: "single-page-application"`, so the Worker
   serves `index.html` for any deep link instead of a 404 (this replaces the
   old Pages-era `_redirects` file, which is no longer needed).
+- **Caching** — `web/public/_headers` marks the hashed `assets/` immutable
+  for a year and the app shell (`index.html`, deep links, `sw.js`,
+  `manifest.webmanifest`) `no-cache`, so a deploy is picked up on the next
+  load. See "Caching" in `web/README.md`.
 - **CORS** — set the chart's `backend.webOrigin` to this exact Worker URL
   (custom domain, or `<name>.<subdomain>.workers.dev` if you're not using
   one). If the frontend needs to be reachable at both a custom domain and
