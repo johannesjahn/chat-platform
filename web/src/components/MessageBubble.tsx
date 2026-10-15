@@ -11,6 +11,7 @@ import {
   Check,
   CheckCheck,
   Copy,
+  Link2,
   Loader2,
   Pencil,
   Pin,
@@ -298,18 +299,25 @@ export function MessageBubble({
     rowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [editRequestKey]);
 
-  // "Copy text" (issue #554): the action group's way to copy a message
-  // without having to select it, with a tick for a moment once it's done.
-  const [copied, setCopied] = useState(false);
+  // "Copy text" (issue #554) and "Copy link" (issue #600): the action
+  // group's ways to copy a message without having to select it, or to point
+  // someone at it, with a tick for a moment once it's done. The link is the
+  // same `?message=` deep link search results land on, so it opens the chat
+  // scrolled to this message and highlighted.
+  const [copied, setCopied] = useState<"text" | "link" | null>(null);
   useEffect(() => {
     if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1500);
+    const timer = setTimeout(() => setCopied(null), 1500);
     return () => clearTimeout(timer);
   }, [copied]);
-  async function copyText() {
+  async function copy(kind: "text" | "link") {
+    const value =
+      kind === "text"
+        ? message.content
+        : `${window.location.origin}/chats/${message.chatId}?message=${message.id}`;
     try {
-      await navigator.clipboard.writeText(message.content);
-      setCopied(true);
+      await navigator.clipboard.writeText(value);
+      setCopied(kind);
     } catch {
       setActionError("Couldn't copy to the clipboard.");
     }
@@ -483,17 +491,31 @@ export function MessageBubble({
           type="button"
           size="icon"
           variant="ghost"
-          aria-label={copied ? "Copied" : "Copy text"}
-          onClick={() => void copyText()}
+          aria-label={copied === "text" ? "Copied" : "Copy text"}
+          onClick={() => void copy("text")}
           className="size-6"
         >
-          {copied ? (
+          {copied === "text" ? (
             <Check className="size-3.5 text-primary" />
           ) : (
             <Copy className="size-3" />
           )}
         </Button>
       )}
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        aria-label={copied === "link" ? "Link copied" : "Copy link"}
+        onClick={() => void copy("link")}
+        className="size-6"
+      >
+        {copied === "link" ? (
+          <Check className="size-3.5 text-primary" />
+        ) : (
+          <Link2 className="size-3.5" />
+        )}
+      </Button>
     </>
   );
 
