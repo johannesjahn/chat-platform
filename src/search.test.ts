@@ -231,6 +231,60 @@ test("searchPosts hides posts by a blocked or muted author", () =>
         query: { q: "pineapple" },
       });
       expect(after.results.length).toBe(0);
+
+      // Muting is the softer option, but it hides posts just the same.
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      yield* carol.client.posts.createPost({
+        payload: { contentType: "text", content: "a pineapple sequel" },
+      });
+      yield* alice.client.users.setBlock({
+        params: { id: carol.user.id },
+        payload: { type: "mute" },
+      });
+      const muted = yield* alice.client.search.searchPosts({
+        query: { q: "pineapple" },
+      });
+      expect(muted.results.length).toBe(0);
+    }),
+  ));
+
+test("searchPosts fills a page past hidden authors instead of coming back short", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const visible: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const post = yield* carol.client.posts.createPost({
+          payload: { contentType: "text", content: `carol mango ${i}` },
+        });
+        visible.push(post.id);
+      }
+      // Bob's posts are the newest matches, so a filter applied after the
+      // LIMIT would leave the first page empty.
+      for (let i = 0; i < 3; i++) {
+        yield* bob.client.posts.createPost({
+          payload: { contentType: "text", content: `bob mango ${i}` },
+        });
+      }
+      yield* alice.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "mute" },
+      });
+
+      const first = yield* alice.client.search.searchPosts({
+        query: { q: "mango", limit: 2 },
+      });
+      expect(first.results.map((r) => r.id)).toEqual([
+        visible[2]!,
+        visible[1]!,
+      ]);
+      const second = yield* alice.client.search.searchPosts({
+        query: { q: "mango", limit: 2, cursor: first.nextCursor! },
+      });
+      expect(second.results.map((r) => r.id)).toEqual([visible[0]!]);
+      expect(second.nextCursor).toBeNull();
     }),
   ));
 
@@ -405,6 +459,55 @@ test("searchComments finds a matching reply and flags its parent", () =>
       expect(page.results.length).toBe(1);
       expect(page.results[0]!.parentCommentId).toBe(comment.id);
       expect(page.results[0]!.postId).toBe(post.id);
+    }),
+  ));
+
+test("searchComments hides comments and replies by a blocked or muted author", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const post = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "a post to comment on" },
+      });
+      const comment = yield* bob.client.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "a guava comment" },
+      });
+      yield* carol.client.comments.createReply({
+        params: { id: comment.id },
+        payload: { content: "a guava reply" },
+      });
+
+      const before = yield* alice.client.search.searchComments({
+        query: { q: "guava" },
+      });
+      expect(before.results.length).toBe(2);
+
+      yield* alice.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "block" },
+      });
+      const blocked = yield* alice.client.search.searchComments({
+        query: { q: "guava" },
+      });
+      expect(blocked.results.map((r) => r.author.username)).toEqual(["carol"]);
+
+      yield* alice.client.users.setBlock({
+        params: { id: carol.user.id },
+        payload: { type: "mute" },
+      });
+      const muted = yield* alice.client.search.searchComments({
+        query: { q: "guava" },
+      });
+      expect(muted.results.length).toBe(0);
+
+      // The unified endpoint applies the same filter to its comment section.
+      const all = yield* alice.client.search.searchAll({
+        query: { q: "guava" },
+      });
+      expect(all.comments.results.length).toBe(0);
     }),
   ));
 
