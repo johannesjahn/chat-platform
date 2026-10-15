@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { onlineManager, useQueryClient } from "@tanstack/react-query";
-import { Link, useRouter } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Loader2,
@@ -93,6 +93,35 @@ function groupByDay<T extends { createdAt: number }>(messages: T[]) {
 // fractional scroll heights (sub-pixel layout, zoom) mean an exact
 // `scrollHeight - scrollTop === clientHeight` comparison almost never lands.
 const BOTTOM_EPSILON_PX = 24;
+
+// The thread owns its scroll position; the router's scroll restoration
+// (`scrollRestoration` in router.tsx) must never put it back anywhere. The
+// router remembers every element it saw scroll under a selector — the
+// element's `data-scroll-restoration-id` if it has one, else its CSS path —
+// and once a navigation renders, writes the remembered offset back onto
+// whatever element that selector finds. A thread restored that way lands at
+// an offset from an older, shorter window: scrolled up from the newest
+// message (issue #614).
+//
+// So the thread wears a restoration id that no remembered entry can match:
+// unique to this mount (the random part outlives a reload, which a counter
+// alone wouldn't — the router keeps its entries in sessionStorage), and
+// renamed on every scroll, so an entry recorded on an earlier visit to this
+// URL can't find a thread that has scrolled since — a docked window, or a
+// search-param change, keeps its thread mounted across navigations. The
+// conversation's own scrolls rename it as they're made, not just once their
+// `scroll` event arrives a frame later, so one made while a navigation renders
+// can't be undone by the entry recorded just before it. Whatever entry does
+// still match was recorded after the last scroll, i.e. holds the offset the
+// thread is already at.
+const THREAD_RESTORATION_PREFIX = `chat-thread-${Math.random().toString(36).slice(2)}`;
+let threadRestorationIds = 0;
+function nextThreadRestorationId() {
+  return `${THREAD_RESTORATION_PREFIX}-${++threadRestorationIds}`;
+}
+function renameForScrollRestoration(thread: HTMLElement) {
+  thread.setAttribute("data-scroll-restoration-id", nextThreadRestorationId());
+}
 
 // How many pages of older history `jumpToMessage` will pull in while hunting
 // for a message that isn't in the loaded window yet (a pinned message, or the
@@ -316,6 +345,10 @@ export function ChatConversation({
   const [dragDepth, setDragDepth] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Rendered once, then renamed imperatively on every scroll (see
+  // `renameForScrollRestoration`); React leaves the attribute alone since
+  // this value never changes.
+  const [initialRestorationId] = useState(nextThreadRestorationId);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const lastMessageIdRef = useRef<number | null>(null);
   const prevScrollHeightRef = useRef<number | null>(null);
@@ -357,6 +390,7 @@ export function ChatConversation({
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior });
+    renameForScrollRestoration(el);
     atBottomRef.current = true;
     lastScrollTopRef.current = el.scrollTop;
   }
@@ -410,30 +444,12 @@ export function ChatConversation({
     const observer = new ResizeObserver(() => {
       if (!atBottomRef.current) return;
       scroller.scrollTop = scroller.scrollHeight;
+      renameForScrollRestoration(scroller);
     });
     observer.observe(scroller);
     observer.observe(content);
     return () => observer.disconnect();
   }, [chatReady]);
-
-  // The router's scroll restoration (`scrollRestoration` in router.tsx)
-  // puts every element it saw scroll back where it was once a navigation
-  // renders — the thread included, at an offset from an older, shorter
-  // window. With the messages already warmed by the route's loader, the
-  // opening jump has happened by then, so a thread that's following the
-  // newest message is pinned back down after the router is done. (Its own
-  // `onRendered` listener was registered first, so it runs first.)
-  const router = useRouter();
-  useEffect(
-    () =>
-      router.subscribe("onRendered", () => {
-        const scroller = scrollRef.current;
-        if (!scroller || !atBottomRef.current) return;
-        scroller.scrollTop = scroller.scrollHeight;
-        lastScrollTopRef.current = scroller.scrollTop;
-      }),
-    [router],
-  );
 
   // A message just queued offline appends below the loaded history the same
   // way a real new message would — scroll down to reveal it.
@@ -461,6 +477,7 @@ export function ChatConversation({
       const delta =
         scrollRef.current.scrollHeight - prevScrollHeightRef.current;
       scrollRef.current.scrollTop += delta;
+      renameForScrollRestoration(scrollRef.current);
       prevScrollHeightRef.current = null;
     }
   }, [oldestMessageId]);
@@ -471,6 +488,7 @@ export function ChatConversation({
   // the triggering fetch settles, even on failure.
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
+    renameForScrollRestoration(el);
     // Re-evaluated on every scroll (ahead of the guards below) so the
     // auto-scroll and resize handlers know whether to keep following the
     // newest message. Landing at the bottom re-arms it; only scrolling *up*
@@ -537,6 +555,7 @@ export function ChatConversation({
         jumpScrollingRef.current = false;
       }, JUMP_SETTLE_MS);
       el.scrollIntoView({ behavior, block: "center" });
+      if (scrollRef.current) renameForScrollRestoration(scrollRef.current);
       // A double pulse (see `animate-jump-flash` in styles.css), so the
       // target is still calling attention to itself once a long smooth
       // scroll arrives. It's React state rather than a class poked onto the
@@ -870,6 +889,7 @@ export function ChatConversation({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        data-scroll-restoration-id={initialRestorationId}
         data-testid="chat-scroll"
         className="h-full overflow-y-auto overflow-x-hidden overscroll-contain"
       >

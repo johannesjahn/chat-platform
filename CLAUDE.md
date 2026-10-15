@@ -367,6 +367,11 @@ bar, the immersive chat shell and the phone menu stay exactly as they were.
   (`variant="docked"`) — don't fork a second chat view. `useImmersiveShell`
   is reference-counted because the layout and the conversation both hold it;
   the root's `data-app-frame`/`data-app-column` boxes are what it clamps.
+  The thread owns its scroll position: it opts out of the router's scroll
+  restoration with a `data-scroll-restoration-id` that's unique per mount and
+  renamed on every scroll (issue #614), so no remembered offset ever matches
+  it — any new code that scrolls the thread must call
+  `renameForScrollRestoration` too.
 - **Chat details panel.** At `xl`+ the chats layout grows an optional third
   pane, [`ChatDetailsPanel`](web/src/components/chat/ChatDetailsPanel.tsx)
   (issue #563), toggled from the conversation header and remembered per
@@ -620,7 +625,9 @@ thresholds, and uploads the `coverage-report` artifact — see Testing above),
 **e2e** (Playwright), and **e2e-stress** (PRs only: re-runs just the
 `web/e2e/**/*.spec.ts` files the PR adds or edits with `--repeat-each=5`,
 `--retries=0` and every core busy, to catch timing flakes that pass a single
-run — issue #619; skipped when no spec changed). The Bun version is pinned once via the
+run — issue #619; skipped when no spec changed). Under that load tests run
+several times slower, so it raises the per-test budget to 90s
+(`--timeout=90000`): it's after races, not slowness. The Bun version is pinned once via the
 workflow-level `BUN_VERSION` env var.
 
 **Path filters** (issue #492): on PRs, a leading `changes` job
