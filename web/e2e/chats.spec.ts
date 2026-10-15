@@ -6,6 +6,9 @@ test(
   "starting a direct chat, sending a message, and seeing it marked read",
   { tag: "@layout" },
   async ({ browser, injectApiUrl, signUp }) => {
+    // Two browser contexts, each cold-loading the app: a few seconds alone,
+    // but past the default 30s budget under the e2e-stress job's load.
+    test.slow();
     const contextA = await browser.newContext();
     await injectApiUrl(contextA);
     const pageA = await contextA.newPage();
@@ -72,6 +75,9 @@ test("group chats can be created, renamed by the creator, and show all participa
   injectApiUrl,
   signUp,
 }) => {
+  // Two browser contexts, each cold-loading the app: a few seconds alone,
+  // but past the default 30s budget under the e2e-stress job's load.
+  test.slow();
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
@@ -351,6 +357,9 @@ test("navigating directly to a chat you can't access shows a not-found message",
   injectApiUrl,
   signUp,
 }) => {
+  // Three browser contexts, each cold-loading the app: a few seconds alone,
+  // but past the default 30s budget under the e2e-stress job's load.
+  test.slow();
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
@@ -1488,12 +1497,15 @@ test(
     // the click has to page earlier history back in before it has anything to
     // scroll to.
     await expect(anchorBubble).toHaveCount(0);
-    await quote.click();
-    await expect(anchorBubble).toBeInViewport();
     // …and is highlighted once it gets there, so it's clear which message the
-    // jump landed on. The highlight clears itself again afterwards.
+    // jump landed on. The highlight clears itself again afterwards — its
+    // timer starts with the scroll, not when it lands, so it's looked for
+    // before the scroll is waited out: on a loaded machine, a smooth scroll
+    // plus the in-viewport polling can outlast the whole flash.
     const highlight = anchorBubble.getByTestId("jump-highlight");
+    await quote.click();
     await expect(highlight).toBeVisible();
+    await expect(anchorBubble).toBeInViewport();
     await expect(highlight).toHaveCSS("animation-name", "jump-flash");
     await expect(highlight).toHaveCount(0);
 
@@ -1503,7 +1515,7 @@ test(
     await thread.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
     await expect(anchorBubble).not.toBeInViewport();
     await quote.click();
-    await expect(anchorBubble).toBeInViewport();
     await expect(highlight).toBeVisible();
+    await expect(anchorBubble).toBeInViewport();
   },
 );
