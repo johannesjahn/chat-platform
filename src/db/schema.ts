@@ -1,5 +1,6 @@
 import {
   type AnyPgColumn,
+  bigint,
   check,
   doublePrecision,
   index,
@@ -71,6 +72,18 @@ export const users = pgTable(
     // so adding it is expand-only: replicas still on the old code simply
     // never read or write it.
     bio: text("bio"),
+    // Running total of `attachments.size` over the user's uploads, so the
+    // upload quota check (`enforceUploadQuota` in AttachmentsHandler.ts) is a
+    // single-row read instead of a `SUM` over every attachment the user ever
+    // uploaded (issue #326). The app never writes it: a trigger on
+    // `attachments` (migration 0033) adjusts it on every insert, delete and
+    // size/uploader change, so it can't drift — not via the cleanup sweep, a
+    // cascade, a direct insert in a test, or a replica still running code
+    // from before the column existed. The DB default is what makes adding it
+    // expand-only; the migration backfills existing users from the real sum.
+    storageUsedBytes: bigint("storage_used_bytes", { mode: "number" })
+      .notNull()
+      .default(0),
     // Signup time. Added for the admin dashboard (signup timeline and the
     // "new users" activity windows) — until then nothing recorded when an
     // account was created, and `id` ordering only gives relative order, not
