@@ -1510,3 +1510,62 @@ test(
     await expect(anchorBubble).toBeInViewport();
   },
 );
+
+test("a message's Copy link points straight back at it (issue #600)", async ({
+  page,
+  request,
+  apiUrl,
+  createUser,
+  signUp,
+}) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await signUp(page);
+  const { username: otherUsername } = await createUser();
+
+  await page.goto("/chats/new");
+  await page.getByRole("button", { name: "Direct message" }).click();
+  await page.fill("#user-search", otherUsername);
+  await page.getByRole("button", { name: `@${otherUsername}` }).click();
+  await expect(page).toHaveURL(/\/chats\/\d+/);
+  const chatId = page.url().split("/").pop();
+
+  const session = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
+  );
+  const post = async (content: string) => {
+    const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+      data: { contentType: "text", content },
+    });
+    expect(response.ok()).toBe(true);
+    return (await response.json()) as { id: number };
+  };
+
+  // Seeded from outside the chat so it opens cold (see the reply-jump test
+  // above), with enough after the target that the link has to scroll to it.
+  await page.goto("/chats");
+  const target = await post("The venue moved to the old boathouse");
+  for (let i = 1; i <= 11; i++) {
+    await post(`Filler message ${i}`);
+  }
+
+  await page.goto(`/chats/${chatId}`);
+  const targetBubble = page.locator(`[data-message-id="${target.id}"]`);
+  await targetBubble.hover();
+  await targetBubble.getByRole("button", { name: "Copy link" }).click();
+  await expect(
+    targetBubble.getByRole("button", { name: "Link copied" }),
+  ).toBeVisible();
+
+  const link = await page.evaluate(() => navigator.clipboard.readText());
+  expect(link).toBe(
+    `${new URL(page.url()).origin}/chats/${chatId}?message=${target.id}`,
+  );
+
+  // Opening it lands on the message, highlighted, the way a search hit does.
+  await page.goto("/chats");
+  await page.goto(link);
+  await expect(targetBubble).toBeInViewport();
+  await expect(targetBubble.getByTestId("jump-highlight")).toBeVisible();
+  await expect(page.locator("[data-message-id]").last()).not.toBeInViewport();
+});
