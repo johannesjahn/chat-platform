@@ -147,9 +147,10 @@ export function ShortcutsDialog() {
                         <Fragment key={i}>
                           {i > 0 && <span>or</span>}
                           <span className="flex items-center gap-0.5">
-                            {combo.map((key) => (
+                            {/* By position: a chord can repeat a key (g g). */}
+                            {combo.map((key, j) => (
                               <kbd
-                                key={key}
+                                key={j}
                                 className="min-w-5 rounded border border-border bg-background px-1.5 py-0.5 text-center font-sans text-[11px] text-foreground"
                               >
                                 {key}

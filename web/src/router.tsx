@@ -3,7 +3,29 @@ import { routeTree } from "./routeTree.gen";
 import { NotFoundPage, RouteErrorPage } from "./components/RouteFallbacks";
 import { settlePageEntrance } from "./lib/pageEntrance";
 
+// The router awaits only a transition's `updateCallbackDone`. Its `ready`
+// promise rejects whenever the browser skips the animation — a newer
+// navigation starts first, the viewport resizes mid-transition — and with
+// nothing else holding it, every skip surfaced as an unhandled rejection
+// (issue #618). The page still updates either way, so a skip isn't an
+// error; mark each transition's `ready` handled.
+let viewTransitionsPatched = false;
+function ignoreSkippedViewTransitions() {
+  if (viewTransitionsPatched || typeof document === "undefined") return;
+  if (typeof document.startViewTransition !== "function") return;
+  viewTransitionsPatched = true;
+  const start = document.startViewTransition.bind(document);
+  document.startViewTransition = ((
+    ...args: Parameters<typeof document.startViewTransition>
+  ) => {
+    const transition = start(...args);
+    transition.ready.catch(() => {});
+    return transition;
+  }) as typeof document.startViewTransition;
+}
+
 export function getRouter() {
+  ignoreSkippedViewTransitions();
   const router = createRouter({
     routeTree,
     scrollRestoration: true,
