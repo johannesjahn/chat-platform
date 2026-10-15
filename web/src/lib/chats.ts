@@ -427,9 +427,11 @@ export function appendSentMessage(
 // this hook to reset itself when `chatId` changes.
 //
 // A mount starts from the cached window's cursors when that's the window
-// the route's loader just fetched — which, by the same rule, it doesn't
-// refetch on mount (`refetchUnlessWarmed`). Otherwise it starts with none,
-// and the mount's refetch opens a new window as before.
+// the route's loader just fetched and no mount has read yet — which, by the
+// same rule, it doesn't refetch on mount (`refetchUnlessWarmed`; the check
+// here runs during render, before the mount consumes the mark). Otherwise
+// it starts with none, and the mount's refetch opens a new window as
+// before.
 export function useChatMessages(chatId: number | undefined, enabled: boolean) {
   const queryClient = useQueryClient();
   const [adopted] = useState(() => {

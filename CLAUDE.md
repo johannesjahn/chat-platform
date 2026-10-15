@@ -434,9 +434,11 @@ skips one of these rules quietly brings back double fetches or broken paging:
   fetched (data that was already cached isn't recorded).
 - **`refetchOnMount: refetchUnlessWarmed`** on the component's query (set in
   the shared options builder). Without it React Query's default
-  `staleTime: 0` refetches on mount what the loader just fetched. It only
-  skips that mount refetch, for a few seconds — focus/reconnect refetches and
-  realtime invalidations behave as before. `warmed` and `refetchUnlessWarmed`
+  `staleTime: 0` refetches on mount what the loader just fetched. The mark
+  is one-time (issue #615): the first mount to subscribe consumes it, so only
+  that mount's refetch is skipped — later mounts, focus/reconnect refetches
+  and realtime invalidations behave as before (a mark no mount reads, from a
+  hover that's never followed, lapses after 10s). `warmed` and `refetchUnlessWarmed`
   come as a pair: a query warmed without them is still refetched on mount.
 - **State outside the cache needs more.** `useChatMessages` keeps its paging
   cursors in refs, so the cached window also stores
