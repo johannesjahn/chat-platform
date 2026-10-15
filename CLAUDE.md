@@ -367,6 +367,11 @@ bar, the immersive chat shell and the phone menu stay exactly as they were.
   (`variant="docked"`) — don't fork a second chat view. `useImmersiveShell`
   is reference-counted because the layout and the conversation both hold it;
   the root's `data-app-frame`/`data-app-column` boxes are what it clamps.
+  The thread owns its scroll position: it opts out of the router's scroll
+  restoration with a `data-scroll-restoration-id` that's unique per mount and
+  renamed on every scroll (issue #614), so no remembered offset ever matches
+  it — any new code that scrolls the thread must call
+  `renameForScrollRestoration` too.
 - **Chat details panel.** At `xl`+ the chats layout grows an optional third
   pane, [`ChatDetailsPanel`](web/src/components/chat/ChatDetailsPanel.tsx)
   (issue #563), toggled from the conversation header and remembered per

@@ -931,6 +931,91 @@ test(
   },
 );
 
+// The router's scroll restoration remembers every element it saw scroll and
+// puts it back once a navigation renders — keyed by its place in the DOM,
+// which every chat's thread shares. Without the thread opting out (issue
+// #614) a chat opened from the list, or come back to with Back/Forward, took
+// over an offset scrolled up some other visit had left behind.
+test("switching chats and going Back/Forward always lands on the newest message", async ({
+  page,
+  request,
+  apiUrl,
+  createUser,
+  signUp,
+}) => {
+  test.setTimeout(90_000);
+
+  const me = await signUp(page);
+  const seededChat = async (label: string) => {
+    const other = await createUser();
+    const headers = { Authorization: `Bearer ${me.session.accessToken}` };
+    const created = await request.post(`${apiUrl}/chats/direct`, {
+      headers,
+      data: { userId: other.session.user.id },
+    });
+    expect(created.ok()).toBe(true);
+    const { id } = (await created.json()) as { id: number };
+    // Comfortably more than fits on one screen, so the thread has to scroll.
+    for (let i = 0; i < 30; i++) {
+      const response = await request.post(`${apiUrl}/chats/${id}/messages`, {
+        headers,
+        data: {
+          contentType: "text",
+          content: `${label} message ${i} — long enough to wrap onto more than one line in the bubble.`,
+        },
+      });
+      expect(response.ok()).toBe(true);
+    }
+    return { id, username: other.username };
+  };
+  const first = await seededChat("First");
+  const second = await seededChat("Second");
+
+  const thread = page.getByRole("main").getByTestId("chat-scroll");
+  const distanceFromBottom = () =>
+    thread.evaluate((el) =>
+      Math.round(el.scrollHeight - el.scrollTop - el.clientHeight),
+    );
+  const expectAtNewest = async (label: string) => {
+    await expect(
+      page.getByRole("main").getByText(`${label} message 29`),
+    ).toBeVisible();
+    await expect.poll(distanceFromBottom).toBeLessThanOrEqual(24);
+  };
+  // Leave the thread well up from the newest message — high enough to be
+  // remembered as an offset that isn't the bottom, low enough not to set off
+  // the load-earlier fetch at the top.
+  const scrollAway = async () => {
+    await thread.evaluate((el) => {
+      el.scrollTop = 200;
+    });
+    await expect.poll(distanceFromBottom).toBeGreaterThan(200);
+  };
+
+  await page.goto("/chats");
+  const list = page.getByRole("complementary", { name: "Conversations" });
+  const row = (username: string) =>
+    list.getByRole("link", { name: new RegExp(`^@${username}`) });
+
+  await row(first.username).click();
+  await expect(page).toHaveURL(`/chats/${first.id}`);
+  await expectAtNewest("First");
+  await scrollAway();
+
+  await row(second.username).click();
+  await expect(page).toHaveURL(`/chats/${second.id}`);
+  await expectAtNewest("Second");
+  await scrollAway();
+
+  await page.goBack();
+  await expect(page).toHaveURL(`/chats/${first.id}`);
+  await expectAtNewest("First");
+
+  await page.goForward();
+  await expect(page).toHaveURL(`/chats/${second.id}`);
+  await expectAtNewest("Second");
+});
+
 test("the empty composer is one line tall and only grows once there's something to grow for", async ({
   page,
   createUser,
