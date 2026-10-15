@@ -30,8 +30,9 @@ export async function warmRoute(
   ]);
 }
 
-// How long data a loader fetched counts as just fetched — the gap between
-// hovering a link and following it.
+// How long a mark outlives a loader fetch that no mount ever reads — a
+// hover preload that's never followed. A followed one is consumed by its
+// mount long before (see below).
 const WARMED_FOR_MS = 10_000;
 
 // The part of a `Query` the checks below read — structural, so it fits any
@@ -43,6 +44,26 @@ type WarmableQuery = {
 
 // Query hash -> the `dataUpdatedAt` of the data a loader fetched for it.
 const warmedAt = new Map<string, number>();
+
+// The mark is one-time: the first mount — the first observer, i.e.
+// `useQuery`, to subscribe — consumes it, so later mounts refetch as they
+// always did. Not on the spot, though: React Query reads `refetchOnMount`
+// in the optimistic render before subscribing and again while subscribing,
+// right after this event, and `useChatMessages` checks it during render
+// too. Dropping it a microtask later lets every check of that mount (and of
+// any other observer subscribing in the same commit) agree, while a mount
+// after it finds no mark.
+queryClient.getQueryCache().subscribe((event) => {
+  const hash = event.query.queryHash;
+  if (event.type === "removed") warmedAt.delete(hash);
+  if (event.type !== "observerAdded") return;
+  const at = warmedAt.get(hash);
+  if (at === undefined) return;
+  queueMicrotask(() => {
+    // Unless a newer loader fetch marked it again meanwhile.
+    if (warmedAt.get(hash) === at) warmedAt.delete(hash);
+  });
+});
 
 // Records that `promise` (an `ensure…Data` call for `queryKey`) fetched,
 // if it did, so the component mounting next doesn't fetch it all over
@@ -59,7 +80,7 @@ export function warmed<T>(queryKey: QueryKey, promise: Promise<T>): Promise<T> {
 }
 
 // Whether a query's data is what a loader fetched moments ago, untouched
-// since — neither refetched nor invalidated.
+// since — neither refetched nor invalidated — and not yet read by a mount.
 export function isFreshlyWarmed(query: WarmableQuery): boolean {
   const at = warmedAt.get(query.queryHash);
   return (
@@ -72,9 +93,9 @@ export function isFreshlyWarmed(query: WarmableQuery): boolean {
 
 // `refetchOnMount` for the queries loaders warm: React Query refetches
 // stale data on mount, and with the default `staleTime` of 0 that would be
-// everything the loader just fetched. Only that mount refetch is skipped
-// (or a remount's, within the same few seconds) — focus/reconnect
-// refetches, realtime invalidations and later mounts behave as before.
+// everything the loader just fetched. Only that one mount's refetch is
+// skipped — focus/reconnect refetches, realtime invalidations and any later
+// mount (leaving the page and coming back) behave as before.
 export function refetchUnlessWarmed(query: WarmableQuery): boolean {
   return !isFreshlyWarmed(query);
 }

@@ -77,7 +77,7 @@ describe("warmed / isFreshlyWarmed", () => {
     expect(refetchUnlessWarmed(find(["invalidated"]))).toBe(true);
   });
 
-  test("it lapses a few seconds after the fetch", async () => {
+  test("unread, it lapses a few seconds after the fetch", async () => {
     await warm(["lapsing"]);
     now += 9_999;
     expect(isFreshlyWarmed(find(["lapsing"]))).toBe(true);
@@ -113,6 +113,63 @@ describe("refetchUnlessWarmed as refetchOnMount", () => {
   test("the component's mount doesn't fetch what its loader just fetched", async () => {
     await warm(["mount-warmed"]);
     expect(await mountFetches(["mount-warmed"])).toBe(false);
+  });
+
+  test("a later mount refetches as before", async () => {
+    await warm(["mount-twice"]);
+    expect(await mountFetches(["mount-twice"])).toBe(false);
+    expect(isFreshlyWarmed(find(["mount-twice"]))).toBe(false);
+    expect(await mountFetches(["mount-twice"])).toBe(true);
+  });
+
+  test("every check of the first mount agrees, before and while it subscribes", async () => {
+    await warm(["mount-checks"]);
+    const queryFn = mock(async () => "remounted");
+    const observer = new QueryObserver(queryClient, {
+      queryKey: ["mount-checks"],
+      queryFn,
+      refetchOnMount: refetchUnlessWarmed,
+    });
+    // The optimistic render, and a render-time check like
+    // `useChatMessages`'s cursor adoption, both read it before subscribing.
+    expect(
+      observer.getOptimisticResult({
+        ...queryClient.defaultQueryOptions(observer.options),
+        _optimisticResults: "optimistic",
+      }).isFetching,
+    ).toBe(false);
+    expect(isFreshlyWarmed(find(["mount-checks"]))).toBe(true);
+    const unsubscribe = observer.subscribe(() => {});
+    await Promise.resolve();
+    unsubscribe();
+    expect(queryFn).not.toHaveBeenCalled();
+    expect(isFreshlyWarmed(find(["mount-checks"]))).toBe(false);
+  });
+
+  test("observers subscribing in the same commit all skip the refetch", async () => {
+    await warm(["mount-together"]);
+    const queryFn = mock(async () => "remounted");
+    const observers = [1, 2].map(
+      () =>
+        new QueryObserver(queryClient, {
+          queryKey: ["mount-together"],
+          queryFn,
+          refetchOnMount: refetchUnlessWarmed,
+        }),
+    );
+    const unsubscribes = observers.map((o) => o.subscribe(() => {}));
+    await Promise.resolve();
+    unsubscribes.forEach((unsubscribe) => unsubscribe());
+    expect(queryFn).not.toHaveBeenCalled();
+  });
+
+  test("a new loader fetch marks it again for the next mount", async () => {
+    await warm(["mount-rewarmed"]);
+    expect(await mountFetches(["mount-rewarmed"])).toBe(false);
+    queryClient.removeQueries({ queryKey: ["mount-rewarmed"] });
+    now += 1;
+    await warm(["mount-rewarmed"]);
+    expect(await mountFetches(["mount-rewarmed"])).toBe(false);
   });
 
   test("cached-but-stale data is refetched on mount as before", async () => {
