@@ -616,7 +616,9 @@ thresholds, and uploads the `coverage-report` artifact — see Testing above),
 **e2e** (Playwright), and **e2e-stress** (PRs only: re-runs just the
 `web/e2e/**/*.spec.ts` files the PR adds or edits with `--repeat-each=5`,
 `--retries=0` and every core busy, to catch timing flakes that pass a single
-run — issue #619; skipped when no spec changed). The Bun version is pinned once via the
+run — issue #619; skipped when no spec changed). Under that load tests run
+several times slower, so it raises the per-test budget to 90s
+(`--timeout=90000`): it's after races, not slowness. The Bun version is pinned once via the
 workflow-level `BUN_VERSION` env var.
 
 **Path filters** (issue #492): on PRs, a leading `changes` job

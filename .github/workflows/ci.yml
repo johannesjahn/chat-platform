@@ -614,7 +614,7 @@ jobs:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.e2e_specs == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -632,6 +632,13 @@ jobs:
       # JSON, never spliced into the script, so a file name can't inject
       # shell. Every project runs, so a changed `@layout` test is also
       # repeated on the phone and wide layouts.
+      #
+      # `--timeout` triples the default 30s per-test budget (tests that set
+      # their own keep it). With every core busy, a test that takes a few
+      # seconds alone ran past 30s here (a full `chats.spec.ts` pass averaged
+      # 34s a test), and a pure-slowness timeout isn't the flake this job is
+      # hunting: a race still fails, because the assertion never sees what it
+      # waits for however long it's given.
       - name: Repeat changed specs under load
         env:
           SPECS: ${{ needs.changes.outputs.e2e_specs_files }}
@@ -640,7 +647,7 @@ jobs:
           mapfile -t specs < <(jq -r '.[] | sub("^web/"; "")' <<< "$SPECS")
           echo "Repeating each of these ${REPEAT_EACH} times:"
           printf '  %s\n' "${specs[@]}"
-          bun run test:e2e --repeat-each="$REPEAT_EACH" --retries=0 --workers=100% "${specs[@]}"
+          bun run test:e2e --repeat-each="$REPEAT_EACH" --retries=0 --workers=100% --timeout=90000 "${specs[@]}"
         working-directory: web
 
       - name: Upload Playwright traces

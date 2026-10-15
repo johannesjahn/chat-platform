@@ -6,9 +6,6 @@ test(
   "starting a direct chat, sending a message, and seeing it marked read",
   { tag: "@layout" },
   async ({ browser, injectApiUrl, signUp }) => {
-    // Two browser contexts, each cold-loading the app: a few seconds alone,
-    // but past the default 30s budget under the e2e-stress job's load.
-    test.slow();
     const contextA = await browser.newContext();
     await injectApiUrl(contextA);
     const pageA = await contextA.newPage();
@@ -75,9 +72,6 @@ test("group chats can be created, renamed by the creator, and show all participa
   injectApiUrl,
   signUp,
 }) => {
-  // Two browser contexts, each cold-loading the app: a few seconds alone,
-  // but past the default 30s budget under the e2e-stress job's load.
-  test.slow();
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
@@ -357,9 +351,6 @@ test("navigating directly to a chat you can't access shows a not-found message",
   injectApiUrl,
   signUp,
 }) => {
-  // Three browser contexts, each cold-loading the app: a few seconds alone,
-  // but past the default 30s budget under the e2e-stress job's load.
-  test.slow();
   const contextA = await browser.newContext();
   await injectApiUrl(contextA);
   const pageA = await contextA.newPage();
