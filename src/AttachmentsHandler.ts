@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "effect/http-api";
 import type { BunFile } from "bun";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Effect, Metric } from "effect";
 import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
@@ -20,7 +20,7 @@ import { processImage } from "./ImageProcessing.ts";
 import { withMediaProcessingPermit } from "./MediaProcessingLimit.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { RateLimiter } from "./RateLimiter.ts";
-import { attachments } from "./db/schema.ts";
+import { attachments, users } from "./db/schema.ts";
 import { processVideo } from "./VideoProcessing.ts";
 
 // Uploads are heavier than a typical write (disk I/O, a bucket round trip),
@@ -65,15 +65,16 @@ const enforceUploadQuota = (
   incomingSize: number,
 ) =>
   Effect.gen(function* () {
+    // A single-row read of the running total a trigger on `attachments`
+    // keeps up to date (migration 0033), rather than re-summing every
+    // attachment the user has ever kept (issue #326).
     const rows = yield* Effect.tryPromise(() =>
       db
-        .select({
-          totalBytes: sql<string>`coalesce(sum(${attachments.size}), 0)`,
-        })
-        .from(attachments)
-        .where(eq(attachments.uploaderId, userId)),
+        .select({ storageUsedBytes: users.storageUsedBytes })
+        .from(users)
+        .where(eq(users.id, userId)),
     ).pipe(Effect.orDie);
-    const currentTotal = Number(rows[0]?.totalBytes ?? 0);
+    const currentTotal = rows[0]?.storageUsedBytes ?? 0;
     if (currentTotal + incomingSize > ATTACHMENT_QUOTA_MAX_BYTES) {
       return yield* Effect.fail(
         new AttachmentQuotaExceeded({

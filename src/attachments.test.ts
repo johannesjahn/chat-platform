@@ -14,7 +14,7 @@ import {
 } from "./Api.ts";
 import { ATTACHMENT_QUOTA_MAX_BYTES } from "./AttachmentsHandler.ts";
 import { Db } from "./Db.ts";
-import { attachments } from "./db/schema.ts";
+import { attachments, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
 
 process.env.JWT_SECRET ??= "test-secret";
@@ -691,6 +691,139 @@ test("uploadAttachment succeeds when comfortably under the per-user storage quot
         }),
       );
       expect(result.status).toBe(201);
+    }),
+  ));
+
+// The quota reads `users.storage_used_bytes`, a counter a trigger on
+// `attachments` maintains (issue #326) — so it has to follow every write to
+// that table, not just the ones the handlers make.
+const storageUsedBytes = (userId: number) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const rows = yield* Effect.promise(() =>
+      db
+        .select({ bytes: users.storageUsedBytes })
+        .from(users)
+        .where(eq(users.id, userId)),
+    );
+    return rows[0]?.bytes;
+  });
+
+test("storage used tracks uploads and deletes through the API", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { user, accessToken } = yield* registerAndLogin(
+        "uploader-counter",
+        "pw-testpass",
+      );
+      expect(yield* storageUsedBytes(user.id)).toBe(0);
+
+      const data = yield* Effect.promise(() => makePng(10, 10));
+      const first = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "a.png",
+          contentType: "image/png",
+          data,
+        }),
+      );
+      const second = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "b.png",
+          contentType: "image/png",
+          data,
+        }),
+      );
+      const firstBody = first.body as { id: number; size: number };
+      const secondBody = second.body as { id: number; size: number };
+      expect(yield* storageUsedBytes(user.id)).toBe(
+        firstBody.size + secondBody.size,
+      );
+
+      const authed = yield* makeAuthedClient(accessToken);
+      yield* authed.attachments.deleteAttachment({
+        params: { id: firstBody.id },
+      });
+      expect(yield* storageUsedBytes(user.id)).toBe(secondBody.size);
+    }),
+  ));
+
+test("storage used follows direct writes to attachments", () =>
+  run(() =>
+    Effect.gen(function* () {
+      const { user: alice } = yield* registerAndLogin(
+        "counter-alice",
+        "pw-testpass",
+      );
+      const { user: bob } = yield* registerAndLogin(
+        "counter-bob",
+        "pw-testpass",
+      );
+      const db = yield* Db;
+      const [row] = yield* Effect.promise(() =>
+        db
+          .insert(attachments)
+          .values({
+            uploaderId: alice.id,
+            filename: "x.mp3",
+            mimeType: "audio/mpeg",
+            size: 300,
+            storageKey: "attachments/x",
+          })
+          .returning(),
+      );
+      expect(yield* storageUsedBytes(alice.id)).toBe(300);
+
+      yield* Effect.promise(() =>
+        db
+          .update(attachments)
+          .set({ size: 120, uploaderId: bob.id })
+          .where(eq(attachments.id, row!.id)),
+      );
+      expect(yield* storageUsedBytes(alice.id)).toBe(0);
+      expect(yield* storageUsedBytes(bob.id)).toBe(120);
+
+      yield* Effect.promise(() =>
+        db.delete(attachments).where(eq(attachments.id, row!.id)),
+      );
+      expect(yield* storageUsedBytes(bob.id)).toBe(0);
+    }),
+  ));
+
+test("deleting an attachment frees its quota for the next upload", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { user, accessToken } = yield* registerAndLogin(
+        "uploader-quota-freed",
+        "pw-testpass",
+      );
+      const db = yield* Db;
+      const [big] = yield* Effect.promise(() =>
+        db
+          .insert(attachments)
+          .values({
+            uploaderId: user.id,
+            filename: "big.mp3",
+            mimeType: "audio/mpeg",
+            size: ATTACHMENT_QUOTA_MAX_BYTES - 10,
+            storageKey: "attachments/big",
+          })
+          .returning(),
+      );
+      const data = yield* Effect.promise(() => makePng(10, 10));
+      const upload = () =>
+        Effect.promise(() =>
+          uploadFile(handler, accessToken, {
+            filename: "small.png",
+            contentType: "image/png",
+            data,
+          }),
+        );
+      expect((yield* upload()).status).toBe(413);
+
+      yield* Effect.promise(() =>
+        db.delete(attachments).where(eq(attachments.id, big!.id)),
+      );
+      expect((yield* upload()).status).toBe(201);
     }),
   ));
 
