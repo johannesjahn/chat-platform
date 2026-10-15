@@ -325,6 +325,37 @@ the client is `web/src/components/games/reflex/` plus
   display only; the client's mirrored scoring constants must track the
   server's.
 
+## Forwarding messages
+
+`POST /chats/:id/messages/:messageId/forward` (issue #601) posts a copy of a
+message into up to `MAX_FORWARD_TARGETS` chats — `forwardMessage` in
+[`src/ChatsHandler.ts`](src/ChatsHandler.ts), picked from
+[`ForwardDialog`](web/src/components/chat/ForwardDialog.tsx). Load-bearing:
+
+- **A forward is a new message owned by the forwarder**, built through the
+  same `insertMessage`/`directChatBlocked`/`publishNewMessage` helpers as
+  `createMessage` — don't fork the send path. It never copies
+  `parentMessageId` (a parent is in another chat), reactions, reads, pins or
+  stars.
+- **Attribution is a snapshot.** `messages.forwarded_from_*` (migration
+  `0034`) store the original sender's name at forward time, with `set null`
+  FKs, so the label survives edits, deletes, renames and account deletion. A
+  forward of a forward copies them through, so the label always credits the
+  original author and never nests.
+- **Attachments are copied, never shared.** The forward gets its own
+  `attachments` row and storage object (`AttachmentStorage.copy`), owned by
+  — and counted against the quota of — the forwarder, inserted in one
+  transaction with the message; a failed step deletes the object it made.
+  Sharing the row would break the "one message per attachment" invariant
+  that delete, quota and `AttachmentCleanup` rely on.
+- **Per-target results, not all-or-nothing.** The source must be in a chat
+  the caller is in (404 otherwise, never 403); each target fails on its own
+  (`unavailable`/`blocked`/`quota_exceeded`/`invalid_content`). A
+  `clientId` keys each copy as `${clientId}:${targetChatId}`, so a replay
+  only fills in the missing targets, and the request is charged N units of
+  the global per-IP budget (`chargeGlobalRequests`) — a forward to N chats is
+  N sends.
+
 ## Disclosure motion
 
 Anything that expands or collapses in place goes through one primitive so the

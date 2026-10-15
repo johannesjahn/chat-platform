@@ -239,6 +239,13 @@
       "when": 1792049506242,
       "tag": "0033_storage_used_bytes",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792055630911,
+      "tag": "0034_forwarded_messages",
+      "breakpoints": true
     }
   ]
 }

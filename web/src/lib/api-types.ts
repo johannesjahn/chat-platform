@@ -532,6 +532,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chats/{id}/messages/{messageId}/forward": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["chats.forwardMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chats/{id}/typing": {
         parameters: {
             query?: never;
@@ -1716,6 +1732,11 @@ export interface components {
             reactions: components["schemas"]["ReactionSummary"][];
             pinned: boolean;
             starred: boolean;
+            forwardedFrom: components["schemas"]["ForwardedFrom"] | null;
+        };
+        ForwardedFrom: {
+            senderId: number | null;
+            senderName: string;
         };
         ReactionSummary: {
             emoji: string;
@@ -1728,6 +1749,7 @@ export interface components {
             senderName: string;
             contentType: components["schemas"]["MessageContentType"];
             content: string;
+            forwarded: boolean;
         };
         /** @enum {string} */
         MessageContentType: "text" | "image_url" | "attachment";
@@ -1788,6 +1810,23 @@ export interface components {
         MarkReadBody: {
             messageId: number;
         };
+        ForwardMessageResult: {
+            results: components["schemas"]["ForwardTargetResult"][];
+        };
+        ForwardTargetResult: {
+            chatId: number;
+            message: components["schemas"]["Message"] | null;
+            error: {
+                reason: components["schemas"]["ForwardFailureReason"];
+                message: string;
+            } | null;
+        };
+        /** @enum {string} */
+        ForwardFailureReason: "unavailable" | "blocked" | "quota_exceeded" | "invalid_content";
+        ForwardMessageBody: {
+            targetChatIds: number[];
+            clientId?: string | null;
+        };
         Message_1: {
             id: number;
             chatId: number;
@@ -1802,6 +1841,7 @@ export interface components {
             reactions: components["schemas"]["ReactionSummary"][];
             pinned: boolean;
             starred: boolean;
+            forwardedFrom: components["schemas"]["ForwardedFrom"] | null;
         };
         CreateMessageBody: {
             contentType: components["schemas"]["MessageContentType"];
@@ -4743,6 +4783,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotFoundEncoded"];
+                };
+            };
+        };
+    };
+    "chats.forwardMessage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                messageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForwardMessageBody"];
+            };
+        };
+        responses: {
+            /** @description ForwardMessageResult */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForwardMessageResult"];
+                };
+            };
+            /** @description HttpApiDecodeError */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFoundEncoded"];
+                };
+            };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };

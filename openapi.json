@@ -3898,6 +3898,101 @@
         }
       }
     },
+    "/chats/{id}/messages/{messageId}/forward": {
+      "post": {
+        "tags": [
+          "chats"
+        ],
+        "operationId": "chats.forwardMessage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+            },
+            "required": true
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ForwardMessageResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwardMessageResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HttpApiDecodeError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedEncoded"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundEncoded"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "TooManyRequests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyRequestsEncoded"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForwardMessageBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
     "/chats/{id}/typing": {
       "post": {
         "tags": [
@@ -10373,6 +10468,16 @@
           },
           "starred": {
             "type": "boolean"
+          },
+          "forwardedFrom": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ForwardedFrom"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -10388,7 +10493,31 @@
           "readByUserIds",
           "reactions",
           "pinned",
-          "starred"
+          "starred",
+          "forwardedFrom"
+        ],
+        "additionalProperties": false
+      },
+      "ForwardedFrom": {
+        "type": "object",
+        "properties": {
+          "senderId": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "senderName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "senderId",
+          "senderName"
         ],
         "additionalProperties": false
       },
@@ -10429,6 +10558,9 @@
           },
           "content": {
             "type": "string"
+          },
+          "forwarded": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -10436,7 +10568,8 @@
           "senderId",
           "senderName",
           "contentType",
-          "content"
+          "content",
+          "forwarded"
         ],
         "additionalProperties": false
       },
@@ -10785,6 +10918,107 @@
         ],
         "additionalProperties": false
       },
+      "ForwardMessageResult": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ForwardTargetResult"
+            }
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "additionalProperties": false
+      },
+      "ForwardTargetResult": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "number"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Message"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "$ref": "#/components/schemas/ForwardFailureReason"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason",
+                  "message"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "chatId",
+          "message",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "ForwardFailureReason": {
+        "type": "string",
+        "enum": [
+          "unavailable",
+          "blocked",
+          "quota_exceeded",
+          "invalid_content"
+        ]
+      },
+      "ForwardMessageBody": {
+        "type": "object",
+        "properties": {
+          "targetChatIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "minItems": 1,
+            "maxItems": 10
+          },
+          "clientId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 48
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "targetChatIds"
+        ],
+        "additionalProperties": false
+      },
       "Message_1": {
         "type": "object",
         "properties": {
@@ -10846,6 +11080,16 @@
           },
           "starred": {
             "type": "boolean"
+          },
+          "forwardedFrom": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ForwardedFrom"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -10861,7 +11105,8 @@
           "readByUserIds",
           "reactions",
           "pinned",
-          "starred"
+          "starred",
+          "forwardedFrom"
         ],
         "additionalProperties": false
       },

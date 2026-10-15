@@ -1,5 +1,6 @@
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import { Effect, Metric } from "effect";
+import { TooManyRequests } from "./Api.ts";
 import { clientIp } from "./ClientIp.ts";
 import { rateLimitRejectionsTotal } from "./Metrics.ts";
 import { RateLimiter } from "./RateLimiter.ts";
@@ -59,4 +60,39 @@ export const globalRateLimit = <E, R>(
       });
     }
     return yield* httpApp;
+  });
+
+// Charges `units` more requests to the caller's global bucket than the one
+// the middleware above already took, for an endpoint where one request does
+// the work of several — a forward to N chats is N sends (issue #601), and
+// must cost N, or batching would be a way around the ceiling. Fails with
+// TooManyRequests once the bucket runs out, like the endpoint-specific limits.
+export const chargeGlobalRequests = (
+  limiter: RateLimiter["Service"],
+  units: number,
+): Effect.Effect<void, TooManyRequests, HttpServerRequest.HttpServerRequest> =>
+  Effect.gen(function* () {
+    if (units <= 0) return;
+    const ip = yield* clientIp;
+    for (let i = 0; i < units; i++) {
+      const result = yield* limiter.consume(
+        `global:${ip}`,
+        GLOBAL_MAX_REQUESTS_PER_IP,
+        GLOBAL_WINDOW_SECONDS,
+      );
+      if (!result.allowed) {
+        yield* Metric.update(
+          Metric.withAttributes(rateLimitRejectionsTotal, {
+            limiter: "global",
+          }),
+          1,
+        );
+        return yield* Effect.fail(
+          new TooManyRequests({
+            message: "Too many requests. Please try again later.",
+            retryAfterSeconds: result.retryAfterSeconds,
+          }),
+        );
+      }
+    }
   });

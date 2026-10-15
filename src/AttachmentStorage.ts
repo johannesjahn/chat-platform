@@ -33,6 +33,16 @@ export class AttachmentStorage extends Context.Service<
     // upload sweep (AttachmentCleanup.ts, issue #256). Deleting a key that
     // doesn't exist is not an error in either backend.
     readonly delete: (key: string) => Effect.Effect<void, unknown>;
+    // Stores a second, independent object at `toKey` with `fromKey`'s bytes.
+    // Used to forward a message's attachment (issue #601): the forward gets
+    // its own object, so deleting the original upload (or its uploader's
+    // account) can't take the forward's media with it. Fails if `fromKey`
+    // isn't present.
+    readonly copy: (
+      fromKey: string,
+      toKey: string,
+      contentType: string,
+    ) => Effect.Effect<void, unknown>;
   }
 >()("AttachmentStorage") {}
 
@@ -103,6 +113,13 @@ export const S3AttachmentStorageLive = Layer.sync(AttachmentStorage, () => {
         return new Uint8Array(await file.arrayBuffer());
       }),
     delete: (key) => Effect.tryPromise(() => client.unlink(key)),
+    // Bun's S3 client has no server-side CopyObject, so the bytes pass
+    // through this process — bounded by MAX_ATTACHMENT_SIZE_BYTES.
+    copy: (fromKey, toKey, contentType) =>
+      Effect.tryPromise(async () => {
+        const data = await client.file(fromKey).bytes();
+        await client.write(toKey, data, { type: contentType });
+      }).pipe(Effect.asVoid),
   };
 });
 
@@ -149,6 +166,12 @@ export const InMemoryAttachmentStorageLive = Layer.sync(
       delete: (key) =>
         Effect.sync(() => {
           inMemoryStore.delete(key);
+        }),
+      copy: (fromKey, toKey, contentType) =>
+        Effect.try(() => {
+          const entry = inMemoryStore.get(fromKey);
+          if (!entry) throw new Error(`No object at ${fromKey}`);
+          inMemoryStore.set(toKey, { data: entry.data.slice(), contentType });
         }),
     };
   },
