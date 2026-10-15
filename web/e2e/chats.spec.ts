@@ -1496,8 +1496,8 @@ test(
     const highlight = anchorBubble.getByTestId("jump-highlight");
     await quote.click();
     await expect(highlight).toBeVisible();
-    await expect(anchorBubble).toBeInViewport();
     await expect(highlight).toHaveCSS("animation-name", "jump-flash");
+    await expect(anchorBubble).toBeInViewport();
     await expect(highlight).toHaveCount(0);
 
     // And once it *is* loaded, a jump from the bottom of the thread is a plain
@@ -1564,8 +1564,10 @@ test("a message's Copy link points straight back at it (issue #600)", async ({
 
   // Opening it lands on the message, highlighted, the way a search hit does.
   await page.goto("/chats");
+  // The highlight is looked for before the scroll is waited out, since its
+  // timer starts with the scroll (see the reply-jump test above).
   await page.goto(link);
-  await expect(targetBubble).toBeInViewport();
   await expect(targetBubble.getByTestId("jump-highlight")).toBeVisible();
+  await expect(targetBubble).toBeInViewport();
   await expect(page.locator("[data-message-id]").last()).not.toBeInViewport();
 });
