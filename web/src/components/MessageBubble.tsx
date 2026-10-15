@@ -11,6 +11,7 @@ import {
   Check,
   CheckCheck,
   Copy,
+  Forward,
   Link2,
   Loader2,
   Pencil,
@@ -75,6 +76,10 @@ type MessageBubbleProps = {
   // Start composing a reply that quotes this message (issue #217). Omitted
   // where replying isn't offered (e.g. a message that's mid-edit).
   onReply?: () => void;
+  // Open the picker to forward this message to other chats (issue #601).
+  // Only ever wired up for a stored message — pending/queued sends render as
+  // PendingMessageBubble, which has no actions at all.
+  onForward?: () => void;
   // Jump the thread to the message this one is replying to. Only meaningful
   // when `message.parentMessage` is set — when provided, the quoted snippet
   // above the body becomes a button that scrolls to (and highlights) the
@@ -128,6 +133,7 @@ export function MessageBubble({
   onEdit,
   onDelete,
   onReply,
+  onForward,
   onJumpToParent,
   highlightKey,
   editRequestKey,
@@ -540,10 +546,13 @@ export function MessageBubble({
     <>
       <span
         className={cn(
-          "font-semibold",
+          "flex items-center gap-1 font-semibold",
           isOwn ? "text-primary-foreground/90" : "text-primary",
         )}
       >
+        {parent.forwarded && (
+          <Forward className="size-3 shrink-0" aria-label="Forwarded" />
+        )}
         {parent.senderName}
       </span>
       <span
@@ -573,6 +582,54 @@ export function MessageBubble({
     </button>
   ) : (
     <div className={quoteClassName}>{quoteBody}</div>
+  );
+
+  const forwardButton = onForward && (
+    <Button
+      type="button"
+      size="icon"
+      variant="ghost"
+      aria-label="Forward message"
+      className="size-6"
+      onClick={onForward}
+    >
+      <Forward className="size-3.5" />
+    </Button>
+  );
+
+  // "Forwarded from X" (issue #601) — the original sender's name as it was
+  // when the message was forwarded, so it still reads right after they
+  // rename, leave, or delete their account. It only links to a profile
+  // while that account exists (`senderId` goes null once it's deleted).
+  const forwardedFrom = message.forwardedFrom;
+  const forwardedLabel = forwardedFrom && (
+    <span
+      data-testid="forwarded-label"
+      className={cn(
+        "flex items-center gap-1 text-xs italic",
+        isOwn ? "text-primary-foreground/75" : "text-muted-foreground",
+      )}
+    >
+      <Forward className="size-3 shrink-0" aria-hidden />
+      <span className="min-w-0 truncate">
+        Forwarded from{" "}
+        {forwardedFrom.senderId !== null ? (
+          <ProfileHoverCard userId={forwardedFrom.senderId}>
+            <Link
+              to="/users/$id"
+              params={{ id: String(forwardedFrom.senderId) }}
+              className="font-medium not-italic hover:underline"
+            >
+              {forwardedFrom.senderName}
+            </Link>
+          </ProfileHoverCard>
+        ) : (
+          <span className="font-medium not-italic">
+            {forwardedFrom.senderName}
+          </span>
+        )}
+      </span>
+    </span>
   );
 
   // Shared visibility classes for both action groups (own + incoming). Hidden
@@ -670,6 +727,7 @@ export function MessageBubble({
               <Reply className="size-3.5" />
             </Button>
           )}
+          {forwardButton}
           {canEdit && (
             <Button
               type="button"
@@ -755,6 +813,8 @@ export function MessageBubble({
               </Link>
             </ProfileHoverCard>
           )}
+
+          {forwardedLabel}
 
           {quotedParent}
 
@@ -966,6 +1026,7 @@ export function MessageBubble({
               <Reply className="size-3.5" />
             </Button>
           )}
+          {forwardButton}
           {canDeleteOthers && (
             <Button
               type="button"

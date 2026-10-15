@@ -34,6 +34,9 @@ import {
   type ChatInvite,
   type ChatParticipant,
   type ChatRole,
+  type ForwardFailureReason,
+  type ForwardTargetResult,
+  isAllowedImageUrl,
   type Message,
   type ParentMessagePreview,
   type ReactionSummary,
@@ -44,11 +47,13 @@ import {
   resolveAttachments,
   toApiAttachment,
 } from "./attachments.ts";
+import { enforceUploadQuota } from "./AttachmentsHandler.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
 import { avatarStorageKey, generateAvatarToken } from "./avatars.ts";
 import { directBlockExists, recipientsMutingSender } from "./blocks.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
+import { chargeGlobalRequests } from "./GlobalRateLimit.ts";
 import { processAvatar } from "./ImageProcessing.ts";
 import { withMediaProcessingPermit } from "./MediaProcessingLimit.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
@@ -68,6 +73,7 @@ import {
   toAvatarVariants,
 } from "./UsersHandler.ts";
 import {
+  attachments,
   chatInvites,
   chatParticipants,
   chats,
@@ -77,9 +83,11 @@ import {
   pinnedMessages,
   starredMessages,
   users,
+  type DbAttachment,
   type DbChat,
   type DbChatInvite,
   type DbMessage,
+  type NewDbMessage,
 } from "./db/schema.ts";
 
 // Mirrors AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT/AVATAR_UPLOAD_WINDOW_SECONDS
@@ -127,6 +135,15 @@ const toApiMessage = (
   reactions: [...reactions],
   pinned,
   starred,
+  // The sender-name snapshot is what marks a row as a forward (issue #601);
+  // the id beside it goes null once that account is deleted.
+  forwardedFrom:
+    row.forwardedFromSenderName !== null
+      ? {
+          senderId: row.forwardedFromSenderId,
+          senderName: row.forwardedFromSenderName,
+        }
+      : null,
 });
 
 // Resolves the lightweight `parentMessage` preview (issue #217) for a batch of
@@ -151,6 +168,7 @@ const resolveParentPreviews = (
           senderId: messages.senderId,
           contentType: messages.contentType,
           content: messages.content,
+          forwardedFromSenderName: messages.forwardedFromSenderName,
           displayName: users.displayName,
           username: users.username,
         })
@@ -171,6 +189,7 @@ const resolveParentPreviews = (
         // Only a one-line snippet is ever shown in a quote — truncate rather
         // than shipping the parent's full body on every reply.
         content: row.content.slice(0, PARENT_MESSAGE_PREVIEW_LENGTH),
+        forwarded: row.forwardedFromSenderName !== null,
       });
     }
     return previews;
@@ -765,6 +784,139 @@ const requireParticipant = (db: DrizzleDb, chatId: number, userId: number) =>
       return yield* Effect.fail(
         new Forbidden({ message: "You are not a participant in this chat" }),
       );
+  });
+
+// Source-side authorization for forwarding a message (issue #601): the
+// caller must currently be in the chat, and the message must belong to it.
+// A caller who isn't (or is no longer) in the chat gets the same 404 as for a
+// message that doesn't exist, so ids from other people's chats aren't
+// confirmed to exist. Every message a participant can see is forwardable
+// today; a per-chat "restrict forwarding" setting would be checked here.
+const getForwardableMessageOr404 = (
+  db: DrizzleDb,
+  chatId: number,
+  messageId: number,
+  userId: number,
+): Effect.Effect<DbMessage, NotFound> =>
+  Effect.gen(function* () {
+    if (!(yield* isParticipant(db, chatId, userId)))
+      return yield* Effect.fail(
+        new NotFound({
+          message: `Message ${messageId} not found in chat ${chatId}`,
+        }),
+      );
+    return yield* getMessageOr404(db, chatId, messageId);
+  });
+
+// In a direct chat, a *block* by either party (not a mere mute) stops
+// messaging in both directions (issue #219). Checked against the other
+// participant only — group chats aren't gated, and a block never applies to
+// yourself. Shared by `createMessage` and each target of `forwardMessage`.
+const directChatBlocked = (
+  db: DrizzleDb,
+  chatRow: DbChat,
+  senderId: number,
+): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    if (chatRow.type !== "direct") return false;
+    const others = yield* Effect.tryPromise(() =>
+      db
+        .select({ userId: chatParticipants.userId })
+        .from(chatParticipants)
+        .where(
+          and(
+            eq(chatParticipants.chatId, chatRow.id),
+            ne(chatParticipants.userId, senderId),
+          ),
+        )
+        .limit(1),
+    ).pipe(Effect.orDie);
+    const otherId = others[0]?.userId;
+    if (otherId === undefined) return false;
+    return yield* Effect.tryPromise(() =>
+      directBlockExists(db, senderId, otherId),
+    ).pipe(Effect.orDie);
+  });
+
+// Inserts a message and bumps its chat's `updatedAt` (which `listChats`
+// sorts by) and `version` as one atomic statement via a writable CTE, rather
+// than two separate un-transacted round trips — Postgres always runs a
+// data-modifying CTE to completion even though only `inserted`'s output is
+// selected, and a single statement is atomic without needing an explicit
+// transaction. Bumping `version` here (rather than a separate
+// `bumpChatVersion` call after, see that helper's comment) keeps it one
+// UPDATE. Resolves to `undefined` when the row's `clientId` collides with one
+// this sender already stored in the chat (issue #567). Takes a plain promise
+// so a forward can run it inside the transaction that also inserts its
+// copied attachment.
+const insertMessage = async (
+  db: DrizzleDb,
+  values: NewDbMessage & { createdAt: Date; updatedAt: Date },
+): Promise<DbMessage | undefined> => {
+  const inserted = db
+    .$with("inserted")
+    .as(db.insert(messages).values(values).onConflictDoNothing().returning());
+  const touched = db.$with("touched").as(
+    db
+      .update(chats)
+      .set({ updatedAt: values.updatedAt, version: sql`${chats.version} + 1` })
+      .where(eq(chats.id, values.chatId))
+      .returning({ id: chats.id }),
+  );
+  const created = await db.with(inserted, touched).select().from(inserted);
+  return created[0];
+};
+
+// The stored message this sender already sent into `chatId` under the
+// idempotency key `clientId` (issue #567), if any.
+const findMessageByClientId = (
+  db: DrizzleDb,
+  chatId: number,
+  senderId: number,
+  clientId: string,
+): Effect.Effect<DbMessage | undefined> =>
+  Effect.tryPromise(() =>
+    db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.chatId, chatId),
+          eq(messages.senderId, senderId),
+          eq(messages.clientId, clientId),
+        ),
+      )
+      .limit(1),
+  ).pipe(
+    Effect.orDie,
+    Effect.map((rows) => rows[0]),
+  );
+
+// Publishes a newly stored message to the chat: reads back the version the
+// insert bumped and nudges every participant. Suppresses the nudge for any
+// participant who has muted or blocked the sender (issue #219: "mute their
+// chat notifications") — the message is still stored and appears when they
+// next open the chat, only the push is withheld. The sender can't mute
+// themselves (self-block is rejected), so they stay in the notify set.
+const publishNewMessage = (
+  db: DrizzleDb,
+  connections: RealtimeConnections["Service"],
+  chatId: number,
+  senderId: number,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const version = yield* getChatVersion(db, chatId);
+    const participants = yield* getParticipants(db, chatId);
+    const recipientIds = participants.map((p) => p.userId);
+    const muting = yield* Effect.tryPromise(() =>
+      recipientsMutingSender(db, senderId, recipientIds),
+    ).pipe(Effect.orDie);
+    yield* notifyChatUpdated(
+      connections,
+      chatId,
+      version,
+      recipientIds.filter((userId) => !muting.has(userId)),
+    );
   });
 
 // Group-chat management actions (updateChat, addParticipants,
@@ -1995,22 +2147,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           // the page reloaded mid-request and the offline queue replayed it —
           // returns the original message untouched: no second row, no second
           // notification.
-          const findByClientId = (clientId: string) =>
-            Effect.tryPromise(() =>
-              db
-                .select()
-                .from(messages)
-                .where(
-                  and(
-                    eq(messages.chatId, id),
-                    eq(messages.senderId, currentUser.id),
-                    eq(messages.clientId, clientId),
-                  ),
-                )
-                .limit(1),
-            ).pipe(Effect.orDie);
           if (payload.clientId !== undefined) {
-            const existing = (yield* findByClientId(payload.clientId))[0];
+            const existing = yield* findMessageByClientId(
+              db,
+              id,
+              currentUser.id,
+              payload.clientId,
+            );
             if (existing)
               return yield* buildMessageResponse(
                 db,
@@ -2020,37 +2163,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               );
           }
 
-          // In a direct chat, a *block* by either party (not a mere mute)
-          // stops messaging in both directions (issue #219). Checked against
-          // the other participant only — group chats aren't gated, and a
-          // block never applies to yourself.
-          if (chatRow.type === "direct") {
-            const others = yield* Effect.tryPromise(() =>
-              db
-                .select({ userId: chatParticipants.userId })
-                .from(chatParticipants)
-                .where(
-                  and(
-                    eq(chatParticipants.chatId, id),
-                    ne(chatParticipants.userId, currentUser.id),
-                  ),
-                )
-                .limit(1),
-            ).pipe(Effect.orDie);
-            const otherId = others[0]?.userId;
-            if (otherId !== undefined) {
-              const blocked = yield* Effect.tryPromise(() =>
-                directBlockExists(db, currentUser.id, otherId),
-              ).pipe(Effect.orDie);
-              if (blocked)
-                return yield* Effect.fail(
-                  new Forbidden({
-                    message:
-                      "You can't send messages in this chat because of a block",
-                  }),
-                );
-            }
-          }
+          if (yield* directChatBlocked(db, chatRow, currentUser.id))
+            return yield* Effect.fail(
+              new Forbidden({
+                message:
+                  "You can't send messages in this chat because of a block",
+              }),
+            );
 
           let attachment: Attachment | null = null;
           if (payload.attachmentId !== undefined) {
@@ -2079,48 +2198,28 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             );
           }
 
-          // Inserting the message and bumping the parent chat's `updatedAt`
-          // (which `listChats` sorts by) are done as one atomic statement via
-          // a writable CTE, rather than two separate un-transacted round
-          // trips — Postgres always runs a data-modifying CTE to completion
-          // even though only `inserted`'s output is selected here, and a
-          // single statement is atomic without needing an explicit
-          // transaction.
           const now = new Date();
-          const inserted = db.$with("inserted").as(
-            db
-              .insert(messages)
-              .values({
-                chatId: id,
-                senderId: currentUser.id,
-                contentType: payload.contentType,
-                content: payload.content,
-                attachmentId: payload.attachmentId ?? null,
-                parentMessageId: payload.parentMessageId ?? null,
-                clientId: payload.clientId ?? null,
-                createdAt: now,
-                updatedAt: now,
-              })
-              .onConflictDoNothing()
-              .returning(),
-          );
-          // Bumps `version` in the same statement as `updatedAt` — one
-          // UPDATE, atomic with the message insert — rather than a separate
-          // `bumpChatVersion` call after (see that helper's comment).
-          const touched = db.$with("touched").as(
-            db
-              .update(chats)
-              .set({ updatedAt: now, version: sql`${chats.version} + 1` })
-              .where(eq(chats.id, id))
-              .returning({ id: chats.id }),
-          );
-          const created = yield* Effect.tryPromise(() =>
-            db.with(inserted, touched).select().from(inserted),
+          const row = yield* Effect.tryPromise(() =>
+            insertMessage(db, {
+              chatId: id,
+              senderId: currentUser.id,
+              contentType: payload.contentType,
+              content: payload.content,
+              attachmentId: payload.attachmentId ?? null,
+              parentMessageId: payload.parentMessageId ?? null,
+              clientId: payload.clientId ?? null,
+              createdAt: now,
+              updatedAt: now,
+            }),
           ).pipe(Effect.orDie);
-          const row = created[0];
           if (!row && payload.clientId !== undefined) {
             // Lost a race with a concurrent send of the same key.
-            const existing = (yield* findByClientId(payload.clientId))[0];
+            const existing = yield* findMessageByClientId(
+              db,
+              id,
+              currentUser.id,
+              payload.clientId,
+            );
             if (existing)
               return yield* buildMessageResponse(
                 db,
@@ -2136,25 +2235,357 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             1,
           );
 
-          const version = yield* getChatVersion(db, id);
-          const participants = yield* getParticipants(db, id);
-          // Suppress the realtime chat notification for any participant who has
-          // muted or blocked the sender (issue #219: "mute their chat
-          // notifications"). The message is still stored and appears when they
-          // next open the chat — only the push nudge is withheld. The sender
-          // can't mute themselves (self-block is rejected), so they stay in the
-          // notify set exactly as before.
-          const recipientIds = participants.map((p) => p.userId);
-          const muting = yield* Effect.tryPromise(() =>
-            recipientsMutingSender(db, currentUser.id, recipientIds),
-          ).pipe(Effect.orDie);
-          yield* notifyChatUpdated(
-            connections,
-            id,
-            version,
-            recipientIds.filter((userId) => !muting.has(userId)),
-          );
+          yield* publishNewMessage(db, connections, id, currentUser.id);
           return toApiMessage(row, [], attachment, NO_REACTIONS, parentMessage);
+        }),
+      )
+      .handle("forwardMessage", ({ params: { id, messageId }, payload }) =>
+        Effect.gen(function* () {
+          const currentUser = yield* CurrentUser;
+          const source = yield* getForwardableMessageOr404(
+            db,
+            id,
+            messageId,
+            currentUser.id,
+          );
+          const targetIds = [...new Set(payload.targetChatIds)];
+
+          // Who the label credits, snapshotted now so it survives renames
+          // and deletions. A forward of a forward copies its attribution
+          // through, crediting the original author rather than the
+          // person in the middle — so chains never nest.
+          let forwardedFrom: {
+            forwardedFromMessageId: number | null;
+            forwardedFromSenderId: number | null;
+            forwardedFromSenderName: string;
+          };
+          if (source.forwardedFromSenderName !== null) {
+            forwardedFrom = {
+              forwardedFromMessageId: source.forwardedFromMessageId,
+              forwardedFromSenderId: source.forwardedFromSenderId,
+              forwardedFromSenderName: source.forwardedFromSenderName,
+            };
+          } else {
+            const senders = yield* Effect.tryPromise(() =>
+              db
+                .select({
+                  displayName: users.displayName,
+                  username: users.username,
+                })
+                .from(users)
+                .where(eq(users.id, source.senderId))
+                .limit(1),
+            ).pipe(Effect.orDie);
+            const sender = senders[0];
+            forwardedFrom = {
+              forwardedFromMessageId: source.id,
+              forwardedFromSenderId: source.senderId,
+              forwardedFromSenderName: sender
+                ? (sender.displayName ?? sender.username)
+                : "Unknown",
+            };
+          }
+
+          // Content that can't be posted anywhere fails every target, not
+          // the request: an image URL whose host has since left the
+          // allowlist (the copy must still pass the check a fresh send
+          // would), or an attachment that's no longer stored.
+          let sourceAttachment: DbAttachment | null = null;
+          let contentProblem: string | null = null;
+          if (
+            source.contentType === "image_url" &&
+            !isAllowedImageUrl(source.content)
+          ) {
+            contentProblem = "This image's host is no longer allowed";
+          } else if (source.contentType === "attachment") {
+            const rows =
+              source.attachmentId === null
+                ? []
+                : yield* Effect.tryPromise(() =>
+                    db
+                      .select()
+                      .from(attachments)
+                      .where(eq(attachments.id, source.attachmentId!))
+                      .limit(1),
+                  ).pipe(Effect.orDie);
+            sourceAttachment = rows[0] ?? null;
+            if (!sourceAttachment)
+              contentProblem = "The attachment is no longer available";
+          }
+
+          // Copies a replayed forward already made (issue #567): each
+          // target's copy is keyed `${clientId}:${targetId}`, so a retry
+          // after a reload returns those and only fills in the rest.
+          const keyFor = (targetId: number) =>
+            payload.clientId !== undefined
+              ? `${payload.clientId}:${targetId}`
+              : null;
+          const existingByChat = new Map<number, DbMessage>();
+          if (payload.clientId !== undefined) {
+            const keys = targetIds.map((t) => keyFor(t)!);
+            const rows = yield* Effect.tryPromise(() =>
+              db
+                .select()
+                .from(messages)
+                .where(
+                  and(
+                    eq(messages.senderId, currentUser.id),
+                    inArray(messages.chatId, targetIds),
+                    inArray(messages.clientId, keys),
+                  ),
+                ),
+            ).pipe(Effect.orDie);
+            for (const row of rows)
+              if (row.clientId === keyFor(row.chatId))
+                existingByChat.set(row.chatId, row);
+          }
+
+          // A forward to N chats is N sends: the request itself already
+          // took one unit of the global per-IP budget, so charge the
+          // rest — only for copies that still need making, so a replay
+          // isn't billed twice.
+          const toSend = targetIds.filter((t) => !existingByChat.has(t));
+          yield* chargeGlobalRequests(limiter, toSend.length - 1);
+
+          const failed = (
+            chatId: number,
+            reason: ForwardFailureReason,
+            message: string,
+          ): ForwardTargetResult => ({
+            chatId,
+            message: null,
+            error: { reason, message },
+          });
+          const delivered = (
+            chatId: number,
+            message: Message,
+          ): ForwardTargetResult => ({ chatId, message, error: null });
+
+          const forwardInto = (
+            targetId: number,
+          ): Effect.Effect<ForwardTargetResult> =>
+            Effect.gen(function* () {
+              // Target-side authorization: the caller must be in every
+              // chat they post into, so a former member can't post into a
+              // group they've left. A chat that doesn't exist reads the
+              // same as one they're not in.
+              const chatRows = yield* Effect.tryPromise(() =>
+                db.select().from(chats).where(eq(chats.id, targetId)),
+              ).pipe(Effect.orDie);
+              const chatRow = chatRows[0];
+              if (
+                !chatRow ||
+                !(yield* isParticipant(db, targetId, currentUser.id))
+              )
+                return failed(
+                  targetId,
+                  "unavailable",
+                  "You can't post in this chat",
+                );
+
+              const existing = existingByChat.get(targetId);
+              if (existing)
+                return delivered(
+                  targetId,
+                  yield* buildMessageResponse(
+                    db,
+                    storage,
+                    existing,
+                    currentUser.id,
+                  ),
+                );
+
+              if (yield* directChatBlocked(db, chatRow, currentUser.id))
+                return failed(
+                  targetId,
+                  "blocked",
+                  "You can't send messages in this chat because of a block",
+                );
+              if (contentProblem !== null)
+                return failed(targetId, "invalid_content", contentProblem);
+
+              const clientId = keyFor(targetId);
+              const now = new Date();
+              // A copy, not a link: a forward never quotes (the parent is
+              // in another chat — issue #217's same-chat rule), and starts
+              // with no reactions, receipts, pins or stars of its own.
+              const values = {
+                chatId: targetId,
+                senderId: currentUser.id,
+                contentType: source.contentType,
+                content: source.content,
+                parentMessageId: null,
+                clientId,
+                ...forwardedFrom,
+                createdAt: now,
+                updatedAt: now,
+              };
+
+              let row: DbMessage | undefined;
+              let attachment: Attachment | null = null;
+              if (sourceAttachment) {
+                const copied = yield* copyAttachmentForForward(
+                  sourceAttachment,
+                  values,
+                );
+                if ("error" in copied)
+                  return failed(targetId, copied.error, copied.message);
+                row = copied.row;
+                attachment = copied.attachment;
+              } else {
+                row = yield* Effect.tryPromise(() =>
+                  insertMessage(db, { ...values, attachmentId: null }),
+                ).pipe(Effect.orDie);
+              }
+
+              if (!row && clientId !== null) {
+                // Lost a race with a concurrent replay of the same forward.
+                const raced = yield* findMessageByClientId(
+                  db,
+                  targetId,
+                  currentUser.id,
+                  clientId,
+                );
+                if (raced)
+                  return delivered(
+                    targetId,
+                    yield* buildMessageResponse(
+                      db,
+                      storage,
+                      raced,
+                      currentUser.id,
+                    ),
+                  );
+              }
+              if (!row)
+                return yield* Effect.die(new Error("INSERT returned no rows"));
+
+              yield* Metric.update(
+                Metric.withAttributes(contentCreatedTotal, {
+                  type: "message",
+                  forwarded: "true",
+                }),
+                1,
+              );
+              yield* publishNewMessage(
+                db,
+                connections,
+                targetId,
+                currentUser.id,
+              );
+              return delivered(
+                targetId,
+                toApiMessage(row, [], attachment, NO_REACTIONS, null),
+              );
+            });
+
+          // A forwarded attachment gets its own upload, owned by the
+          // forwarder: the "one message per attachment" invariant
+          // (db/schema.ts) is what lets the original's uploader delete it
+          // — or their account — without breaking anyone else's message,
+          // and what the quota and orphan sweep assume. So the stored file
+          // is copied, the copy counts toward the forwarder's quota, and
+          // its row and the message land in one transaction. Whatever
+          // step fails, nothing half-made is left behind: the sweep only
+          // reclaims unreferenced rows after a day, and never objects
+          // without a row at all.
+          const copyAttachmentForForward = (
+            original: DbAttachment,
+            values: Omit<NewDbMessage, "attachmentId"> & {
+              createdAt: Date;
+              updatedAt: Date;
+            },
+          ): Effect.Effect<
+            | {
+                row: DbMessage | undefined;
+                attachment: Attachment | null;
+              }
+            | { error: ForwardFailureReason; message: string }
+          > =>
+            Effect.gen(function* () {
+              const withinQuota = yield* enforceUploadQuota(
+                db,
+                currentUser.id,
+                original.size,
+              ).pipe(
+                Effect.as(true),
+                Effect.catch(() => Effect.succeed(false)),
+              );
+              if (!withinQuota)
+                return {
+                  error: "quota_exceeded" as const,
+                  message: "This attachment doesn't fit in your storage",
+                };
+
+              const storageKey = `attachments/${crypto.randomUUID()}`;
+              const discardObject = storage
+                .delete(storageKey)
+                .pipe(Effect.ignore);
+              const copiedObject = yield* storage
+                .copy(original.storageKey, storageKey, original.mimeType)
+                .pipe(
+                  Effect.as(true),
+                  Effect.catch(() => Effect.as(discardObject, false)),
+                );
+              if (!copiedObject)
+                return {
+                  error: "invalid_content" as const,
+                  message: "The attachment is no longer available",
+                };
+
+              // Thrown inside the transaction to roll the attachment row
+              // back when the message insert hit an idempotency conflict.
+              const duplicate = Symbol("duplicate");
+              const outcome = yield* Effect.tryPromise({
+                try: () =>
+                  db.transaction(async (tx) => {
+                    const attachmentRows = await tx
+                      .insert(attachments)
+                      .values({
+                        uploaderId: currentUser.id,
+                        filename: original.filename,
+                        mimeType: original.mimeType,
+                        size: original.size,
+                        storageKey,
+                        width: original.width,
+                        height: original.height,
+                        blurhash: original.blurhash,
+                        waveform: original.waveform,
+                        durationMs: original.durationMs,
+                      })
+                      .returning();
+                    const attachmentRow = attachmentRows[0]!;
+                    const messageRow = await insertMessage(tx, {
+                      ...values,
+                      attachmentId: attachmentRow.id,
+                    });
+                    if (!messageRow) throw duplicate;
+                    return { attachmentRow, messageRow };
+                  }),
+                catch: (cause) => cause,
+              }).pipe(
+                Effect.tapError(() => discardObject),
+                Effect.catch((cause) =>
+                  cause === duplicate
+                    ? Effect.succeed(null)
+                    : Effect.die(cause),
+                ),
+              );
+              if (!outcome) return { row: undefined, attachment: null };
+              return {
+                row: outcome.messageRow,
+                attachment: toApiAttachment(
+                  outcome.attachmentRow,
+                  storage.presignGetUrl(storageKey),
+                ),
+              };
+            });
+
+          // One target at a time: each is its own atomic insert, version
+          // bump and notification, exactly like a send, so chat-list order
+          // and version-gap detection (#55) hold per chat.
+          const results = yield* Effect.forEach(targetIds, forwardInto);
+          return { results };
         }),
       )
       .handle("sendTyping", ({ params: { id } }) =>

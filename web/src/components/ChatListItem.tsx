@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Link } from "@tanstack/react-router";
-import { ImageIcon, Users } from "lucide-react";
+import { Forward, ImageIcon, Users } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { PresenceDot } from "@/components/PresenceDot";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -174,6 +174,13 @@ export function ChatListItem({
             )}
           >
             {isOwnLastMessage && <span className="shrink-0">You:</span>}
+            {lastMessage?.forwardedFrom && (
+              <Forward
+                className="size-3.5 shrink-0"
+                aria-label="Forwarded"
+                data-testid="chat-list-forwarded"
+              />
+            )}
             {lastMessage?.contentType === "image_url" && (
               <ImageIcon className="size-3.5 shrink-0" />
             )}

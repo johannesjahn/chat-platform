@@ -886,8 +886,28 @@ export const ParentMessagePreview = Schema.Struct({
   senderName: Schema.String,
   contentType: MessageContentType,
   content: Schema.String,
+  // Whether the quoted message is itself a forward (issue #601), so the
+  // quote can carry the same "Forwarded" marker as the bubble it points at.
+  forwarded: Schema.Boolean,
 }).annotate({ identifier: "ParentMessagePreview" });
 export type ParentMessagePreview = typeof ParentMessagePreview.Type;
+
+// Where a forwarded message came from (issue #601) — a snapshot taken when
+// it was forwarded, so it doesn't follow later renames or deletions.
+// `senderName` is the original sender's display name (displayName ??
+// username) at that time; `senderId` is null once that account is gone, so
+// a client only links the label to a profile that still exists. Forwarding a
+// forward copies this through unchanged — it always credits the original
+// author, never the person in the middle — so it never nests.
+//
+// Showing the original sender's name to the target chat is deliberate, as in
+// most messengers: anyone in a chat a message is forwarded into can see who
+// first wrote it, even if they don't otherwise know them.
+export const ForwardedFrom = Schema.Struct({
+  senderId: Schema.NullOr(Schema.Finite),
+  senderName: Schema.String,
+}).annotate({ identifier: "ForwardedFrom" });
+export type ForwardedFrom = typeof ForwardedFrom.Type;
 
 export const Message = Schema.Struct({
   id: Schema.Finite,
@@ -918,6 +938,9 @@ export const Message = Schema.Struct({
   // (never reflects anyone else's stars). Both default to false.
   pinned: Schema.Boolean,
   starred: Schema.Boolean,
+  // Set when this message is a forward (issue #601), null otherwise — see
+  // `ForwardedFrom` above.
+  forwardedFrom: Schema.NullOr(ForwardedFrom),
 }).annotate({ identifier: "Message" });
 export type Message = typeof Message.Type;
 
@@ -1060,6 +1083,54 @@ export const UpdateMessageBody = Schema.Struct({
     Schema.makeFilter(requireAttachmentId),
   )
   .annotate({ identifier: "UpdateMessageBody" });
+
+// How many chats one forward may post into (issue #601). Each target is a
+// full send — its own insert, notification and, for an attachment, a copy of
+// the stored file — so the fan-out is bounded per request.
+export const MAX_FORWARD_TARGETS = 10;
+
+export const ForwardMessageBody = Schema.Struct({
+  // Chats to post a copy into. Duplicates are collapsed server-side; the
+  // source chat itself is allowed (it's just a re-post).
+  targetChatIds: Schema.Array(Schema.Int).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_FORWARD_TARGETS),
+  ),
+  // Idempotency key for the whole forward (see `CreateMessageBody.clientId`).
+  // Each target's copy is stored under `${clientId}:${targetChatId}`, so a
+  // replay returns the copies already made and only fills in the targets
+  // that are missing.
+  clientId: Schema.optional(Schema.String.check(Schema.isMaxLength(48))),
+}).annotate({ identifier: "ForwardMessageBody" });
+
+// Why one target of a forward didn't get its copy. The rest of the request
+// still goes ahead — a forward reports per target rather than failing whole.
+// "unavailable" covers both a chat that doesn't exist and one the caller
+// isn't (or is no longer) in, so the answer doesn't confirm other chats'
+// ids exist.
+export const ForwardFailureReason = Schema.Literals([
+  "unavailable",
+  "blocked",
+  "quota_exceeded",
+  "invalid_content",
+]).annotate({ identifier: "ForwardFailureReason" });
+export type ForwardFailureReason = typeof ForwardFailureReason.Type;
+
+export const ForwardTargetResult = Schema.Struct({
+  chatId: Schema.Finite,
+  // The copy posted into `chatId` — null exactly when `error` is set.
+  message: Schema.NullOr(Message),
+  error: Schema.NullOr(
+    Schema.Struct({ reason: ForwardFailureReason, message: Schema.String }),
+  ),
+}).annotate({ identifier: "ForwardTargetResult" });
+export type ForwardTargetResult = typeof ForwardTargetResult.Type;
+
+export const ForwardMessageResult = Schema.Struct({
+  // One entry per distinct target, in the order they were requested.
+  results: Schema.Array(ForwardTargetResult),
+}).annotate({ identifier: "ForwardMessageResult" });
+export type ForwardMessageResult = typeof ForwardMessageResult.Type;
 
 export const MarkReadBody = Schema.Struct({
   messageId: Schema.Finite,
@@ -2024,6 +2095,25 @@ const ChatsGroup = HttpApiGroup.make("chats")
       success: Message.pipe(HttpApiSchema.status(201)),
       error: [NotFound, Forbidden],
     }).middleware(Authentication),
+  )
+  .add(
+    // Posts a copy of a message into up to MAX_FORWARD_TARGETS other chats
+    // (issue #601). Each copy is a new message owned by the caller, labelled
+    // with the original sender (`Message.forwardedFrom`); an attachment is
+    // copied into a new upload the caller owns. The source message must be
+    // in a chat the caller is in — otherwise 404, never 403, so ids from
+    // other chats aren't confirmed to exist. Targets fail individually
+    // (see `ForwardTargetResult`), and each counts as one send.
+    HttpApiEndpoint.post(
+      "forwardMessage",
+      "/chats/:id/messages/:messageId/forward",
+      {
+        params: MessageIdPath,
+        payload: ForwardMessageBody,
+        success: ForwardMessageResult,
+        error: [NotFound, TooManyRequests],
+      },
+    ).middleware(Authentication),
   )
   .add(
     // Fire-and-forget: pushes a `typing` realtime event (see Realtime.ts) to

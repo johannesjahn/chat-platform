@@ -403,6 +403,26 @@ export const messages = pgTable(
     // message instead of inserting another. Null for messages sent without
     // one (older clients), which are never deduplicated.
     clientId: text("client_id"),
+    // Forwarded messages (issue #601). A forward is a new message owned by
+    // the forwarder; these record where it came from, as a *snapshot* taken
+    // at forward time. `forwardedFromSenderName` is what the "Forwarded from
+    // X" label renders and is the column that marks a row as a forward —
+    // it's copied, not joined, so the label survives the original being
+    // deleted and its sender renaming, leaving, or deleting their account.
+    // Both FKs are `set null`, never cascade: the forward must outlive the
+    // original message and its author. A forward of a forward copies these
+    // three through unchanged, so the label always credits the original
+    // author and chains never nest. All nullable with no default, so the
+    // migration is expand-only.
+    forwardedFromMessageId: integer("forwarded_from_message_id").references(
+      (): AnyPgColumn => messages.id,
+      { onDelete: "set null" },
+    ),
+    forwardedFromSenderId: integer("forwarded_from_sender_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    forwardedFromSenderName: text("forwarded_from_sender_name"),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -411,6 +431,14 @@ export const messages = pgTable(
       .$defaultFn(() => new Date()),
   },
   (table) => [
+    // Serve the two `set null` FKs above, so deleting a message or a user
+    // doesn't sequentially scan `messages` for forwards pointing at it.
+    index("messages_forwarded_from_message_id_idx").on(
+      table.forwardedFromMessageId,
+    ),
+    index("messages_forwarded_from_sender_id_idx").on(
+      table.forwardedFromSenderId,
+    ),
     // Backs the idempotency check in `createMessage`. Nulls never collide in
     // a Postgres unique index, so key-less messages are unaffected.
     uniqueIndex("messages_client_id_idx").on(

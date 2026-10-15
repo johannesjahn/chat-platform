@@ -59,7 +59,10 @@ const enforceUploadLimit = (limiter: RateLimiter["Service"], userId: number) =>
 // in a burst (issue #256).
 export const ATTACHMENT_QUOTA_MAX_BYTES = 500 * 1024 * 1024; // 500MB per user
 
-const enforceUploadQuota = (
+// Exported for forwarding (ChatsHandler.ts, issue #601): a forwarded
+// attachment is copied into a new upload owned by the forwarder, which
+// counts toward their quota like any other.
+export const enforceUploadQuota = (
   db: DrizzleDb,
   userId: number,
   incomingSize: number,

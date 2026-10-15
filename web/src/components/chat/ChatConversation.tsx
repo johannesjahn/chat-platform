@@ -6,8 +6,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { onlineManager, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Loader2,
@@ -22,6 +23,10 @@ import {
   type ChatComposerHandle,
   type ReplyTarget,
 } from "@/components/ChatComposer";
+import {
+  ForwardDialog,
+  type ForwardOutcome,
+} from "@/components/chat/ForwardDialog";
 import { DateSeparator } from "@/components/DateSeparator";
 import { GroupManagementDialog } from "@/components/GroupManagementDialog";
 import { LoginPrompt } from "@/components/LoginPrompt";
@@ -39,6 +44,7 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { type ToastOptions, useToast } from "@/components/ui/toast";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import {
@@ -54,6 +60,7 @@ import {
   chatViewTransitionNames,
   chatsListQueryKey,
   localDayKey,
+  type ChatMessage,
   useChatDetail,
   useChatMessages,
   useChatsTwoPane,
@@ -87,6 +94,48 @@ function groupByDay<T extends { createdAt: number }>(messages: T[]) {
     lastKey = key;
   });
   return groups;
+}
+
+const FORWARD_FAILURE_LABELS = {
+  unavailable: "you're not in it",
+  blocked: "blocked",
+  quota_exceeded: "your storage is full",
+  invalid_content: "it can't be sent",
+} as const;
+
+// What to tell someone once a forward (issue #601) comes back: how many of
+// the chats they picked got it, and which didn't and why. A single target
+// that worked offers a jump to it.
+function forwardToast(
+  { results, chatNames }: ForwardOutcome,
+  openChat: (chatId: number) => void,
+): ToastOptions {
+  const sent = results.filter((r) => r.message !== null);
+  const failed = results.filter((r) => r.error !== null);
+  const chats = (n: number) => `${n} ${n === 1 ? "chat" : "chats"}`;
+  const description =
+    failed.length > 0
+      ? `Not sent to ${failed
+          .map(
+            (r) =>
+              `${chatNames.get(r.chatId) ?? "a chat"} (${FORWARD_FAILURE_LABELS[r.error!.reason]})`,
+          )
+          .join(", ")}`
+      : undefined;
+  const only = results.length === 1 ? sent[0] : undefined;
+  return {
+    title:
+      failed.length === 0
+        ? `Forwarded to ${chats(sent.length)}`
+        : sent.length === 0
+          ? "Couldn't forward the message"
+          : `Forwarded to ${sent.length} of ${chats(results.length)}`,
+    description,
+    tone: failed.length === 0 ? "success" : "warning",
+    action: only
+      ? { label: "Open chat", onClick: () => openChat(only.chatId) }
+      : undefined,
+  };
 }
 
 // How close to the bottom of the thread still counts as "at the bottom" —
@@ -332,6 +381,14 @@ export function ChatConversation({
   // The message a reply is currently being composed against (issue #217), or
   // null when composing a normal message.
   const [replyingTo, setReplyingTo] = useState<ReplyTarget | null>(null);
+  // The message being forwarded (issue #601). Kept while the picker animates
+  // out after `open` drops, then cleared.
+  const [forwarding, setForwarding] = useState<{
+    message: ChatMessage;
+    open: boolean;
+  } | null>(null);
+  const showToast = useToast();
+  const navigate = useNavigate();
   const twoPane = useChatsTwoPane();
   const composerRef = useRef<ChatComposerHandle | null>(null);
   // `↑` in an empty composer opens your newest text message's editor
@@ -949,6 +1006,7 @@ export function ChatConversation({
                             content: message.content,
                           })
                         }
+                        onForward={() => setForwarding({ message, open: true })}
                         onJumpToParent={
                           parentId == null
                             ? undefined
@@ -1018,6 +1076,34 @@ export function ChatConversation({
           />
         </div>
       </div>
+      {/* Portalled: a docked window's own transform would otherwise make it
+          the containing block of the picker's fixed backdrop. */}
+      {forwarding &&
+        createPortal(
+          <ForwardDialog
+            key={forwarding.message.id}
+            open={forwarding.open}
+            message={forwarding.message}
+            onClose={() =>
+              setForwarding((prev) => prev && { ...prev, open: false })
+            }
+            onExited={() => setForwarding(null)}
+            onForwarded={(outcome) => {
+              setForwarding((prev) => prev && { ...prev, open: false });
+              showToast(
+                forwardToast(
+                  outcome,
+                  (id) =>
+                    void navigate({
+                      to: "/chats/$id",
+                      params: { id: String(id) },
+                    }),
+                ),
+              );
+            }}
+          />,
+          document.body,
+        )}
     </>
   );
   const composer = (

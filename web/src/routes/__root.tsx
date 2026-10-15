@@ -35,6 +35,7 @@ import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { HeaderSearch } from "@/components/HeaderSearch";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { SessionPlaceholder } from "@/components/SessionPlaceholder";
@@ -148,28 +149,30 @@ function RootComponent() {
         persistOptions={persistOptions}
       >
         <ConfirmProvider>
-          <OfflineQueueSync />
-          <SkipLink />
-          {/* The frame is a column below `lg` — the top bar over the page,
+          <ToastProvider>
+            <OfflineQueueSync />
+            <SkipLink />
+            {/* The frame is a column below `lg` — the top bar over the page,
               as it always was — and a row from `lg` up, where the desktop
               sidebar takes the left edge and the page fills the rest
               (issue #554). `data-app-frame`/`data-app-column` are what the
               immersive shell clamps to the viewport (see styles.css). */}
-          <div data-app-frame className="flex grow flex-col lg:flex-row">
-            <AppNavigation />
-            <div data-app-column className="flex min-w-0 grow flex-col">
-              <OfflineBanner />
-              <Outlet />
+            <div data-app-frame className="flex grow flex-col lg:flex-row">
+              <AppNavigation />
+              <div data-app-column className="flex min-w-0 grow flex-col">
+                <OfflineBanner />
+                <Outlet />
+              </div>
             </div>
-          </div>
-          <VersionFooter />
-          <ChatDockSlot />
-          <Suspense fallback={null}>
-            <PwaUpdatePrompt />
-          </Suspense>
-          <LazyOverlay overlay="palette" component={CommandPalette} />
-          <LazyOverlay overlay="shortcuts" component={ShortcutsDialog} />
-          <KeyboardShortcuts />
+            <VersionFooter />
+            <ChatDockSlot />
+            <Suspense fallback={null}>
+              <PwaUpdatePrompt />
+            </Suspense>
+            <LazyOverlay overlay="palette" component={CommandPalette} />
+            <LazyOverlay overlay="shortcuts" component={ShortcutsDialog} />
+            <KeyboardShortcuts />
+          </ToastProvider>
         </ConfirmProvider>
       </PersistQueryClientProvider>
     </RootDocument>
