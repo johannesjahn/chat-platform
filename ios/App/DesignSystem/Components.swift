@@ -96,3 +96,66 @@ struct PrimaryButtonStyle: ButtonStyle {
 extension ButtonStyle where Self == PrimaryButtonStyle {
     static var primary: PrimaryButtonStyle { PrimaryButtonStyle() }
 }
+
+/// Placeholder rows shown while a list loads for the first time.
+struct SkeletonRows: View {
+    var count = 4
+    var body: some View {
+        ForEach(0..<count, id: \.self) { _ in
+            HStack(alignment: .top, spacing: 12) {
+                Circle().fill(Color(.tertiarySystemFill)).frame(width: 40, height: 40)
+                VStack(alignment: .leading, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 4).fill(Color(.tertiarySystemFill)).frame(width: 120, height: 12)
+                    RoundedRectangle(cornerRadius: 4).fill(Color(.tertiarySystemFill)).frame(height: 12)
+                    RoundedRectangle(cornerRadius: 4).fill(Color(.tertiarySystemFill)).frame(width: 200, height: 12)
+                }
+            }
+            .padding(.vertical, 8)
+            .accessibilityHidden(true)
+        }
+        .accessibilityIdentifier("skeleton")
+    }
+}
+
+/// Reaction chips plus an "add reaction" menu, shared by posts, comments and
+/// messages. `identifier` namespaces the controls (`post.12`, `comment.7`).
+struct ReactionBar: View {
+    let reactions: [ReactionSummary]
+    let identifier: String
+    let toggle: (ReactionEmoji) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(reactions.filter { $0.count > 0 }, id: \.emoji) { reaction in
+                    Button {
+                        if let emoji = ReactionEmoji(rawValue: reaction.emoji) { toggle(emoji) }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(reaction.emoji)
+                            Text("\(reaction.count)").font(.footnote.weight(.medium)).monospacedDigit()
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(reaction.reactedByMe ? Color.accentColor.opacity(0.2) : Color(.tertiarySystemFill), in: Capsule())
+                        .overlay(Capsule().stroke(reaction.reactedByMe ? Color.accentColor : .clear, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(reaction.emoji) \(reaction.count)\(reaction.reactedByMe ? ", you reacted" : "")")
+                    .accessibilityIdentifier("\(identifier).reaction.\(reaction.emoji)")
+                }
+                Menu {
+                    ForEach(ReactionEmoji.picker, id: \.rawValue) { emoji in
+                        Button(emoji.rawValue) { toggle(emoji) }
+                            .accessibilityIdentifier("\(identifier).react.\(emoji.rawValue)")
+                    }
+                } label: {
+                    Image(systemName: "face.smiling").padding(7)
+                        .background(Color(.tertiarySystemFill), in: Capsule())
+                }
+                .accessibilityLabel("Add reaction")
+                .accessibilityIdentifier("\(identifier).react")
+            }
+        }
+        .scrollClipDisabled()
+    }
+}

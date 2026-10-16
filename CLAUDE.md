@@ -368,6 +368,24 @@ ported. Needs Xcode 27 and `brew install xcodegen`.
   Password?" sheet via `dismissSavePasswordPrompt()` and switch tabs with
   `selectTab(_:)`; `xcodebuild` runs with `-collect-test-diagnostics never`
   because the post-failure `simctl diagnose` can hang forever.
+- **State and realtime.** One `@Observable` store per resource (`UserStore`,
+  `PostStore`, …) owned by `AppEnvironment` and injected with `.environment`.
+  Rows hold ids and read entities from the store, so a reaction or edit shows
+  everywhere at once. `RealtimeClient` (`Core/Realtime`) keeps one `/ws`
+  socket while signed in and foregrounded (reconnect backoff 1s→15s, ping every
+  30s, rooms ref-counted and replayed). `AppEnvironment.handle(_:)` turns each
+  id-only event into an `Invalidations` bump (or a patch, for reaction counts);
+  screens attach `.task(id: env.invalidations.token(.topic))` to refetch, and
+  every (re)connect bumps all topics to heal missed events. Lists page with
+  `PageState` (cursor, de-duplicating `append`, `mergeHead` for background
+  refetches that must keep the loaded tail).
+- **Uploads** (`APIClient.upload`) build multipart by hand: the generated client
+  can't set a part's own `Content-Type`, which the server reads as the file type.
+- **The test backend is shared**, so the feed is never empty and tests must
+  find their own rows by id/text. `test.sh` sets `TRUST_PROXY=loopback`;
+  `TestAPI` sends a made-up `X-Forwarded-For` per user so the per-IP
+  register/login limits don't bite. UI tests wait on the hidden
+  `realtime.state` element (`waitForRealtime()`) before testing live updates.
 - CI: the `ios` job (macOS runner) runs `ios/scripts/test.sh`.
 
 ## Forwarding messages

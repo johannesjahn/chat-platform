@@ -1,31 +1,38 @@
 import SwiftUI
 
 struct MainTabView: View {
-    enum Tab: Hashable { case feed, chats, games, notifications, more }
-
     let environment: AppEnvironment
     let user: User
-    @State private var selection: Tab = .feed
 
     var body: some View {
-        TabView(selection: $selection) {
-            SwiftUI.Tab("Feed", systemImage: "text.bubble", value: Tab.feed) {
-                PlaceholderTab(title: "Feed", systemImage: "text.bubble", identifier: "feed")
+        @Bindable var router = environment.router
+        TabView(selection: $router.selectedTab) {
+            SwiftUI.Tab("Feed", systemImage: "text.bubble", value: AppTab.feed) {
+                TabStack(tab: .feed) { FeedView() }
             }
-            SwiftUI.Tab("Chats", systemImage: "message", value: Tab.chats) {
+            SwiftUI.Tab("Chats", systemImage: "message", value: AppTab.chats) {
                 PlaceholderTab(title: "Chats", systemImage: "message", identifier: "chats")
             }
-            SwiftUI.Tab("Games", systemImage: "gamecontroller", value: Tab.games) {
+            SwiftUI.Tab("Games", systemImage: "gamecontroller", value: AppTab.games) {
                 PlaceholderTab(title: "Games", systemImage: "gamecontroller", identifier: "games")
             }
-            SwiftUI.Tab("Alerts", systemImage: "bell", value: Tab.notifications) {
+            SwiftUI.Tab("Alerts", systemImage: "bell", value: AppTab.notifications) {
                 PlaceholderTab(title: "Notifications", systemImage: "bell", identifier: "notifications")
             }
-            SwiftUI.Tab("More", systemImage: "ellipsis.circle", value: Tab.more) {
+            SwiftUI.Tab("More", systemImage: "ellipsis.circle", value: AppTab.more) {
                 MoreView(environment: environment, user: user)
             }
         }
         .accessibilityIdentifier("main.tabs")
+        .overlay(alignment: .topLeading) {
+            // UI tests wait for the socket before relying on live updates.
+            if LaunchOptions.resolve().uiTesting {
+                Color.clear.frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityLabel(String(describing: environment.realtime.state))
+                    .accessibilityIdentifier("realtime.state")
+            }
+        }
     }
 }
 

@@ -31,7 +31,7 @@ const isNullSchema = (value: Json): boolean =>
 
 // Property names whose `number` is always a whole number on the wire.
 const INTEGER_NAME =
-  /^(id|count|limit|maxPlayers|minPlayers|maxUses|round|turn|place|rank|serverNow)$|(Id|Ids|At|Count)$/;
+  /^(id|count|limit|size|width|height|maxPlayers|minPlayers|maxUses|round|turn|place|rank|serverNow)$|(Id|Ids|At|Count)$/;
 
 const without = (schema: Schema, key: string): Schema =>
   Object.fromEntries(Object.entries(schema).filter(([name]) => name !== key));

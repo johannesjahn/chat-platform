@@ -22,6 +22,7 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     struct Request: Sendable {
         var method: String
         var path: String
+        var query: String
         var authorization: String?
         var body: Data
     }
@@ -64,6 +65,7 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         let reply = handler(Request(
             method: request.httpMethod ?? "GET",
             path: url.path(percentEncoded: false),
+            query: url.query() ?? "",
             authorization: request.value(forHTTPHeaderField: "Authorization"),
             body: body
         ))

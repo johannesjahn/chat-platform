@@ -35,13 +35,15 @@ free_port() {
 }
 
 # 1. The real backend: in-memory PGlite (no DB_PATH / DATABASE_URL), a test
-#    JWT secret, in-memory realtime (REDIS_URL emptied).
+#    JWT secret, in-memory realtime (REDIS_URL emptied). TRUST_PROXY lets the
+#    tests' API helper pose as many clients (X-Forwarded-For), so arranging
+#    dozens of users doesn't trip the per-IP register/login limits.
 PORT="$(free_port)"
 API_BASE_URL="http://localhost:$PORT"
 echo "▸ Starting backend on $API_BASE_URL"
 (
   cd "$REPO_ROOT" || exit 1
-  exec env -u DB_PATH -u DATABASE_URL PORT="$PORT" JWT_SECRET="ios-test-secret" REDIS_URL="" \
+  exec env -u DB_PATH -u DATABASE_URL PORT="$PORT" JWT_SECRET="ios-test-secret" REDIS_URL="" TRUST_PROXY=loopback \
     bun run start
 ) >"$BUILD_DIR/backend.log" 2>&1 &
 BACKEND_PID=$!
