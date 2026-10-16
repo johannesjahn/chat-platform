@@ -8,6 +8,15 @@ enum AppTab: Hashable, Sendable { case feed, chats, games, notifications, more }
 enum Route: Hashable, Sendable {
     case post(Int)
     case profile(Int)
+    /// A conversation, optionally scrolled to (and highlighting) one message.
+    case chat(Int, messageId: Int?)
+    /// A game's lobby browser, by game slug (`GameId` raw value).
+    case game(String)
+    case gameLobby(Int)
+    case leaderboard(String)
+    case users
+    case settings
+    case admin
 }
 
 /// The selected tab and each tab's stack, held outside the views so a link
