@@ -1,0 +1,94 @@
+name: ChatPlatform
+options:
+  bundleIdPrefix: dev.chatplatform
+  deploymentTarget:
+    iOS: "27.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  # The generator's input is derived from the root openapi.json (see the script).
+  preGenCommand: bun scripts/prepare-openapi.ts
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    GCC_TREAT_WARNINGS_AS_ERRORS: YES
+    TARGETED_DEVICE_FAMILY: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+packages:
+  ChatAPI:
+    path: ChatAPI
+targets:
+  ChatPlatform:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+    dependencies:
+      - package: ChatAPI
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Chat Platform
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        # Optional: the API base URL baked into a build. A launch argument
+        # (-apiBaseURL) wins over it; localhost:3000 is the fallback.
+        APIBaseURL: ""
+        # Plain HTTP only for localhost — everything else must be HTTPS.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            localhost:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: false
+            127.0.0.1:
+              NSExceptionAllowsInsecureHTTPLoads: true
+        NSPhotoLibraryUsageDescription: Choose photos to attach to posts and messages.
+        NSCameraUsageDescription: Take photos to attach to posts and messages.
+        NSMicrophoneUsageDescription: Record voice messages.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.chatplatform.ios
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+  ChatPlatformTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: ChatPlatform
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: dev.chatplatform.ios.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ChatPlatform.app/ChatPlatform"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  ChatPlatformUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: ChatPlatform
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: dev.chatplatform.ios.uitests
+        TEST_TARGET_NAME: ChatPlatform
+schemes:
+  ChatPlatform:
+    build:
+      targets:
+        ChatPlatform: all
+    test:
+      targets:
+        - ChatPlatformTests
+        - ChatPlatformUITests
+      gatherCoverageData: false

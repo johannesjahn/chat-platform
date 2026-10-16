@@ -325,6 +325,51 @@ the client is `web/src/components/games/reflex/` plus
   display only; the client's mirrored scoring constants must track the
   server's.
 
+## iOS app
+
+A native SwiftUI iPhone app in [`ios/`](ios/) (Swift 6, iOS 27, `NavigationStack`/
+`TabView`), talking to the same backend as the web app. It follows the web's
+_phone_ layout; the desktop panes, dock and hover cards are deliberately not
+ported. Needs Xcode 27 and `brew install xcodegen`.
+
+- **Run/test:** `ios/scripts/test.sh` boots the real backend (free port, in-memory
+  DB, test `JWT_SECRET`), waits for `/version`, runs `xcodegen` then
+  `xcodebuild test` on the "iPhone 18 Pro" simulator (override with
+  `SIMULATOR_NAME`), exports screenshots to `ios/build/screenshots/<appearance>/`,
+  and always stops the backend. `APPEARANCE=dark` runs the app in dark mode;
+  extra args go to xcodebuild (`-only-testing:ChatPlatformUITests/…`). Look at
+  the screenshots after UI changes — a green test can still be a broken layout.
+- **Project:** generated from `ios/project.yml` (XcodeGen); never edit or commit
+  the `.xcodeproj`. Source is `ios/App/` (one folder per feature under
+  `Features/`, shared UI in `DesignSystem/`, networking/session in `Core/`);
+  unit tests (Swift Testing, `URLProtocol` stub, no live server) in
+  `ios/Tests/`, XCUITests (real backend; each test makes its own users through
+  the API) in `ios/UITests/`.
+- **Config:** API base URL = `-apiBaseURL` launch argument, then the `APIBaseURL`
+  Info.plist value, then `http://localhost:3000`. ATS allows plain HTTP only for
+  localhost. UI tests use `-uiTesting` (wipes the Keychain), `-uiTestSession
+<json>` (start signed in) and `-uiAppearance light|dark`.
+- **The API client is generated, from a derived spec.** `ios/ChatAPI` runs
+  Apple's swift-openapi-generator at build time. It silently _drops_ every
+  property written `anyOf: [X, {type: "null"}]` (Effect's nullable encoding), so
+  [`ios/scripts/prepare-openapi.ts`](ios/scripts/prepare-openapi.ts) rewrites
+  those, narrows id/timestamp/count numbers to `Int`, and writes the
+  (gitignored) generator input. `xcodegen` and `test.sh` run it; after changing
+  `openapi.json` re-run `xcodegen` (in `ios/`). A unit test decodes a `User`
+  with `displayName`, so a regression there fails loudly.
+- **Auth:** access + refresh token live only in the Keychain
+  (`SessionManager`, an actor). A 401 refreshes once and retries; concurrent
+  requests share one in-flight refresh (a refresh token rotates on use); only a
+  _rejected_ refresh signs out — offline keeps the session. Errors are mapped
+  to `APIError` (the server's `message`) in middleware, so call sites only see
+  success bodies: `try await api.call { try await $0.op(...) }.ok.body.json`.
+- **Hard-won testing notes:** don't set `textContentType` under `-uiTesting`
+  (the strong-password sheet swallows typing); dismiss the system "Save
+  Password?" sheet via `dismissSavePasswordPrompt()` and switch tabs with
+  `selectTab(_:)`; `xcodebuild` runs with `-collect-test-diagnostics never`
+  because the post-failure `simctl diagnose` can hang forever.
+- CI: the `ios` job (macOS runner) runs `ios/scripts/test.sh`.
+
 ## Forwarding messages
 
 `POST /chats/:id/messages/:messageId/forward` (issue #601) posts a copy of a

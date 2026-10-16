@@ -18,6 +18,8 @@ export default tseslint.config(
       "web/.tanstack/**",
       "web/src/routeTree.gen.ts",
       "web/src/lib/api-types.ts",
+      "ios/build/**",
+      "ios/ChatAPI/.build/**",
     ],
   },
 
