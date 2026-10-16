@@ -176,11 +176,10 @@ export function PostCard({
         );
       }}
       className={cn(
-        // `card-lift` tips the card a couple of degrees toward the viewer as
-        // it rises — it drives `transform`, while the lift below is Tailwind's
-        // separate `translate` property, so the two compose into one gesture
-        // instead of overwriting each other.
-        "group w-full max-w-xl gap-0 overflow-hidden py-0 transition-all duration-400 ease-smooth card-lift hover:-translate-y-1 hover:border-primary/35 hover:shadow-xl hover:shadow-primary/8",
+        // Hover only tints the card — no lift or tilt. A tall post (a long
+        // body or an open comment thread) moved under the pointer, shifting
+        // the reply box and comment actions out from under it.
+        "group w-full max-w-xl gap-0 overflow-hidden py-0 transition-[border-color,box-shadow] duration-400 ease-smooth hover:border-primary/35 hover:shadow-lg hover:shadow-primary/8",
         "motion-safe:fill-mode-both motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-500 stagger-in",
       )}
     >
