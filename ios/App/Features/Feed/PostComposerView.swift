@@ -41,9 +41,7 @@ struct PostComposerView: View {
                             Button("Remove photo", role: .destructive) { self.photo = nil; picked = nil }
                                 .accessibilityIdentifier("composer.photo.remove")
                         }
-                        PhotosPicker(selection: $picked, matching: .images) {
-                            Label(photo == nil ? "Add photo" : "Change photo", systemImage: "photo")
-                        }
+                        PhotosPicker(photo == nil ? "Add photo" : "Change photo", selection: $picked, matching: .images)
                         .accessibilityIdentifier("composer.photo")
                     }
                 }
