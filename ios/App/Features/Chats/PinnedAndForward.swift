@@ -155,14 +155,19 @@ struct ForwardSheet: View {
                             HStack {
                                 Text(env.chats.chat(outcome.chatId)?.displayName(me: me) ?? "Chat")
                                 Spacer()
-                                if let error = outcome.error {
-                                    Label(error, systemImage: "xmark.circle.fill").foregroundStyle(.red).font(.footnote)
-                                } else {
-                                    Label("Sent", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.footnote)
+                                Group {
+                                    if let error = outcome.error {
+                                        Label(error, systemImage: "xmark.circle.fill").foregroundStyle(.red)
+                                    } else {
+                                        Label("Sent", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                                    }
                                 }
+                                .font(.footnote)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(outcome.error.map { "Not sent: \($0)" } ?? "Sent")
+                                .accessibilityIdentifier("forward.result.\(outcome.chatId).status")
                             }
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("\(env.chats.chat(outcome.chatId)?.displayName(me: me) ?? "Chat"), \(outcome.error.map { "not sent: \($0)" } ?? "Sent")")
+                            .accessibilityElement(children: .contain)
                             .accessibilityIdentifier("forward.result.\(outcome.chatId)")
                         }
                     }

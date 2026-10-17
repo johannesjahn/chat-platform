@@ -149,8 +149,8 @@ final class ChatsTests: AppTestCase {
         element("forward.chat.\(target)").tap()
         screenshot("chats-11-forward-pick")
         element("forward.send").tap()
-        let result = element("forward.result.\(target)")
-        XCTAssertTrue(result.label.contains("Sent"), result.label)
+        let result = element("forward.result.\(target).status")
+        XCTAssertEqual(result.label, "Sent")
         screenshot("chats-12-forward-result")
         element("forward.cancel").tap()
 
