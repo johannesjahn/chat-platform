@@ -161,7 +161,8 @@ struct ForwardSheet: View {
                                     Label("Sent", systemImage: "checkmark.circle.fill").foregroundStyle(.green).font(.footnote)
                                 }
                             }
-                            .accessibilityElement(children: .combine)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("\(env.chats.chat(outcome.chatId)?.displayName(me: me) ?? "Chat"), \(outcome.error.map { "not sent: \($0)" } ?? "Sent")")
                             .accessibilityIdentifier("forward.result.\(outcome.chatId)")
                         }
                     }

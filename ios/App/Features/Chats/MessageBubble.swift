@@ -54,7 +54,7 @@ struct MessageBubble: View {
     }
 
     private var bubble: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        BubbleLayout(spacing: 6) {
             if let forwarded = message.forwardedFrom {
                 Label("Forwarded from \(forwarded.senderName)", systemImage: "arrowshape.turn.up.right")
                     .font(.caption.italic())
@@ -72,7 +72,6 @@ struct MessageBubble: View {
                     }
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background((isOwn ? Color.black : Color.primary).opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
@@ -127,7 +126,6 @@ struct MessageBubble: View {
         }
         .font(.caption2)
         .opacity(0.75)
-        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private var reactions: some View {
@@ -185,6 +183,32 @@ struct MessageBubble: View {
         case .imageUrl: return "📷 Photo"
         case .attachment: return "📎 \(parent.content)"
         case .text: return parent.content
+        }
+    }
+}
+
+/// A bubble's column: as wide as its widest line (never wider than offered),
+/// everything leading except the last child — the footer — which sits
+/// trailing. A plain VStack would either stretch every bubble to full width
+/// or leave the time hanging under short text.
+struct BubbleLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil)) }
+        let width = sizes.map(\.width).max() ?? 0
+        let height = sizes.map(\.height).reduce(0, +) + spacing * CGFloat(max(sizes.count - 1, 0))
+        return CGSize(width: min(width, proposal.width ?? width), height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for (index, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+            let isFooter = index == subviews.count - 1
+            let x = isFooter ? bounds.maxX - size.width : bounds.minX
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: min(size.width, bounds.width), height: size.height))
+            y += size.height + spacing
         }
     }
 }
