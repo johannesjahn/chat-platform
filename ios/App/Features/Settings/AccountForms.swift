@@ -110,21 +110,29 @@ struct BlockedUsersView: View {
                 ErrorBanner(message: message, retry: { Task { await load() } }, identifier: "blocked.loadError")
             case .loaded:
                 ForEach(env.blocks.entries, id: \.user.id) { entry in
-                    HStack {
-                        NavigationLink(value: Route.profile(entry.user.id)) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                UserRowLabel(userId: entry.user.id)
-                                Label(entry._type == .block ? "Blocked" : "Muted",
-                                      systemImage: entry._type == .block ? "hand.raised" : "bell.slash")
-                                    .font(.caption).foregroundStyle(.secondary)
+                    // Two borderless buttons, not a NavigationLink: a link
+                    // swallows the row (and the lift button with it).
+                    HStack(spacing: 12) {
+                        Button { env.router.push(.profile(entry.user.id)) } label: {
+                            HStack(spacing: 12) {
+                                AvatarView(userId: entry.user.id, size: 40)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(env.users.user(entry.user.id)?.label ?? entry.user.label)
+                                        .font(.body.weight(.medium)).lineLimit(1).foregroundStyle(.primary)
+                                    Text(entry._type == .block ? "Blocked" : "Muted")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
                             }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.borderless)
+                        .accessibilityIdentifier("blocked.row.\(entry.user.id)")
                         Button(entry._type == .block ? "Unblock" : "Unmute") { lift(entry.user.id) }
                             .buttonStyle(.bordered)
                             .disabled(pending == entry.user.id)
                             .accessibilityIdentifier("blocked.row.\(entry.user.id).lift")
                     }
-                    .accessibilityIdentifier("blocked.row.\(entry.user.id)")
                     .swipeActions {
                         Button(entry._type == .block ? "Unblock" : "Unmute") { lift(entry.user.id) }.tint(.accentColor)
                     }
