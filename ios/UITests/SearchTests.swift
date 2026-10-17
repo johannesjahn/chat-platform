@@ -35,7 +35,13 @@ final class SearchTests: AppTestCase {
 
     private func selectScope(_ scope: String) {
         let chip = element("search.scope.\(scope)")
+        // The chip row scrolls sideways on a narrow phone.
+        let row = element("search.scopes")
+        for _ in 0..<3 where !chip.isHittable {
+            if ["all", "users", "posts"].contains(scope) { row.swipeRight() } else { row.swipeLeft() }
+        }
         chip.tap()
+        XCTAssertTrue(chip.isSelected, "scope \(scope) not selected")
     }
 
     func testUnifiedSearchAndEveryKindsOwnTab() async throws {

@@ -51,6 +51,8 @@ struct NotificationsView: View {
             }
         }
         .listStyle(.plain)
+        // Before the overlay, so the empty state keeps its own identifier.
+        .accessibilityIdentifier("notifications.list")
         .overlay {
             if store.phase == .loaded, store.page.ids.isEmpty {
                 EmptyState(
@@ -60,7 +62,6 @@ struct NotificationsView: View {
                 )
             }
         }
-        .accessibilityIdentifier("notifications.list")
         .navigationTitle("Notifications")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

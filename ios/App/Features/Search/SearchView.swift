@@ -10,6 +10,7 @@ struct SearchView: View {
     @State private var text = ""
     @State private var scope: SearchScope = .all
     @FocusState private var searchFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
@@ -43,12 +44,13 @@ struct SearchView: View {
     }
 
     private var scopePicker: some View {
+        ScrollViewReader { proxy in
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(SearchScope.allCases, id: \.self) { item in
                     let selected = item == scope
                     Button { scope = item } label: {
-                        Label(item.title, systemImage: item.symbol)
+                        Text(item.title)
                             .font(.subheadline.weight(selected ? .semibold : .regular))
                             .padding(.horizontal, 12).padding(.vertical, 7)
                             .foregroundStyle(selected ? Color("OnAccent") : Color.primary)
@@ -57,9 +59,16 @@ struct SearchView: View {
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(selected ? .isSelected : [])
                     .accessibilityIdentifier("search.scope.\(item.rawValue)")
+                    .id(item)
                 }
             }
             .padding(.horizontal).padding(.vertical, 8)
+        }
+        .accessibilityIdentifier("search.scopes")
+        // "See all" can pick a tab that's scrolled out of view.
+        .onChange(of: scope) { _, selected in
+            withAnimation(reduceMotion ? nil : .default) { proxy.scrollTo(selected, anchor: .center) }
+        }
         }
         .background(.bar)
     }
