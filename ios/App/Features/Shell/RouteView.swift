@@ -8,8 +8,10 @@ struct RouteView: View {
         switch route {
         case .post(let id): PostDetailView(postId: id)
         case .profile(let id): ProfileView(userId: id)
+        case .users: UsersListView()
+        case .settings: SettingsView()
         // Each feature replaces its own placeholder case(s) below.
-        case .chat, .game, .gameLobby, .leaderboard, .users, .settings, .admin:
+        case .chat, .game, .gameLobby, .leaderboard, .admin:
             EmptyState(title: "Coming soon", systemImage: "hammer", identifier: "route.placeholder")
         }
     }

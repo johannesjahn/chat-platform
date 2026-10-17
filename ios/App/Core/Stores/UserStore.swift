@@ -46,6 +46,13 @@ final class UserStore {
 
     func store(_ profile: UserProfile) { store(profile.asUser) }
 
+    /// A deleted account: dropped, and not asked for again.
+    func forget(_ id: Int) {
+        users[id] = nil
+        statuses[id] = nil
+        missing.insert(id)
+    }
+
     /// Fetches whichever of `ids` aren't cached yet (once each, even if many
     /// rows ask at the same moment). A 404 — a deleted account — is
     /// remembered so it isn't asked for again.

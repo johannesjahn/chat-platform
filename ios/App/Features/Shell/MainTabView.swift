@@ -20,7 +20,7 @@ struct MainTabView: View {
                 PlaceholderTab(title: "Notifications", systemImage: "bell", identifier: "notifications")
             }
             SwiftUI.Tab("More", systemImage: "ellipsis.circle", value: AppTab.more) {
-                MoreView(environment: environment, user: user)
+                TabStack(tab: .more) { MoreView(environment: environment, user: user) }
             }
         }
         .accessibilityIdentifier("main.tabs")

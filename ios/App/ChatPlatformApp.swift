@@ -22,8 +22,9 @@ struct ChatPlatformApp: App {
     var body: some Scene {
         WindowGroup {
             if let environment {
+                // The `-uiAppearance` test flag wins over the user's choice.
                 RootView(environment: environment)
-                    .preferredColorScheme(Self.scheme)
+                    .preferredColorScheme(Self.scheme ?? environment.theme.preference.colorScheme)
             }
         }
     }
