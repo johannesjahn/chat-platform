@@ -386,6 +386,32 @@ ported. Needs Xcode 27 and `brew install xcodegen`.
   `TestAPI` sends a made-up `X-Forwarded-For` per user so the per-IP
   register/login limits don't bite. UI tests wait on the hidden
   `realtime.state` element (`waitForRealtime()`) before testing live updates.
+- **Notifications** (Alerts tab, `Features/Notifications/`): one
+  `NotificationStore` (in `AppEnvironment`) holds the inbox pages and the
+  unread count. The tab's `.badge` reads that count, which `MainTabView`
+  refetches from `/notifications/unread-count` on every `.notifications`
+  invalidation (so on each `notifications_changed` event and each reconnect);
+  a different signed-in user resets the store. Mark read (tap, swipe, context
+  menu, "Mark all read") is optimistic, then takes the server's returned
+  count; a failure rolls back and a 404 drops the row. What a row says and
+  where it goes is `NotificationPresentation` (mirrors `notificationTarget`
+  and `NotificationRow.tsx`: invite → `.gameLobby`, or `.game` with no lobby;
+  record → `.leaderboard`; otherwise → `.post`). Keep it in step with the web
+  when a type is added. The excerpt is the server's, never rebuilt on the device.
+- **Search** (`Route.search`, the magnifier on the Feed, `Features/Search/`):
+  `.searchable` plus scope chips. "All" calls `GET /search` (5 per kind,
+  with "See all" when there's a `nextCursor`), and each kind's tab pages its own
+  `/search/<kind>` (20 at a time). The rules mirror `web/src/lib/search.ts`:
+  nothing under 2 trimmed characters is sent, there's a 180ms debounce
+  (`.task(id:)` cancellation, so a burst of typing makes one request), and old
+  results stay dimmed while a new query loads. Rows render the server's
+  snippet segments (`SearchHighlight`, as plain text runs that are never parsed
+  as markup) and expose the matched fragments as the accessibility value
+  ("Matched: …"), which the UI tests assert on. Blocked/muted filtering and
+  ranking are the server's, so don't filter on the client. Message hits push
+  `.chat(chatId, messageId:)`.
+- UI tests read the Alerts badge off the hidden `notifications.unreadCount`
+  element (`waitForBadge`), and search with a unique letters-only token per test.
 - CI: the `ios` job (macOS runner) runs `ios/scripts/test.sh`.
 
 ## Forwarding messages
