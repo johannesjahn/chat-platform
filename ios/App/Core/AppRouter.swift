@@ -17,6 +17,8 @@ enum Route: Hashable, Sendable {
     case users
     case settings
     case admin
+    /// Unified search (people, posts, comments, messages).
+    case search
 }
 
 /// The selected tab and each tab's stack, held outside the views so a link
