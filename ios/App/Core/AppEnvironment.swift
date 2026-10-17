@@ -14,6 +14,7 @@ final class AppEnvironment {
     let invalidations = Invalidations()
     let users: UserStore
     let posts: PostStore
+    let notifications: NotificationStore
     let realtime: RealtimeClient
     let router = AppRouter()
     let images: ImageLoader
@@ -43,6 +44,7 @@ final class AppEnvironment {
         let users = UserStore(api: api)
         self.users = users
         posts = PostStore(api: api, users: users)
+        notifications = NotificationStore(api: api, users: users)
         realtime = RealtimeClient(transport: URLSessionRealtimeTransport(api: api))
         images = ImageLoader(session: urlSession, baseURL: config.apiBaseURL)
         realtime.onConnect = { [weak self] in self?.handleConnect() }
