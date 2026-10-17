@@ -61,6 +61,7 @@ final class AppEnvironment {
     private func handleConnect() {
         users.resetPresence()
         invalidations.invalidateAll()
+        messages.invalidateAll()
         Task { await messages.retryFailed() }
     }
 

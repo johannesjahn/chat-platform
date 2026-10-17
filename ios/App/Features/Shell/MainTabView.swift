@@ -11,8 +11,9 @@ struct MainTabView: View {
                 TabStack(tab: .feed) { FeedView() }
             }
             SwiftUI.Tab("Chats", systemImage: "message", value: AppTab.chats) {
-                PlaceholderTab(title: "Chats", systemImage: "message", identifier: "chats")
+                TabStack(tab: .chats) { ChatsListView() }
             }
+            .badge(environment.chats.totalUnread)
             SwiftUI.Tab("Games", systemImage: "gamecontroller", value: AppTab.games) {
                 PlaceholderTab(title: "Games", systemImage: "gamecontroller", identifier: "games")
             }
@@ -24,6 +25,8 @@ struct MainTabView: View {
             }
         }
         .accessibilityIdentifier("main.tabs")
+        // The chat list backs the Chats badge, so it stays loaded app-wide.
+        .task(id: environment.invalidations.token(.chats)) { await environment.chats.loadList(reset: false) }
         .overlay(alignment: .topLeading) {
             // UI tests wait for the socket before relying on live updates.
             if LaunchOptions.resolve().uiTesting {

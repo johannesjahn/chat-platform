@@ -173,7 +173,9 @@ final class MessageStore {
     static let refreshSize = 50
     static let jumpMaxPages = 10
 
-    private var windows: [Int: MessageWindow] = [:]
+    /// Not observed itself — a view asking for a window may create one
+    /// mid-render; each window's own properties are what views track.
+    @ObservationIgnored private var windows: [Int: MessageWindow] = [:]
     private let api: APIClient
     /// Called with each message confirmed sent (the chat list's preview).
     var onSent: (Message) -> Void = { _ in }
@@ -273,6 +275,14 @@ final class MessageStore {
 
     /// Something in the chat changed: an open conversation refetches.
     func invalidate(_ chatId: Int) { windows[chatId]?.revision += 1 }
+
+    /// After a reconnect: every open conversation refetches what it missed.
+    func invalidateAll() {
+        for window in windows.values {
+            window.revision += 1
+            window.pinsRevision += 1
+        }
+    }
 
     func applyReactionCounts(_ counts: [RealtimeEvent.ReactionCount], to messageId: Int, in chatId: Int) {
         guard let window = windows[chatId] else { return }

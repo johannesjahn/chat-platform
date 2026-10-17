@@ -311,3 +311,6 @@ extension Message {
         }
     }
 }
+
+extension Message: @retroactive Identifiable {}
+extension Chat: @retroactive Identifiable {}
