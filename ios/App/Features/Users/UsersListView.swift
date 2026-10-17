@@ -75,6 +75,10 @@ private struct UsersListContent: View {
             }
             await model.search(isAdmin: isAdmin)
         }
+        // An account deleted elsewhere (its profile) or a reconnect: re-ask.
+        .onChange(of: env.invalidations.token(.users)) {
+            Task { await model.search(isAdmin: isAdmin) }
+        }
         .confirmationDialog(
             "Permanently delete \(confirmingDelete.flatMap { env.users.user($0)?.label } ?? "this user")?",
             isPresented: Binding(get: { confirmingDelete != nil }, set: { if !$0 { confirmingDelete = nil } }),

@@ -82,6 +82,6 @@ enum UserActions {
     static func delete(_ userId: Int, env: AppEnvironment) async throws {
         _ = try await env.api.call { try await $0.users_deleteUser(path: .init(id: String(userId))) }
         env.users.forget(userId)
-        env.invalidations.invalidate(.posts)
+        env.invalidations.invalidate(.posts, .users)
     }
 }

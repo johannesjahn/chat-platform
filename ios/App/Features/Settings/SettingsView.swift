@@ -15,7 +15,7 @@ struct SettingsView: View {
                         HStack(spacing: 14) {
                             AvatarView(userId: me.id, size: 52)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(env.users.user(me.id)?.label ?? me.label).font(.headline)
+                                Text(env.users.user(me.id)?.shownName ?? me.shownName).font(.headline)
                                 Text("@\(me.username)").font(.subheadline).foregroundStyle(.secondary)
                             }
                         }

@@ -72,9 +72,11 @@ struct ProfileView: View {
                 HStack(alignment: .center, spacing: 16) {
                     AvatarView(userId: userId, size: 76, showsPresence: true, identifier: "profile.avatar")
                     VStack(alignment: .leading, spacing: 3) {
+                        let named = profile?.displayName?.isEmpty == false
                         Text(profile?.label ?? "…").font(.title2.bold())
-                            .accessibilityIdentifier("profile.name")
-                        if let profile {
+                            .accessibilityIdentifier(named || profile == nil ? "profile.name" : "profile.username")
+                        // Without a display name the title already is the handle.
+                        if let profile, profile.displayName?.isEmpty == false {
                             Text("@\(profile.username)").foregroundStyle(.secondary)
                                 .accessibilityIdentifier("profile.username")
                         }
