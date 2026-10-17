@@ -31,7 +31,7 @@ struct MentionText: View {
         for segment in Mentions.parse(text) {
             switch segment {
             case .text(let plain):
-                out += AttributedString(plain)
+                out += Self.linkified(plain)
             case .mention(let shown, let username):
                 var piece = AttributedString(shown)
                 if let user = resolved[username.lowercased()] {
@@ -42,5 +42,24 @@ struct MentionText: View {
             }
         }
         return out
+    }
+
+    private static let linkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    /// Plain text with any web links made tappable, like the web renderer.
+    static func linkified(_ plain: String) -> AttributedString {
+        var piece = AttributedString(plain)
+        guard let detector = linkDetector else { return piece }
+        let range = NSRange(plain.startIndex..., in: plain)
+        for match in detector.matches(in: plain, range: range) {
+            guard let url = match.url, url.scheme == "http" || url.scheme == "https",
+                  let stringRange = Range(match.range, in: plain),
+                  let lower = AttributedString.Index(stringRange.lowerBound, within: piece),
+                  let upper = AttributedString.Index(stringRange.upperBound, within: piece)
+            else { continue }
+            piece[lower..<upper].link = url
+            piece[lower..<upper].underlineStyle = .single
+        }
+        return piece
     }
 }
