@@ -386,6 +386,39 @@ ported. Needs Xcode 27 and `brew install xcodegen`.
   `TestAPI` sends a made-up `X-Forwarded-For` per user so the per-IP
   register/login limits don't bite. UI tests wait on the hidden
   `realtime.state` element (`waitForRealtime()`) before testing live updates.
+- **Chats** (`Features/Chats/`, stores in `Core/Stores/{Chat,Message,Typing}Store.swift`):
+  - `ChatStore` holds the paged list (it backs the Chats tab badge, so
+    `MainTabView` keeps it loaded on the `.chats` token) and every chat by id;
+    a 404/403 or `chat_deleted` puts the id in `missing` → "Chat not found".
+    It tracks per-chat `version`s like `web/src/lib/chatVersions.ts`: a
+    `chat_updated` at or below the known version is dropped, anything else
+    bumps that chat's `MessageWindow.revision` and the list.
+  - `MessageStore` keeps one `MessageWindow` per chat for the app's lifetime
+    (so reopening keeps the loaded pages and the reader's place). Its
+    `MessageList` is a pure value: `before`/`after` cursor pages, and a
+    refetch of the newest page _merges over the tail_ (edits, deletions,
+    reactions and read receipts in that range land; older pages stay; a page
+    that doesn't reach the loaded ones re-anchors). After a jump into history
+    (`hasNewer`) refetches don't touch it — it pages down instead. Unlike the
+    web's `after`-only catch-up, this is what makes others' edits/deletes live.
+  - Sends are optimistic `PendingMessage`s keyed by a `clientId` (the
+    server's idempotency key): failed ones stay with Retry, and every
+    reconnect retries them — never mint a new `clientId` for a retry.
+  - Typing: `TypingStore` entries lapse after 4s (no "stopped" event), a
+    message from that person clears them; the composer posts
+    `/chats/{id}/typing` at most every 2.5s. Reactions/pins patch in place
+    from their events; starring has no event.
+  - Read receipts: the conversation marks read up to the newest message
+    _visible_ (`onScrollTargetVisibilityChange`, rows are `m<id>`), only
+    while `scenePhase == .active` and the chat has unread.
+  - The thread is a bottom-anchored `ScrollView`/`LazyVStack`
+    (`defaultScrollAnchor(.bottom)` for initial offset _and_ size changes —
+    the latter is what keeps the view still when older pages prepend).
+    Bubbles size through `BubbleLayout`; don't put `maxWidth: .infinity` in
+    a bubble or every one stretches full width.
+  - Permissions mirror the web's group dialog (`ChatPermissions`); UI tests
+    find messages by `message.<id>` and use the long-press menu by label
+    (`messageAction`), and arrange chats through `ChatTestSupport.swift`.
 - CI: the `ios` job (macOS runner) runs `ios/scripts/test.sh`.
 
 ## Forwarding messages
