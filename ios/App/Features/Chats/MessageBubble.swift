@@ -59,6 +59,9 @@ struct MessageBubble: View {
                 Label("Forwarded from \(forwarded.senderName)", systemImage: "arrowshape.turn.up.right")
                     .font(.caption.italic())
                     .foregroundStyle(isOwn ? Color("OnAccent").opacity(0.8) : .secondary)
+                    // Otherwise VoiceOver may read the symbol ("Forward") alone.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Forwarded from \(forwarded.senderName)")
                     .accessibilityIdentifier("message.\(message.id).forwarded")
             }
             if let parent = message.parentMessage {
