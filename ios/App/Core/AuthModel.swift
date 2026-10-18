@@ -20,6 +20,10 @@ final class AuthModel {
         return nil
     }
 
+    /// Called with the account about to be shown as signed in, before the
+    /// phase changes (also on token refreshes and profile updates).
+    var willSignIn: (User) -> Void = { _ in }
+
     private let api: APIClient
     private let sessions: SessionManager
 
@@ -38,7 +42,12 @@ final class AuthModel {
     }
 
     private func apply(_ session: Session?) {
-        if let session { phase = .signedIn(session.user) } else { phase = .signedOut }
+        if let session {
+            willSignIn(session.user)
+            phase = .signedIn(session.user)
+        } else {
+            phase = .signedOut
+        }
     }
 
     private func refreshProfile(id: Int) async {

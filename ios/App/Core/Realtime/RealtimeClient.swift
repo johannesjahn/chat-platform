@@ -127,27 +127,39 @@ final class RealtimeClient {
     // MARK: loop
 
     private func run() async {
+        // A stopped run can still be suspended in `open()` (the upgrade wait
+        // doesn't observe cancellation) or `receive()` while a newer run owns
+        // `connection`. So each run keeps its own socket, and only touches the
+        // shared state while it hasn't been cancelled — `stop()` cancels before
+        // a `start()` can begin the next one.
         var failures = 0
         while !Task.isCancelled {
             state = .connecting
+            var opened: (any RealtimeConnection)?
             do {
-                let opened = try await transport.open()
-                connection = opened
+                let socket = try await transport.open()
+                opened = socket
+                guard !Task.isCancelled else {
+                    socket.close()
+                    return
+                }
+                connection = socket
                 Self.log.notice("connected")
                 state = .connected
                 failures = 0
                 replayRooms()
                 onConnect()
-                let pinger = Task { [weak self] in
+                let pinger = Task {
                     while !Task.isCancelled {
                         try? await Task.sleep(for: Self.pingInterval)
                         // Anything at all resets the server's idle timeout.
-                        try? await self?.connection?.send("ping")
+                        try? await socket.send("ping")
                     }
                 }
                 defer { pinger.cancel() }
                 while !Task.isCancelled {
-                    let frame = try await opened.receive()
+                    let frame = try await socket.receive()
+                    guard !Task.isCancelled else { break }
                     let event = RealtimeEvent.decode(frame)
                     Self.log.notice("frame \(frame, privacy: .public) decoded=\(event != nil)")
                     if let event { onEvent(event) }
@@ -156,9 +168,9 @@ final class RealtimeClient {
                 // Fall through to backoff.
                 Self.log.notice("connection ended: \(String(describing: error), privacy: .public)")
             }
-            connection?.close()
-            connection = nil
+            opened?.close()
             guard !Task.isCancelled else { break }
+            connection = nil
             state = .waiting
             let delay = backoff.delay(afterFailures: failures)
             failures += 1

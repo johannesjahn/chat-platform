@@ -340,6 +340,35 @@ private func makeAPI(_ backend: FakeBackend) -> APIClient {
         #expect(window.revision == 1)
     }
 
+    @Test func anotherAccountSigningInGetsFreshStores() async throws {
+        let backend = FakeBackend { request in
+            if request.path == "/chats/1" { return .json(chatJSON(1)) }
+            return .json(pageJSON([1], hasEarlier: false))
+        }
+        let env = makeEnvironment(backend)
+        let ada = try JSONDecoder().decode(User.self, from: Data(userJSON.utf8))
+        var bob = ada
+        bob.id = 2
+        env.accountWillSignIn(ada)
+        _ = try await env.chats.fetch(1)
+        let messages = env.messages
+        env.router.push(.chat(1, messageId: nil))
+
+        // The same account again (a token refresh, signing back in) keeps them.
+        env.accountWillSignIn(ada)
+        #expect(env.chats.chats[1] != nil)
+        #expect(env.messages === messages)
+
+        env.accountWillSignIn(bob)
+        #expect(env.chats.chats.isEmpty)
+        #expect(env.messages !== messages)
+        #expect(env.router.path(for: .feed).isEmpty)
+        // The new stores are wired like the launch ones.
+        let chatsToken = env.invalidations.token(.chats)
+        env.messages.onSent(try JSONDecoder().decode(Message.self, from: Data(messageJSON(1).utf8)))
+        #expect(env.invalidations.token(.chats) == chatsToken + 1)
+    }
+
     @Test func deletionTypingReactionsAndPinsLandInTheStores() async throws {
         let backend = FakeBackend { _ in
             .json(pageJSON([5], hasEarlier: false))

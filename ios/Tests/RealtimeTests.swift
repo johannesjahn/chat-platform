@@ -71,7 +71,42 @@ final class FakeConnection: RealtimeConnection {
         guard let next = try await iterator.next() else { throw URLError(.networkConnectionLost) }
         return next
     }
-    func close() { continuation.finish(throwing: URLError(.cancelled)) }
+    func close() {
+        closed.withLock { $0 = true }
+        continuation.finish(throwing: URLError(.cancelled))
+    }
+    private let closed = Mutex(false)
+    var isClosed: Bool { closed.withLock { $0 } }
+}
+
+/// The first `open()` hangs until released and, like the real upgrade wait,
+/// ignores cancellation; later ones return `next` at once.
+final class GatedTransport: RealtimeTransport {
+    private let gate = Mutex<(waiter: CheckedContinuation<FakeConnection, Never>?, used: Bool, next: FakeConnection?)>((nil, false, nil))
+
+    var waiting: Bool { gate.withLock { $0.waiter != nil } }
+    var next: FakeConnection? {
+        get { gate.withLock { $0.next } }
+        set { gate.withLock { $0.next = newValue } }
+    }
+    func release(_ connection: FakeConnection) {
+        gate.withLock { state in
+            defer { state.waiter = nil }
+            return state.waiter
+        }?.resume(returning: connection)
+    }
+
+    func open() async throws -> any RealtimeConnection {
+        let first = gate.withLock { state in
+            defer { state.used = true }
+            return !state.used
+        }
+        if !first, let next { return next }
+        if !first { throw URLError(.timedOut) }
+        return await withCheckedContinuation { continuation in
+            gate.withLock { $0.waiter = continuation }
+        }
+    }
 }
 
 final class FakeTransport: RealtimeTransport {
@@ -193,5 +228,30 @@ final class FakeTransport: RealtimeTransport {
         try? await Task.sleep(for: .milliseconds(100))
         #expect(transport.openCount == 1)
         #expect(client.state == .stopped)
+    }
+
+    @Test func aStoppedRunThatOpensLateDoesNotTakeOverTheNewSocket() async {
+        let transport = GatedTransport()
+        let late = FakeConnection(), current = FakeConnection()
+        var connects = 0
+        let client = RealtimeClient(transport: transport, backoff: Backoff(base: .milliseconds(1), cap: .milliseconds(2)))
+        client.onConnect = { connects += 1 }
+        client.start()
+        #expect(await waitUntil { transport.waiting })
+
+        // Inactive → active while the first upgrade is still pending.
+        client.stop()
+        transport.next = current
+        client.start()
+        #expect(await waitUntil { connects == 1 && client.state == .connected })
+
+        transport.release(late)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(connects == 1)
+        #expect(late.isClosed)
+        #expect(client.state == .connected)
+        client.send(["type": "game_progress", "progress": 1])
+        #expect(await waitUntil { current.sent.contains { $0.contains("game_progress") } })
+        client.stop()
     }
 }

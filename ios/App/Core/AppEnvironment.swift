@@ -12,16 +12,20 @@ final class AppEnvironment {
     let auth: AuthModel
     let server: ServerStatusModel
     let invalidations = Invalidations()
-    let users: UserStore
-    let posts: PostStore
-    let notifications: NotificationStore
-    let blocks: BlockStore
+    // Everything below up to `theme` is one account's data — rebuilt as a set
+    // whenever a different account signs in (see `accountWillSignIn`).
+    private(set) var users: UserStore
+    private(set) var posts: PostStore
+    private(set) var notifications: NotificationStore
+    private(set) var blocks: BlockStore
+    private(set) var chats: ChatStore
+    private(set) var messages: MessageStore
+    private(set) var typing = TypingStore()
+    private(set) var games: GameStore
+    /// Whose data the stores above hold; nil until the first sign-in.
+    private var storesOwner: Int?
     let theme: ThemeStore
-    let chats: ChatStore
-    let messages: MessageStore
-    let typing = TypingStore()
     let realtime: RealtimeClient
-    let games: GameStore
     let router = AppRouter()
     let images: ImageLoader
 
@@ -47,24 +51,55 @@ final class AppEnvironment {
         self.api = api
         auth = AuthModel(api: api, sessions: sessions)
         server = ServerStatusModel(api: api)
+        theme = ThemeStore(reset: options.uiTesting)
+        let realtime = RealtimeClient(transport: URLSessionRealtimeTransport(api: api))
+        self.realtime = realtime
         let users = UserStore(api: api)
         self.users = users
         posts = PostStore(api: api, users: users)
         notifications = NotificationStore(api: api, users: users)
         blocks = BlockStore(api: api, users: users)
-        theme = ThemeStore(reset: options.uiTesting)
         chats = ChatStore(api: api)
         messages = MessageStore(api: api)
-        let realtime = RealtimeClient(transport: URLSessionRealtimeTransport(api: api))
-        self.realtime = realtime
         games = GameStore(api: api, users: users, realtime: realtime)
         images = ImageLoader(session: urlSession, baseURL: config.apiBaseURL)
         realtime.onConnect = { [weak self] in self?.handleConnect() }
         realtime.onEvent = { [weak self] event in self?.handle(event) }
+        auth.willSignIn = { [weak self] user in self?.accountWillSignIn(user) }
+        wireStores()
+    }
+
+    private func wireStores() {
         // A block or mute hides (or brings back) that person's posts.
         blocks.onChange = { [weak self] in self?.invalidations.invalidate(.posts) }
         // A sent message moves its chat to the top of the list with a new preview.
         messages.onSent = { [weak self] _ in self?.invalidations.invalidate(.chats) }
+    }
+
+    /// Runs before the signed-in shell appears. When the account isn't the one
+    /// the stores were filled for, they're replaced wholesale — otherwise the
+    /// next person would inherit the last one's chats, cached posts, block
+    /// list, and (via `retryFailed` on connect) send their unsent messages.
+    /// Replacing beats clearing in place: a late response to the previous
+    /// account's request lands in a store nothing reads anymore. Every account
+    /// change passes through `.signedOut`, which tears down the views holding
+    /// the old stores.
+    func accountWillSignIn(_ user: User) {
+        guard storesOwner != user.id else { return }
+        defer { storesOwner = user.id }
+        // The ones built at launch are still empty.
+        guard storesOwner != nil else { return }
+        let users = UserStore(api: api)
+        self.users = users
+        posts = PostStore(api: api, users: users)
+        notifications = NotificationStore(api: api, users: users)
+        blocks = BlockStore(api: api, users: users)
+        chats = ChatStore(api: api)
+        messages = MessageStore(api: api)
+        typing = TypingStore()
+        games = GameStore(api: api, users: users, realtime: realtime)
+        wireStores()
+        router.reset()
     }
 
     /// Events are best-effort, so every (re)connect refetches everything
