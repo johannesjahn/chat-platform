@@ -21,6 +21,7 @@ final class AppEnvironment {
     let messages: MessageStore
     let typing = TypingStore()
     let realtime: RealtimeClient
+    let games: GameStore
     let router = AppRouter()
     let images: ImageLoader
 
@@ -54,7 +55,9 @@ final class AppEnvironment {
         theme = ThemeStore(reset: options.uiTesting)
         chats = ChatStore(api: api)
         messages = MessageStore(api: api)
-        realtime = RealtimeClient(transport: URLSessionRealtimeTransport(api: api))
+        let realtime = RealtimeClient(transport: URLSessionRealtimeTransport(api: api))
+        self.realtime = realtime
+        games = GameStore(api: api, users: users, realtime: realtime)
         images = ImageLoader(session: urlSession, baseURL: config.apiBaseURL)
         realtime.onConnect = { [weak self] in self?.handleConnect() }
         realtime.onEvent = { [weak self] event in self?.handle(event) }
@@ -107,7 +110,7 @@ final class AppEnvironment {
         case .gameLobbyUpdated, .gameLobbiesChanged, .gameChat:
             invalidations.invalidate(.games)
         case .gameProgress, .gameReaction:
-            break
+            games.handle(event, me: auth.user?.id)
         case .notificationsChanged:
             invalidations.invalidate(.notifications)
         case .unknown:

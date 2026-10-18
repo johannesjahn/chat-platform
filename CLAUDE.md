@@ -466,6 +466,43 @@ ported. Needs Xcode 27 and `brew install xcodegen`.
   - Permissions mirror the web's group dialog (`ChatPermissions`); UI tests
     find messages by `message.<id>` and use the long-press menu by label
     (`messageAction`), and arrange chats through `ChatTestSupport.swift`.
+- **Games** (Games tab, `Features/Games/`; `Route.game`/`.gameLobby`/
+  `.leaderboard`): `GameStore` (in `AppEnvironment`) caches lobbies, each
+  game's browser list, lobby chats and leaderboards, and holds the two
+  transient socket streams — `game_progress` (per-lobby, per-user log that
+  only moves forward) and `game_reaction` (flying emoji; our own server echo
+  is skipped). Screens join `game-hub:<game>` / `game-lobby:<id>` while
+  visible; id-only lobby/chat events bump the `.games` topic. Rules a change
+  could break:
+  - **The server decides.** Phases come from `startsAt`/`endsAt` on a
+    `ServerClock` (each response's `serverNow`, sampled at the round trip's
+    midpoint, shortest round trip of the last 8 wins — the web's
+    `noteServerClock`); `LobbyTiming.isOverdue` refetches when the clock says
+    a countdown/stage/race should have ended (no event marks that). Sketchy
+    shows only what `DrawingGame` hands this viewer — never infer a prompt.
+    Scores are only ever the server's; the Reflex points shown mid-game are
+    the web's mirror for instant feedback.
+  - **Mirrors are tested against the source files.** `GamesTests.swift` reads
+    `src/` and `web/src/` from disk (the simulator sees the host) and checks
+    the reaction set (`GameStore.reactions` = `GAME_REACTIONS`), the drawing
+    palette (`Sketch.palette` = `DRAWING_PALETTE`, `DRAWING_PALETTE_SIZE` long,
+    same order), canvas limits and Reflex's scoring constants/symbols.
+  - **Reflex taps bypass the generated client** (`APIClient.postJSON`): its
+    synthesized `Codable` omits nil properties, and the server rejects a
+    `ReflexTap` without its nullable keys. Any new request body with
+    required-but-nullable fields needs the same.
+  - Reflex reaction time is measured from the display-link frame that showed
+    the signal (`targetTimestamp`) to the touch's own `timestamp`
+    (`ReflexEngine`, a `UIView` touch layer). Typing uses a plain
+    `UITextField` (no autocorrect/smart punctuation) driven by `TypingEngine`;
+    progress frames are throttled (`ProgressThrottle`, plus a 12/s budget) and
+    reactions capped at 4/s, under the server's per-connection limits.
+  - Flying emoji are animated to opacity 0, which accessibility reads as
+    hidden — `RecentReactions` in the chat panel is their still, accessible
+    counterpart (and what UI tests query as `lobby.reaction.flying`).
+  - UI tests: other players are API calls (`GamesTestSupport.swift`, incl. a
+    raw socket for relayed reactions); a typing finish must stay under the
+    server's 250 WPM cap, so the test holds the last key until it's plausible.
 - CI: the `ios` job (macOS runner) runs `ios/scripts/test.sh`.
 
 ## Forwarding messages

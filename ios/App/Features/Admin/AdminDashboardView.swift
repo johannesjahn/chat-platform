@@ -78,7 +78,7 @@ private struct AdminDashboardContent: View {
 
 // MARK: tiles
 
-private struct StatTile: View {
+private struct AdminStatTile: View {
     let label: String
     let value: String
     var hint: String?
@@ -109,14 +109,14 @@ private struct TotalsSection: View {
     var body: some View {
         Section {
             LazyVGrid(columns: tileColumns, spacing: 10) {
-                StatTile(label: "Users", value: AdminFormat.count(totals.users),
+                AdminStatTile(label: "Users", value: AdminFormat.count(totals.users),
                          hint: totals.admins == 1 ? "1 admin" : "\(AdminFormat.count(totals.admins)) admins", identifier: "admin.total.users")
-                StatTile(label: "Posts", value: AdminFormat.count(totals.posts), identifier: "admin.total.posts")
-                StatTile(label: "Comments", value: AdminFormat.count(totals.comments), identifier: "admin.total.comments")
-                StatTile(label: "Reactions", value: AdminFormat.count(totals.reactions), identifier: "admin.total.reactions")
-                StatTile(label: "Chats", value: AdminFormat.count(totals.chats), identifier: "admin.total.chats")
-                StatTile(label: "Messages", value: AdminFormat.count(totals.messages), identifier: "admin.total.messages")
-                StatTile(label: "Attachments", value: AdminFormat.count(totals.attachments),
+                AdminStatTile(label: "Posts", value: AdminFormat.count(totals.posts), identifier: "admin.total.posts")
+                AdminStatTile(label: "Comments", value: AdminFormat.count(totals.comments), identifier: "admin.total.comments")
+                AdminStatTile(label: "Reactions", value: AdminFormat.count(totals.reactions), identifier: "admin.total.reactions")
+                AdminStatTile(label: "Chats", value: AdminFormat.count(totals.chats), identifier: "admin.total.chats")
+                AdminStatTile(label: "Messages", value: AdminFormat.count(totals.messages), identifier: "admin.total.messages")
+                AdminStatTile(label: "Attachments", value: AdminFormat.count(totals.attachments),
                          hint: AdminFormat.bytes(totals.attachmentBytes), identifier: "admin.total.attachments")
             }
             .padding(.vertical, 4)
@@ -161,13 +161,13 @@ private struct HealthSection: View {
                 .accessibilityIdentifier("admin.dependency.\(dependency.name.rawValue)")
             }
             LazyVGrid(columns: tileColumns, spacing: 10) {
-                StatTile(label: "Requests served", value: AdminFormat.count(health.requestsTotal),
+                AdminStatTile(label: "Requests served", value: AdminFormat.count(health.requestsTotal),
                          hint: "\(AdminFormat.percent(health.errorRate)) 5xx", identifier: "admin.health.requests")
-                StatTile(label: "Server errors", value: AdminFormat.count(health.serverErrorsTotal),
+                AdminStatTile(label: "Server errors", value: AdminFormat.count(health.serverErrorsTotal),
                          hint: "since process start", identifier: "admin.health.errors")
-                StatTile(label: "Rate-limited", value: AdminFormat.count(health.rateLimitRejectionsTotal),
+                AdminStatTile(label: "Rate-limited", value: AdminFormat.count(health.rateLimitRejectionsTotal),
                          hint: "requests rejected", identifier: "admin.health.rateLimited")
-                StatTile(label: "Live sockets", value: AdminFormat.count(health.websocketConnections),
+                AdminStatTile(label: "Live sockets", value: AdminFormat.count(health.websocketConnections),
                          hint: "/ws connections open", identifier: "admin.health.sockets")
             }
             .padding(.vertical, 4)

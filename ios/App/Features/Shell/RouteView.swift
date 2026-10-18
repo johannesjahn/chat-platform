@@ -13,9 +13,9 @@ struct RouteView: View {
         case .settings: SettingsView()
         case .admin: AdminDashboardView()
         case .chat(let id, let messageId): ConversationView(chatId: id, targetMessageId: messageId)
-        // Each feature replaces its own placeholder case(s) below.
-        case .game, .gameLobby, .leaderboard:
-            EmptyState(title: "Coming soon", systemImage: "hammer", identifier: "route.placeholder")
+        case .game(let slug): GameHubView(slug: slug)
+        case .gameLobby(let id): LobbyView(lobbyId: id)
+        case .leaderboard(let slug): LeaderboardView(slug: slug)
         }
     }
 }
