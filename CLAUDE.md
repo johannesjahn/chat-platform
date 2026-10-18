@@ -332,8 +332,8 @@ A native SwiftUI iPhone app in [`ios/`](ios/) (Swift 6, iOS 27, `NavigationStack
 _phone_ layout; the desktop panes, dock and hover cards are deliberately not
 ported. Needs Xcode 27 and `brew install xcodegen`.
 
-- **Run/test:** `ios/scripts/test.sh` boots the real backend (free port, in-memory
-  DB, test `JWT_SECRET`), waits for `/version`, runs `xcodegen` then
+- **Run/test:** `ios/scripts/test.sh` boots the real backend (free port, a
+  throwaway PGlite directory, test `JWT_SECRET`), waits for `/version`, runs `xcodegen` then
   `xcodebuild test` on the "iPhone 18 Pro" simulator (override with
   `SIMULATOR_NAME`), exports screenshots to `ios/build/screenshots/<appearance>/`,
   and always stops the backend. `APPEARANCE=dark` runs the app in dark mode;
@@ -412,6 +412,27 @@ ported. Needs Xcode 27 and `brew install xcodegen`.
   `.chat(chatId, messageId:)`.
 - UI tests read the Alerts badge off the hidden `notifications.unreadCount`
   element (`waitForBadge`), and search with a unique letters-only token per test.
+- **People, profiles, settings** (`Features/Users`, `Features/Settings`).
+  `/users/search` needs 3+ characters unless you're an admin (empty = everyone)
+  — mirrored in `UserSearchPolicy` only to skip a doomed request. Block/mute
+  state lives in `BlockStore` (its changes invalidate `.posts`); statuses are
+  always read via `UserStore.status(of:)` (realtime override + expiry).
+  `PUT /users/me` and `PUT /users/me/status` are full-replace with required
+  _nullable_ fields: the generated client omits nil keys (→ 400), so they go
+  through `APIClient.sendJSON` with the hand-encoded `UpdateProfileRequest`/
+  `UpdateStatusRequest` (unit-tested). A profile save also clears an uploaded
+  avatar — the server's rule, same as the web; the form says so. Avatars are
+  redrawn upright before cropping (`AvatarImage.upright`), so the crop
+  rectangle is in the pixels the server decodes. The theme (`ThemeStore`,
+  UserDefaults) applies via `.preferredColorScheme`; `-uiAppearance` still
+  wins and `-uiTesting` resets it.
+- **Admin** (`Features/Admin`, `Route.admin`): `GET /admin/stats`, Swift Charts
+  stacked daily bars in the web's validated series colors. Aggregates only —
+  never add a per-user panel. The More row shows for `role == .admin` but a
+  403 is still handled (`.forbidden`). Admins can't be minted through the API,
+  so `test.sh` seeds one into the throwaway DB (`ios/scripts/seed-admin.ts`)
+  and passes its credentials to the UI tests; `TestAPI.makeAdmin()` promotes
+  a fresh user with it.
 - CI: the `ios` job (macOS runner) runs `ios/scripts/test.sh`.
 
 ## Forwarding messages

@@ -68,21 +68,47 @@ final class APIClient: Sendable {
         body.append(file.data)
         append("\r\n--\(boundary)--\r\n")
 
-        func send(token: String?) async throws -> (Data, HTTPURLResponse) {
+        return try await send(method: "POST", path: path, body: body, contentType: "multipart/form-data; boundary=\(boundary)")
+    }
+
+    // MARK: hand-encoded JSON
+
+    /// A JSON request whose body the generated client can't express: it
+    /// encodes an optional `nil` by *omitting* the key, while full-replace
+    /// bodies (`PUT /users/me`, `PUT /users/me/status`) need an explicit
+    /// `null` to clear a field. Same auth and error handling as `call`.
+    func sendJSON<Body: Encodable & Sendable, T: Decodable & Sendable>(
+        _ method: String, path: String, body: Body, as _: T.Type = T.self
+    ) async throws -> T {
+        let data: Data
+        do { data = try JSONEncoder().encode(body) } catch { throw APIError.from(error) }
+        return try await send(method: method, path: path, body: data, contentType: "application/json")
+    }
+
+    /// Sends a prepared body with the bearer token, refreshing once on a 401,
+    /// and decodes a 2xx answer (anything else becomes `APIError`).
+    private func send<T: Decodable & Sendable>(method: String, path: String, body: Data, contentType: String) async throws -> T {
+        func attempt(token: String?) async throws -> (Data, HTTPURLResponse) {
             var request = URLRequest(url: baseURL.appending(path: path))
-            request.httpMethod = "POST"
-            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            request.httpMethod = method
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
             if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-            let (data, response) = try await urlSession.upload(for: request, from: body)
+            let (data, response): (Data, URLResponse)
+            if contentType.hasPrefix("multipart/") {
+                (data, response) = try await urlSession.upload(for: request, from: body)
+            } else {
+                request.httpBody = body
+                (data, response) = try await urlSession.data(for: request)
+            }
             guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
             return (data, http)
         }
 
         do {
             let token = await sessions.accessToken()
-            var (data, response) = try await send(token: token)
+            var (data, response) = try await attempt(token: token)
             if response.statusCode == 401, let token, let fresh = await sessions.recover(from: token) {
-                (data, response) = try await send(token: fresh)
+                (data, response) = try await attempt(token: fresh)
             }
             guard (200..<300).contains(response.statusCode) else {
                 throw APIError.http(status: response.statusCode, body: data)

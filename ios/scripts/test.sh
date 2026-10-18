@@ -5,7 +5,7 @@
 #   APPEARANCE=dark ios/scripts/test.sh # same, with the app in dark mode
 #   ios/scripts/test.sh -only-testing:ChatPlatformUITests/AuthFlowTests
 #
-# Starts the repo's backend on a free port (in-memory DB, test JWT secret),
+# Starts the repo's backend on a free port (throwaway DB seeded with one admin, test JWT secret),
 # waits for /version, runs xcodebuild test on a simulator, exports the UI-test
 # screenshots to ios/build/screenshots/, and always stops the backend.
 set -uo pipefail
@@ -20,7 +20,9 @@ SHOTS="$BUILD_DIR/screenshots/$APPEARANCE"
 
 mkdir -p "$BUILD_DIR"
 BACKEND_PID=""
+DB_DIR="$(mktemp -d -t chatplatform-ios-db)"
 cleanup() {
+  rm -rf "$DB_DIR"
   if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" 2>/dev/null; then
     kill "$BACKEND_PID" 2>/dev/null
     for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$BACKEND_PID" 2>/dev/null || break; sleep 0.2; done
@@ -34,16 +36,23 @@ free_port() {
   python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
 }
 
-# 1. The real backend: in-memory PGlite (no DB_PATH / DATABASE_URL), a test
-#    JWT secret, in-memory realtime (REDIS_URL emptied). TRUST_PROXY lets the
-#    tests' API helper pose as many clients (X-Forwarded-For), so arranging
-#    dozens of users doesn't trip the per-IP register/login limits.
+# 1. The real backend: PGlite in a throwaway data directory (no DATABASE_URL),
+#    a test JWT secret, in-memory realtime (REDIS_URL emptied). TRUST_PROXY
+#    lets the tests' API helper pose as many clients (X-Forwarded-For), so
+#    arranging dozens of users doesn't trip the per-IP register/login limits.
+#    The directory is seeded first with one admin (nothing in the API can mint
+#    one), whose credentials the UI tests get to promote their own users.
+ADMIN_USERNAME="ios_admin"
+ADMIN_PASSWORD="admin-$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
+(cd "$REPO_ROOT" && DB_PATH="$DB_DIR" bun ios/scripts/seed-admin.ts "$ADMIN_USERNAME" "$ADMIN_PASSWORD") \
+  >"$BUILD_DIR/seed.log" 2>&1 || { echo "✗ Seeding the admin failed:"; tail -20 "$BUILD_DIR/seed.log"; exit 1; }
+
 PORT="$(free_port)"
 API_BASE_URL="http://localhost:$PORT"
 echo "▸ Starting backend on $API_BASE_URL"
 (
   cd "$REPO_ROOT" || exit 1
-  exec env -u DB_PATH -u DATABASE_URL PORT="$PORT" JWT_SECRET="ios-test-secret" REDIS_URL="" TRUST_PROXY=loopback \
+  exec env -u DATABASE_URL DB_PATH="$DB_DIR" PORT="$PORT" JWT_SECRET="ios-test-secret" REDIS_URL="" TRUST_PROXY=loopback \
     bun run start
 ) >"$BUILD_DIR/backend.log" 2>&1 &
 BACKEND_PID=$!
@@ -67,6 +76,7 @@ mkdir -p "$SHOTS"
 echo "▸ xcodebuild test on $SIMULATOR_NAME ($APPEARANCE)"
 # TEST_RUNNER_* variables are forwarded to the UI-test runner process.
 TEST_RUNNER_API_BASE_URL="$API_BASE_URL" TEST_RUNNER_UITEST_APPEARANCE="$APPEARANCE" \
+TEST_RUNNER_ADMIN_USERNAME="$ADMIN_USERNAME" TEST_RUNNER_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   xcodebuild test \
     -project ChatPlatform.xcodeproj \
     -scheme ChatPlatform \

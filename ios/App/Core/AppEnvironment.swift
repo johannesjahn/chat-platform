@@ -15,6 +15,8 @@ final class AppEnvironment {
     let users: UserStore
     let posts: PostStore
     let notifications: NotificationStore
+    let blocks: BlockStore
+    let theme: ThemeStore
     let realtime: RealtimeClient
     let router = AppRouter()
     let images: ImageLoader
@@ -45,10 +47,14 @@ final class AppEnvironment {
         self.users = users
         posts = PostStore(api: api, users: users)
         notifications = NotificationStore(api: api, users: users)
+        blocks = BlockStore(api: api, users: users)
+        theme = ThemeStore(reset: options.uiTesting)
         realtime = RealtimeClient(transport: URLSessionRealtimeTransport(api: api))
         images = ImageLoader(session: urlSession, baseURL: config.apiBaseURL)
         realtime.onConnect = { [weak self] in self?.handleConnect() }
         realtime.onEvent = { [weak self] event in self?.handle(event) }
+        // A block or mute hides (or brings back) that person's posts.
+        blocks.onChange = { [weak self] in self?.invalidations.invalidate(.posts) }
     }
 
     /// Events are best-effort, so every (re)connect refetches everything
