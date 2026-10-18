@@ -43,7 +43,7 @@ final class GameStore {
     /// The emoji anyone watching a lobby can fling — exactly the server's
     /// `GAME_REACTIONS` (src/games/reactions.ts), which drops anything else;
     /// shown in this order.
-    static let reactions = ["👏", "🔥", "😂", "😮", "😱", "💀", "❤️", "👀"]
+    nonisolated static let reactions = ["👏", "🔥", "😂", "😮", "😱", "💀", "❤️", "👀"]
     static let reactionFlightSeconds = 2.6
     private static let maxInFlight = 40
 

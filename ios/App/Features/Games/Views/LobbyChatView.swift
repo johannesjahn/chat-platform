@@ -13,7 +13,7 @@ struct LobbyChatPanel: View {
     @State private var error: String?
     @FocusState private var focused: Bool
 
-    static let maxLength = 280
+    nonisolated static let maxLength = 280
 
     var body: some View {
         GamePanel(title: "Lobby chat", systemImage: "bubble.left.and.bubble.right", identifier: "lobby.chat") {
