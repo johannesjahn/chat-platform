@@ -159,7 +159,7 @@ private struct PassageText: View {
 
     var body: some View {
         Text(attributed)
-            .font(.system(.title3, design: .monospaced))
+            .font(.system(.body, design: .monospaced))
             .lineSpacing(4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityLabel(String(engine.passage))
