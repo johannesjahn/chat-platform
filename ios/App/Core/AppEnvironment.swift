@@ -15,6 +15,7 @@ final class AppEnvironment {
     let users: UserStore
     let posts: PostStore
     let realtime: RealtimeClient
+    let games: GameStore
     let router = AppRouter()
     let images: ImageLoader
 
@@ -43,7 +44,9 @@ final class AppEnvironment {
         let users = UserStore(api: api)
         self.users = users
         posts = PostStore(api: api, users: users)
-        realtime = RealtimeClient(transport: URLSessionRealtimeTransport(api: api))
+        let realtime = RealtimeClient(transport: URLSessionRealtimeTransport(api: api))
+        self.realtime = realtime
+        games = GameStore(api: api, users: users, realtime: realtime)
         images = ImageLoader(session: urlSession, baseURL: config.apiBaseURL)
         realtime.onConnect = { [weak self] in self?.handleConnect() }
         realtime.onEvent = { [weak self] event in self?.handle(event) }
@@ -79,7 +82,7 @@ final class AppEnvironment {
         case .gameLobbyUpdated, .gameLobbiesChanged, .gameChat:
             invalidations.invalidate(.games)
         case .gameProgress, .gameReaction:
-            break
+            games.handle(event, me: auth.user?.id)
         case .notificationsChanged:
             invalidations.invalidate(.notifications)
         case .unknown:
