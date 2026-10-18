@@ -40,6 +40,11 @@ struct FeedView: View {
         .accessibilityIdentifier("feed.list")
         .navigationTitle("Feed")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { env.router.push(.search) } label: { Image(systemName: "magnifyingglass") }
+                    .accessibilityLabel("Search")
+                    .accessibilityIdentifier("feed.search")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button { composing = true } label: { Image(systemName: "square.and.pencil") }
                     .accessibilityLabel("New post")

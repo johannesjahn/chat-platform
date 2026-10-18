@@ -14,6 +14,7 @@ final class AppEnvironment {
     let invalidations = Invalidations()
     let users: UserStore
     let posts: PostStore
+    let notifications: NotificationStore
     let realtime: RealtimeClient
     let games: GameStore
     let router = AppRouter()
@@ -44,6 +45,7 @@ final class AppEnvironment {
         let users = UserStore(api: api)
         self.users = users
         posts = PostStore(api: api, users: users)
+        notifications = NotificationStore(api: api, users: users)
         let realtime = RealtimeClient(transport: URLSessionRealtimeTransport(api: api))
         self.realtime = realtime
         games = GameStore(api: api, users: users, realtime: realtime)
