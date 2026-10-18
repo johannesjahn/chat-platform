@@ -437,6 +437,25 @@ private func number(named name: String, in source: String) -> Double? {
         #expect(store.progress(1, userId: 2) == 0)
     }
 
+    /// Regression: the generated client omits nil properties, and the server
+    /// rejects a `ReflexTap` without its (nullable) keys — every solo run
+    /// with a miss ended up a "Didn't finish".
+    @Test func reflexTapsAreSentWithExplicitNulls() async throws {
+        let backend = FakeBackend { request in
+            request.path == "/games/lobbies/4/reflex" ? .json(lobbyJSON(id: 4, game: "reflex")) : .json("{}", status: 404)
+        }
+        let store = makeStore(backend)
+        try await store.finishReflex(4, taps: [Reflex.noTap, ReflexTap(early: false, reactionMs: 250, direction: .left, x: nil, y: nil)])
+        let body = try #require(backend.requests.first { $0.path == "/games/lobbies/4/reflex" }?.body)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let taps = try #require(json["taps"] as? [[String: Any]])
+        #expect(taps.count == 2)
+        for tap in taps { #expect(Set(tap.keys) == ["early", "reactionMs", "direction", "x", "y"]) }
+        #expect(taps[0]["reactionMs"] is NSNull)
+        #expect(taps[1]["reactionMs"] as? Int == 250)
+        #expect(taps[1]["direction"] as? String == "left")
+    }
+
     @Test func flingingIsThrottledToTheServersBudget() {
         let store = makeStore(FakeBackend { _ in .json("{}") })
         let sent = (0..<6).map { _ in store.fling("👏", in: 1, me: 1) }

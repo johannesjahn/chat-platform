@@ -18,6 +18,7 @@ struct LobbyChatPanel: View {
     var body: some View {
         GamePanel(title: "Lobby chat", systemImage: "bubble.left.and.bubble.right", identifier: "lobby.chat") {
             LobbyReactionBar(lobby: lobby, meId: meId)
+            RecentReactions(lobbyId: lobby.id, meId: meId)
             if lobby.chatOpen {
                 let messages = env.games.chats[lobby.id] ?? []
                 VStack(alignment: .leading, spacing: 10) {
@@ -148,7 +149,7 @@ struct ReactionStream: View {
         GeometryReader { proxy in
             ZStack {
                 ForEach(env.games.flying.filter { $0.lobbyId == lobbyId }) { reaction in
-                    FlyingEmoji(reaction: reaction, size: proxy.size, name: env.users.user(reaction.userId)?.shownName ?? "Someone")
+                    FlyingEmoji(reaction: reaction, size: proxy.size)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
@@ -160,7 +161,6 @@ struct ReactionStream: View {
 private struct FlyingEmoji: View {
     let reaction: GameStore.FlyingReaction
     let size: CGSize
-    let name: String
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var launched = false
 
@@ -175,9 +175,32 @@ private struct FlyingEmoji: View {
             .onAppear {
                 withAnimation(.easeOut(duration: GameStore.reactionFlightSeconds)) { launched = true }
             }
-            .accessibilityElement()
-            .accessibilityLabel("\(name) reacted \(reaction.reaction)")
-            .accessibilityIdentifier("lobby.reaction.flying")
-            .accessibilityValue(reaction.reaction)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Who just reacted, in words — the flying emoji's still counterpart (an
+/// animation reads to VoiceOver as its faded-out end state), shown while
+/// they're in flight.
+private struct RecentReactions: View {
+    @Environment(AppEnvironment.self) private var env
+    let lobbyId: Int
+    let meId: Int
+
+    var body: some View {
+        let recent = env.games.flying.filter { $0.lobbyId == lobbyId }.suffix(3)
+        if !recent.isEmpty {
+            HStack(spacing: 10) {
+                ForEach(Array(recent)) { reaction in
+                    let name = reaction.userId == meId ? "You" : env.users.user(reaction.userId)?.shownName ?? "Someone"
+                    Text("\(reaction.reaction) \(name)")
+                        .font(.caption).lineLimit(1).foregroundStyle(.secondary)
+                        .accessibilityLabel("\(name) reacted \(reaction.reaction)")
+                        .accessibilityIdentifier("lobby.reaction.flying")
+                        .accessibilityValue(reaction.reaction)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }

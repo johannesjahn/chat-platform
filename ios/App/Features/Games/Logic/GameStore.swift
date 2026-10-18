@@ -167,9 +167,9 @@ final class GameStore {
     /// Submits a played Reflex Rush game, one tap per round.
     func finishReflex(_ id: Int, taps: [ReflexTap]) async throws {
         let sent = localNowMs()
-        let lobby = try await api.call {
-            try await $0.games_finishReflex(path: .init(id: String(id)), body: .json(.init(taps: taps)))
-        }.ok.body.json
+        // Not through the generated client: it would leave out the taps'
+        // null fields, which the server requires (see APIClient+ExplicitNulls).
+        let lobby = try await api.postJSON(path: "games/lobbies/\(id)/reflex", body: try ReflexTap.finishBody(taps), as: GameLobby.self)
         absorb(lobby, sentAt: sent)
         leaderboards = leaderboards.filter { !$0.key.hasPrefix("reflex:") }
     }
