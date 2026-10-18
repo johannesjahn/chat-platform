@@ -127,6 +127,7 @@ struct BlockedUsersView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.borderless)
+                        .tint(Color.primary)
                         .accessibilityIdentifier("blocked.row.\(entry.user.id)")
                         Button(entry._type == .block ? "Unblock" : "Unmute") { lift(entry.user.id) }
                             .buttonStyle(.bordered)
