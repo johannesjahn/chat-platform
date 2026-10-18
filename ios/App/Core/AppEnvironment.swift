@@ -17,6 +17,9 @@ final class AppEnvironment {
     let notifications: NotificationStore
     let blocks: BlockStore
     let theme: ThemeStore
+    let chats: ChatStore
+    let messages: MessageStore
+    let typing = TypingStore()
     let realtime: RealtimeClient
     let router = AppRouter()
     let images: ImageLoader
@@ -49,12 +52,16 @@ final class AppEnvironment {
         notifications = NotificationStore(api: api, users: users)
         blocks = BlockStore(api: api, users: users)
         theme = ThemeStore(reset: options.uiTesting)
+        chats = ChatStore(api: api)
+        messages = MessageStore(api: api)
         realtime = RealtimeClient(transport: URLSessionRealtimeTransport(api: api))
         images = ImageLoader(session: urlSession, baseURL: config.apiBaseURL)
         realtime.onConnect = { [weak self] in self?.handleConnect() }
         realtime.onEvent = { [weak self] event in self?.handle(event) }
         // A block or mute hides (or brings back) that person's posts.
         blocks.onChange = { [weak self] in self?.invalidations.invalidate(.posts) }
+        // A sent message moves its chat to the top of the list with a new preview.
+        messages.onSent = { [weak self] _ in self?.invalidations.invalidate(.chats) }
     }
 
     /// Events are best-effort, so every (re)connect refetches everything
@@ -62,28 +69,41 @@ final class AppEnvironment {
     private func handleConnect() {
         users.resetPresence()
         invalidations.invalidateAll()
+        messages.invalidateAll()
+        Task { await messages.retryFailed() }
     }
 
     func handle(_ event: RealtimeEvent) {
         switch event {
-        case .chatUpdated, .chatDeleted, .messagePinChanged:
+        case .chatUpdated(let chatId, let version):
+            // A redelivery of a version already seen changes nothing.
+            guard chats.noteUpdate(chatId, version: version) else { return }
+            messages.invalidate(chatId)
             invalidations.invalidate(.chats)
+        case .chatDeleted(let chatId):
+            chats.noteDeleted(chatId)
+            messages.drop(chatId)
+            invalidations.invalidate(.chats)
+        case .messagePinChanged(let chatId, let messageId, let pinned):
+            messages.setPinned(pinned, messageId: messageId, in: chatId)
         case .postChanged:
             invalidations.invalidate(.posts)
         case .commentChanged:
             invalidations.invalidate(.comments, .posts)
-        case .reactionChanged(let target, let targetId, _, let reactions):
+        case .reactionChanged(let target, let targetId, let chatId, let reactions):
             switch target {
             case .post: posts.applyReactionCounts(reactions, to: targetId)
             case .comment: invalidations.invalidate(.comments)
-            case .message: invalidations.invalidate(.chats)
+            case .message:
+                if let chatId { messages.applyReactionCounts(reactions, to: targetId, in: chatId) }
             }
         case .presence(let userId, let online):
             users.setOnline(userId, online)
         case .statusChanged(let userId, let text, let emoji, let expiresAt):
             users.setStatus(userId, text: text, emoji: emoji, expiresAt: expiresAt)
-        case .typing:
-            break
+        case .typing(let chatId, let userId, let username, let displayName):
+            guard userId != auth.user?.id else { return }
+            typing.note(chatId: chatId, userId: userId, name: displayName?.isEmpty == false ? displayName! : username)
         case .gameLobbyUpdated, .gameLobbiesChanged, .gameChat:
             invalidations.invalidate(.games)
         case .gameProgress, .gameReaction:

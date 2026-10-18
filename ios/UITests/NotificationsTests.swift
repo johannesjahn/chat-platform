@@ -32,11 +32,6 @@ extension TestAPI {
         try await request("PUT", "/users/\(target.id)/block", body: ["type": "block"], token: user.accessToken)
     }
 
-    func directChat(_ user: TestUser, with other: TestUser) async throws -> Int {
-        let chat = try await request("POST", "/chats/direct", body: ["userId": other.id], token: user.accessToken) as! [String: Any]
-        return chat["id"] as! Int
-    }
-
     @discardableResult
     func sendMessage(_ user: TestUser, chat chatId: Int, _ text: String) async throws -> Int {
         let message = try await request("POST", "/chats/\(chatId)/messages", body: ["contentType": "text", "content": text], token: user.accessToken) as! [String: Any]
