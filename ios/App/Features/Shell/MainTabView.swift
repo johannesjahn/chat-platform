@@ -14,7 +14,7 @@ struct MainTabView: View {
                 PlaceholderTab(title: "Chats", systemImage: "message", identifier: "chats")
             }
             SwiftUI.Tab("Games", systemImage: "gamecontroller", value: AppTab.games) {
-                PlaceholderTab(title: "Games", systemImage: "gamecontroller", identifier: "games")
+                TabStack(tab: .games) { GamesHomeView() }
             }
             SwiftUI.Tab("Alerts", systemImage: "bell", value: AppTab.notifications) {
                 TabStack(tab: .notifications) { NotificationsView() }

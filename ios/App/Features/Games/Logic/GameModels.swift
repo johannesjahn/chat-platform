@@ -13,6 +13,7 @@ typealias DrawingGame = Components.Schemas.DrawingGame
 typealias DrawingEntry = Components.Schemas.DrawingEntry
 typealias DrawingAnswer = Components.Schemas.DrawingAnswer
 typealias DrawingStage = Components.Schemas.DrawingStage
+typealias DrawingStageKind = Components.Schemas.DrawingStageKind
 typealias DrawingStroke = Components.Schemas.DrawingStroke
 typealias DrawingBrush = Components.Schemas.DrawingBrush
 typealias DrawingPack = Components.Schemas.DrawingPack
@@ -21,6 +22,7 @@ typealias ReflexKind = Components.Schemas.ReflexKind
 typealias ReflexDirection = Components.Schemas.ReflexDirection
 typealias ReflexOutcome = Components.Schemas.ReflexOutcome
 typealias ReflexTap = Components.Schemas.ReflexTap
+typealias ReflexGame = Components.Schemas.ReflexGame
 
 /// Wall-clock milliseconds on this device.
 func localNowMs() -> Double { Date().timeIntervalSince1970 * 1000 }
