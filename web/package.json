@@ -16,16 +16,16 @@
   },
   "dependencies": {
     "@radix-ui/react-slot": "1.5.0",
-    "@tanstack/query-sync-storage-persister": "5.104.4",
-    "@tanstack/react-query": "5.104.4",
-    "@tanstack/react-query-persist-client": "5.104.4",
+    "@tanstack/query-sync-storage-persister": "5.104.5",
+    "@tanstack/react-query": "5.104.5",
+    "@tanstack/react-query-persist-client": "5.104.5",
     "@tanstack/react-router": "1.170.45",
     "@tanstack/react-start": "1.169.3",
     "blurhash": "2.0.5",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "gsap": "3.15.0",
-    "lucide-react": "1.59.0",
+    "lucide-react": "1.60.0",
     "openapi-fetch": "0.17.0",
     "openapi-react-query": "0.5.4",
     "react": "19.3.1",
@@ -51,7 +51,7 @@
     "vite-tsconfig-paths": "6.1.1"
   },
   "overrides": {
-    "fast-uri": "4.2.2",
+    "fast-uri": "4.2.3",
     "js-yaml": "4.3.2",
     "brace-expansion": "5.0.12",
     "nanoid": "6.0.2"
