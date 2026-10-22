@@ -352,6 +352,16 @@ export const chatParticipants = pgTable(
     role: text("role", { enum: ["owner", "admin", "member"] })
       .notNull()
       .default("member"),
+    // Read watermark (issue #659): every message in this chat with an id at
+    // or below this one counts as read by this participant. Unread counts
+    // are then `id > last_read_message_id` over the `(chat_id, id)` index —
+    // bounded by the unread messages, not the chat's whole history — and
+    // `markRead` only ever moves it forward. Null means nothing read yet.
+    // Deliberately no FK: deleting the message it points at must not reset
+    // the watermark (`set null` would make the whole history unread again).
+    // Back-filled from `message_reads` by migration 0035, which stays
+    // written alongside it until a contract migration drops it.
+    lastReadMessageId: integer("last_read_message_id"),
   },
   (table) => [
     unique().on(table.chatId, table.userId),
@@ -470,6 +480,12 @@ export type NewDbMessage = typeof messages.$inferInsert;
 // One row per (message, reader) — the read state of a message is tracked
 // per user rather than as a single "read" flag, so group chats can later
 // show "read by N of M" without a schema change.
+//
+// Superseded by `chat_participants.last_read_message_id` (issue #659): no
+// read path uses this table any more. `markRead` still writes the rows it
+// newly reads (only those, never the whole history) so replicas running the
+// previous release keep seeing reads mid-rollout; drop it in a later
+// contract migration.
 export const messageReads = pgTable(
   "message_reads",
   {

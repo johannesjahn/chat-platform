@@ -5,15 +5,16 @@ import {
   desc,
   eq,
   gt,
+  gte,
   inArray,
   isNull,
   lt,
   lte,
-  max,
   ne,
   or,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Effect, Metric } from "effect";
 import {
   ALLOWED_AVATAR_MIME_TYPES,
@@ -346,7 +347,7 @@ const buildMessageResponse = (
   starredOverride?: boolean,
 ): Effect.Effect<Message> =>
   Effect.gen(function* () {
-    const readers = yield* getReaders(db, row.id);
+    const readers = yield* getReaders(db, row);
     const attachment = yield* resolveAttachment(db, storage, row.attachmentId);
     const reactions = yield* Effect.tryPromise(() =>
       messageReactionInfoOne(db, row.id, userId),
@@ -384,21 +385,7 @@ const hydrateMessages = (
   Effect.gen(function* () {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.id);
-    const readRows = yield* Effect.tryPromise(() =>
-      db
-        .select({
-          messageId: messageReads.messageId,
-          userId: messageReads.userId,
-        })
-        .from(messageReads)
-        .where(inArray(messageReads.messageId, ids)),
-    ).pipe(Effect.orDie);
-    const readersByMessage = new Map<number, number[]>();
-    for (const r of readRows) {
-      const list = readersByMessage.get(r.messageId) ?? [];
-      list.push(r.userId);
-      readersByMessage.set(r.messageId, list);
-    }
+    const readersByMessage = yield* getReadersForMessages(db, rows);
     const attachmentsByRow = yield* resolveAttachments(
       db,
       storage,
@@ -481,26 +468,59 @@ const getUnreadCount = (
   chatId: number,
   userId: number,
 ): Effect.Effect<number> =>
-  Effect.tryPromise(async () => {
-    const rows = await db
-      .select({ total: count() })
-      .from(messages)
-      .leftJoin(
-        messageReads,
-        and(
-          eq(messageReads.messageId, messages.id),
-          eq(messageReads.userId, userId),
-        ),
-      )
-      .where(
-        and(
-          eq(messages.chatId, chatId),
-          ne(messages.senderId, userId),
-          isNull(messageReads.id),
-        ),
+  getUnreadCountsForChats(db, [chatId], userId).pipe(
+    Effect.map((byChat) => byChat.get(chatId) ?? 0),
+  );
+
+// The messages a participant has read, as identified by their read
+// watermark (`chat_participants.last_read_message_id`, issue #659).
+type MessageReadKey = Pick<DbMessage, "id" | "chatId" | "senderId">;
+
+// Who has read each of `rows`: every current participant of its chat, other
+// than its sender, whose watermark has reached it. One query over the
+// participants of the chats involved (a handful of rows each), never over
+// the message history. Ids are ascending, so the order is stable.
+const getReadersForMessages = (
+  db: DrizzleDb,
+  rows: ReadonlyArray<MessageReadKey>,
+): Effect.Effect<Map<number, number[]>> =>
+  Effect.gen(function* () {
+    const byMessage = new Map<number, number[]>();
+    if (rows.length === 0) return byMessage;
+    const chatIds = [...new Set(rows.map((r) => r.chatId))];
+    const oldest = Math.min(...rows.map((r) => r.id));
+    const watermarks = yield* Effect.tryPromise(() =>
+      db
+        .select({
+          chatId: chatParticipants.chatId,
+          userId: chatParticipants.userId,
+          lastRead: chatParticipants.lastReadMessageId,
+        })
+        .from(chatParticipants)
+        .where(
+          and(
+            inArray(chatParticipants.chatId, chatIds),
+            gte(chatParticipants.lastReadMessageId, oldest),
+          ),
+        )
+        .orderBy(chatParticipants.userId),
+    ).pipe(Effect.orDie);
+    for (const row of rows) {
+      byMessage.set(
+        row.id,
+        watermarks
+          .filter(
+            (w) =>
+              w.chatId === row.chatId &&
+              w.userId !== row.senderId &&
+              w.lastRead !== null &&
+              w.lastRead >= row.id,
+          )
+          .map((w) => w.userId),
       );
-    return rows[0]?.total ?? 0;
-  }).pipe(Effect.orDie);
+    }
+    return byMessage;
+  });
 
 // Batched equivalents of getParticipants/getLastMessage/getUnreadCount for
 // building many chats at once (e.g. listChats) — each does one query (plus,
@@ -573,13 +593,25 @@ const getLastMessagesForChats = (
     if (chatIds.length === 0) return byChat;
 
     // One most-recent message id per chat, then fetch just those messages —
-    // avoids pulling every message in every chat to pick the last one.
+    // avoids pulling every message in every chat to pick the last one. A
+    // per-chat `ORDER BY id DESC LIMIT 1` is one backward step down the
+    // `(chat_id, id)` index; a `max(id) … GROUP BY chat_id` instead reads
+    // every message in every chat (issue #659).
     const latest = yield* Effect.tryPromise(() =>
       db
-        .select({ lastId: max(messages.id) })
-        .from(messages)
-        .where(inArray(messages.chatId, chatIds))
-        .groupBy(messages.chatId),
+        .select({
+          // Spelled out with an alias: in a single-table select Drizzle
+          // renders `${messages.chatId}` unqualified, which inside this
+          // subquery would bind to `messages`, not the outer `chats`.
+          lastId: sql<number | null>`(
+            SELECT latest.id FROM ${messages} AS latest
+            WHERE latest.chat_id = ${chats}.id
+            ORDER BY latest.id DESC
+            LIMIT 1
+          )`,
+        })
+        .from(chats)
+        .where(inArray(chats.id, chatIds)),
     ).pipe(Effect.orDie);
     const lastIds = latest
       .map((r) => r.lastId)
@@ -589,21 +621,7 @@ const getLastMessagesForChats = (
     const rows = yield* Effect.tryPromise(() =>
       db.select().from(messages).where(inArray(messages.id, lastIds)),
     ).pipe(Effect.orDie);
-    const readRows = yield* Effect.tryPromise(() =>
-      db
-        .select({
-          messageId: messageReads.messageId,
-          userId: messageReads.userId,
-        })
-        .from(messageReads)
-        .where(inArray(messageReads.messageId, lastIds)),
-    ).pipe(Effect.orDie);
-    const readersByMessage = new Map<number, number[]>();
-    for (const r of readRows) {
-      const list = readersByMessage.get(r.messageId) ?? [];
-      list.push(r.userId);
-      readersByMessage.set(r.messageId, list);
-    }
+    const readersByMessage = yield* getReadersForMessages(db, rows);
     const attachmentsByRow = yield* resolveAttachments(
       db,
       storage,
@@ -656,22 +674,28 @@ const getUnreadCountsForChats = (
 ): Effect.Effect<Map<number, number>> =>
   chatIds.length === 0
     ? Effect.succeed(new Map())
-    : Effect.tryPromise(() =>
+    : // Joined through the reader's own participant row, so each chat only
+      // counts past its watermark — a range scan over `(chat_id, id)` that
+      // reads the unread messages, not the whole history (issue #659).
+      Effect.tryPromise(() =>
         db
           .select({ chatId: messages.chatId, total: count() })
-          .from(messages)
-          .leftJoin(
-            messageReads,
+          .from(chatParticipants)
+          .innerJoin(
+            messages,
             and(
-              eq(messageReads.messageId, messages.id),
-              eq(messageReads.userId, userId),
+              eq(messages.chatId, chatParticipants.chatId),
+              gt(
+                messages.id,
+                sql`coalesce(${chatParticipants.lastReadMessageId}, 0)`,
+              ),
             ),
           )
           .where(
             and(
-              inArray(messages.chatId, chatIds),
+              inArray(chatParticipants.chatId, chatIds),
+              eq(chatParticipants.userId, userId),
               ne(messages.senderId, userId),
-              isNull(messageReads.id),
             ),
           )
           .groupBy(messages.chatId),
@@ -729,16 +753,10 @@ const getMessageOr404 = (
 
 const getReaders = (
   db: DrizzleDb,
-  messageId: number,
+  message: MessageReadKey,
 ): Effect.Effect<ReadonlyArray<number>> =>
-  Effect.tryPromise(() =>
-    db
-      .select({ userId: messageReads.userId })
-      .from(messageReads)
-      .where(eq(messageReads.messageId, messageId)),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows.map((r) => r.userId)),
+  getReadersForMessages(db, [message]).pipe(
+    Effect.map((byMessage) => byMessage.get(message.id) ?? []),
   );
 
 const isParticipant = (
@@ -2069,24 +2087,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             : null;
 
           const messageIds = rows.map((r) => r.id);
-          const readRows =
-            messageIds.length === 0
-              ? []
-              : yield* Effect.tryPromise(() =>
-                  db
-                    .select({
-                      messageId: messageReads.messageId,
-                      userId: messageReads.userId,
-                    })
-                    .from(messageReads)
-                    .where(inArray(messageReads.messageId, messageIds)),
-                ).pipe(Effect.orDie);
-          const readersByMessage = new Map<number, number[]>();
-          for (const r of readRows) {
-            const list = readersByMessage.get(r.messageId) ?? [];
-            list.push(r.userId);
-            readersByMessage.set(r.messageId, list);
-          }
+          const readersByMessage = yield* getReadersForMessages(db, rows);
           const attachmentsByRow = yield* resolveAttachments(
             db,
             storage,
@@ -2624,38 +2625,65 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          const unreadUpTo = yield* Effect.tryPromise(() =>
+          // Move the reader's watermark forward to the target (issue #659) —
+          // never back, so re-reading an older message is a no-op. The
+          // `previous` self-join returns the watermark it replaced, which
+          // bounds the newly read range below.
+          const previous = alias(chatParticipants, "previous");
+          const advanced = yield* Effect.tryPromise(() =>
             db
-              .select({ id: messages.id })
-              .from(messages)
+              .update(chatParticipants)
+              .set({ lastReadMessageId: payload.messageId })
+              .from(previous)
               .where(
                 and(
-                  eq(messages.chatId, id),
-                  ne(messages.senderId, currentUser.id),
-                  lte(messages.id, payload.messageId),
+                  eq(previous.id, chatParticipants.id),
+                  eq(chatParticipants.chatId, id),
+                  eq(chatParticipants.userId, currentUser.id),
+                  sql`coalesce(${chatParticipants.lastReadMessageId}, 0) < ${payload.messageId}`,
                 ),
-              ),
+              )
+              .returning({ previous: previous.lastReadMessageId }),
           ).pipe(Effect.orDie);
 
-          if (unreadUpTo.length > 0) {
-            const now = new Date();
-            yield* Effect.tryPromise(() =>
+          // Only messages from others past the old watermark are newly read,
+          // so the work is bounded by what was unread, not the history
+          // (issue #648). If none of them is from anyone else, no unread
+          // count or receipt changed, so nothing is bumped or published.
+          let newlyRead = 0;
+          if (advanced[0]) {
+            const newlyReadRange = and(
+              eq(messages.chatId, id),
+              ne(messages.senderId, currentUser.id),
+              gt(messages.id, advanced[0].previous ?? 0),
+              lte(messages.id, payload.messageId),
+            );
+            const counted = yield* Effect.tryPromise(() =>
               db
-                .insert(messageReads)
-                .values(
-                  unreadUpTo.map((m) => ({
-                    messageId: m.id,
-                    userId: currentUser.id,
-                    readAt: now,
-                  })),
-                )
-                .onConflictDoNothing(),
+                .select({ total: count() })
+                .from(messages)
+                .where(newlyReadRange),
             ).pipe(Effect.orDie);
+            newlyRead = counted[0]?.total ?? 0;
+            // Expand phase: keep `message_reads` written for replicas still
+            // on the previous release, which read receipts from it. One
+            // INSERT … SELECT, so there's no bind-parameter limit to hit.
+            if (newlyRead > 0) {
+              yield* Effect.tryPromise(() =>
+                db.execute(sql`
+                  INSERT INTO ${messageReads} (message_id, user_id, read_at)
+                  SELECT ${messages.id}, ${currentUser.id}, now()
+                  FROM ${messages}
+                  WHERE ${newlyReadRange}
+                  ON CONFLICT DO NOTHING
+                `),
+              ).pipe(Effect.orDie);
+            }
           }
 
           const participants = yield* getParticipants(db, id);
           let version = chatRow.version;
-          if (unreadUpTo.length > 0) {
+          if (newlyRead > 0) {
             version = yield* bumpChatVersion(db, id);
             yield* notifyChatUpdated(
               connections,
@@ -2713,7 +2741,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
 
-          const readers = yield* getReaders(db, messageId);
+          const readers = yield* getReaders(db, row);
           const reactions = yield* Effect.tryPromise(() =>
             messageReactionInfoOne(db, messageId, currentUser.id),
           ).pipe(Effect.orDie);
