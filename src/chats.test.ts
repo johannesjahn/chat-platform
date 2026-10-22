@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Effect, Metric } from "effect";
 import {
   ChatApi,
@@ -10,7 +10,7 @@ import {
 } from "./Api.ts";
 import { Db } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
-import { chatInvites, users } from "./db/schema.ts";
+import { chatInvites, messageReads, messages, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
 
 const run = makeTestRun();
@@ -905,6 +905,249 @@ test("markRead marks messages up to a point as read and updates unreadCount + re
         (m) => m.id !== m1.id && m.id !== m2.id,
       );
       expect(thirdMessage?.readByUserIds).toEqual([]);
+    }),
+  ));
+
+// Seeds `total` text messages from `senderId` straight into the database —
+// far quicker than the API for the history-size tests below. Chunked so no
+// single INSERT nears Postgres's bind-parameter limit.
+const seedMessages = (chatId: number, senderId: number, total: number) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const now = new Date();
+    for (let start = 0; start < total; start += 5000) {
+      const size = Math.min(5000, total - start);
+      yield* Effect.tryPromise(() =>
+        db.insert(messages).values(
+          Array.from({ length: size }, (_, i) => ({
+            chatId,
+            senderId,
+            contentType: "text" as const,
+            content: `seeded ${start + i}`,
+            createdAt: now,
+            updatedAt: now,
+          })),
+        ),
+      ).pipe(Effect.orDie);
+    }
+  });
+
+const medianMs = (samples: number[]) =>
+  [...samples].sort((a, b) => a - b)[Math.floor(samples.length / 2)]!;
+
+test("listChats doesn't slow down with already-read history, and markRead copes with a 50k-message chat (issues #659, #648)", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+
+      const timeListChats = Effect.gen(function* () {
+        // Warm up, then take the median, so one GC pause can't fail the test.
+        yield* alice.client.chats.listChats({ query: {} });
+        const samples: number[] = [];
+        for (let i = 0; i < 7; i++) {
+          const startedAt = performance.now();
+          yield* alice.client.chats.listChats({ query: {} });
+          samples.push(performance.now() - startedAt);
+        }
+        return medianMs(samples);
+      });
+
+      const sendAndRead = (content: string) =>
+        Effect.gen(function* () {
+          const message = yield* bob.client.chats.createMessage({
+            params: { id: chat.id },
+            payload: { contentType: "text", content },
+          });
+          return yield* alice.client.chats.markRead({
+            params: { id: chat.id },
+            payload: { messageId: message.id },
+          });
+        });
+
+      // The baseline already has a (read) last message, so both timings pay
+      // for hydrating one — the only difference is the history behind it.
+      yield* sendAndRead("the first one");
+      const baseline = yield* timeListChats;
+
+      yield* seedMessages(chat.id, bob.user.id, 50_000);
+      // Past the ~21.8k messages that used to blow the bind-parameter limit.
+      const read = yield* sendAndRead("the newest one");
+      expect(read.unreadCount).toBe(0);
+      expect(read.lastMessage?.readByUserIds).toEqual([alice.user.id]);
+
+      const withHistory = yield* timeListChats;
+      // Within ~2× of the baseline; the couple of ms of slack only absorbs
+      // timer noise at these ms scales — anti-joining the whole history
+      // again costs tens of ms.
+      expect(withHistory).toBeLessThan(Math.max(2 * baseline, baseline + 2));
+    }),
+  ));
+
+test("markRead only moves the read watermark forward, and a repeat with nothing new is a no-op", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: {
+          title: "Crew",
+          participantIds: [bob.user.id, carol.user.id],
+        },
+      });
+      const send = (content: string) =>
+        alice.client.chats.createMessage({
+          params: { id: chat.id },
+          payload: { contentType: "text", content },
+        });
+      const m1 = yield* send("one");
+      const m2 = yield* send("two");
+      const m3 = yield* send("three");
+
+      const read = yield* bob.client.chats.markRead({
+        params: { id: chat.id },
+        payload: { messageId: m3.id },
+      });
+      expect(read.unreadCount).toBe(0);
+
+      // Re-reading the newest message, or an older one, changes nothing:
+      // no version bump (so no `chat_updated`), and nothing becomes unread.
+      const repeat = yield* bob.client.chats.markRead({
+        params: { id: chat.id },
+        payload: { messageId: m3.id },
+      });
+      expect(repeat.version).toBe(read.version);
+      const older = yield* bob.client.chats.markRead({
+        params: { id: chat.id },
+        payload: { messageId: m1.id },
+      });
+      expect(older.version).toBe(read.version);
+      expect(older.unreadCount).toBe(0);
+
+      yield* carol.client.chats.markRead({
+        params: { id: chat.id },
+        payload: { messageId: m2.id },
+      });
+      const page = yield* alice.client.chats.listMessages({
+        params: { id: chat.id },
+        query: {},
+      });
+      const readers = new Map(
+        page.messages.map((m) => [m.id, m.readByUserIds]),
+      );
+      const bothReaders = [bob.user.id, carol.user.id].sort((a, b) => a - b);
+      expect(readers.get(m1.id)).toEqual(bothReaders);
+      expect(readers.get(m2.id)).toEqual(bothReaders);
+      expect(readers.get(m3.id)).toEqual([bob.user.id]);
+
+      // Expand phase: the previous release still reads receipts from
+      // `message_reads`, so markRead keeps writing exactly the newly read rows.
+      const db = yield* Db;
+      const rows = yield* Effect.tryPromise(() =>
+        db
+          .select({ messageId: messageReads.messageId })
+          .from(messageReads)
+          .where(eq(messageReads.userId, carol.user.id)),
+      ).pipe(Effect.orDie);
+      expect(rows.map((r) => r.messageId).sort((a, b) => a - b)).toEqual([
+        m1.id,
+        m2.id,
+      ]);
+    }),
+  ));
+
+test("listChats pairs each chat with its own newest message", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const withBob = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const withCarol = yield* alice.client.chats.createDirectChat({
+        payload: { userId: carol.user.id },
+      });
+      // Interleaved, so no chat's id lines up with its last message's id.
+      for (const [chat, content] of [
+        [withCarol, "carol 1"],
+        [withBob, "bob 1"],
+        [withCarol, "carol 2"],
+        [withBob, "bob 2"],
+        [withBob, "bob 3"],
+      ] as const)
+        yield* alice.client.chats.createMessage({
+          params: { id: chat.id },
+          payload: { contentType: "text", content },
+        });
+
+      const { chats: listed } = yield* alice.client.chats.listChats({
+        query: {},
+      });
+      const lastContent = new Map(
+        listed.map((c) => [c.id, c.lastMessage?.content]),
+      );
+      expect(lastContent.get(withBob.id)).toBe("bob 3");
+      expect(lastContent.get(withCarol.id)).toBe("carol 2");
+    }),
+  ));
+
+test("migration 0035 back-fills each participant's read watermark from message_reads", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const m1 = yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: { contentType: "text", content: "one" },
+      });
+      const m2 = yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: { contentType: "text", content: "two" },
+      });
+      yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: { contentType: "text", content: "three" },
+      });
+
+      // The state a pre-0035 database is in: read rows, no watermark.
+      const db = yield* Db;
+      yield* Effect.tryPromise(() =>
+        db.insert(messageReads).values([
+          { messageId: m1.id, userId: bob.user.id },
+          { messageId: m2.id, userId: bob.user.id },
+        ]),
+      ).pipe(Effect.orDie);
+      const before = yield* bob.client.chats.getChat({
+        params: { id: chat.id },
+      });
+      expect(before.unreadCount).toBe(3);
+
+      const migration = yield* Effect.promise(() =>
+        Bun.file(
+          new URL("../drizzle/0035_read_watermark.sql", import.meta.url),
+        ).text(),
+      );
+      const backfill = migration.split("--> statement-breakpoint")[1]!;
+      yield* Effect.tryPromise(() => db.execute(sql.raw(backfill))).pipe(
+        Effect.orDie,
+      );
+
+      const after = yield* bob.client.chats.getChat({
+        params: { id: chat.id },
+      });
+      expect(after.unreadCount).toBe(1);
+      const aliceView = yield* alice.client.chats.getChat({
+        params: { id: chat.id },
+      });
+      expect(aliceView.unreadCount).toBe(0);
     }),
   ));
 
