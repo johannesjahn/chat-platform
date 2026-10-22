@@ -1638,3 +1638,73 @@ test("another participant's edit, delete and read receipt reach an open conversa
   await expect(main.getByRole("img", { name: "Read" })).toBeVisible();
   await expect(main.getByRole("img", { name: "Sent" })).toHaveCount(0);
 });
+
+test("an open chat in a hidden tab leaves new messages unread until the tab is back (issue #663)", async ({
+  page,
+  request,
+  apiUrl,
+  signUp,
+  createUser,
+}) => {
+  const alice = await signUp(page);
+  const bob = await createUser();
+  const bobHeaders = { Authorization: `Bearer ${bob.session.accessToken}` };
+
+  await page.goto("/chats/new");
+  await page.getByRole("button", { name: "Direct message" }).click();
+  await page.fill("#user-search", bob.username);
+  await page.getByRole("button", { name: `@${bob.username}` }).click();
+  await expect(page).toHaveURL(/\/chats\/\d+/);
+  const chatId = page.url().split("/").pop();
+
+  // Alice leaves the conversation open and switches to another tab.
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "hidden",
+    });
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+
+  const sent = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
+    headers: bobHeaders,
+    data: { contentType: "text", content: "Sent while Alice was away" },
+  });
+  expect(sent.ok()).toBe(true);
+  const { id: messageId } = (await sent.json()) as { id: number };
+
+  async function readByAlice() {
+    const response = await request.get(`${apiUrl}/chats/${chatId}/messages`, {
+      headers: bobHeaders,
+    });
+    const { messages } = (await response.json()) as {
+      messages: { id: number; readByUserIds: number[] }[];
+    };
+    return (
+      messages
+        .find((m) => m.id === messageId)
+        ?.readByUserIds.includes(alice.session.user.id) ?? false
+    );
+  }
+
+  // The message reaches Alice's open (hidden) conversation and her tab title
+  // counts it — while the server still has it unread.
+  await expect(
+    page.getByRole("main").getByText("Sent while Alice was away"),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(page).toHaveTitle(/^\(1\) /);
+  expect(await readByAlice()).toBe(false);
+
+  // Coming back to the tab reads it.
+  await page.evaluate(() => {
+    delete (document as { visibilityState?: unknown }).visibilityState;
+    delete (document as { hidden?: unknown }).hidden;
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect.poll(readByAlice, { timeout: 10_000 }).toBe(true);
+  await expect(page).not.toHaveTitle(/^\(\d+\+?\) /);
+});

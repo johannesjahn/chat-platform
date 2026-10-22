@@ -74,6 +74,7 @@ import {
   useQueuedMessages,
 } from "@/lib/offlineQueue";
 import { useOnlineStatus } from "@/lib/online";
+import { usePageVisible } from "@/lib/pageVisibility";
 import { useIsOnline } from "@/lib/presence";
 import { isStatusVisible, useUserStatus } from "@/lib/status";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
@@ -685,8 +686,18 @@ export function ChatConversation({
 
   // Mark everything up to the newest loaded message as read once we know
   // there's something unread — keeps this chat's badge and the nav badge live.
+  // Only while the page is visible (issue #663): a conversation left open in
+  // a background tab mustn't read what arrives there; it's marked read when
+  // the user comes back.
+  const pageVisible = usePageVisible();
   useEffect(() => {
-    if (!session || !chat || chat.unreadCount === 0 || newestMessageId == null)
+    if (
+      !pageVisible ||
+      !session ||
+      !chat ||
+      chat.unreadCount === 0 ||
+      newestMessageId == null
+    )
       return;
     markRead.mutate(
       {
@@ -702,10 +713,10 @@ export function ChatConversation({
         },
       },
     );
-    // Only re-run when the unread count or the newest message actually
-    // changes — `markRead` is recreated every render.
+    // Only re-run when the unread count, the newest message or the page's
+    // visibility actually changes — `markRead` is recreated every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chat?.unreadCount, newestMessageId]);
+  }, [chat?.unreadCount, newestMessageId, pageVisible]);
 
   function editLastMessage() {
     const mine = [...messages]
