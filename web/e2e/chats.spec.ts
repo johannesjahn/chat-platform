@@ -1571,3 +1571,70 @@ test("a message's Copy link points straight back at it (issue #600)", async ({
   await expect(targetBubble).toBeInViewport();
   await expect(page.locator("[data-message-id]").last()).not.toBeInViewport();
 });
+
+// Edits, deletes and read receipts change messages already on screen, so the
+// `after` catch-up a `chat_updated` event triggers came back empty and the
+// open conversation kept its stale window until a reload (issue #658).
+test("another participant's edit, delete and read receipt reach an open conversation live", async ({
+  page,
+  request,
+  apiUrl,
+  createUser,
+  signUp,
+}) => {
+  const alice = await signUp(page);
+  const bob = await createUser();
+  const asAlice = { Authorization: `Bearer ${alice.session.accessToken}` };
+  const asBob = { Authorization: `Bearer ${bob.session.accessToken}` };
+
+  const created = await request.post(`${apiUrl}/chats/direct`, {
+    headers: asAlice,
+    data: { userId: bob.session.user.id },
+  });
+  expect(created.ok()).toBe(true);
+  const { id: chatId } = (await created.json()) as { id: number };
+  const send = async (headers: Record<string, string>, content: string) => {
+    const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
+      headers,
+      data: { contentType: "text", content },
+    });
+    expect(response.ok()).toBe(true);
+    return ((await response.json()) as { id: number }).id;
+  };
+  const toEdit = await send(asBob, "original text from bob");
+  const toDelete = await send(asBob, "second message to delete");
+  const fromAlice = await send(asAlice, "alice's reply");
+
+  await page.goto(`/chats/${chatId}`);
+  const main = page.getByRole("main");
+  await expect(main.getByText("original text from bob")).toBeVisible();
+  await expect(main.getByText("second message to delete")).toBeVisible();
+  await expect(main.getByRole("img", { name: "Sent" })).toBeVisible();
+
+  const edited = await request.put(
+    `${apiUrl}/chats/${chatId}/messages/${toEdit}`,
+    {
+      headers: asBob,
+      data: { contentType: "text", content: "EDITED text from bob" },
+    },
+  );
+  expect(edited.ok()).toBe(true);
+  const deleted = await request.delete(
+    `${apiUrl}/chats/${chatId}/messages/${toDelete}`,
+    { headers: asBob },
+  );
+  expect(deleted.ok()).toBe(true);
+
+  await expect(main.getByText("EDITED text from bob")).toBeVisible();
+  await expect(main.getByText("original text from bob")).toHaveCount(0);
+  await expect(main.getByText("second message to delete")).toHaveCount(0);
+
+  const read = await request.post(`${apiUrl}/chats/${chatId}/read`, {
+    headers: asBob,
+    data: { messageId: fromAlice },
+  });
+  expect(read.ok()).toBe(true);
+
+  await expect(main.getByRole("img", { name: "Read" })).toBeVisible();
+  await expect(main.getByRole("img", { name: "Sent" })).toHaveCount(0);
+});

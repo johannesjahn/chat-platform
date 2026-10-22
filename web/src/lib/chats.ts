@@ -413,7 +413,9 @@ export function appendSentMessage(
 //  - on first load, fetches the newest `MESSAGES_PAGE_SIZE` messages;
 //  - on every refetch (triggered by `useChatSocket` invalidating this query
 //    key on a `chat_updated` event), fetches only what's newer than the last
-//    message already loaded (`after`) and appends it;
+//    message already loaded (`after`) and appends it — or, when there's
+//    nothing newer, re-reads the loaded window so edits, deletes and read
+//    receipts on messages already on screen show up (issue #658);
 //  - if that would grow the window past `MESSAGES_MAX_LIMIT`, re-anchors with
 //    a fresh newest-window fetch instead of trimming — a cursor for wherever
 //    the trimmed-to front would land isn't something the client can
@@ -467,6 +469,29 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
     latestCursor: newestCursorRef.current,
   });
 
+  // Swaps the newest part of `prev` for `fresh`, a newest-window page
+  // fetched just now: every loaded message `fresh` reaches back to is
+  // replaced by it (dropping deleted ones, picking up edits and receipts),
+  // and anything older that `loadEarlier` paged in — past what one request
+  // can return — is kept as it was.
+  const replaceNewestWindow = (
+    prev: ChatMessagesPage,
+    fresh: MessagesPageResponse,
+  ): ChatMessagesPage => {
+    const firstFreshId = fresh.messages[0]?.id;
+    const older =
+      firstFreshId === undefined
+        ? []
+        : prev.messages.filter((m) => m.id < firstFreshId);
+    if (older.length === 0) oldestCursorRef.current = fresh.earliestCursor;
+    newestCursorRef.current = fresh.latestCursor;
+    return {
+      messages: [...older, ...fresh.messages],
+      hasEarlier: older.length > 0 ? prev.hasEarlier : fresh.hasEarlier,
+      ...cursors(),
+    };
+  };
+
   const query = useQuery({
     queryKey,
     enabled: enabled && chatId != null,
@@ -506,19 +531,35 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
           after: newestCursorRef.current,
           limit: MESSAGES_MAX_LIMIT,
         });
-        if (page.messages.length === 0) return prev;
+        // Nothing newer, yet the chat changed: an edit, a delete or a read
+        // receipt on a message already loaded (issue #658), none of which
+        // an `after` page can carry — so re-read the window itself.
+        if (page.messages.length === 0) {
+          const fresh = await fetchMessagesPage(id, {
+            limit: Math.min(
+              Math.max(prev.messages.length, MESSAGES_PAGE_SIZE),
+              MESSAGES_MAX_LIMIT,
+            ),
+          });
+          return replaceNewestWindow(prev, fresh);
+        }
         // `newestCursorRef` isn't advanced by `appendSentMessage` (it has no
         // access to this hook's refs), so a `chat_updated`-triggered refetch
         // right after sending a message re-fetches "everything after the
         // stale cursor" — which includes the message already appended
-        // optimistically. Drop anything already present by id so it isn't
-        // duplicated in the merged list.
+        // optimistically. Those are replaced by their fetched copy rather
+        // than duplicated (it may carry a read receipt the optimistic one
+        // can't); only genuinely new ones are appended.
+        const fetchedById = new Map(page.messages.map((m) => [m.id, m]));
         const existingIds = new Set(prev.messages.map((m) => m.id));
         const newMessages = page.messages.filter((m) => !existingIds.has(m.id));
         if (prev.messages.length + newMessages.length <= MESSAGES_MAX_LIMIT) {
           newestCursorRef.current = page.latestCursor;
           return {
-            messages: [...prev.messages, ...newMessages],
+            messages: [
+              ...prev.messages.map((m) => fetchedById.get(m.id) ?? m),
+              ...newMessages,
+            ],
             hasEarlier: prev.hasEarlier,
             ...cursors(),
           };
