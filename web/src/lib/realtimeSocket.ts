@@ -31,6 +31,11 @@ import { noteGameReaction } from "./games/reactions";
 import { noteGameProgress, setGameRoomsSocket } from "./games/rooms";
 import { notificationsQueryKeyRoot } from "./notifications";
 import { setRealtimeSocket } from "./postRooms";
+import {
+  type PostChange,
+  refreshCachedPost,
+  syncChangedPost,
+} from "./postSync";
 import { replacePresence, setUserOnline } from "./presence";
 import { mergeReactionCounts } from "./reactions";
 import { setUserStatus } from "./status";
@@ -39,7 +44,12 @@ import { noteTyping } from "./typing";
 type RealtimeSocketEvent =
   | { type: "chat_updated"; chatId: number; version: number }
   | { type: "chat_deleted"; chatId: number }
-  | { type: "post_changed"; postId: number }
+  | {
+      type: "post_changed";
+      postId: number;
+      // Absent from a server that predates it (see PostChange).
+      change?: PostChange;
+    }
   | { type: "comment_changed"; postId: number; commentId: number }
   | {
       type: "reaction_changed";
@@ -109,7 +119,8 @@ function realtimeSocketUrl(ticket: string): string {
 //
 // `chat_updated` is scoped server-side to a chat's participants, so this
 // hook doesn't need to filter it. `post_changed` goes out to every connected
-// user — the feed has no notion of participants, anyone signed in sees it.
+// user — the feed has no notion of participants, anyone signed in sees it —
+// so it's applied to the one post it names, never as a feed-wide refetch.
 // `presence`/`typing`/`status_changed` don't touch React Query at all — they
 // update the standalone stores in lib/presence.ts, lib/typing.ts, and
 // lib/status.ts instead, since there's no REST resource behind any of them to
@@ -258,39 +269,25 @@ export function useRealtimeSocket(enabled: boolean): void {
             break;
           }
           case "post_changed":
-            void queryClient.invalidateQueries({
-              queryKey: postsFeedQueryKey,
-            });
-            void queryClient.invalidateQueries({
-              queryKey: postDetailQueryKeyPrefix,
-            });
-            void queryClient.invalidateQueries({
-              queryKey: userPostsQueryKeyPrefix,
-            });
+            // Goes to every connected client, so it touches only the one
+            // post — at most one request — rather than invalidating every
+            // loaded feed page (issue #662; see syncChangedPost).
+            void syncChangedPost(queryClient, parsed.postId, parsed.change);
             break;
           case "comment_changed":
             // Scoped to this post's room (only arrives while its comment
             // section is open — see postRooms.ts). Refetch the comment/reply
             // queries; the event is id-only, so a refetch is how the new
-            // content/counts land, same convention as `post_changed`.
+            // content/counts land.
             void queryClient.invalidateQueries({
               queryKey: commentsQueryKeyRoot,
             });
             // The post's `commentCount` (surfaced on its card — issue #306)
             // also changes when a comment/reply is added or removed. Refetch
-            // the feed, any open post-detail query, and any open profile
-            // activity feed so the count updates in place (the card's
-            // `CountUp` then animates old → new), same recovery as
-            // `post_changed`.
-            void queryClient.invalidateQueries({
-              queryKey: postsFeedQueryKey,
-            });
-            void queryClient.invalidateQueries({
-              queryKey: postDetailQueryKeyPrefix,
-            });
-            void queryClient.invalidateQueries({
-              queryKey: userPostsQueryKeyPrefix,
-            });
+            // just that post and patch it in wherever it's cached (the card's
+            // `CountUp` then animates old → new) — not the whole feed, which
+            // would refetch every loaded page (issue #662).
+            void refreshCachedPost(queryClient, parsed.postId);
             break;
           case "reaction_changed":
             // A post reaction goes out feed-wide, so this lands on *every*

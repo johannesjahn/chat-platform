@@ -259,6 +259,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           yield* connections.broadcastAll({
             type: "post_changed",
             postId: row.id,
+            change: "created",
           });
           if (mentionsApply(row.contentType)) {
             yield* notifyMentions(
@@ -322,6 +323,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           yield* connections.broadcastAll({
             type: "post_changed",
             postId: row.id,
+            change: "updated",
           });
           // Only names this edit added are pinged (see notifyMentions).
           if (mentionsApply(row.contentType)) {
@@ -359,7 +361,11 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           yield* Effect.tryPromise(() =>
             db.delete(posts).where(eq(posts.id, id)),
           ).pipe(Effect.orDie);
-          yield* connections.broadcastAll({ type: "post_changed", postId: id });
+          yield* connections.broadcastAll({
+            type: "post_changed",
+            postId: id,
+            change: "deleted",
+          });
         }),
       );
   }),

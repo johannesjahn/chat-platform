@@ -183,9 +183,17 @@ test("broadcastAll reaches every connected user regardless of chat participation
       alice.received.length = 0;
       bob.received.length = 0;
 
-      yield* connections.broadcastAll({ type: "post_changed", postId: 99 });
+      yield* connections.broadcastAll({
+        type: "post_changed",
+        postId: 99,
+        change: "created",
+      });
 
-      const expected = JSON.stringify({ type: "post_changed", postId: 99 });
+      const expected = JSON.stringify({
+        type: "post_changed",
+        postId: 99,
+        change: "created",
+      });
       expect(alice.received).toEqual([expected]);
       expect(bob.received).toEqual([expected]);
     }),
@@ -201,7 +209,11 @@ test("broadcastAll doesn't reach a user who has since unregistered", async () =>
       alice.received.length = 0;
       unregister();
 
-      yield* connections.broadcastAll({ type: "post_changed", postId: 1 });
+      yield* connections.broadcastAll({
+        type: "post_changed",
+        postId: 1,
+        change: "created",
+      });
 
       expect(alice.received).toEqual([]);
     }),
