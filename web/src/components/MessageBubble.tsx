@@ -969,10 +969,17 @@ export function MessageBubble({
                 // actually replays. See `animate-check-draw`.
                 <CheckCheck
                   key="read"
+                  role="img"
+                  aria-label="Read"
                   className="size-3.5 motion-safe:animate-check-draw"
                 />
               ) : (
-                <Check key="sent" className="size-3.5" />
+                <Check
+                  key="sent"
+                  role="img"
+                  aria-label="Sent"
+                  className="size-3.5"
+                />
               ))}
           </div>
         </div>
