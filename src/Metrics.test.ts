@@ -9,6 +9,7 @@ import {
   websocketConnectionsTotal,
 } from "./Metrics.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
+import { staticPresenceAudience } from "./PresenceAudience.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
 import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
 import { makeTestRun } from "./testApi.ts";
@@ -69,6 +70,7 @@ test("RealtimeConnections.register/unregister track the websocketConnectionsActi
   const TestRealtimeLive = RealtimeConnectionsLive.pipe(
     Layer.provide(InMemoryPubSubLive),
     Layer.provide(InMemoryPresenceStoreLive),
+    Layer.provide(staticPresenceAudience([])),
   );
 
   await Effect.runPromise(
@@ -94,6 +96,7 @@ test("RealtimeConnections.register/unregister increment websocket_connections_to
   const TestRealtimeLive = RealtimeConnectionsLive.pipe(
     Layer.provide(InMemoryPubSubLive),
     Layer.provide(InMemoryPresenceStoreLive),
+    Layer.provide(staticPresenceAudience([])),
   );
   const connects = Metric.withAttributes(websocketConnectionsTotal, {
     event: "connect",

@@ -1356,7 +1356,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             return yield* Effect.die(new Error("UPDATE returned no rows"));
 
           const publicUser = toPublicUser(updated);
-          yield* connections.broadcastAll({
+          yield* connections.notifyContacts(currentUser.id, {
             type: "status_changed",
             userId: currentUser.id,
             statusText: publicUser.statusText,

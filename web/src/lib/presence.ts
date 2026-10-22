@@ -8,20 +8,28 @@ import { useSyncExternalStore } from "react";
 // into `queryClient.setQueryData`.
 const onlineUserIds = new Set<number>();
 const listeners = new Set<() => void>();
-// An immutable copy of the set for `useOnlineUserIds`, replaced on every
-// change so `useSyncExternalStore` sees a new snapshot only when something
-// actually changed.
+// An immutable copy of the set for `useOnlineUserIds`. Built lazily — only
+// when something reads it after a change — rather than on every event, so a
+// burst of presence frames costs O(1) each instead of a full copy each
+// (issue #660).
 let snapshot: ReadonlySet<number> = new Set();
+let snapshotStale = false;
 
 function notify(): void {
-  snapshot = new Set(onlineUserIds);
+  snapshotStale = true;
   for (const listener of listeners) listener();
 }
 
-// Applies one user's online/offline transition — both the live pushes after
-// connecting and the initial "who's online" snapshot (sent as a burst of
-// individual `online: true` events right after the socket opens, see
-// RealtimeSocket.ts) go through this same path.
+function getSnapshot(): ReadonlySet<number> {
+  if (snapshotStale) {
+    snapshot = new Set(onlineUserIds);
+    snapshotStale = false;
+  }
+  return snapshot;
+}
+
+// Applies one user's live online/offline transition, pushed after the
+// socket's initial snapshot (see `replacePresence`).
 export function setUserOnline(userId: number, online: boolean): void {
   const wasOnline = onlineUserIds.has(userId);
   if (wasOnline === online) return;
@@ -33,14 +41,21 @@ export function setUserOnline(userId: number, online: boolean): void {
   notify();
 }
 
-// Clears all known presence state. Called when a fresh `/ws` connection is
-// about to open (including on reconnect) — a connection drop can mean any
-// number of users went offline/online without this client hearing about it,
-// so starting clean and letting the new connection's initial snapshot
-// repopulate it avoids showing stale "online" dots.
-export function resetPresence(): void {
-  if (onlineUserIds.size === 0) return;
+// Replaces all known presence state with a fresh connection's
+// `presence_snapshot` — the one frame the server sends right after the
+// socket opens, listing which of this user's contacts are online (see
+// RealtimeSocket.ts). Doubles as the reset after a reconnect: a dropped
+// connection can mean any number of users went offline/online without this
+// client hearing about it, so nothing from before survives it.
+export function replacePresence(userIds: ReadonlyArray<number>): void {
+  if (
+    userIds.length === onlineUserIds.size &&
+    userIds.every((userId) => onlineUserIds.has(userId))
+  ) {
+    return;
+  }
   onlineUserIds.clear();
+  for (const userId of userIds) onlineUserIds.add(userId);
   notify();
 }
 
@@ -59,9 +74,5 @@ export function useIsOnline(userId: number | undefined): boolean {
 // Everyone currently known to be online — the feed's "online now" rail
 // (issue #554) lists the people you chat with from it.
 export function useOnlineUserIds(): ReadonlySet<number> {
-  return useSyncExternalStore(
-    subscribe,
-    () => snapshot,
-    () => snapshot,
-  );
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

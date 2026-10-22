@@ -5,8 +5,8 @@ import { Context, Duration, Effect, Layer, Schedule } from "effect";
 // instance* — not just the local one handling a given connect/disconnect.
 // `RealtimeConnections` (see Realtime.ts) uses this to decide when a user's
 // global connection count genuinely transitions to/from zero (so it knows
-// whether to broadcast a `presence` event at all) and what to hand a
-// freshly-connecting client as its initial "who's online" snapshot.
+// whether to push a `presence` event at all) and which of a freshly-connecting
+// client's contacts to hand it as its initial "who's online" snapshot.
 //
 // This used to be inferred from each instance's own local connection
 // registry (`byUser` in Realtime.ts), which is wrong under horizontal
@@ -29,8 +29,13 @@ export class PresenceStore extends Context.Service<
     // was the global transition down to zero connections — the caller
     // should broadcast `online: false`.
     readonly disconnect: (userId: number) => Effect.Effect<boolean>;
-    // Every user with at least one live connection anywhere right now.
-    readonly onlineUserIds: Effect.Effect<ReadonlyArray<number>>;
+    // Of `userIds`, the ones with at least one live connection anywhere
+    // right now. Asked about a specific set (a connecting user's contacts,
+    // see RealtimeSocket.ts) rather than "everyone online", so its cost
+    // tracks the size of that set, not of the whole deployment (issue #660).
+    readonly onlineAmong: (
+      userIds: ReadonlyArray<number>,
+    ) => Effect.Effect<ReadonlyArray<number>>;
   }
 >()("PresenceStore") {}
 
@@ -64,7 +69,8 @@ export const InMemoryPresenceStoreLive = Layer.sync(PresenceStore, () => {
         counts.delete(userId);
         return true;
       }),
-    onlineUserIds: Effect.sync(() => [...counts.keys()]),
+    onlineAmong: (userIds) =>
+      Effect.sync(() => userIds.filter((userId) => counts.has(userId))),
   };
 });
 
@@ -99,7 +105,7 @@ export const RedisPresenceStoreLive = Layer.effect(
   Effect.gen(function* () {
     const redis = new RedisClient(process.env.REDIS_URL);
 
-    // Issue #102 part 2: connect/disconnect/onlineUserIds all fail soft
+    // Issue #102 part 2: connect/disconnect/onlineAmong all fail soft
     // (Redis being unreachable must never fail a `/ws` connection), which
     // previously meant a Redis blip silently degraded presence with nothing
     // surfacing it. Logging here at least leaves a trail.
@@ -180,15 +186,22 @@ export const RedisPresenceStoreLive = Layer.effect(
         ),
       );
 
-    const onlineUserIds: Effect.Effect<ReadonlyArray<number>> =
-      Effect.tryPromise(() => redis.hkeys(KEY)).pipe(
-        Effect.map((fields) => fields.map(Number)),
-        Effect.catch((error) =>
-          logFallback("onlineUserIds", error).pipe(
-            Effect.as([] as ReadonlyArray<number>),
-          ),
-        ),
-      );
+    // One `HMGET` for the whole set; a field only exists while its count is
+    // positive (`disconnect` deletes it at zero), but a stray non-positive
+    // value is treated as offline all the same.
+    const onlineAmong: PresenceStore["Service"]["onlineAmong"] = (userIds) =>
+      userIds.length === 0
+        ? Effect.succeed([])
+        : Effect.tryPromise(() => redis.hmget(KEY, userIds.map(String))).pipe(
+            Effect.map((counts) =>
+              userIds.filter((_, i) => Number(counts[i] ?? 0) > 0),
+            ),
+            Effect.catch((error) =>
+              logFallback("onlineAmong", error).pipe(
+                Effect.as([] as ReadonlyArray<number>),
+              ),
+            ),
+          );
 
     // Background heartbeat: every HEARTBEAT_INTERVAL, refresh the TTL of
     // every field this instance is still holding a connection for.
@@ -206,7 +219,7 @@ export const RedisPresenceStoreLive = Layer.effect(
       ).pipe(Effect.repeat(Schedule.spaced(HEARTBEAT_INTERVAL))),
     );
 
-    return { connect, disconnect, onlineUserIds };
+    return { connect, disconnect, onlineAmong };
   }),
 );
 

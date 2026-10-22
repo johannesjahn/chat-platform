@@ -22,6 +22,7 @@ import { JwtLive } from "./Jwt.ts";
 import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
+import { PresenceAudienceLive } from "./PresenceAudience.ts";
 import { InMemoryPubSubLive, PubSub } from "./PubSub.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
@@ -65,7 +66,7 @@ const ApiLive = HttpApiBuilder.layer(ChatApi).pipe(
 // it) so raw routes — which look their services up per request, unlike
 // `ChatApi`'s handler groups — find them too.
 const ServicesLive = Layer.mergeAll(
-  RealtimeConnectionsLive,
+  RealtimeConnectionsLive.pipe(Layer.provide(PresenceAudienceLive)),
   TokenVersionCacheLive,
 ).pipe(
   Layer.provideMerge(

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
+import { staticPresenceAudience } from "./PresenceAudience.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
 import {
   MAX_POST_ROOMS_PER_CONNECTION,
@@ -16,10 +17,13 @@ import { makeIncomingHandler } from "./RealtimeSocket.ts";
 // RealtimeConnectionsLive now delivers through PubSub (see Realtime.ts) — the
 // in-memory implementation is the fully correct single-process one, not a
 // stand-in, so these tests stay exactly as fast/synchronous as before. Same
-// reasoning for InMemoryPresenceStoreLive (see Presence.ts).
+// reasoning for InMemoryPresenceStoreLive (see Presence.ts). Users 1 and 2
+// share a chat, and so see each other's presence/status; users 3 and 4 share
+// a chat with no one (see PresenceAudience.ts).
 const TestRealtimeLive = RealtimeConnectionsLive.pipe(
   Layer.provide(InMemoryPubSubLive),
   Layer.provide(InMemoryPresenceStoreLive),
+  Layer.provide(staticPresenceAudience([[1, 2]])),
 );
 
 // A writer that just records every chunk it was asked to send, standing in
@@ -218,7 +222,7 @@ test("notifyUsers is a no-op for a user with no live connection", async () => {
   );
 });
 
-test("register broadcasts a presence online event the first time a user connects", async () => {
+test("register pushes a presence online event to contacts the first time a user connects", async () => {
   await run(
     Effect.gen(function* () {
       const connections = yield* RealtimeConnections;
@@ -231,8 +235,8 @@ test("register broadcasts a presence online event the first time a user connects
         JSON.stringify({ type: "presence", userId: 1, online: true }),
         JSON.stringify({ type: "presence", userId: 2, online: true }),
       ]);
-      // Bob wasn't connected yet when Alice's own online transition
-      // broadcast, so he only sees his own.
+      // Bob wasn't connected yet when Alice's own online transition went
+      // out, so he only sees his own.
       expect(bob.received).toEqual([
         JSON.stringify({ type: "presence", userId: 2, online: true }),
       ]);
@@ -257,7 +261,7 @@ test("a user's second simultaneous connection doesn't re-broadcast presence", as
   );
 });
 
-test("unregistering a user's last connection broadcasts a presence offline event", async () => {
+test("unregistering a user's last connection pushes a presence offline event to contacts", async () => {
   await run(
     Effect.gen(function* () {
       const connections = yield* RealtimeConnections;
@@ -298,21 +302,77 @@ test("unregistering one of two connections for the same user doesn't broadcast o
   );
 });
 
-test("onlineUserIds reflects users with at least one live connection", async () => {
+test("onlineContactIds reflects only the user's contacts with a live connection", async () => {
   await run(
     Effect.gen(function* () {
       const connections = yield* RealtimeConnections;
-      const alice = recordingWriter();
-      const bob = recordingWriter();
-      const unregisterAlice = yield* connections.register(1, alice.write);
-      yield* connections.register(2, bob.write);
+      const unregisterAlice = yield* connections.register(1, () => Effect.void);
+      yield* connections.register(2, () => Effect.void);
+      // Online, but shares no chat with anyone.
+      yield* connections.register(3, () => Effect.void);
 
-      expect(new Set(yield* connections.onlineUserIds)).toEqual(
-        new Set([1, 2]),
-      );
+      expect(yield* connections.onlineContactIds(2)).toEqual([1]);
+      expect(yield* connections.onlineContactIds(1)).toEqual([2]);
+      expect(yield* connections.onlineContactIds(3)).toEqual([]);
 
       unregisterAlice();
-      expect(yield* connections.onlineUserIds).toEqual([2]);
+      expect(yield* connections.onlineContactIds(2)).toEqual([]);
+    }),
+  );
+});
+
+// Issue #660: presence and status used to go to every socket in the
+// deployment, including people who'd never interacted with the user.
+test("presence transitions reach only sockets of users who share a chat with the user", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const bob = recordingWriter();
+      const stranger = recordingWriter();
+      yield* connections.register(2, bob.write);
+      yield* connections.register(3, stranger.write);
+      bob.received.length = 0;
+      stranger.received.length = 0;
+
+      const unregisterAlice = yield* connections.register(1, () => Effect.void);
+      unregisterAlice();
+      yield* Effect.sleep("10 millis");
+
+      expect(bob.received).toEqual([
+        JSON.stringify({ type: "presence", userId: 1, online: true }),
+        JSON.stringify({ type: "presence", userId: 1, online: false }),
+      ]);
+      expect(stranger.received).toEqual([]);
+    }),
+  );
+});
+
+test("notifyContacts delivers a status change to the user's contacts and own tabs only", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const aliceOtherTab = recordingWriter();
+      const bob = recordingWriter();
+      const stranger = recordingWriter();
+      yield* connections.register(1, aliceOtherTab.write);
+      yield* connections.register(2, bob.write);
+      yield* connections.register(3, stranger.write);
+      aliceOtherTab.received.length = 0;
+      bob.received.length = 0;
+      stranger.received.length = 0;
+
+      const event = {
+        type: "status_changed",
+        userId: 1,
+        statusText: "Lunch",
+        statusEmoji: null,
+        statusExpiresAt: null,
+      } as const;
+      yield* connections.notifyContacts(1, event);
+
+      expect(aliceOtherTab.received).toEqual([JSON.stringify(event)]);
+      expect(bob.received).toEqual([JSON.stringify(event)]);
+      expect(stranger.received).toEqual([]);
     }),
   );
 });
