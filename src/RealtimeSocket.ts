@@ -8,6 +8,7 @@ import {
   gameLobbyRoom,
   isValidRoomName,
   RealtimeConnections,
+  type RealtimeEvent,
 } from "./Realtime.ts";
 import { allowedOrigins } from "./WebOrigin.ts";
 import { WsTicket } from "./WsTicket.ts";
@@ -257,17 +258,18 @@ const wsHandler = Effect.gen(function* () {
 
   // `register` only pushes a `presence` event for a state *transition* (see
   // Realtime.ts), so a client connecting after others are already online
-  // would otherwise never learn about them. This hands the new connection an
-  // explicit snapshot of who's online right now, targeted at just this
-  // socket rather than broadcast — every other connected client already
-  // knows this from the `online: true` transition `register` just triggered
-  // above.
-  const online = yield* connections.onlineUserIds;
-  for (const onlineUserId of online) {
-    yield* write(
-      JSON.stringify({ type: "presence", userId: onlineUserId, online: true }),
-    ).pipe(Effect.ignore);
-  }
+  // would otherwise never learn about them. This hands the new connection a
+  // snapshot of which of its contacts are online right now (plus itself), as
+  // a single frame targeted at just this socket — not one frame per online
+  // user, which made a reconnect wave O(online²) (issue #660). The client
+  // replaces its whole presence set with it.
+  const onlineContacts = yield* connections.onlineContactIds(userId);
+  yield* write(
+    JSON.stringify({
+      type: "presence_snapshot",
+      userIds: [userId, ...onlineContacts],
+    } satisfies RealtimeEvent),
+  ).pipe(Effect.ignore);
 
   // Blocks for the lifetime of the connection. Most incoming frames are
   // ignored (a periodic ping to defeat idle timeouts), but a client viewing a

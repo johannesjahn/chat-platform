@@ -2,6 +2,7 @@ import { RedisClient } from "bun";
 import { expect, test } from "bun:test";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { RedisPresenceStoreLive } from "./Presence.ts";
+import { staticPresenceAudience } from "./PresenceAudience.ts";
 import { PubSub, RedisPubSubLive } from "./PubSub.ts";
 import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
 
@@ -18,12 +19,17 @@ const redisConfigured = Boolean(process.env.REDIS_URL);
 
 // Each simulates one horizontally-scaled app instance: its own
 // RealtimeConnectionsLive (own local connection registry) backed by its own
-// dedicated pair of Redis connections, sharing the same server.
-const makeInstance = () =>
+// dedicated pair of Redis connections, sharing the same server. `contacts`
+// stands in for the chats that decide who sees whose presence (see
+// PresenceAudience.ts).
+const makeInstance = (
+  contacts: ReadonlyArray<readonly [number, number]> = [],
+) =>
   ManagedRuntime.make(
     RealtimeConnectionsLive.pipe(
       Layer.provide(RedisPubSubLive),
       Layer.provide(RedisPresenceStoreLive),
+      Layer.provide(staticPresenceAudience(contacts)),
     ),
   );
 
@@ -97,21 +103,21 @@ async function waitFor(
 (redisConfigured ? test : test.skip)(
   "a user connected across two instances broadcasts exactly one online and one offline transition, via PresenceStore's shared Redis count",
   async () => {
-    const instanceA = makeInstance();
-    const instanceB = makeInstance();
     // Fresh ids per run, distinct from the ones the test above uses, so a
     // previous run against a persistent (non-CI) Redis can't leave stale
     // counts that would throw this test's own transition detection off.
     const userId = Date.now();
     const observerId = userId + 1;
+    const instanceA = makeInstance([[userId, observerId]]);
+    const instanceB = makeInstance([[userId, observerId]]);
 
     try {
-      // A third, unrelated connection that stays up for the whole test.
-      // Presence is broadcast to everyone (see Realtime.ts), and a
-      // connection never receives its own online/offline transition (see
-      // the "unregistering a user's last connection..." case in
-      // Realtime.test.ts) — so this observer, not `userId`'s own sockets,
-      // is what actually proves how many transitions were broadcast.
+      // A third connection — a contact of `userId`'s — that stays up for
+      // the whole test. Presence goes to a user's contacts (see
+      // Realtime.ts), and a connection never receives its own offline
+      // transition (see the "unregistering a user's last connection..."
+      // case in Realtime.test.ts) — so this observer, not `userId`'s own
+      // sockets, is what actually proves how many transitions went out.
       const observed: string[] = [];
       const observerWrite = (chunk: string) =>
         Effect.sync(() => {

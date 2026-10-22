@@ -114,3 +114,30 @@ const freshUserId = () => nextUserId++;
   },
   30_000,
 );
+
+(redisConfigured ? test : test.skip)(
+  "onlineAmong answers for just the ids it's asked about, in one round trip",
+  async () => {
+    const runtime = ManagedRuntime.make(RedisPresenceStoreLive);
+    const online = freshUserId();
+    const offline = freshUserId();
+    const gone = freshUserId();
+
+    try {
+      const result = await runtime.runPromise(
+        Effect.gen(function* () {
+          const store = yield* PresenceStore;
+          yield* store.connect(online);
+          yield* store.connect(gone);
+          yield* store.disconnect(gone);
+          const found = yield* store.onlineAmong([offline, online, gone]);
+          yield* store.disconnect(online);
+          return found;
+        }),
+      );
+      expect(result).toEqual([online]);
+    } finally {
+      await runtime.dispose();
+    }
+  },
+);

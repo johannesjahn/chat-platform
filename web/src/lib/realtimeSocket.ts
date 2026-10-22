@@ -31,7 +31,7 @@ import { noteGameReaction } from "./games/reactions";
 import { noteGameProgress, setGameRoomsSocket } from "./games/rooms";
 import { notificationsQueryKeyRoot } from "./notifications";
 import { setRealtimeSocket } from "./postRooms";
-import { resetPresence, setUserOnline } from "./presence";
+import { replacePresence, setUserOnline } from "./presence";
 import { mergeReactionCounts } from "./reactions";
 import { setUserStatus } from "./status";
 import { noteTyping } from "./typing";
@@ -55,6 +55,7 @@ type RealtimeSocketEvent =
       pinned: boolean;
     }
   | { type: "presence"; userId: number; online: boolean }
+  | { type: "presence_snapshot"; userIds: number[] }
   | {
       type: "typing";
       chatId: number;
@@ -171,11 +172,6 @@ export function useRealtimeSocket(enabled: boolean): void {
         if (socket) setRealtimeSocket(socket);
         // Same for any game lobby / lobby browser rooms (see games/rooms.ts).
         if (socket) setGameRoomsSocket(socket);
-        // A dropped connection can mean any number of users went
-        // offline/online without this client hearing about it — start
-        // presence clean and let the fresh connection's initial snapshot
-        // (see RealtimeSocket.ts) repopulate it.
-        resetPresence();
         // Events are best-effort (see RealtimeEvent in src/Realtime.ts) — one
         // dropped while this client was disconnected (or never sent because
         // publish failed) would otherwise sit unnoticed until the next event
@@ -361,6 +357,11 @@ export function useRealtimeSocket(enabled: boolean): void {
             break;
           case "presence":
             setUserOnline(parsed.userId, parsed.online);
+            break;
+          case "presence_snapshot":
+            // Replaces whatever the previous connection left behind (see
+            // replacePresence).
+            replacePresence(parsed.userIds);
             break;
           case "typing":
             noteTyping(

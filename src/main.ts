@@ -22,6 +22,7 @@ import { GamesHandlerLive } from "./GamesHandler.ts";
 import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
 import { PresenceStoreLive } from "./Presence.ts";
+import { PresenceAudienceLive } from "./PresenceAudience.ts";
 import { PubSubLive } from "./PubSub.ts";
 import { RateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
@@ -107,7 +108,7 @@ const HttpServerLive = HttpRouter.serve(RoutesLive, {
 // Every shared service, built once and handed to the server, its routes and
 // handlers, and the background jobs alike.
 const ServicesLive = Layer.mergeAll(
-  RealtimeConnectionsLive,
+  RealtimeConnectionsLive.pipe(Layer.provide(PresenceAudienceLive)),
   TokenVersionCacheLive,
 ).pipe(
   Layer.provideMerge(

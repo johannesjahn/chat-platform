@@ -4,6 +4,7 @@ import {
   websocketConnectionsTotal,
 } from "./Metrics.ts";
 import { PresenceStore } from "./Presence.ts";
+import { PresenceAudience } from "./PresenceAudience.ts";
 import { PubSub } from "./PubSub.ts";
 
 // Pushed to every participant of a chat whenever something in it changes
@@ -86,13 +87,22 @@ export type ReactionEvent = {
 // Pushed whenever a user's live-connection count transitions between zero and
 // non-zero (see `register` below) — i.e. on their *first* connection (a tab
 // opened, a page refreshed) or their *last* disconnection (every tab closed),
-// not on every individual socket. Broadcast to everyone rather than scoped to
-// a chat's participants: presence is a property of the user, not of any one
-// conversation, so this mirrors `broadcastAll`'s reasoning for `PostEvent`.
+// not on every individual socket. Delivered only to the user's contacts (and
+// the user's own other tabs) — see `notifyContacts` and PresenceAudience.ts —
+// never broadcast: a global broadcast made presence O(online²) (issue #660).
 export type PresenceEvent = {
   readonly type: "presence";
   readonly userId: number;
   readonly online: boolean;
+};
+
+// Who among a connecting user's contacts is online right now, written once
+// straight to the new socket (see RealtimeSocket.ts) rather than as one
+// `PresenceEvent` per online user. Replaces the client's whole presence set,
+// so it doubles as the reset after a reconnect. Never published.
+export type PresenceSnapshotEvent = {
+  readonly type: "presence_snapshot";
+  readonly userIds: ReadonlyArray<number>;
 };
 
 // Pushed when a message is pinned or unpinned chat-wide (issue #223). Scoped
@@ -125,10 +135,10 @@ export type TypingEvent = {
   readonly displayName: string | null;
 };
 
-// Pushed to every connected user whenever someone sets/clears/updates their
-// custom status (issue #218, see `updateStatus` in UsersHandler.ts) —
-// broadcast like `PresenceEvent` rather than scoped to a chat's participants,
-// since a status is a property of the user, not of any one conversation.
+// Pushed whenever someone sets/clears/updates their custom status (issue
+// #218, see `updateStatus` in UsersHandler.ts) — to the same audience as
+// `PresenceEvent` (their contacts and their own tabs, via `notifyContacts`).
+// Anyone else sees the new status the next time they fetch the user.
 // Carries the full, already-expiry-resolved state (see `effectiveStatus` in
 // UsersHandler.ts) so a client never needs a follow-up fetch to render it.
 export type StatusEvent = {
@@ -213,6 +223,7 @@ export type RealtimeEvent =
   | ReactionEvent
   | MessagePinEvent
   | PresenceEvent
+  | PresenceSnapshotEvent
   | TypingEvent
   | StatusEvent
   | GameLobbyEvent
@@ -242,6 +253,14 @@ export class RealtimeConnections extends Context.Service<
       event: RealtimeEvent,
     ) => Effect.Effect<void>;
     readonly broadcastAll: (event: RealtimeEvent) => Effect.Effect<void>;
+    // Delivers `event` to `userId`'s contacts (see PresenceAudience.ts) and
+    // to `userId`'s own sockets — the audience for anything that's a
+    // property of the user rather than of a chat or post: presence and
+    // status. Not `broadcastAll` (issue #660).
+    readonly notifyContacts: (
+      userId: number,
+      event: RealtimeEvent,
+    ) => Effect.Effect<void>;
     // Post-room subscription: a single `/ws` connection (identified by its
     // `write` channel) joining/leaving the set of sockets currently viewing
     // `postId`'s comment section. Membership is local to this instance — a
@@ -266,13 +285,15 @@ export class RealtimeConnections extends Context.Service<
       postId: number,
       event: RealtimeEvent,
     ) => Effect.Effect<void>;
-    // Ids of every user with a live `/ws` connection *anywhere* right now
-    // (see PresenceStore, which is what actually answers this — correctly
+    // Ids of `userId`'s contacts with a live `/ws` connection *anywhere*
+    // right now (PresenceStore answers the "anywhere" part — correctly
     // cross-instance when Redis-backed). Used to hand a freshly-connecting
-    // client its initial presence snapshot (see RealtimeSocket.ts) — after
-    // that, live transitions arrive as `PresenceEvent`s pushed through the
-    // usual broadcast path.
-    readonly onlineUserIds: Effect.Effect<ReadonlyArray<number>>;
+    // client its initial `presence_snapshot` (see RealtimeSocket.ts) — after
+    // that, live transitions arrive as `PresenceEvent`s via
+    // `notifyContacts`. Costs O(contacts), not O(everyone online).
+    readonly onlineContactIds: (
+      userId: number,
+    ) => Effect.Effect<ReadonlyArray<number>>;
     // Named rooms — the generalized form of the post rooms above, used by
     // the games feature (`game-hub:<game>` for a lobby browser,
     // `game-lobby:<id>` for one lobby; see `isValidRoomName`). Same
@@ -357,6 +378,7 @@ export const RealtimeConnectionsLive = Layer.effect(
   Effect.gen(function* () {
     const pubsub = yield* PubSub;
     const presenceStore = yield* PresenceStore;
+    const audience = yield* PresenceAudience;
     const byUser = new Map<number, Set<Writer>>();
     // postId -> the local connection writers currently subscribed to that
     // post's comment room (see `subscribePost`). Parallel to `byUser`, and
@@ -482,6 +504,18 @@ export const RealtimeConnectionsLive = Layer.effect(
         .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
     };
 
+    const notifyContacts: RealtimeConnections["Service"]["notifyContacts"] = (
+      userId,
+      event,
+    ) =>
+      audience
+        .contactsOf(userId)
+        .pipe(
+          Effect.flatMap((contacts) =>
+            notifyUsers([userId, ...contacts], event),
+          ),
+        );
+
     const notifyPostRoom: RealtimeConnections["Service"]["notifyPostRoom"] = (
       postId,
       event,
@@ -588,7 +622,11 @@ export const RealtimeConnectionsLive = Layer.effect(
         // who's already online via the first.
         const cameOnline = yield* presenceStore.connect(userId);
         if (cameOnline) {
-          yield* broadcastAll({ type: "presence", userId, online: true });
+          yield* notifyContacts(userId, {
+            type: "presence",
+            userId,
+            online: true,
+          });
         }
         return () => {
           const current = byUser.get(userId);
@@ -632,30 +670,38 @@ export const RealtimeConnectionsLive = Layer.effect(
           // connections left on *this* instance) — it's the one that knows
           // whether any connection, anywhere, is still holding them online.
           Effect.runFork(
-            presenceStore
-              .disconnect(userId)
-              .pipe(
-                Effect.flatMap((wentOffline) =>
-                  wentOffline
-                    ? broadcastAll({ type: "presence", userId, online: false })
-                    : Effect.void,
-                ),
+            presenceStore.disconnect(userId).pipe(
+              Effect.flatMap((wentOffline) =>
+                wentOffline
+                  ? notifyContacts(userId, {
+                      type: "presence",
+                      userId,
+                      online: false,
+                    })
+                  : Effect.void,
               ),
+            ),
           );
         };
       });
 
-    const onlineUserIds: RealtimeConnections["Service"]["onlineUserIds"] =
-      presenceStore.onlineUserIds;
+    const onlineContactIds: RealtimeConnections["Service"]["onlineContactIds"] =
+      (userId) =>
+        audience
+          .contactsOf(userId)
+          .pipe(
+            Effect.flatMap((contacts) => presenceStore.onlineAmong(contacts)),
+          );
 
     return {
       register,
       notifyUsers,
       broadcastAll,
+      notifyContacts,
       subscribePost,
       unsubscribePost,
       notifyPostRoom,
-      onlineUserIds,
+      onlineContactIds,
       subscribeRoom,
       unsubscribeRoom,
       isInRoom,

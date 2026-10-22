@@ -1432,9 +1432,9 @@ const UsersGroup = HttpApiGroup.make("users")
     // Sets or clears the current user's custom status (issue #218) — a short
     // message plus an optional emoji, with an optional auto-expiry.
     // Full-replace like `updateProfile`: setting both `statusText` and
-    // `statusEmoji` to null clears the status entirely. Broadcasts a
-    // `status_changed` realtime event (see Realtime.ts) to every connected
-    // user, mirroring how presence updates propagate.
+    // `statusEmoji` to null clears the status entirely. Pushes a
+    // `status_changed` realtime event (see Realtime.ts) to the user's
+    // contacts, the same audience presence updates go to.
     HttpApiEndpoint.put("updateStatus", "/users/me/status", {
       payload: UpdateStatusBody,
       success: User,
