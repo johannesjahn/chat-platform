@@ -66,6 +66,7 @@ import {
 } from "./pinsStars.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { RealtimeConnections } from "./Realtime.ts";
+import { serializableTransaction } from "./serializableTransaction.ts";
 import {
   deleteAvatarObjects,
   effectiveStatus,
@@ -1254,76 +1255,71 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           // the "create one if not" insert run inside a single `serializable`
           // transaction. Two concurrent requests for the same pair would
           // otherwise both see "no existing chat" and both create one; under
-          // `serializable` isolation Postgres instead aborts one of them with
-          // a serialization failure (surfaced here as a die, same as any
-          // other unexpected DB error) rather than letting it silently race.
-          const chatRow = yield* Effect.tryPromise(() =>
-            db.transaction(
-              async (tx) => {
-                // A direct chat always has exactly the two participants it
-                // was created with, so matching on "both ids are
-                // participants of some direct chat, and it has exactly two
-                // participants" uniquely identifies the (at most one)
-                // existing chat for this pair.
-                const existing = await tx
-                  .select({ chatId: chatParticipants.chatId })
-                  .from(chatParticipants)
-                  .innerJoin(chats, eq(chats.id, chatParticipants.chatId))
-                  .where(
-                    and(
-                      eq(chats.type, "direct"),
-                      inArray(chatParticipants.userId, [
-                        currentUser.id,
-                        payload.userId,
-                      ]),
-                    ),
-                  )
-                  .groupBy(chatParticipants.chatId)
-                  .having(eq(count(chatParticipants.userId), 2));
+          // `serializable` isolation Postgres instead aborts one of them, and
+          // `serializableTransaction` retries it — so the loser re-runs the
+          // check, finds the winner's chat and returns it.
+          const chatRow = yield* serializableTransaction(db, async (tx) => {
+            // A direct chat always has exactly the two participants it
+            // was created with, so matching on "both ids are
+            // participants of some direct chat, and it has exactly two
+            // participants" uniquely identifies the (at most one)
+            // existing chat for this pair.
+            const existing = await tx
+              .select({ chatId: chatParticipants.chatId })
+              .from(chatParticipants)
+              .innerJoin(chats, eq(chats.id, chatParticipants.chatId))
+              .where(
+                and(
+                  eq(chats.type, "direct"),
+                  inArray(chatParticipants.userId, [
+                    currentUser.id,
+                    payload.userId,
+                  ]),
+                ),
+              )
+              .groupBy(chatParticipants.chatId)
+              .having(eq(count(chatParticipants.userId), 2));
 
-                if (existing[0]) {
-                  const rows = await tx
-                    .select()
-                    .from(chats)
-                    .where(eq(chats.id, existing[0].chatId));
-                  const row = rows[0];
-                  if (!row)
-                    throw new Error("Existing chat vanished mid-transaction");
-                  return row;
-                }
+            if (existing[0]) {
+              const rows = await tx
+                .select()
+                .from(chats)
+                .where(eq(chats.id, existing[0].chatId));
+              const row = rows[0];
+              if (!row)
+                throw new Error("Existing chat vanished mid-transaction");
+              return row;
+            }
 
-                const now = new Date();
-                const created = await tx
-                  .insert(chats)
-                  .values({
-                    type: "direct",
-                    title: null,
-                    createdBy: currentUser.id,
-                    createdAt: now,
-                    updatedAt: now,
-                  })
-                  .returning();
-                const newRow = created[0];
-                if (!newRow) throw new Error("INSERT returned no rows");
+            const now = new Date();
+            const created = await tx
+              .insert(chats)
+              .values({
+                type: "direct",
+                title: null,
+                createdBy: currentUser.id,
+                createdAt: now,
+                updatedAt: now,
+              })
+              .returning();
+            const newRow = created[0];
+            if (!newRow) throw new Error("INSERT returned no rows");
 
-                await tx.insert(chatParticipants).values([
-                  {
-                    chatId: newRow.id,
-                    userId: currentUser.id,
-                    joinedAt: now,
-                  },
-                  {
-                    chatId: newRow.id,
-                    userId: payload.userId,
-                    joinedAt: now,
-                  },
-                ]);
-
-                return newRow;
+            await tx.insert(chatParticipants).values([
+              {
+                chatId: newRow.id,
+                userId: currentUser.id,
+                joinedAt: now,
               },
-              { isolationLevel: "serializable" },
-            ),
-          ).pipe(Effect.orDie);
+              {
+                chatId: newRow.id,
+                userId: payload.userId,
+                joinedAt: now,
+              },
+            ]);
+
+            return newRow;
+          });
 
           const participants = yield* getParticipants(db, chatRow.id);
           // A freshly created chat's row already carries its initial
@@ -1667,41 +1663,36 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           // either insert commits, and together push the group over
           // MAX_GROUP_PARTICIPANTS. `onConflictDoNothing` also guards
           // against re-adding someone a concurrent call just added.
-          const result = yield* Effect.tryPromise(() =>
-            db.transaction(
-              async (tx) => {
-                const currentParticipants = await tx
-                  .select({ userId: chatParticipants.userId })
-                  .from(chatParticipants)
-                  .where(eq(chatParticipants.chatId, id));
-                const currentIds = new Set(
-                  currentParticipants.map((p) => p.userId),
-                );
-                const newIds = requestedIds.filter(
-                  (userId) => !currentIds.has(userId),
-                );
+          const result = yield* serializableTransaction(db, async (tx) => {
+            const currentParticipants = await tx
+              .select({ userId: chatParticipants.userId })
+              .from(chatParticipants)
+              .where(eq(chatParticipants.chatId, id));
+            const currentIds = new Set(
+              currentParticipants.map((p) => p.userId),
+            );
+            const newIds = requestedIds.filter(
+              (userId) => !currentIds.has(userId),
+            );
 
-                if (currentIds.size + newIds.length > MAX_GROUP_PARTICIPANTS)
-                  return { ok: false as const };
+            if (currentIds.size + newIds.length > MAX_GROUP_PARTICIPANTS)
+              return { ok: false as const };
 
-                if (newIds.length > 0) {
-                  const now = new Date();
-                  await tx
-                    .insert(chatParticipants)
-                    .values(
-                      newIds.map((userId) => ({
-                        chatId: id,
-                        userId,
-                        joinedAt: now,
-                      })),
-                    )
-                    .onConflictDoNothing();
-                }
-                return { ok: true as const };
-              },
-              { isolationLevel: "serializable" },
-            ),
-          ).pipe(Effect.orDie);
+            if (newIds.length > 0) {
+              const now = new Date();
+              await tx
+                .insert(chatParticipants)
+                .values(
+                  newIds.map((userId) => ({
+                    chatId: id,
+                    userId,
+                    joinedAt: now,
+                  })),
+                )
+                .onConflictDoNothing();
+            }
+            return { ok: true as const };
+          });
 
           if (!result.ok)
             return yield* Effect.fail(
@@ -3209,42 +3200,37 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           // first, then the guarded bump, then the insert, so a request that
           // fails either check never mutates `chatInvites` or
           // `chatParticipants`.
-          const result = yield* Effect.tryPromise(() =>
-            db.transaction(
-              async (tx) => {
-                const currentParticipants = await tx
-                  .select({ id: chatParticipants.id })
-                  .from(chatParticipants)
-                  .where(eq(chatParticipants.chatId, chatRow.id));
-                if (currentParticipants.length >= MAX_GROUP_PARTICIPANTS)
-                  return { ok: false as const, reason: "cap" as const };
+          const result = yield* serializableTransaction(db, async (tx) => {
+            const currentParticipants = await tx
+              .select({ id: chatParticipants.id })
+              .from(chatParticipants)
+              .where(eq(chatParticipants.chatId, chatRow.id));
+            if (currentParticipants.length >= MAX_GROUP_PARTICIPANTS)
+              return { ok: false as const, reason: "cap" as const };
 
-                const useCountGuard =
-                  invite.maxUses !== null
-                    ? and(
-                        eq(chatInvites.id, invite.id),
-                        lt(chatInvites.useCount, invite.maxUses),
-                      )
-                    : eq(chatInvites.id, invite.id);
-                const bumped = await tx
-                  .update(chatInvites)
-                  .set({ useCount: sql`${chatInvites.useCount} + 1` })
-                  .where(useCountGuard)
-                  .returning({ id: chatInvites.id });
-                if (bumped.length === 0)
-                  return { ok: false as const, reason: "maxUses" as const };
+            const useCountGuard =
+              invite.maxUses !== null
+                ? and(
+                    eq(chatInvites.id, invite.id),
+                    lt(chatInvites.useCount, invite.maxUses),
+                  )
+                : eq(chatInvites.id, invite.id);
+            const bumped = await tx
+              .update(chatInvites)
+              .set({ useCount: sql`${chatInvites.useCount} + 1` })
+              .where(useCountGuard)
+              .returning({ id: chatInvites.id });
+            if (bumped.length === 0)
+              return { ok: false as const, reason: "maxUses" as const };
 
-                await tx.insert(chatParticipants).values({
-                  chatId: chatRow.id,
-                  userId: currentUser.id,
-                  joinedAt: new Date(),
-                  role: "member",
-                });
-                return { ok: true as const };
-              },
-              { isolationLevel: "serializable" },
-            ),
-          ).pipe(Effect.orDie);
+            await tx.insert(chatParticipants).values({
+              chatId: chatRow.id,
+              userId: currentUser.id,
+              joinedAt: new Date(),
+              role: "member",
+            });
+            return { ok: true as const };
+          });
           if (!result.ok)
             return yield* Effect.fail(
               new InvalidChatRequest({
