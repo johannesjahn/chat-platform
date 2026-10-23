@@ -184,7 +184,7 @@ async function waitFor(
 );
 
 (redisConfigured ? test : test.skip)(
-  "RedisPubSubLive resubscribes after its connection drops and Bun auto-reconnects (#52)",
+  "RedisPubSubLive resubscribes every channel after its connection drops and Bun auto-reconnects (#52, #649)",
   async () => {
     const runtime = ManagedRuntime.make(RedisPubSubLive);
     // A separate, unrelated connection used only to inspect/manipulate the
@@ -192,46 +192,60 @@ async function waitFor(
     // (network hiccup, Redis restart, idle timeout) that drops the
     // connection this layer subscribes on.
     const admin = new RedisClient(process.env.REDIS_URL);
-    const channel = `chat-platform:pubsub-reconnect-test:${Date.now()}`;
+    // Two channels on the same instance, like the app's own
+    // `chat-platform:realtime` + `auth:invalidation` — a reconnect has to
+    // bring back both, not just whichever subscribed last (#649).
+    const runId = Date.now();
+    const channelA = `chat-platform:pubsub-reconnect-test:${runId}:a`;
+    const channelB = `chat-platform:pubsub-reconnect-test:${runId}:b`;
 
     try {
       const received: string[] = [];
       await runtime.runPromise(
         Effect.gen(function* () {
           const pubsub = yield* PubSub;
-          yield* pubsub.subscribe(channel, (message) =>
-            Effect.sync(() => {
-              received.push(message);
-            }),
-          );
+          for (const channel of [channelA, channelB]) {
+            yield* pubsub.subscribe(channel, (message) =>
+              Effect.sync(() => {
+                received.push(`${channel}:${message}`);
+              }),
+            );
+          }
         }),
       );
 
       // Find and kill the subscriber's underlying connection from the
-      // server side. At this point in the test it's the only client
-      // connection actively subscribed to a channel (`sub=1`) — the
-      // publisher connection RedisPubSubLive also holds isn't.
+      // server side. It's the only client connection subscribed to two
+      // channels (`sub=2`) — the publisher connection RedisPubSubLive also
+      // holds isn't subscribed at all, and the other tests' instances (whose
+      // connections can outlive their runtimes) hold one channel each.
+      const subscribedToBoth = (list: string) =>
+        list.split("\n").find((line) => / sub=2 /.test(line));
       const clientList = (await admin.send("CLIENT", ["LIST"])) as string;
-      const subscriberLine = clientList
-        .split("\n")
-        .find((line) => line.includes("sub=1"));
-      const clientId = subscriberLine?.match(/id=(\d+)/)?.[1];
+      const clientId = subscribedToBoth(clientList)?.match(/id=(\d+)/)?.[1];
       expect(clientId).toBeDefined();
       await admin.send("CLIENT", ["KILL", "ID", clientId as string]);
 
       // Bun's client reconnects the dropped TCP connection automatically,
       // but a fresh connection has no server-side subscriptions until
-      // RedisPubSubLive's `onconnect` handler re-issues one — wait for that
-      // to land rather than racing it.
+      // RedisPubSubLive's `onconnect` handler re-issues them — wait for
+      // both to land (on a new connection) rather than racing it.
       await waitFor(async () => {
         const list = (await admin.send("CLIENT", ["LIST"])) as string;
-        return list.split("\n").some((line) => line.includes("sub=1"));
+        const line = subscribedToBoth(list);
+        return line !== undefined && !line.includes(`id=${clientId} `);
       });
 
-      await admin.publish(channel, "after-reconnect");
+      await admin.publish(channelA, "after-reconnect");
+      await admin.publish(channelB, "after-reconnect");
 
-      await waitFor(() => received.length > 0);
-      expect(received).toEqual(["after-reconnect"]);
+      await waitFor(() => received.length >= 2);
+      // Give a moment for a wrongly-duplicated delivery to arrive too.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(received.sort()).toEqual([
+        `${channelA}:after-reconnect`,
+        `${channelB}:after-reconnect`,
+      ]);
     } finally {
       await runtime.dispose();
       admin.close();

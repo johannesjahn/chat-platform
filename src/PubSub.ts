@@ -98,6 +98,60 @@ export const RedisPubSubLive = Layer.effect(
     const publisher = new RedisClient(process.env.REDIS_URL);
     const subscriber = await publisher.duplicate();
 
+    // Every handler subscribed on this instance, by channel — what a
+    // reconnect has to restore. The app subscribes to more than one channel
+    // on the same subscriber connection (`chat-platform:realtime` from
+    // Realtime.ts, `auth:invalidation` from Auth.ts), so this can't be
+    // tracked per `subscribe` call (issue #649).
+    const subscriptions = new Map<string, Array<(message: string) => void>>();
+
+    // Bun's `RedisClient` transparently reconnects the underlying connection
+    // (`autoReconnect`, on by default) after a drop, but Redis pub/sub
+    // subscriptions live on the connection, not the account — a fresh
+    // connection starts with none. Without this, an instance would silently
+    // stop receiving cross-instance events after any blip until restarted
+    // (see issue #52). `onconnect` is a single property, so it's set exactly
+    // once here and re-issues *every* channel — set per `subscribe` call,
+    // each call overwrote the last and only one channel came back (#649).
+    // It fires on every (re)connect including the very first one, but at
+    // that point `subscriptions` is empty, and later ones are covered by
+    // the explicit `subscribe` below.
+    subscriber.onconnect = () => {
+      for (const [channel, handlers] of subscriptions) {
+        Effect.runFork(
+          // Bun's client-side listener list isn't cleared across
+          // reconnects, so subscribing again without unsubscribing first
+          // would register a second listener on the same channel —
+          // delivering every future message twice (three times after the
+          // next reconnect, and so on). Unsubscribing drops every listener
+          // on the channel, so all of its handlers are re-added after.
+          Effect.tryPromise(() => subscriber.unsubscribe(channel)).pipe(
+            Effect.ignore,
+            Effect.andThen(
+              Effect.forEach(
+                handlers,
+                (handler) =>
+                  Effect.tryPromise(() =>
+                    subscriber.subscribe(channel, handler),
+                  ),
+                { discard: true },
+              ),
+            ),
+            Effect.catch((error) =>
+              Effect.logWarning(
+                "PubSub: failed to resubscribe after Redis reconnect",
+              ).pipe(
+                Effect.annotateLogs({
+                  channel,
+                  error: String(error),
+                }),
+              ),
+            ),
+          ),
+        );
+      }
+    };
+
     return {
       publish: (channel: string, message: string) =>
         trackOutcome(
@@ -142,45 +196,9 @@ export const RedisPubSubLive = Layer.effect(
             Effect.asVoid,
             Effect.tap(() =>
               Effect.sync(() => {
-                // Bun's `RedisClient` transparently reconnects the underlying
-                // connection (`autoReconnect`, on by default) after a drop,
-                // but Redis pub/sub subscriptions live on the connection, not
-                // the account — a fresh connection starts with none. Without
-                // this, an instance would silently stop receiving
-                // cross-instance events after any blip until restarted (see
-                // issue #52). `onconnect` fires on every (re)connect
-                // including the very first one, but that one's already
-                // covered by the explicit `subscribe` above, so this handler
-                // only needs to cover the ones after it.
-                subscriber.onconnect = () => {
-                  Effect.runFork(
-                    // Bun's client-side listener list isn't cleared across
-                    // reconnects, so subscribing again without unsubscribing
-                    // first would register a second listener on the same
-                    // channel — delivering every future message twice (three
-                    // times after the next reconnect, and so on).
-                    Effect.tryPromise(() =>
-                      subscriber.unsubscribe(channel),
-                    ).pipe(
-                      Effect.ignore,
-                      Effect.andThen(
-                        Effect.tryPromise(() =>
-                          subscriber.subscribe(channel, handleMessage),
-                        ),
-                      ),
-                      Effect.catch((error) =>
-                        Effect.logWarning(
-                          "PubSub: failed to resubscribe after Redis reconnect",
-                        ).pipe(
-                          Effect.annotateLogs({
-                            channel,
-                            error: String(error),
-                          }),
-                        ),
-                      ),
-                    ),
-                  );
-                };
+                const handlers = subscriptions.get(channel) ?? [];
+                handlers.push(handleMessage);
+                subscriptions.set(channel, handlers);
               }),
             ),
           ),
