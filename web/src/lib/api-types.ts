@@ -1471,7 +1471,7 @@ export interface components {
             message: string;
             retryAfterSeconds: number;
         };
-        GameChatMessage_1: {
+        GameChatMessage: {
             id: number;
             lobbyId: number;
             user: components["schemas"]["User"];
@@ -1483,13 +1483,6 @@ export interface components {
         };
         GameChat: {
             messages: components["schemas"]["GameChatMessage"][];
-        };
-        GameChatMessage: {
-            id: number;
-            lobbyId: number;
-            user: components["schemas"]["User"];
-            text: string;
-            createdAt: number;
         };
         GameInviteBody: {
             userId: number;
@@ -1507,24 +1500,6 @@ export interface components {
         FinishRaceBody: {
             typed: string;
             errors: number;
-        };
-        GameLobby_1: {
-            id: number;
-            game: components["schemas"]["GameId"];
-            hostId: number;
-            phase: components["schemas"]["GameLobbyPhase"];
-            round: number;
-            passage: string | null;
-            startsAt: number | null;
-            endsAt: number | null;
-            serverNow: number;
-            minPlayers: number;
-            maxPlayers: number;
-            players: components["schemas"]["GameLobbyPlayer"][];
-            drawing: components["schemas"]["DrawingGame"] | null;
-            reflex: components["schemas"]["ReflexGame"] | null;
-            chatOpen: boolean;
-            createdAt: number;
         };
         GameLobbyList: {
             lobbies: components["schemas"]["GameLobby"][];
@@ -1606,7 +1581,7 @@ export interface components {
             _tag: "UnsupportedAttachmentType";
             message: string;
         };
-        Attachment_1: {
+        Attachment: {
             id: number;
             filename: string;
             mimeType: string;
@@ -1753,29 +1728,6 @@ export interface components {
         };
         /** @enum {string} */
         MessageContentType: "text" | "image_url" | "attachment";
-        Attachment: {
-            id: number;
-            filename: string;
-            mimeType: string;
-            size: number;
-            url: string;
-            width: number | null;
-            height: number | null;
-            blurhash: string | null;
-            waveform: number[] | null;
-            durationMs: number | null;
-        };
-        ChatInvite_1: {
-            id: number;
-            chatId: number;
-            code: string;
-            createdBy: number;
-            createdAt: number;
-            expiresAt: number | null;
-            maxUses: number | null;
-            useCount: number;
-            revokedAt: number | null;
-        };
         ChatInvite: {
             id: number;
             chatId: number;
@@ -1827,22 +1779,6 @@ export interface components {
             targetChatIds: number[];
             clientId?: string | null;
         };
-        Message_1: {
-            id: number;
-            chatId: number;
-            senderId: number;
-            contentType: components["schemas"]["MessageContentType"];
-            content: string;
-            attachment: components["schemas"]["Attachment"] | null;
-            parentMessage: components["schemas"]["ParentMessagePreview"] | null;
-            createdAt: number;
-            updatedAt: number;
-            readByUserIds: number[];
-            reactions: components["schemas"]["ReactionSummary"][];
-            pinned: boolean;
-            starred: boolean;
-            forwardedFrom: components["schemas"]["ForwardedFrom"] | null;
-        };
         CreateMessageBody: {
             contentType: components["schemas"]["MessageContentType"];
             content: string;
@@ -1881,19 +1817,6 @@ export interface components {
         UpdateChatBody: {
             title: string;
         };
-        Chat_1: {
-            id: number;
-            type: components["schemas"]["ChatType"];
-            title: string | null;
-            createdBy: number | null;
-            createdAt: number;
-            updatedAt: number;
-            version: number;
-            participants: components["schemas"]["ChatParticipant"][];
-            lastMessage: components["schemas"]["Message"] | null;
-            unreadCount: number;
-            avatarVariants: components["schemas"]["AvatarVariants"] | null;
-        };
         CreateGroupChatBody: {
             title: string;
             participantIds: number[];
@@ -1925,17 +1848,6 @@ export interface components {
             _tag: "InvalidCommentRequest";
             message: string;
         };
-        Comment_2: {
-            id: number;
-            postId: number;
-            parentCommentId: number | null;
-            authorId: number;
-            content: string;
-            createdAt: number;
-            updatedAt: number;
-            reactions: components["schemas"]["ReactionSummary"][];
-            replyCount: number;
-        };
         CreateCommentBody: {
             content: string;
         };
@@ -1943,17 +1855,6 @@ export interface components {
             comments: components["schemas"]["Comment"][];
             limit: number;
             nextCursor: string | null;
-        };
-        Comment_1: {
-            id: number;
-            postId: number;
-            parentCommentId: number | null;
-            authorId: number;
-            content: string;
-            createdAt: number;
-            updatedAt: number;
-            reactions: components["schemas"]["ReactionSummary"][];
-            replyCount: number;
         };
         Post: {
             id: number;
@@ -1972,17 +1873,6 @@ export interface components {
             contentType: components["schemas"]["PostContentType"];
             content: string;
             attachmentId?: number | null;
-        };
-        Post_1: {
-            id: number;
-            authorId: number;
-            contentType: components["schemas"]["PostContentType"];
-            content: string;
-            attachment: components["schemas"]["Attachment"] | null;
-            createdAt: number;
-            updatedAt: number;
-            reactions: components["schemas"]["ReactionSummary"][];
-            commentCount: number;
         };
         CreatePostBody: {
             contentType: components["schemas"]["PostContentType"];
@@ -2045,7 +1935,7 @@ export interface components {
         UpdateProfileBody: {
             displayName: string | null;
             avatarUrl: string | null;
-            bio?: (string | null) | null;
+            bio?: string | null;
         };
         RefreshResponse: {
             accessToken: string;
@@ -2075,17 +1965,6 @@ export interface components {
             /** @enum {string} */
             _tag: "UsernameTaken";
             message: string;
-        };
-        User_1: {
-            id: number;
-            username: string;
-            displayName: string | null;
-            avatarUrl: string | null;
-            avatarVariants: components["schemas"]["AvatarVariants"] | null;
-            role: components["schemas"]["UserRole"];
-            statusText: string | null;
-            statusEmoji: string | null;
-            statusExpiresAt: number | null;
         };
         RegisterBody: {
             username: string & unknown;
@@ -2372,7 +2251,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["User_1"];
+                    "application/json": components["schemas"]["User"];
                 };
             };
             /** @description HttpApiDecodeError */
@@ -3205,7 +3084,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Post_1"];
+                    "application/json": components["schemas"]["Post"];
                 };
             };
             /** @description HttpApiDecodeError */
@@ -3434,7 +3313,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Comment_1"];
+                    "application/json": components["schemas"]["Comment"];
                 };
             };
             /** @description HttpApiDecodeError */
@@ -3548,7 +3427,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Comment_2"];
+                    "application/json": components["schemas"]["Comment"];
                 };
             };
             /** @description InvalidCommentRequest | HttpApiDecodeError */
@@ -4185,7 +4064,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Chat_1"];
+                    "application/json": components["schemas"]["Chat"];
                 };
             };
             /** @description InvalidChatRequest | HttpApiDecodeError */
@@ -4746,7 +4625,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Message_1"];
+                    "application/json": components["schemas"]["Message"];
                 };
             };
             /** @description HttpApiDecodeError */
@@ -5586,7 +5465,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChatInvite_1"][];
+                    "application/json": components["schemas"]["ChatInvite"][];
                 };
             };
             /** @description HttpApiDecodeError */
@@ -6026,7 +5905,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Attachment_1"];
+                    "application/json": components["schemas"]["Attachment"];
                 };
             };
             /** @description HttpApiDecodeError */
@@ -6296,7 +6175,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GameLobby_1"];
+                    "application/json": components["schemas"]["GameLobby"];
                 };
             };
             /** @description HttpApiDecodeError */
@@ -6883,7 +6762,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GameChatMessage_1"];
+                    "application/json": components["schemas"]["GameChatMessage"];
                 };
             };
             /** @description InvalidGameRequest | HttpApiDecodeError */

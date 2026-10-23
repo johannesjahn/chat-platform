@@ -147,7 +147,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -211,7 +211,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -280,7 +280,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -306,7 +306,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -386,7 +386,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/User_1"
+                  "$ref": "#/components/schemas/User"
                 }
               }
             }
@@ -903,7 +903,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -1094,7 +1094,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -1175,7 +1175,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -1224,7 +1224,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -1288,7 +1288,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -1372,7 +1372,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -1458,7 +1458,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -1530,7 +1530,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Post_1"
+                  "$ref": "#/components/schemas/Post"
                 }
               }
             }
@@ -1590,7 +1590,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -1674,7 +1674,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -1760,7 +1760,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -1786,7 +1786,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -1862,7 +1862,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -1878,7 +1878,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Comment_1"
+                  "$ref": "#/components/schemas/Comment"
                 }
               }
             }
@@ -1948,7 +1948,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -1974,7 +1974,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -2050,7 +2050,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -2066,7 +2066,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Comment_2"
+                  "$ref": "#/components/schemas/Comment"
                 }
               }
             }
@@ -2143,7 +2143,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -2207,7 +2207,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -2301,7 +2301,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -2380,7 +2380,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -2464,7 +2464,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -2567,7 +2567,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -2635,7 +2635,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -2709,7 +2709,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -2800,7 +2800,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -2955,7 +2955,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Chat_1"
+                  "$ref": "#/components/schemas/Chat"
                 }
               }
             }
@@ -3022,7 +3022,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -3158,7 +3158,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -3241,7 +3241,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -3334,7 +3334,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -3343,7 +3343,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -3426,7 +3426,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -3502,7 +3502,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -3595,7 +3595,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -3604,7 +3604,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -3697,7 +3697,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -3738,7 +3738,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -3824,7 +3824,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -3840,7 +3840,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Message_1"
+                  "$ref": "#/components/schemas/Message"
                 }
               }
             }
@@ -3910,7 +3910,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -3919,7 +3919,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4005,7 +4005,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4074,7 +4074,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4160,7 +4160,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -4169,7 +4169,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4253,7 +4253,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -4262,7 +4262,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4331,7 +4331,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -4340,7 +4340,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4424,7 +4424,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -4433,7 +4433,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4519,7 +4519,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4596,7 +4596,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4682,7 +4682,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -4691,7 +4691,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4767,7 +4767,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4846,7 +4846,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -4855,7 +4855,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -4929,7 +4929,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -4938,7 +4938,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -5014,7 +5014,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -5105,7 +5105,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -5123,7 +5123,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/ChatInvite_1"
+                    "$ref": "#/components/schemas/ChatInvite"
                   }
                 }
               }
@@ -5184,7 +5184,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           },
@@ -5193,7 +5193,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -5344,7 +5344,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -5437,7 +5437,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -5530,7 +5530,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -5623,7 +5623,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -5716,7 +5716,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -5790,7 +5790,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Attachment_1"
+                  "$ref": "#/components/schemas/Attachment"
                 }
               }
             }
@@ -5887,7 +5887,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -6026,7 +6026,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -6165,7 +6165,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GameLobby_1"
+                  "$ref": "#/components/schemas/GameLobby"
                 }
               }
             }
@@ -6260,7 +6260,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -6326,7 +6326,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -6399,7 +6399,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -6458,7 +6458,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -6541,7 +6541,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -6634,7 +6634,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -6727,7 +6727,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -6810,7 +6810,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -6906,7 +6906,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -6970,7 +6970,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -6986,7 +6986,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GameChatMessage_1"
+                  "$ref": "#/components/schemas/GameChatMessage"
                 }
               }
             }
@@ -7109,7 +7109,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -7202,7 +7202,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -7295,7 +7295,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -7388,7 +7388,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -7568,7 +7568,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+                  "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
                 },
                 {
                   "type": "null"
@@ -7728,7 +7728,7 @@
             "in": "path",
             "schema": {
               "type": "string",
-              "pattern": "^[+-]?\\d*\\.?\\d+(?:[Ee][+-]?\\d+)?$"
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": true
           }
@@ -9139,7 +9139,7 @@
         ],
         "additionalProperties": false
       },
-      "GameChatMessage_1": {
+      "GameChatMessage": {
         "type": "object",
         "properties": {
           "id": {
@@ -9191,34 +9191,6 @@
         },
         "required": [
           "messages"
-        ],
-        "additionalProperties": false
-      },
-      "GameChatMessage": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "lobbyId": {
-            "type": "number"
-          },
-          "user": {
-            "$ref": "#/components/schemas/User"
-          },
-          "text": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "id",
-          "lobbyId",
-          "user",
-          "text",
-          "createdAt"
         ],
         "additionalProperties": false
       },
@@ -9330,116 +9302,6 @@
         "required": [
           "typed",
           "errors"
-        ],
-        "additionalProperties": false
-      },
-      "GameLobby_1": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "game": {
-            "$ref": "#/components/schemas/GameId"
-          },
-          "hostId": {
-            "type": "number"
-          },
-          "phase": {
-            "$ref": "#/components/schemas/GameLobbyPhase"
-          },
-          "round": {
-            "type": "number"
-          },
-          "passage": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "startsAt": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "endsAt": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "serverNow": {
-            "type": "number"
-          },
-          "minPlayers": {
-            "type": "number"
-          },
-          "maxPlayers": {
-            "type": "number"
-          },
-          "players": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/GameLobbyPlayer"
-            }
-          },
-          "drawing": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DrawingGame"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reflex": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReflexGame"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "chatOpen": {
-            "type": "boolean"
-          },
-          "createdAt": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "id",
-          "game",
-          "hostId",
-          "phase",
-          "round",
-          "passage",
-          "startsAt",
-          "endsAt",
-          "serverNow",
-          "minPlayers",
-          "maxPlayers",
-          "players",
-          "drawing",
-          "reflex",
-          "chatOpen",
-          "createdAt"
         ],
         "additionalProperties": false
       },
@@ -9779,7 +9641,7 @@
         ],
         "additionalProperties": false
       },
-      "Attachment_1": {
+      "Attachment": {
         "type": "object",
         "properties": {
           "id": {
@@ -10581,157 +10443,6 @@
           "attachment"
         ]
       },
-      "Attachment": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "filename": {
-            "type": "string"
-          },
-          "mimeType": {
-            "type": "string"
-          },
-          "size": {
-            "type": "number"
-          },
-          "url": {
-            "type": "string"
-          },
-          "width": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "height": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "blurhash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "waveform": {
-            "anyOf": [
-              {
-                "type": "array",
-                "items": {
-                  "type": "number"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "durationMs": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "filename",
-          "mimeType",
-          "size",
-          "url",
-          "width",
-          "height",
-          "blurhash",
-          "waveform",
-          "durationMs"
-        ],
-        "additionalProperties": false
-      },
-      "ChatInvite_1": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "chatId": {
-            "type": "number"
-          },
-          "code": {
-            "type": "string"
-          },
-          "createdBy": {
-            "type": "number"
-          },
-          "createdAt": {
-            "type": "number"
-          },
-          "expiresAt": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "maxUses": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "useCount": {
-            "type": "number"
-          },
-          "revokedAt": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "chatId",
-          "code",
-          "createdBy",
-          "createdAt",
-          "expiresAt",
-          "maxUses",
-          "useCount",
-          "revokedAt"
-        ],
-        "additionalProperties": false
-      },
       "ChatInvite": {
         "type": "object",
         "properties": {
@@ -11019,97 +10730,6 @@
         ],
         "additionalProperties": false
       },
-      "Message_1": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "chatId": {
-            "type": "number"
-          },
-          "senderId": {
-            "type": "number"
-          },
-          "contentType": {
-            "$ref": "#/components/schemas/MessageContentType"
-          },
-          "content": {
-            "type": "string"
-          },
-          "attachment": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Attachment"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "parentMessage": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ParentMessagePreview"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "createdAt": {
-            "type": "number"
-          },
-          "updatedAt": {
-            "type": "number"
-          },
-          "readByUserIds": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            }
-          },
-          "reactions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ReactionSummary"
-            }
-          },
-          "pinned": {
-            "type": "boolean"
-          },
-          "starred": {
-            "type": "boolean"
-          },
-          "forwardedFrom": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ForwardedFrom"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "chatId",
-          "senderId",
-          "contentType",
-          "content",
-          "attachment",
-          "parentMessage",
-          "createdAt",
-          "updatedAt",
-          "readByUserIds",
-          "reactions",
-          "pinned",
-          "starred",
-          "forwardedFrom"
-        ],
-        "additionalProperties": false
-      },
       "CreateMessageBody": {
         "type": "object",
         "properties": {
@@ -11307,89 +10927,6 @@
         ],
         "additionalProperties": false
       },
-      "Chat_1": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "type": {
-            "$ref": "#/components/schemas/ChatType"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "createdBy": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "createdAt": {
-            "type": "number"
-          },
-          "updatedAt": {
-            "type": "number"
-          },
-          "version": {
-            "type": "number"
-          },
-          "participants": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ChatParticipant"
-            }
-          },
-          "lastMessage": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Message"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "unreadCount": {
-            "type": "number"
-          },
-          "avatarVariants": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AvatarVariants"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "type",
-          "title",
-          "createdBy",
-          "createdAt",
-          "updatedAt",
-          "version",
-          "participants",
-          "lastMessage",
-          "unreadCount",
-          "avatarVariants"
-        ],
-        "additionalProperties": false
-      },
       "CreateGroupChatBody": {
         "type": "object",
         "properties": {
@@ -11544,60 +11081,6 @@
         ],
         "additionalProperties": false
       },
-      "Comment_2": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "postId": {
-            "type": "number"
-          },
-          "parentCommentId": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "authorId": {
-            "type": "number"
-          },
-          "content": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "number"
-          },
-          "updatedAt": {
-            "type": "number"
-          },
-          "reactions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ReactionSummary"
-            }
-          },
-          "replyCount": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "id",
-          "postId",
-          "parentCommentId",
-          "authorId",
-          "content",
-          "createdAt",
-          "updatedAt",
-          "reactions",
-          "replyCount"
-        ],
-        "additionalProperties": false
-      },
       "CreateCommentBody": {
         "type": "object",
         "properties": {
@@ -11640,60 +11123,6 @@
           "comments",
           "limit",
           "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "Comment_1": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "postId": {
-            "type": "number"
-          },
-          "parentCommentId": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "authorId": {
-            "type": "number"
-          },
-          "content": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "number"
-          },
-          "updatedAt": {
-            "type": "number"
-          },
-          "reactions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ReactionSummary"
-            }
-          },
-          "replyCount": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "id",
-          "postId",
-          "parentCommentId",
-          "authorId",
-          "content",
-          "createdAt",
-          "updatedAt",
-          "reactions",
-          "replyCount"
         ],
         "additionalProperties": false
       },
@@ -11785,60 +11214,6 @@
         "required": [
           "contentType",
           "content"
-        ],
-        "additionalProperties": false
-      },
-      "Post_1": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "authorId": {
-            "type": "number"
-          },
-          "contentType": {
-            "$ref": "#/components/schemas/PostContentType"
-          },
-          "content": {
-            "type": "string"
-          },
-          "attachment": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Attachment"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "createdAt": {
-            "type": "number"
-          },
-          "updatedAt": {
-            "type": "number"
-          },
-          "reactions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ReactionSummary"
-            }
-          },
-          "commentCount": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "id",
-          "authorId",
-          "contentType",
-          "content",
-          "attachment",
-          "createdAt",
-          "updatedAt",
-          "reactions",
-          "commentCount"
         ],
         "additionalProperties": false
       },
@@ -12198,17 +11573,13 @@
           "bio": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-                    "minLength": 1,
-                    "maxLength": 160
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "type": "string",
+                "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              {
+                "type": "null"
               },
               {
                 "type": "null"
@@ -12351,92 +11722,6 @@
         "required": [
           "_tag",
           "message"
-        ],
-        "additionalProperties": false
-      },
-      "User_1": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "username": {
-            "type": "string"
-          },
-          "displayName": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "avatarUrl": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "avatarVariants": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AvatarVariants"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "role": {
-            "$ref": "#/components/schemas/UserRole"
-          },
-          "statusText": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "statusEmoji": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "statusExpiresAt": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "username",
-          "displayName",
-          "avatarUrl",
-          "avatarVariants",
-          "role",
-          "statusText",
-          "statusEmoji",
-          "statusExpiresAt"
         ],
         "additionalProperties": false
       },
