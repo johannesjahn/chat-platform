@@ -472,6 +472,136 @@ test("deleteChatAvatar clears an uploaded group avatar and is forbidden for a pl
     }),
   ));
 
+// Uploads a group avatar for `chatId` and returns its three proxy URLs,
+// checking they're served before the test goes on to delete the chat.
+const uploadServedChatAvatar = (
+  handler: (request: Request) => Promise<Response>,
+  token: string,
+  chatId: number,
+) =>
+  Effect.gen(function* () {
+    const size = MIN_AVATAR_SOURCE_PX;
+    const png = yield* Effect.promise(() => makePng(size, size));
+    const result = yield* Effect.promise(() =>
+      uploadChatAvatarFile(
+        handler,
+        token,
+        chatId,
+        { filename: "avatar.png", contentType: "image/png", data: png },
+        { x: 0, y: 0, size },
+      ),
+    );
+    expect(result.status).toBe(200);
+    const urls = Object.values(
+      (result.body as { avatarVariants: Record<string, string> })
+        .avatarVariants,
+    );
+    for (const url of urls) {
+      const response = yield* Effect.promise(() =>
+        handler(new Request(`http://localhost${url}`)),
+      );
+      expect(response.status).toBe(200);
+    }
+    return urls;
+  });
+
+const expectAvatarsGone = (
+  handler: (request: Request) => Promise<Response>,
+  urls: ReadonlyArray<string>,
+) =>
+  Effect.gen(function* () {
+    for (const url of urls) {
+      const response = yield* Effect.promise(() =>
+        handler(new Request(`http://localhost${url}`)),
+      );
+      expect(response.status).toBe(404);
+    }
+  });
+
+test("deleteChat removes the group avatar's objects from storage (issue #652)", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const owner = yield* registerAndLogin("groupavatarer9", "pw-testpass");
+      const member = yield* registerAndLogin("groupavatarer9b", "pw-testpass");
+      const ownerClient = yield* makeAuthedClient(owner.accessToken);
+      const chat = yield* ownerClient.chats.createGroupChat({
+        payload: { title: "Group 9", participantIds: [member.user.id] },
+      });
+      const urls = yield* uploadServedChatAvatar(
+        handler,
+        owner.accessToken,
+        chat.id,
+      );
+
+      yield* ownerClient.chats.deleteChat({ params: { id: chat.id } });
+
+      yield* expectAvatarsGone(handler, urls);
+    }),
+  ));
+
+test("the last member leaving a group removes its avatar's objects from storage (issue #652)", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const owner = yield* registerAndLogin("groupavatarer10", "pw-testpass");
+      const member = yield* registerAndLogin("groupavatarer10b", "pw-testpass");
+      const ownerClient = yield* makeAuthedClient(owner.accessToken);
+      const memberClient = yield* makeAuthedClient(member.accessToken);
+      const chat = yield* ownerClient.chats.createGroupChat({
+        payload: { title: "Group 10", participantIds: [member.user.id] },
+      });
+      const urls = yield* uploadServedChatAvatar(
+        handler,
+        owner.accessToken,
+        chat.id,
+      );
+
+      // A departure that leaves someone behind keeps the avatar...
+      yield* ownerClient.chats.leaveChat({ params: { id: chat.id } });
+      for (const url of urls) {
+        const response = yield* Effect.promise(() =>
+          handler(new Request(`http://localhost${url}`)),
+        );
+        expect(response.status).toBe(200);
+      }
+
+      // ...and the last one out takes it with the chat.
+      yield* memberClient.chats.leaveChat({ params: { id: chat.id } });
+      yield* expectAvatarsGone(handler, urls);
+    }),
+  ));
+
+test("deleteAccount removes the account's avatar objects from storage", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "avatarer11",
+        "pw-testpass",
+      );
+      const authed = yield* makeAuthedClient(accessToken);
+      const size = MIN_AVATAR_SOURCE_PX;
+      const png = yield* Effect.promise(() => makePng(size, size));
+      const result = yield* Effect.promise(() =>
+        uploadAvatarFile(
+          handler,
+          accessToken,
+          { filename: "avatar.png", contentType: "image/png", data: png },
+          { x: 0, y: 0, size },
+        ),
+      );
+      expect(result.status).toBe(200);
+      const urls = Object.values(
+        (result.body as { avatarVariants: Record<string, string> })
+          .avatarVariants,
+      );
+
+      yield* authed.users.deleteAccount({
+        payload: { password: "pw-testpass" },
+      });
+
+      yield* expectAvatarsGone(handler, urls);
+    }),
+  ));
+
 test("updateProfile clears an uploaded avatar back to an external avatarUrl", () =>
   run(({ handler }) =>
     Effect.gen(function* () {

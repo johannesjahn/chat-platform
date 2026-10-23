@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { Effect, Schema } from "effect";
@@ -13,6 +13,10 @@ import {
   MAX_ATTACHMENT_SIZE_BYTES,
 } from "./Api.ts";
 import { ATTACHMENT_QUOTA_MAX_BYTES } from "./AttachmentsHandler.ts";
+import {
+  AttachmentStorage,
+  InMemoryAttachmentStorageLive,
+} from "./AttachmentStorage.ts";
 import { Db } from "./Db.ts";
 import { attachments, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
@@ -911,5 +915,111 @@ test("deleteAttachment 404s for a nonexistent attachment id", () =>
         .deleteAttachment({ params: { id: 999999 } })
         .pipe(Effect.flip);
       expect(result._tag).toBe("NotFound");
+    }),
+  ));
+
+// Account deletion cascades away the account's `attachments` rows, so the
+// objects behind them have to be swept explicitly — nothing walks the bucket
+// for keys with no row (issue #652). Uploads two attachments and returns
+// their ids and storage keys.
+const uploadTwoAttachments = (
+  handler: (request: Request) => Promise<Response>,
+  accessToken: string,
+) =>
+  Effect.gen(function* () {
+    const data = yield* Effect.promise(() => makePng(10, 10));
+    const ids: number[] = [];
+    for (const filename of ["sent.png", "unused.png"]) {
+      const upload = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename,
+          contentType: "image/png",
+          data,
+        }),
+      );
+      expect(upload.status).toBe(201);
+      ids.push((upload.body as { id: number }).id);
+    }
+    const db = yield* Db;
+    const rows = yield* Effect.promise(() =>
+      db
+        .select({ storageKey: attachments.storageKey })
+        .from(attachments)
+        .where(inArray(attachments.id, ids)),
+    );
+    expect(rows.length).toBe(2);
+    return { ids, storageKeys: rows.map((row) => row.storageKey) };
+  });
+
+const storedObjects = (storageKeys: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const storage = yield* Effect.service(AttachmentStorage).pipe(
+      Effect.provide(InMemoryAttachmentStorageLive),
+    );
+    const found: string[] = [];
+    for (const key of storageKeys) {
+      if ((yield* storage.get(key).pipe(Effect.orDie)) !== null)
+        found.push(key);
+    }
+    return found;
+  });
+
+test("deleteAccount removes the account's attachment objects from storage (issue #652)", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("erasure1", "pw-testpass");
+      const bob = yield* registerAndLogin("erasure1b", "pw-testpass");
+      const { ids, storageKeys } = yield* uploadTwoAttachments(
+        handler,
+        alice.accessToken,
+      );
+      const aliceClient = yield* makeAuthedClient(alice.accessToken);
+      const chat = yield* aliceClient.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      yield* aliceClient.chats.createMessage({
+        params: { id: chat.id },
+        payload: {
+          contentType: "attachment",
+          content: "sent.png",
+          attachmentId: ids[0],
+        },
+      });
+      expect(yield* storedObjects(storageKeys)).toEqual(storageKeys);
+
+      yield* aliceClient.users.deleteAccount({
+        payload: { password: "pw-testpass" },
+      });
+
+      expect(yield* storedObjects(storageKeys)).toEqual([]);
+    }),
+  ));
+
+test("an admin's deleteUser removes the account's attachment objects from storage (issue #652)", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const target = yield* registerAndLogin("erasure2", "pw-testpass");
+      const admin = yield* registerAndLogin("erasure2admin", "pw-testpass");
+      const db = yield* Db;
+      yield* Effect.promise(() =>
+        db
+          .update(users)
+          .set({ role: "admin" })
+          .where(eq(users.id, admin.user.id)),
+      );
+      // Log in again so the token carries the admin role.
+      const { accessToken } = yield* (yield* makeClient).users.login({
+        payload: { username: "erasure2admin", password: "pw-testpass" },
+      });
+      const { storageKeys } = yield* uploadTwoAttachments(
+        handler,
+        target.accessToken,
+      );
+      expect(yield* storedObjects(storageKeys)).toEqual(storageKeys);
+
+      const adminClient = yield* makeAuthedClient(accessToken);
+      yield* adminClient.users.deleteUser({ params: { id: target.user.id } });
+
+      expect(yield* storedObjects(storageKeys)).toEqual([]);
     }),
   ));
