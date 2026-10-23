@@ -134,12 +134,18 @@ function realtimeSocketUrl(ticket: string): string {
 export function useRealtimeSocket(enabled: boolean): void {
   const queryClient = useQueryClient();
   const session = useSession();
-  const accessToken = enabled ? session?.accessToken : undefined;
-  // Only changes along with the session (and so the token) itself.
-  const meId = session?.user.id;
+  // Keyed on who is signed in, never on the token itself (issue #655): the
+  // access token rotates on every refresh (~15 min, and in every tab at once,
+  // since the session is shared through localStorage), but an open socket
+  // doesn't need it — it authenticated once, with a ticket, and each ticket
+  // is minted through `fetchClient`, which attaches whatever token is current.
+  // Reconnecting on rotation only cost a full refetch, a presence
+  // offline/online blip for everyone else, and whatever was published in
+  // between. Logging out or switching account still changes this.
+  const meId = enabled ? session?.user.id : undefined;
 
   useEffect(() => {
-    if (!accessToken) return;
+    if (meId === undefined) return;
 
     let socket: WebSocket | null = null;
     let pingTimer: ReturnType<typeof setInterval> | undefined;
@@ -148,10 +154,13 @@ export function useRealtimeSocket(enabled: boolean): void {
     let stopped = false;
 
     function scheduleReconnect() {
+      // Wait a random half-to-all of the backoff, so a deploy (which drops every
+      // client at once) doesn't bring them all back in lockstep.
+      const delay = reconnectDelay / 2 + Math.random() * (reconnectDelay / 2);
       reconnectTimer = setTimeout(() => {
         reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
         void connect();
-      }, reconnectDelay);
+      }, delay);
     }
 
     async function connect() {
@@ -429,5 +438,5 @@ export function useRealtimeSocket(enabled: boolean): void {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [accessToken, meId, queryClient]);
+  }, [meId, queryClient]);
 }
