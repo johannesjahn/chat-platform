@@ -57,7 +57,13 @@ import { RealtimeConnections } from "./Realtime.ts";
 import { clientIp } from "./ClientIp.ts";
 import { RateLimiter, type RateLimitResult } from "./RateLimiter.ts";
 import { containsPattern } from "./search.ts";
-import { refreshTokens, userBlocks, users, posts } from "./db/schema.ts";
+import {
+  attachments,
+  refreshTokens,
+  userBlocks,
+  users,
+  posts,
+} from "./db/schema.ts";
 
 // Sensible defaults for auth-endpoint rate limiting (see issue #25). Login is
 // capped per source IP (every attempt counts) and per targeted account — but
@@ -202,6 +208,46 @@ export const deleteAvatarObjects = (
     (token) => storage.delete(avatarStorageKey(token)).pipe(Effect.ignore),
     { discard: true },
   );
+
+// How many attachment objects `deleteUserAndObjects` removes from the bucket
+// at once — an account can have thousands, and one at a time would hold the
+// delete request open for as many S3 round trips.
+const ACCOUNT_OBJECT_DELETE_CONCURRENCY = 8;
+
+// Deletes a `users` row — whose cascading/`set null` FKs (db/schema.ts) take
+// care of everything else the account owns in the database — and then,
+// best-effort, the storage objects that cascade would otherwise orphan for
+// good: the avatar variants (`avatarTokens`, read by the caller) and every
+// attachment the account uploaded (issue #652). Neither is reachable by
+// AttachmentCleanup.ts's sweep, which walks `attachments` rows, so once the
+// rows are gone nothing else would ever find the objects. The attachment rows
+// are deleted explicitly, in the same transaction as the user, so the keys
+// swept are exactly the rows removed.
+const deleteUserAndObjects = (
+  db: DrizzleDb,
+  storage: AttachmentStorage["Service"],
+  userId: number,
+  avatarTokens: ReadonlyArray<string | null>,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const storageKeys = yield* Effect.tryPromise(() =>
+      db.transaction(async (tx) => {
+        const removed = await tx
+          .delete(attachments)
+          .where(eq(attachments.uploaderId, userId))
+          .returning({ storageKey: attachments.storageKey });
+        await tx.delete(users).where(eq(users.id, userId));
+        return removed.map((row) => row.storageKey);
+      }),
+    ).pipe(Effect.orDie);
+
+    yield* deleteAvatarObjects(storage, avatarTokens);
+    yield* Effect.forEach(
+      storageKeys,
+      (key) => storage.delete(key).pipe(Effect.ignore),
+      { discard: true, concurrency: ACCOUNT_OBJECT_DELETE_CONCURRENCY },
+    );
+  });
 
 // A status past its `statusExpiresAt` is treated as fully unset wherever a
 // user is read, rather than needing a background sweep to null the columns
@@ -1159,10 +1205,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             DELETE_ACCOUNT_WINDOW_SECONDS,
           );
 
-          // Also pull the avatar tokens: the row's FKs cascade to the DB, but
-          // nothing else knows to remove the account's avatar objects from the
-          // bucket (they aren't `attachments` rows, so the orphan sweep in
-          // AttachmentCleanup.ts never sees them).
+          // Also pull the avatar tokens, for `deleteUserAndObjects` to sweep
+          // from the bucket once the row is gone.
           const rows = yield* Effect.tryPromise(() =>
             db
               .select({
@@ -1184,15 +1228,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               new InvalidCredentials({ message: "Incorrect password" }),
             );
 
-          // The `users` row's cascading/`set null` FKs (db/schema.ts) take
-          // care of everything else this account owns — refresh tokens,
-          // posts, comments, likes, chat participation, sent messages, read
-          // receipts.
-          yield* Effect.tryPromise(() =>
-            db.delete(users).where(eq(users.id, currentUser.id)),
-          ).pipe(Effect.orDie);
-
-          yield* deleteAvatarObjects(storage, [
+          yield* deleteUserAndObjects(db, storage, currentUser.id, [
             dbUser.avatarSmallKey,
             dbUser.avatarMediumKey,
             dbUser.avatarLargeKey,
@@ -1275,9 +1311,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          // Pull the avatar tokens first (an account's avatar objects aren't
-          // `attachments` rows, so nothing else sweeps them once the row's FKs
-          // cascade) — same reasoning as `deleteAccount` above.
+          // Pull the avatar tokens first, for `deleteUserAndObjects` to sweep
+          // — same as `deleteAccount` above.
           const rows = yield* Effect.tryPromise(() =>
             db
               .select({
@@ -1295,14 +1330,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               new NotFound({ message: `User ${id} not found` }),
             );
 
-          // The `users` row's cascading/`set null` FKs (db/schema.ts) take
-          // care of everything the account owns — refresh tokens, posts,
-          // comments, likes, chat participation, sent messages, read receipts.
-          yield* Effect.tryPromise(() =>
-            db.delete(users).where(eq(users.id, id)),
-          ).pipe(Effect.orDie);
-
-          yield* deleteAvatarObjects(storage, [
+          yield* deleteUserAndObjects(db, storage, id, [
             dbUser.avatarSmallKey,
             dbUser.avatarMediumKey,
             dbUser.avatarLargeKey,

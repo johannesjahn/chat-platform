@@ -986,6 +986,36 @@ const requireChatOwner = (
       );
   });
 
+// Deletes a chat row (its cascading FKs, see db/schema.ts, take care of the
+// rest of the database) and then, best-effort, its group avatar's objects —
+// nothing else would ever sweep them once the row stops pointing at them
+// (issue #652), and `GET /avatars/:token` serves them publicly. The tokens
+// come from the deleted row itself, so an avatar swapped in after the caller
+// read the chat is still the one removed. Takes `db` so it runs inside a
+// caller's transaction; the returned effect sweeps the objects, to run once
+// that has committed.
+const deleteChatRow = async (
+  db: Pick<DrizzleDb, "delete">,
+  storage: AttachmentStorage["Service"],
+  chatId: number,
+): Promise<Effect.Effect<void>> => {
+  const deleted = await db.delete(chats).where(eq(chats.id, chatId)).returning({
+    avatarSmallKey: chats.avatarSmallKey,
+    avatarMediumKey: chats.avatarMediumKey,
+    avatarLargeKey: chats.avatarLargeKey,
+  });
+  return Effect.forEach(
+    deleted,
+    (row) =>
+      deleteAvatarObjects(storage, [
+        row.avatarSmallKey,
+        row.avatarMediumKey,
+        row.avatarLargeKey,
+      ]),
+    { discard: true },
+  );
+};
+
 // Shared by `leaveChat` and `removeParticipant`: removes `departingUserId`
 // from `chatRow`, then either deletes the chat outright (if that emptied it
 // — `chats`'s cascading FKs, see db/schema.ts, take care of the rest) or, if
@@ -996,6 +1026,7 @@ const requireChatOwner = (
 // half-updated state.
 const departParticipant = (
   db: DrizzleDb,
+  storage: AttachmentStorage["Service"],
   chatRow: DbChat,
   departingUserId: number,
 ): Effect.Effect<
@@ -1027,8 +1058,8 @@ const departParticipant = (
           .where(eq(chatParticipants.chatId, chatRow.id));
 
         if (remaining.length === 0) {
-          await tx.delete(chats).where(eq(chats.id, chatRow.id));
-          return { deleted: true as const };
+          const sweepAvatar = await deleteChatRow(tx, storage, chatRow.id);
+          return { deleted: true as const, sweepAvatar };
         }
 
         if (chatRow.createdBy === departingUserId) {
@@ -1064,7 +1095,10 @@ const departParticipant = (
       }),
     ).pipe(Effect.orDie);
 
-    if (result.deleted) return result;
+    if (result.deleted) {
+      yield* result.sweepAvatar;
+      return { deleted: true as const };
+    }
     const participants = yield* getParticipants(db, chatRow.id);
     return { deleted: false as const, chat: result.chat, participants };
   });
@@ -1782,7 +1816,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          const result = yield* departParticipant(db, chatRow, userId);
+          const result = yield* departParticipant(db, storage, chatRow, userId);
           if (result.deleted)
             return yield* Effect.die(
               new Error("Chat unexpectedly emptied by removeParticipant"),
@@ -1813,7 +1847,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             );
           yield* requireParticipant(db, id, currentUser.id);
 
-          const result = yield* departParticipant(db, chatRow, currentUser.id);
+          const result = yield* departParticipant(
+            db,
+            storage,
+            chatRow,
+            currentUser.id,
+          );
           if (result.deleted) {
             yield* connections.notifyUsers([currentUser.id], {
               type: "chat_deleted",
@@ -1841,14 +1880,15 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           yield* requireChatManager(db, currentUser, chatRow);
 
           const participants = yield* getParticipants(db, id);
-          yield* Effect.tryPromise(() =>
-            db.delete(chats).where(eq(chats.id, id)),
+          const sweepAvatar = yield* Effect.tryPromise(() =>
+            deleteChatRow(db, storage, id),
           ).pipe(Effect.orDie);
 
           yield* connections.notifyUsers(
             participants.map((p) => p.userId),
             { type: "chat_deleted", chatId: id },
           );
+          yield* sweepAvatar;
         }),
       )
       .handle("transferOwnership", ({ params: { id }, payload }) =>
