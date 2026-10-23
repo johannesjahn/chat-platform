@@ -34,19 +34,38 @@ export class RateLimiter extends Context.Service<
   }
 >()("RateLimiter") {}
 
-// Single-process fixed-window counters. Like InMemoryPubSubLive (see
-// PubSub.ts), this is fully correct only when there's a single app instance —
-// each instance would otherwise enforce its own separate limit. Buckets are
-// reset lazily the first time they're touched after expiring (rather than
-// swept on a timer), so memory use is bounded by the number of distinct keys
-// seen within the current window, not by process uptime.
-export const InMemoryRateLimiterLive = Layer.sync(RateLimiter, () => {
-  const buckets = new Map<string, { count: number; resetAt: number }>();
+// How often the in-memory stores below drop entries that have expired.
+// Sweeping is opportunistic — the first call after this much time has passed
+// runs it — so there's no timer to own or clean up, and an idle process
+// simply keeps what it held until the next call.
+export const IN_MEMORY_SWEEP_INTERVAL_MS = 60_000;
 
-  return {
+// Single-process fixed-window counters, plus the bucket count (for tests).
+// Like InMemoryPubSubLive (see PubSub.ts), this is fully correct only when
+// there's a single app instance — each instance would otherwise enforce its
+// own separate limit. An expired bucket is replaced when its key is touched
+// again, and every IN_MEMORY_SWEEP_INTERVAL_MS a sweep deletes the expired
+// buckets nobody touched (issue #653: without it every IP and every typed
+// username stayed in the map for the life of the process). So memory is
+// bounded by the distinct keys seen within the longest window plus one sweep
+// interval, not by process uptime.
+export const makeInMemoryRateLimiter = () => {
+  const buckets = new Map<string, { count: number; resetAt: number }>();
+  let nextSweepAt = Date.now() + IN_MEMORY_SWEEP_INTERVAL_MS;
+
+  const sweepIfDue = (now: number) => {
+    if (now < nextSweepAt) return;
+    nextSweepAt = now + IN_MEMORY_SWEEP_INTERVAL_MS;
+    for (const [key, bucket] of buckets) {
+      if (bucket.resetAt <= now) buckets.delete(key);
+    }
+  };
+
+  const service: RateLimiter["Service"] = {
     consume: (key, limit, windowSeconds) =>
       Effect.sync(() => {
         const now = Date.now();
+        sweepIfDue(now);
         const existing = buckets.get(key);
         const bucket =
           existing && existing.resetAt > now
@@ -74,16 +93,33 @@ export const InMemoryRateLimiterLive = Layer.sync(RateLimiter, () => {
         buckets.delete(key);
       }),
   };
-});
 
-// Redis-backed fixed-window counters via INCR + EXPIRE, so every
-// horizontally-scaled app instance enforces the same limit (mirrors
-// RedisPubSubLive in PubSub.ts). INCR on a fresh key both creates it and
-// returns 1, so only that first call needs to also set the TTL. There's a
-// narrow race between the INCR and the following EXPIRE (a crash in between
-// would leave a key that never expires) — acceptable here, since the only
-// consequence is a rate limit occasionally staying stricter than intended,
-// not a correctness issue.
+  return { service, size: () => buckets.size };
+};
+
+export const InMemoryRateLimiterLive = Layer.sync(
+  RateLimiter,
+  () => makeInMemoryRateLimiter().service,
+);
+
+// Redis-backed fixed-window counters, so every horizontally-scaled app
+// instance enforces the same limit (mirrors RedisPubSubLive in PubSub.ts).
+// One atomic script per call: INCR (creating the key at 1 if missing), then
+// set the window's TTL whenever the key has none. Checking "no TTL" rather
+// than "count is 1" is what makes it self-healing — a key left without an
+// expiry (by an older INCR-then-EXPIRE that never finished its EXPIRE) gets
+// one on its next consume instead of staying over its limit forever (issue
+// #653). Returns `{count, ttl}`.
+const CONSUME_SCRIPT = `
+local count = redis.call("INCR", KEYS[1])
+local ttl = redis.call("TTL", KEYS[1])
+if ttl < 0 then
+  redis.call("EXPIRE", KEYS[1], ARGV[1])
+  ttl = tonumber(ARGV[1])
+end
+return {count, ttl}
+`;
+
 // Atomic floor-at-zero decrement for `refund`. DECR keeps the key's TTL, and
 // a missing key is left alone rather than recreated (which DECR on its own
 // would do, as -1 with no expiry).
@@ -101,12 +137,12 @@ export const RedisRateLimiterLive = Layer.sync(RateLimiter, () => {
   return {
     consume: (key, limit, windowSeconds) =>
       Effect.promise(async () => {
-        const redisKey = `ratelimit:${key}`;
-        const count = await client.incr(redisKey);
-        if (count === 1) {
-          await client.expire(redisKey, windowSeconds);
-        }
-        const ttl = await client.ttl(redisKey);
+        const [count, ttl] = (await client.send("EVAL", [
+          CONSUME_SCRIPT,
+          "1",
+          `ratelimit:${key}`,
+          String(windowSeconds),
+        ])) as [number, number];
         return {
           allowed: count <= limit,
           retryAfterSeconds: ttl > 0 ? ttl : windowSeconds,

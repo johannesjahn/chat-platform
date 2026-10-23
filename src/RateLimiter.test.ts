@@ -1,8 +1,10 @@
 import { RedisClient } from "bun";
-import { expect, test } from "bun:test";
+import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { Effect, type Layer } from "effect";
 import {
+  IN_MEMORY_SWEEP_INTERVAL_MS,
   InMemoryRateLimiterLive,
+  makeInMemoryRateLimiter,
   RateLimiter,
   RedisRateLimiterLive,
 } from "./RateLimiter.ts";
@@ -122,6 +124,74 @@ for (const { name, layer, enabled } of implementations) {
         ),
       );
       expect(await admin.exists(`ratelimit:${missing}`)).toBe(false);
+    } finally {
+      admin.close();
+    }
+  },
+);
+
+afterEach(() => {
+  setSystemTime();
+});
+
+test("[in-memory] expired buckets are swept, so a stream of distinct keys stays bounded", () => {
+  setSystemTime(new Date("2026-01-01T00:00:00Z"));
+  const { service: limiter, size } = makeInMemoryRateLimiter();
+  const windowSeconds = 60;
+  const perTick = 100;
+  let peak = 0;
+  // Ten sweep intervals of never-repeating keys (like `global:<ip>` from
+  // ever-new IPs): without eviction the map would end up holding all of them.
+  for (let tick = 0; tick < 10; tick++) {
+    for (let i = 0; i < perTick; i++) {
+      Effect.runSync(limiter.consume(`ip:${tick}:${i}`, 5, windowSeconds));
+    }
+    peak = Math.max(peak, size());
+    setSystemTime(new Date(Date.now() + IN_MEMORY_SWEEP_INTERVAL_MS));
+  }
+  // Only keys from within the window plus one sweep interval survive.
+  const bound =
+    perTick *
+    (Math.ceil((windowSeconds * 1000) / IN_MEMORY_SWEEP_INTERVAL_MS) + 1);
+  expect(peak).toBeLessThanOrEqual(bound);
+  expect(peak).toBeLessThan(10 * perTick);
+});
+
+test("[in-memory] the sweep keeps buckets whose window is still open", () => {
+  setSystemTime(new Date("2026-01-01T00:00:00Z"));
+  const { service: limiter } = makeInMemoryRateLimiter();
+  Effect.runSync(limiter.consume("long", 1, 3600));
+  setSystemTime(new Date(Date.now() + IN_MEMORY_SWEEP_INTERVAL_MS + 1));
+  // This call runs the sweep, which must leave "long" (and its count) alone.
+  Effect.runSync(limiter.consume("other", 1, 60));
+  expect(Effect.runSync(limiter.consume("long", 1, 3600)).allowed).toBe(false);
+});
+
+(redisConfigured ? test : test.skip)(
+  "[redis] consume gives a key that lost its TTL a fresh one",
+  async () => {
+    const admin = new RedisClient(process.env.REDIS_URL);
+    try {
+      const k = `test:${crypto.randomUUID()}`;
+      // A bucket stuck over its limit with no expiry — what an INCR whose
+      // following EXPIRE never landed used to leave behind.
+      await admin.set(`ratelimit:${k}`, "50");
+      expect(await admin.ttl(`ratelimit:${k}`)).toBe(-1);
+      const result = await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const limiter = yield* RateLimiter;
+            return yield* limiter.consume(k, 5, 60);
+          }),
+          RedisRateLimiterLive,
+        ),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.retryAfterSeconds).toBeGreaterThan(0);
+      expect(result.retryAfterSeconds).toBeLessThanOrEqual(60);
+      const ttl = await admin.ttl(`ratelimit:${k}`);
+      expect(ttl).toBeGreaterThan(0);
+      expect(ttl).toBeLessThanOrEqual(60);
     } finally {
       admin.close();
     }
