@@ -3,10 +3,14 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { QueryObserver } from "@tanstack/react-query";
 
 // `warmRoute` only runs for a signed-in visitor; outside a browser
-// `getSession` is always null, so it's stubbed per test.
+// `getSession` is always null, so it's stubbed per test. Bun's module mocks
+// are shared by every file in a run, so the stub also covers what api.ts
+// imports from ./auth (see api.test.ts).
 let session: object | null = null;
 mock.module("./auth", () => ({
   getSession: () => session,
+  setSession: () => {},
+  clearSession: () => {},
   subscribeSession: () => () => {},
 }));
 
