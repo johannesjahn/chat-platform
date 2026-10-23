@@ -1,5 +1,6 @@
 import { RedisClient } from "bun";
 import { Context, Effect, Layer } from "effect";
+import { IN_MEMORY_SWEEP_INTERVAL_MS } from "./RateLimiter.ts";
 
 // Long enough to cover minting a ticket over REST and immediately opening
 // the `/ws` connection with it, short enough that a leaked ticket (e.g. one
@@ -27,34 +28,56 @@ export class WsTicket extends Context.Service<
   }
 >()("WsTicket") {}
 
-// Single-process ticket store. Like InMemoryPubSubLive (see PubSub.ts), only
-// correct when there's a single app instance — a ticket minted on one
-// instance wouldn't be redeemable on another. Expired entries are dropped
-// lazily on the next `consume` that happens to touch them rather than swept
-// on a timer, so memory use is bounded by tickets actually issued within the
-// last TICKET_TTL_SECONDS.
-export const InMemoryWsTicketLive = Layer.sync(WsTicket, () => {
+// Single-process ticket store, plus its entry count (for tests). Like
+// InMemoryPubSubLive (see PubSub.ts), only correct when there's a single app
+// instance — a ticket minted on one instance wouldn't be redeemable on
+// another. A redeemed ticket is deleted on the spot; one that's never
+// redeemed (the tab closed before the upgrade, or the upgrade failed) is
+// dropped by a sweep every IN_MEMORY_SWEEP_INTERVAL_MS, run opportunistically
+// like the in-memory rate limiter's (issue #653). So memory is bounded by
+// tickets issued within the last TICKET_TTL_SECONDS plus one sweep interval.
+export const makeInMemoryWsTicket = () => {
   const tickets = new Map<string, { userId: number; expiresAt: number }>();
+  let nextSweepAt = Date.now() + IN_MEMORY_SWEEP_INTERVAL_MS;
 
-  return {
+  const sweepIfDue = (now: number) => {
+    if (now < nextSweepAt) return;
+    nextSweepAt = now + IN_MEMORY_SWEEP_INTERVAL_MS;
+    for (const [ticket, entry] of tickets) {
+      if (entry.expiresAt < now) tickets.delete(ticket);
+    }
+  };
+
+  const service: WsTicket["Service"] = {
     issue: (userId) =>
       Effect.sync(() => {
+        const now = Date.now();
+        sweepIfDue(now);
         const ticket = crypto.randomUUID();
         tickets.set(ticket, {
           userId,
-          expiresAt: Date.now() + TICKET_TTL_SECONDS * 1000,
+          expiresAt: now + TICKET_TTL_SECONDS * 1000,
         });
         return ticket;
       }),
     consume: (ticket) =>
       Effect.sync(() => {
+        const now = Date.now();
+        sweepIfDue(now);
         const entry = tickets.get(ticket);
         tickets.delete(ticket);
-        if (!entry || entry.expiresAt < Date.now()) return null;
+        if (!entry || entry.expiresAt < now) return null;
         return entry.userId;
       }),
   };
-});
+
+  return { service, size: () => tickets.size };
+};
+
+export const InMemoryWsTicketLive = Layer.sync(
+  WsTicket,
+  () => makeInMemoryWsTicket().service,
+);
 
 // Redis-backed ticket store, so a ticket minted on one horizontally-scaled
 // instance can be redeemed by the `/ws` upgrade landing on any other
