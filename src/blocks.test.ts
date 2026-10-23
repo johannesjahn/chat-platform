@@ -171,6 +171,127 @@ test("listPosts hides posts from blocked and muted authors, restored on removeBl
     }),
   ));
 
+test("comments and replies from blocked and muted authors are hidden, restored on removeBlock", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", PW);
+      const bob = yield* registerAndLogin("bob", PW);
+      const carol = yield* registerAndLogin("carol", PW);
+      const dave = yield* registerAndLogin("dave", PW);
+
+      const post = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "alice post" },
+      });
+      const aliceComment = yield* alice.client.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "alice comment" },
+      });
+      const bobComment = yield* bob.client.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "bob comment" },
+      });
+      yield* carol.client.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "carol comment" },
+      });
+      yield* bob.client.comments.createReply({
+        params: { id: aliceComment.id },
+        payload: { content: "bob reply" },
+      });
+      yield* dave.client.comments.createReply({
+        params: { id: aliceComment.id },
+        payload: { content: "dave reply" },
+      });
+      // Dave's reply under bob's comment is unreachable for alice once bob's
+      // comment is hidden, so it drops out of her count too.
+      yield* dave.client.comments.createReply({
+        params: { id: bobComment.id },
+        payload: { content: "dave reply to bob" },
+      });
+
+      yield* alice.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "block" },
+      });
+      yield* alice.client.users.setBlock({
+        params: { id: carol.user.id },
+        payload: { type: "mute" },
+      });
+
+      const top = yield* alice.client.comments.listComments({
+        params: { id: post.id },
+        query: {},
+      });
+      expect(top.comments.map((c) => c.content)).toEqual(["alice comment"]);
+      expect(top.comments[0]?.replyCount).toBe(1);
+
+      const replies = yield* alice.client.comments.listReplies({
+        params: { id: aliceComment.id },
+        query: {},
+      });
+      expect(replies.comments.map((c) => c.content)).toEqual(["dave reply"]);
+
+      expect(
+        (yield* alice.client.posts.getPost({ params: { id: post.id } }))
+          .commentCount,
+      ).toBe(2);
+      const feed = yield* alice.client.posts.listPosts({ query: {} });
+      expect(feed.posts[0]?.commentCount).toBe(2);
+      const comment = yield* alice.client.comments.getComment({
+        params: { id: aliceComment.id },
+      });
+      expect(comment.replyCount).toBe(1);
+
+      // A page never comes back short: the hidden rows are skipped inside
+      // the keyset query, not trimmed off afterwards.
+      const firstPage = yield* alice.client.comments.listComments({
+        params: { id: post.id },
+        query: { limit: 1 },
+      });
+      expect(firstPage.comments.map((c) => c.content)).toEqual([
+        "alice comment",
+      ]);
+      expect(firstPage.nextCursor).toBeNull();
+
+      // The filter is per-viewer: dave still sees everything.
+      const daveView = yield* dave.client.comments.listComments({
+        params: { id: post.id },
+        query: {},
+      });
+      expect(daveView.comments.length).toBe(3);
+      expect(
+        (yield* dave.client.posts.getPost({ params: { id: post.id } }))
+          .commentCount,
+      ).toBe(6);
+
+      // Unblocking and unmuting brings everything back.
+      yield* alice.client.users.removeBlock({ params: { id: bob.user.id } });
+      yield* alice.client.users.removeBlock({ params: { id: carol.user.id } });
+      const restored = yield* alice.client.comments.listComments({
+        params: { id: post.id },
+        query: {},
+      });
+      expect(restored.comments.map((c) => c.content)).toEqual([
+        "alice comment",
+        "bob comment",
+        "carol comment",
+      ]);
+      expect(restored.comments[0]?.replyCount).toBe(2);
+      const restoredReplies = yield* alice.client.comments.listReplies({
+        params: { id: aliceComment.id },
+        query: {},
+      });
+      expect(restoredReplies.comments.map((c) => c.content)).toEqual([
+        "bob reply",
+        "dave reply",
+      ]);
+      expect(
+        (yield* alice.client.posts.getPost({ params: { id: post.id } }))
+          .commentCount,
+      ).toBe(6);
+    }),
+  ));
+
 test("createMessage is rejected in a direct chat when either party has blocked the other", () =>
   run(
     Effect.gen(function* () {

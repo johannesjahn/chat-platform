@@ -1,5 +1,14 @@
 import { HttpApiBuilder } from "effect/http-api";
-import { and, asc, count, eq, gt, inArray, isNull } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  notInArray,
+} from "drizzle-orm";
 import { Effect, Metric } from "effect";
 import {
   ChatApi,
@@ -10,6 +19,7 @@ import {
   TooManyRequests,
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
+import { blockedOrMutedUserIds } from "./blocks.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import {
@@ -94,16 +104,26 @@ const toApiComment = (
 // Reply counts for a page of comments, keyed by parent id, in one grouped
 // query served by `comments_parent_comment_id_idx`. Comments with no
 // replies (including every reply itself) are absent; callers default to 0.
+// Replies by `hiddenAuthorIds` (the viewer's blocked/muted users) aren't
+// counted, matching what `listReplies` shows that viewer (issue #661).
 const commentReplyCounts = async (
   db: DrizzleDb,
   commentIds: ReadonlyArray<number>,
+  hiddenAuthorIds: ReadonlyArray<number>,
 ): Promise<Map<number, number>> => {
   const result = new Map<number, number>();
   if (commentIds.length === 0) return result;
   const rows = await db
     .select({ parentId: comments.parentCommentId, total: count() })
     .from(comments)
-    .where(inArray(comments.parentCommentId, [...commentIds]))
+    .where(
+      and(
+        inArray(comments.parentCommentId, [...commentIds]),
+        hiddenAuthorIds.length > 0
+          ? notInArray(comments.authorId, [...hiddenAuthorIds])
+          : undefined,
+      ),
+    )
     .groupBy(comments.parentCommentId);
   for (const row of rows) {
     if (row.parentId !== null) result.set(row.parentId, Number(row.total));
@@ -158,6 +178,10 @@ const getCommentOr404 = (db: DrizzleDb, id: number) =>
 // Shared by `listComments` (top-level, filtered on a null parent) and
 // `listReplies` (a comment's children): a keyset page over `comments` in
 // `id asc` order, decorated with per-row like info for the current user.
+// Comments by users the viewer blocked or muted are left out (issue #661),
+// the same way `listPosts` hides their posts: a `NOT IN` inside the keyset
+// query, so a page never comes back short. Hiding a top-level comment hides
+// its replies with it — `listReplies` under it is only reachable by id.
 const listThread = (
   db: DrizzleDb,
   where: ReturnType<typeof and>,
@@ -176,13 +200,25 @@ const listThread = (
         );
     }
 
+    const hiddenAuthorIds = yield* Effect.tryPromise(() =>
+      blockedOrMutedUserIds(db, currentUser.id),
+    ).pipe(Effect.orDie);
+
     // Fetch one past `limit` to derive `nextCursor` without a separate
     // COUNT(*), same trick as `listPosts`.
     const fetched = yield* Effect.tryPromise(() =>
       db
         .select()
         .from(comments)
-        .where(after !== null ? and(where, gt(comments.id, after)) : where)
+        .where(
+          and(
+            where,
+            after !== null ? gt(comments.id, after) : undefined,
+            hiddenAuthorIds.length > 0
+              ? notInArray(comments.authorId, hiddenAuthorIds)
+              : undefined,
+          ),
+        )
         .orderBy(asc(comments.id))
         .limit(limit + 1),
     ).pipe(Effect.orDie);
@@ -203,6 +239,7 @@ const listThread = (
       commentReplyCounts(
         db,
         rows.map((r) => r.id),
+        hiddenAuthorIds,
       ),
     ).pipe(Effect.orDie);
 
@@ -391,8 +428,12 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const reactions = yield* Effect.tryPromise(() =>
             commentReactionInfoOne(db, id, currentUser.id),
           ).pipe(Effect.orDie);
-          const replyCounts = yield* Effect.tryPromise(() =>
-            commentReplyCounts(db, [row.id]),
+          const replyCounts = yield* Effect.tryPromise(async () =>
+            commentReplyCounts(
+              db,
+              [row.id],
+              await blockedOrMutedUserIds(db, currentUser.id),
+            ),
           ).pipe(Effect.orDie);
           return toApiComment(row, reactions, replyCounts.get(row.id) ?? 0);
         }),
@@ -581,8 +622,12 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               commentId: row.id,
             },
           );
-          const replyCounts = yield* Effect.tryPromise(() =>
-            commentReplyCounts(db, [row.id]),
+          const replyCounts = yield* Effect.tryPromise(async () =>
+            commentReplyCounts(
+              db,
+              [row.id],
+              await blockedOrMutedUserIds(db, currentUser.id),
+            ),
           ).pipe(Effect.orDie);
           return toApiComment(row, reactions, replyCounts.get(row.id) ?? 0);
         }),

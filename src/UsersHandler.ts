@@ -35,6 +35,7 @@ import {
 import { resolveAttachments } from "./attachments.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser, TokenVersionCache } from "./Auth.ts";
+import { blockedOrMutedUserIds } from "./blocks.ts";
 import {
   avatarStorageKey,
   avatarUrlForToken,
@@ -590,10 +591,11 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               currentUser.id,
             ),
           ).pipe(Effect.orDie);
-          const commentCounts = yield* Effect.tryPromise(() =>
+          const commentCounts = yield* Effect.tryPromise(async () =>
             postCommentCounts(
               db,
               rows.map((r) => r.id),
+              await blockedOrMutedUserIds(db, currentUser.id),
             ),
           ).pipe(Effect.orDie);
           const attachments = yield* resolveAttachments(
