@@ -171,15 +171,20 @@ export function enqueueMessage(
   ]);
 }
 
-export function enqueuePost(values: {
-  contentType: PostContentType;
-  content: string;
-}): void {
+export function enqueuePost(
+  values: {
+    contentType: PostContentType;
+    content: string;
+  },
+  // The idempotency key of the live attempt that failed, if there was one
+  // (issue #657) — see `enqueueMessage`.
+  clientId: string = makeClientId(),
+): void {
   writeQueue([
     ...readQueue(),
     {
       kind: "post",
-      clientId: makeClientId(),
+      clientId,
       ownerId: currentUserId(),
       contentType: values.contentType,
       content: values.content,
@@ -331,7 +336,11 @@ async function drainQueue(queryClient: QueryClient): Promise<void> {
       let result: Awaited<ReturnType<typeof fetchClient.POST>>;
       try {
         result = await fetchClient.POST("/posts", {
-          body: { contentType: next.contentType, content: next.content },
+          body: {
+            contentType: next.contentType,
+            content: next.content,
+            clientId: next.clientId,
+          },
         });
       } catch {
         return;

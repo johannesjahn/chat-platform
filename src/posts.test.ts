@@ -104,6 +104,48 @@ test('createPost increments content_created_total{type="post"}', () =>
     }),
   ));
 
+test("createPost is idempotent per author and clientId (issue #657)", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* makeAuthedClient(
+        (yield* registerAndLogin("alice", "pw-testpass")).accessToken,
+      );
+      const bob = yield* makeAuthedClient(
+        (yield* registerAndLogin("bob", "pw-testpass")).accessToken,
+      );
+      const create = (
+        client: typeof alice,
+        content: string,
+        clientId?: string,
+      ) =>
+        client.posts.createPost({
+          payload: { contentType: "text", content, clientId },
+        });
+      const postsCreated = Metric.withAttributes(contentCreatedTotal, {
+        type: "post",
+      });
+
+      const first = yield* create(alice, "once", "key-1");
+      const before = yield* Metric.value(postsCreated);
+      // A replay returns the stored post — even if its body differs, since
+      // the key identifies the attempt, not the content.
+      const repeat = yield* create(alice, "once again", "key-1");
+      expect(repeat.id).toBe(first.id);
+      expect(repeat.content).toBe("once");
+      expect((yield* Metric.value(postsCreated)).count).toBe(before.count);
+
+      // A different key, no key, or the same key from another author is a
+      // new post.
+      const other = yield* create(alice, "two", "key-2");
+      const keyless = yield* create(alice, "three");
+      const bobs = yield* create(bob, "bob's", "key-1");
+      expect(new Set([first.id, other.id, keyless.id, bobs.id]).size).toBe(4);
+
+      const { posts } = yield* alice.posts.listPosts({ query: {} });
+      expect(posts).toHaveLength(4);
+    }),
+  ));
+
 test("createPost creates an image_url post", () =>
   run(
     Effect.gen(function* () {
