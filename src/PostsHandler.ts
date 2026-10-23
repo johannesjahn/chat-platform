@@ -1,5 +1,15 @@
 import { HttpApiBuilder } from "effect/http-api";
-import { and, count, desc, eq, inArray, lt, notInArray } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  inArray,
+  lt,
+  notExists,
+  notInArray,
+} from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Effect, Metric } from "effect";
 import {
   type Attachment,
@@ -49,16 +59,44 @@ export const toApiPost = (
 // comment on `Post` in Api.ts). The `comments_post_id_idx` (postId, id) index
 // keeps a page's worth cheap. Ids with no comments are simply absent from the
 // map; callers default them to 0.
+//
+// `hiddenAuthorIds` (the viewer's `blockedOrMutedUserIds`, issue #661) makes
+// the count match what the thread endpoints show that viewer: a hidden
+// author's comments and replies aren't counted, nor are other people's replies
+// under a hidden author's top-level comment, since that comment — the only way
+// to reach them — is hidden too.
 export const postCommentCounts = async (
   db: DrizzleDb,
   postIds: ReadonlyArray<number>,
+  hiddenAuthorIds: ReadonlyArray<number> = [],
 ): Promise<Map<number, number>> => {
   const result = new Map<number, number>();
   if (postIds.length === 0) return result;
+  const parent = alias(comments, "parent");
   const rows = await db
     .select({ postId: comments.postId, total: count() })
     .from(comments)
-    .where(inArray(comments.postId, [...postIds]))
+    .where(
+      and(
+        inArray(comments.postId, [...postIds]),
+        hiddenAuthorIds.length > 0
+          ? and(
+              notInArray(comments.authorId, [...hiddenAuthorIds]),
+              notExists(
+                db
+                  .select({ id: parent.id })
+                  .from(parent)
+                  .where(
+                    and(
+                      eq(parent.id, comments.parentCommentId),
+                      inArray(parent.authorId, [...hiddenAuthorIds]),
+                    ),
+                  ),
+              ),
+            )
+          : undefined,
+      ),
+    )
     .groupBy(comments.postId);
   for (const row of rows) result.set(row.postId, Number(row.total));
   return result;
@@ -117,8 +155,12 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const reactions = yield* Effect.tryPromise(() =>
             postReactionInfo(db, [row.id], currentUser.id),
           ).pipe(Effect.orDie);
-          const commentCounts = yield* Effect.tryPromise(() =>
-            postCommentCounts(db, [row.id]),
+          const commentCounts = yield* Effect.tryPromise(async () =>
+            postCommentCounts(
+              db,
+              [row.id],
+              await blockedOrMutedUserIds(db, currentUser.id),
+            ),
           ).pipe(Effect.orDie);
           const attachments = yield* resolveAttachments(db, storage, [
             row.attachmentId,
@@ -191,6 +233,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             postCommentCounts(
               db,
               rows.map((r) => r.id),
+              hiddenAuthorIds,
             ),
           ).pipe(Effect.orDie);
           const attachments = yield* resolveAttachments(
@@ -317,8 +360,12 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           const reactions = yield* Effect.tryPromise(() =>
             postReactionInfo(db, [row.id], currentUser.id),
           ).pipe(Effect.orDie);
-          const commentCounts = yield* Effect.tryPromise(() =>
-            postCommentCounts(db, [row.id]),
+          const commentCounts = yield* Effect.tryPromise(async () =>
+            postCommentCounts(
+              db,
+              [row.id],
+              await blockedOrMutedUserIds(db, currentUser.id),
+            ),
           ).pipe(Effect.orDie);
           yield* connections.broadcastAll({
             type: "post_changed",
