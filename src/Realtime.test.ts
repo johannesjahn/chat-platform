@@ -772,3 +772,109 @@ test("game_reaction relays only the fixed emoji, stamped with the sender's id an
     }),
   );
 });
+
+// A connection whose `close` handle records that it was called, standing in
+// for a real socket's close (see `register` in Realtime.ts).
+const closableConnection = () => {
+  const { write, received } = recordingWriter();
+  const state = { closed: 0 };
+  const close = Effect.sync(() => {
+    state.closed++;
+  });
+  return { write, received, close, state };
+};
+
+test("disconnectUser closes every connection of that user and no one else's (issue #651)", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const tabA = closableConnection();
+      const tabB = closableConnection();
+      const bob = closableConnection();
+      yield* connections.register(1, tabA.write, tabA.close);
+      yield* connections.register(1, tabB.write, tabB.close);
+      yield* connections.register(2, bob.write, bob.close);
+
+      yield* connections.disconnectUser(1);
+
+      expect(tabA.state.closed).toBe(1);
+      expect(tabB.state.closed).toBe(1);
+      expect(bob.state.closed).toBe(0);
+    }),
+  );
+});
+
+test("a disconnected user's sockets stop receiving events before their close lands", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const alice = closableConnection();
+      const bob = closableConnection();
+      yield* connections.register(1, alice.write, alice.close);
+      yield* connections.register(2, bob.write, bob.close);
+      alice.received.length = 0;
+      bob.received.length = 0;
+
+      yield* connections.disconnectUser(1);
+      yield* connections.notifyUsers([1, 2], {
+        type: "chat_updated",
+        chatId: 3,
+        version: 1,
+      });
+      yield* connections.broadcastAll({
+        type: "post_changed",
+        postId: 9,
+        change: "created",
+      });
+
+      expect(alice.received).toEqual([]);
+      expect(bob.received).toHaveLength(2);
+    }),
+  );
+});
+
+test("disconnectUser leaves a connection made afterwards alone", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const before = closableConnection();
+      const unregister = yield* connections.register(
+        1,
+        before.write,
+        before.close,
+      );
+      yield* connections.disconnectUser(1);
+      unregister();
+
+      // The session that made the change reconnects with fresh tokens.
+      const after = closableConnection();
+      yield* connections.register(1, after.write, after.close);
+      after.received.length = 0;
+      yield* connections.notifyUsers([1], {
+        type: "chat_updated",
+        chatId: 1,
+        version: 1,
+      });
+
+      expect(before.state.closed).toBe(1);
+      expect(after.state.closed).toBe(0);
+      expect(after.received).toHaveLength(1);
+    }),
+  );
+});
+
+test("a failing close doesn't stop the user's other connections from closing", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const broken = recordingWriter();
+      const tab = closableConnection();
+      yield* connections.register(1, broken.write, Effect.fail("gone"));
+      yield* connections.register(1, tab.write, tab.close);
+
+      yield* connections.disconnectUser(1);
+
+      expect(tab.state.closed).toBe(1);
+    }),
+  );
+});

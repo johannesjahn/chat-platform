@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
-import { Duration, Effect, Metric } from "effect";
+import { Duration, Effect, Layer, Metric } from "effect";
 import {
   ChatApi,
   MAX_BIO_LENGTH,
@@ -21,7 +21,10 @@ import {
 import { extractMentionedUsernames } from "./notifications.ts";
 import { Db } from "./Db.ts";
 import { authEventsTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
+import { InMemoryPresenceStoreLive } from "./Presence.ts";
+import { staticPresenceAudience } from "./PresenceAudience.ts";
 import { PubSub } from "./PubSub.ts";
+import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
 import { users } from "./db/schema.ts";
 import { eq } from "drizzle-orm";
 import { makeTestRun } from "./testApi.ts";
@@ -2440,5 +2443,159 @@ test("updateStatus rejects an unauthenticated request", () =>
         })
         .pipe(Effect.flip);
       expect(result._tag).toBe("Unauthorized");
+    }),
+  ));
+
+// Registers a stand-in `/ws` connection for `userId` and reports how many
+// times it was closed — the handlers below must close a user's sockets
+// wherever they bump token_version (issue #651). The connection lives on its
+// own RealtimeConnectionsLive sharing the run's PubSub, i.e. on another
+// replica than the one handling the request.
+const openSocket = (userId: number) =>
+  Effect.gen(function* () {
+    const pubsub = yield* PubSub;
+    const connections = yield* Effect.service(RealtimeConnections).pipe(
+      Effect.provide(
+        RealtimeConnectionsLive.pipe(
+          Layer.provide(Layer.succeed(PubSub, pubsub)),
+          Layer.provide(InMemoryPresenceStoreLive),
+          Layer.provide(staticPresenceAudience([])),
+        ),
+      ),
+    );
+    const state = { closed: 0 };
+    yield* connections.register(
+      userId,
+      () => Effect.void,
+      Effect.sync(() => {
+        state.closed++;
+      }),
+    );
+    return state;
+  });
+
+const insertAdmin = (username: string, password: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const passwordHash = yield* Effect.tryPromise(() =>
+      Bun.password.hash(password, { algorithm: "argon2id" }),
+    );
+    yield* Effect.tryPromise(() =>
+      db.insert(users).values({ username, passwordHash, role: "admin" }),
+    );
+    const c = yield* makeClient;
+    const { accessToken } = yield* c.users.login({
+      payload: { username, password },
+    });
+    return yield* makeAuthedClient(accessToken);
+  });
+
+test("logout with allSessions closes the user's open sockets, and only theirs", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const me = yield* c.users.register({
+        payload: { username: "wsrevoke1", password: "pw-wsrevoke1" },
+      });
+      const other = yield* c.users.register({
+        payload: { username: "wsrevoke2", password: "pw-wsrevoke2" },
+      });
+      const { refreshToken } = yield* c.users.login({
+        payload: { username: "wsrevoke1", password: "pw-wsrevoke1" },
+      });
+      const tabA = yield* openSocket(me.id);
+      const tabB = yield* openSocket(me.id);
+      const theirs = yield* openSocket(other.id);
+
+      yield* c.users.logout({ payload: { refreshToken, allSessions: true } });
+
+      expect(tabA.closed).toBe(1);
+      expect(tabB.closed).toBe(1);
+      expect(theirs.closed).toBe(0);
+    }),
+  ));
+
+test("a single-session logout leaves the user's other sockets open", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const me = yield* c.users.register({
+        payload: { username: "wsrevoke3", password: "pw-wsrevoke3" },
+      });
+      const { refreshToken } = yield* c.users.login({
+        payload: { username: "wsrevoke3", password: "pw-wsrevoke3" },
+      });
+      const tab = yield* openSocket(me.id);
+
+      yield* c.users.logout({ payload: { refreshToken } });
+
+      expect(tab.closed).toBe(0);
+    }),
+  ));
+
+test("changePassword closes the user's open sockets", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const me = yield* c.users.register({
+        payload: { username: "wsrevoke4", password: "pw-wsrevoke4" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "wsrevoke4", password: "pw-wsrevoke4" },
+      });
+      const tab = yield* openSocket(me.id);
+
+      const authed = yield* makeAuthedClient(accessToken);
+      yield* authed.users.changePassword({
+        payload: {
+          currentPassword: "pw-wsrevoke4",
+          newPassword: "pw-wsrevoke4-new",
+        },
+      });
+
+      expect(tab.closed).toBe(1);
+    }),
+  ));
+
+test("deleteAccount closes the user's open sockets", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const me = yield* c.users.register({
+        payload: { username: "wsrevoke5", password: "pw-wsrevoke5" },
+      });
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "wsrevoke5", password: "pw-wsrevoke5" },
+      });
+      const tab = yield* openSocket(me.id);
+
+      const authed = yield* makeAuthedClient(accessToken);
+      yield* authed.users.deleteAccount({
+        payload: { password: "pw-wsrevoke5" },
+      });
+
+      expect(tab.closed).toBe(1);
+    }),
+  ));
+
+test("an admin's role change or deletion closes the target's open sockets", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const admin = yield* insertAdmin("wsrevokeadmin", "pw-wsrevokeadmin");
+      const target = yield* c.users.register({
+        payload: { username: "wsrevoke6", password: "pw-wsrevoke6" },
+      });
+
+      const beforeRoleChange = yield* openSocket(target.id);
+      yield* admin.users.updateUserRole({
+        params: { id: target.id },
+        payload: { role: "admin" },
+      });
+      expect(beforeRoleChange.closed).toBe(1);
+
+      const beforeDeletion = yield* openSocket(target.id);
+      yield* admin.users.deleteUser({ params: { id: target.id } });
+      expect(beforeDeletion.closed).toBe(1);
     }),
   ));

@@ -242,6 +242,14 @@ export type RealtimeEvent =
 // A connected client's outbound channel — bound to one open `/ws` socket.
 type Writer = (chunk: string) => Effect.Effect<void, unknown>;
 
+// Closes one open `/ws` socket (see `disconnectUser`).
+type Closer = Effect.Effect<void, unknown>;
+
+// The application close code a socket is closed with when its user's
+// sessions were revoked (issue #651). The client reconnects as after any
+// close, by minting a new ticket — which only a still-valid session can.
+export const SESSION_REVOKED_CLOSE_CODE = 4401;
+
 // Tracks which users currently have a live `/ws` connection, so:
 //  - chat mutations can notify only the participants of the affected chat
 //    (`notifyUsers`);
@@ -250,15 +258,24 @@ type Writer = (chunk: string) => Effect.Effect<void, unknown>;
 export class RealtimeConnections extends Context.Service<
   RealtimeConnections,
   {
+    // `close` is how `disconnectUser` ends this connection; a connection
+    // registered without one is only ever dropped from delivery.
     readonly register: (
       userId: number,
       write: Writer,
+      close?: Closer,
     ) => Effect.Effect<() => void>;
     readonly notifyUsers: (
       userIds: Iterable<number>,
       event: RealtimeEvent,
     ) => Effect.Effect<void>;
     readonly broadcastAll: (event: RealtimeEvent) => Effect.Effect<void>;
+    // Closes every `/ws` connection `userId` has open, on every instance —
+    // called wherever their token_version is bumped (log out everywhere,
+    // password/role change, account deletion), since a socket is only
+    // authenticated once, at its handshake, and would otherwise outlive the
+    // sessions that opened it (issue #651).
+    readonly disconnectUser: (userId: number) => Effect.Effect<void>;
     // Delivers `event` to `userId`'s contacts (see PresenceAudience.ts) and
     // to `userId`'s own sockets — the audience for anything that's a
     // property of the user rather than of a chat or post: presence and
@@ -368,7 +385,8 @@ type Envelope =
       readonly scope: "room";
       readonly room: string;
       readonly event: RealtimeEvent;
-    };
+    }
+  | { readonly scope: "disconnect"; readonly userId: number };
 
 // Registration (`byUser`) stays local to this process — a `/ws` connection
 // only ever lives on the instance that accepted it, and `byUser` exists only
@@ -386,6 +404,9 @@ export const RealtimeConnectionsLive = Layer.effect(
     const presenceStore = yield* PresenceStore;
     const audience = yield* PresenceAudience;
     const byUser = new Map<number, Set<Writer>>();
+    // Each local connection's `close` handle (see `register`), for
+    // `disconnectUser`.
+    const closers = new Map<Writer, Closer>();
     // postId -> the local connection writers currently subscribed to that
     // post's comment room (see `subscribePost`). Parallel to `byUser`, and
     // like it stays local per-instance — cross-instance fan-out is PubSub's
@@ -442,6 +463,33 @@ export const RealtimeConnectionsLive = Layer.effect(
     const deliverLocally = (message: string) =>
       Effect.gen(function* () {
         const envelope = JSON.parse(message) as Envelope;
+
+        if (envelope.scope === "disconnect") {
+          const writers = byUser.get(envelope.userId);
+          if (!writers) return;
+          // Out of delivery right away rather than once the close lands, so
+          // nothing more reaches a revoked socket in between. The socket's
+          // own `unregister` still runs when its read loop ends.
+          byUser.delete(envelope.userId);
+          for (const write of writers) {
+            const close = closers.get(write);
+            if (!close) continue;
+            yield* close.pipe(
+              Effect.catch((error) =>
+                Effect.logWarning(
+                  "RealtimeConnections: failed to close a revoked connection",
+                ).pipe(
+                  Effect.annotateLogs({
+                    userId: envelope.userId,
+                    error: String(error),
+                  }),
+                ),
+              ),
+            );
+          }
+          return;
+        }
+
         const payload = JSON.stringify(envelope.event);
 
         if (envelope.scope === "all") {
@@ -505,6 +553,15 @@ export const RealtimeConnectionsLive = Layer.effect(
       event,
     ) => {
       const envelope = { scope: "all", event } satisfies Envelope;
+      return pubsub
+        .publish(CHANNEL, JSON.stringify(envelope))
+        .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
+    };
+
+    const disconnectUser: RealtimeConnections["Service"]["disconnectUser"] = (
+      userId,
+    ) => {
+      const envelope = { scope: "disconnect", userId } satisfies Envelope;
       return pubsub
         .publish(CHANNEL, JSON.stringify(envelope))
         .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
@@ -602,11 +659,13 @@ export const RealtimeConnectionsLive = Layer.effect(
     const register: RealtimeConnections["Service"]["register"] = (
       userId,
       write,
+      close,
     ) =>
       Effect.gen(function* () {
         const set = byUser.get(userId) ?? new Set();
         set.add(write);
         byUser.set(userId, set);
+        if (close) closers.set(write, close);
         // One live `/ws` socket on this instance, for VictoriaMetrics'
         // `websocket_connections_active` gauge (see Metrics.ts) — a count of
         // *connections*, not of online *users* (PresenceStore, below, is the
@@ -640,6 +699,7 @@ export const RealtimeConnectionsLive = Layer.effect(
             current.delete(write);
             if (current.size === 0) byUser.delete(userId);
           }
+          closers.delete(write);
           // Sweep this connection out of every post and named room it had
           // joined, so a dropped socket leaves no dangling room membership
           // (the client has no chance to send `unsubscribe_post_comments` on
@@ -703,6 +763,7 @@ export const RealtimeConnectionsLive = Layer.effect(
       register,
       notifyUsers,
       broadcastAll,
+      disconnectUser,
       notifyContacts,
       subscribePost,
       unsubscribePost,
