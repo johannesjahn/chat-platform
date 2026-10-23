@@ -3228,11 +3228,19 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           // first, then the guarded bump, then the insert, so a request that
           // fails either check never mutates `chatInvites` or
           // `chatParticipants`.
+          //
+          // `alreadyIn` above is only a fast path: two concurrent joins by
+          // the same user (a double-tap) both pass it, and when the loser is
+          // aborted and retried its rerun must see the winner's row — or it
+          // would bump `useCount` again and then trip the participant
+          // unique constraint. So membership is re-checked in here too.
           const result = yield* serializableTransaction(db, async (tx) => {
             const currentParticipants = await tx
-              .select({ id: chatParticipants.id })
+              .select({ userId: chatParticipants.userId })
               .from(chatParticipants)
               .where(eq(chatParticipants.chatId, chatRow.id));
+            if (currentParticipants.some((p) => p.userId === currentUser.id))
+              return { ok: true as const, joined: false };
             if (currentParticipants.length >= MAX_GROUP_PARTICIPANTS)
               return { ok: false as const, reason: "cap" as const };
 
@@ -3257,7 +3265,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               joinedAt: new Date(),
               role: "member",
             });
-            return { ok: true as const };
+            return { ok: true as const, joined: true };
           });
           if (!result.ok)
             return yield* Effect.fail(
@@ -3268,6 +3276,8 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                     : `Group chats can have at most ${MAX_GROUP_PARTICIPANTS} participants`,
               }),
             );
+          if (!result.joined)
+            return yield* buildChat(db, storage, chatRow, currentUser.id);
 
           const version = yield* bumpChatVersion(db, chatRow.id);
           const participants = yield* getParticipants(db, chatRow.id);
