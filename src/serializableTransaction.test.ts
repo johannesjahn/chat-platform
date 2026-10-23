@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Exit } from "effect";
 import type { DrizzleDb } from "./Db.ts";
 import {
-  isSerializationFailure,
+  isRetryableAbort,
   SERIALIZABLE_MAX_RETRIES,
   serializableTransaction,
 } from "./serializableTransaction.ts";
@@ -40,12 +40,21 @@ const fakeDb = (errors: ReadonlyArray<unknown>) => {
   return { db, calls };
 };
 
-describe("isSerializationFailure", () => {
+describe("isRetryableAbort", () => {
   test("finds the SQLSTATE through wrapping, in either field", () => {
-    expect(isSerializationFailure(bunSerializationFailure())).toBe(true);
+    expect(isRetryableAbort(bunSerializationFailure())).toBe(true);
     // PGlite's DatabaseError carries it in `code`.
     expect(
-      isSerializationFailure(Object.assign(new Error(), { code: "40001" })),
+      isRetryableAbort(Object.assign(new Error(), { code: "40001" })),
+    ).toBe(true);
+  });
+
+  test("treats a deadlock as retryable too", () => {
+    expect(
+      isRetryableAbort(Object.assign(new Error(), { errno: "40P01" })),
+    ).toBe(true);
+    expect(
+      isRetryableAbort(Object.assign(new Error(), { code: "40P01" })),
     ).toBe(true);
   });
 
@@ -53,12 +62,12 @@ describe("isSerializationFailure", () => {
     for (const error of [
       new Error("boom"),
       Object.assign(new Error(), { code: "23505" }),
-      Object.assign(new Error(), { errno: "40P01" }),
+      Object.assign(new Error(), { errno: "40P02" }),
       "40001",
       null,
       undefined,
     ])
-      expect(isSerializationFailure(error)).toBe(false);
+      expect(isRetryableAbort(error)).toBe(false);
   });
 });
 

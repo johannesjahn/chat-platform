@@ -582,6 +582,12 @@ regenerated from scratch.
   [src/RealtimePubSub.integration.test.ts](src/RealtimePubSub.integration.test.ts),
   which needs a real Redis at `REDIS_URL` (CI provides one as a service
   container — see `.github/workflows/ci.yml`) and skips itself otherwise.
+  Likewise
+  [src/chats.postgres.integration.test.ts](src/chats.postgres.integration.test.ts)
+  needs a throwaway real Postgres at `TEST_DATABASE_URL` (it migrates and
+  truncates it; CI provides one): PGlite is a single connection, so only a
+  real pool makes concurrent requests race through the chats handlers'
+  `serializableTransaction`s (issue #654).
   `--parallel` is safe here because PGlite instances, ports (integration
   tests grab a free ephemeral port), and Redis usage (only one file touches
   it) are all already isolated per file/process — don't add `test.concurrent`

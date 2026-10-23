@@ -339,10 +339,12 @@ jobs:
     if: github.event_name == 'push' || needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Only RealtimePubSub.integration.test.ts uses this — it's the one test
+    # Only RealtimePubSub.integration.test.ts uses Redis — it's the one test
     # that proves cross-instance delivery over real Redis Pub/Sub (see
-    # src/PubSub.ts). Everything else uses the in-memory PubSub fallback and
-    # doesn't touch it.
+    # src/PubSub.ts). Only chats.postgres.integration.test.ts uses Postgres —
+    # it races concurrent requests through the chats handlers' serializable
+    # transactions, which PGlite's single connection can never overlap
+    # (issue #654). Everything else uses the in-memory PubSub and PGlite.
     services:
       redis:
         image: redis:8.10.2-alpine
@@ -350,6 +352,19 @@ jobs:
           - 6379:6379
         options: >-
           --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: chat_platform
+          POSTGRES_PASSWORD: chat_platform
+          POSTGRES_DB: chat_platform
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chat_platform"
           --health-interval 2s
           --health-timeout 5s
           --health-retries 20
@@ -396,6 +411,7 @@ jobs:
         run: bun run test:coverage
         env:
           REDIS_URL: redis://localhost:6379
+          TEST_DATABASE_URL: postgres://chat_platform:chat_platform@localhost:5432/chat_platform
 
       - name: Upload coverage report
         if: ${{ !cancelled() }}
