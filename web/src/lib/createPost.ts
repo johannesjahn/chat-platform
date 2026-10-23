@@ -1,6 +1,6 @@
 import { onlineManager, useQueryClient } from "@tanstack/react-query";
 import { $api } from "./api";
-import { enqueuePost } from "./offlineQueue";
+import { enqueuePost, makeClientId } from "./offlineQueue";
 import { postsFeedQueryKey, type PostContentType } from "./posts";
 
 export type NewPost = {
@@ -23,17 +23,22 @@ export function useCreatePost() {
     content,
     attachmentId,
   }: NewPost) {
+    // Idempotency key (issue #657), shared by the live attempt and any queued
+    // replay of it: if the connection drops after the server stored the post
+    // but before the response arrived, the replay is recognised as a repeat
+    // rather than creating the post twice.
+    const clientId = makeClientId();
     // Offline: queue instead of attempting the request — it would just
     // fail. An attachment post can't be queued this way (the forms only let
     // one through while online, since it needs an already-completed
     // upload), so it always falls through to the live request below.
     if (contentType !== "attachment" && !onlineManager.isOnline()) {
-      enqueuePost({ contentType, content });
+      enqueuePost({ contentType, content }, clientId);
       return;
     }
     try {
       await createPost.mutateAsync({
-        body: { contentType, content, attachmentId },
+        body: { contentType, content, attachmentId, clientId },
       });
       await queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
     } catch (err) {
@@ -42,7 +47,7 @@ export function useCreatePost() {
       // rather than surfacing the failure, same as above (again, not for an
       // attachment post — see the comment above).
       if (contentType !== "attachment" && !onlineManager.isOnline()) {
-        enqueuePost({ contentType, content });
+        enqueuePost({ contentType, content }, clientId);
         return;
       }
       throw err;

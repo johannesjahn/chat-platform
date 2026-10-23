@@ -646,6 +646,11 @@ export const CreatePostBody = Schema.Struct({
   // Id of a previously-uploaded attachment (`POST /attachments`) owned by
   // the caller — required exactly when contentType is "attachment".
   attachmentId: Schema.optional(Schema.Finite),
+  // Idempotency key (issue #657, mirroring `CreateMessageBody.clientId`): a
+  // client-generated id, reused when a create is retried. If this author
+  // already stored a post with the same key, that post is returned instead of
+  // creating a duplicate.
+  clientId: Schema.optional(Schema.String.check(Schema.isMaxLength(64))),
 })
   .check(
     Schema.makeFilter(requireAllowedImageUrl),

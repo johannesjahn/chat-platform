@@ -32,7 +32,7 @@ import { contentCreatedTotal } from "./Metrics.ts";
 import { notifyMentions } from "./notifications.ts";
 import { postReactionInfo, type ReactionSummary } from "./reactions.ts";
 import { RealtimeConnections } from "./Realtime.ts";
-import { comments, posts } from "./db/schema.ts";
+import { comments, type DbPost, posts } from "./db/schema.ts";
 
 const NO_REACTIONS: ReactionSummary[] = [];
 
@@ -140,6 +140,56 @@ const getPostOr404 = (db: DrizzleDb, id: number) =>
     return row;
   });
 
+// The full API view of a stored post as `viewerId` sees it — its reactions,
+// comment count (hiding authors the viewer blocked/muted) and attachment.
+const buildPostResponse = (
+  db: DrizzleDb,
+  storage: AttachmentStorage["Service"],
+  row: DbPost,
+  viewerId: number,
+) =>
+  Effect.gen(function* () {
+    const reactions = yield* Effect.tryPromise(() =>
+      postReactionInfo(db, [row.id], viewerId),
+    ).pipe(Effect.orDie);
+    const commentCounts = yield* Effect.tryPromise(async () =>
+      postCommentCounts(
+        db,
+        [row.id],
+        await blockedOrMutedUserIds(db, viewerId),
+      ),
+    ).pipe(Effect.orDie);
+    const attachments = yield* resolveAttachments(db, storage, [
+      row.attachmentId,
+    ]);
+    return toApiPost(
+      row,
+      reactions.get(row.id),
+      row.attachmentId !== null
+        ? (attachments.get(row.attachmentId) ?? null)
+        : null,
+      commentCounts.get(row.id) ?? 0,
+    );
+  });
+
+// The post this author already created under the idempotency key `clientId`
+// (issue #657), if any.
+const findPostByClientId = (
+  db: DrizzleDb,
+  authorId: number,
+  clientId: string,
+): Effect.Effect<DbPost | undefined> =>
+  Effect.tryPromise(() =>
+    db
+      .select()
+      .from(posts)
+      .where(and(eq(posts.authorId, authorId), eq(posts.clientId, clientId)))
+      .limit(1),
+  ).pipe(
+    Effect.orDie,
+    Effect.map((rows) => rows[0]),
+  );
+
 export const PostsHandlerLive = HttpApiBuilder.group(
   ChatApi,
   "posts",
@@ -152,27 +202,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           const row = yield* getPostOr404(db, id);
-          const reactions = yield* Effect.tryPromise(() =>
-            postReactionInfo(db, [row.id], currentUser.id),
-          ).pipe(Effect.orDie);
-          const commentCounts = yield* Effect.tryPromise(async () =>
-            postCommentCounts(
-              db,
-              [row.id],
-              await blockedOrMutedUserIds(db, currentUser.id),
-            ),
-          ).pipe(Effect.orDie);
-          const attachments = yield* resolveAttachments(db, storage, [
-            row.attachmentId,
-          ]);
-          return toApiPost(
-            row,
-            reactions.get(row.id),
-            row.attachmentId !== null
-              ? (attachments.get(row.attachmentId) ?? null)
-              : null,
-            commentCounts.get(row.id) ?? 0,
-          );
+          return yield* buildPostResponse(db, storage, row, currentUser.id);
         }),
       )
       .handle("listPosts", ({ query: urlParams }) =>
@@ -261,6 +291,25 @@ export const PostsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
 
+          // A repeat of a create the server already stored (issue #657) —
+          // e.g. the response was lost and the offline queue replayed it —
+          // returns the original post untouched: no second row, no second
+          // broadcast or mention notification.
+          if (payload.clientId !== undefined) {
+            const existing = yield* findPostByClientId(
+              db,
+              currentUser.id,
+              payload.clientId,
+            );
+            if (existing)
+              return yield* buildPostResponse(
+                db,
+                storage,
+                existing,
+                currentUser.id,
+              );
+          }
+
           let attachment: Attachment | null = null;
           if (payload.attachmentId !== undefined) {
             const attachmentRow = yield* getOwnedAttachmentOr404(
@@ -287,12 +336,29 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 contentType: payload.contentType,
                 content: payload.content,
                 attachmentId: payload.attachmentId ?? null,
+                clientId: payload.clientId ?? null,
                 createdAt: now,
                 updatedAt: now,
               })
+              .onConflictDoNothing()
               .returning(),
           ).pipe(Effect.orDie);
           const row = rows[0];
+          if (!row && payload.clientId !== undefined) {
+            // Lost a race with a concurrent create of the same key.
+            const existing = yield* findPostByClientId(
+              db,
+              currentUser.id,
+              payload.clientId,
+            );
+            if (existing)
+              return yield* buildPostResponse(
+                db,
+                storage,
+                existing,
+                currentUser.id,
+              );
+          }
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
           yield* Metric.update(

@@ -209,6 +209,11 @@ export const posts = pgTable(
     attachmentId: integer("attachment_id").references(() => attachments.id, {
       onDelete: "set null",
     }),
+    // Client-generated idempotency key (issue #657, like
+    // `messages.clientId`): a retried create carrying the same key from the
+    // same author returns the stored post instead of inserting another. Null
+    // for posts created without one, which are never deduplicated.
+    clientId: text("client_id"),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -223,6 +228,9 @@ export const posts = pgTable(
   (table) => [
     index("posts_author_id_idx").on(table.authorId),
     index("posts_attachment_id_idx").on(table.attachmentId),
+    // Backs the idempotency check in `createPost`. Nulls never collide in a
+    // Postgres unique index, so key-less posts are unaffected.
+    uniqueIndex("posts_client_id_idx").on(table.authorId, table.clientId),
   ],
 );
 

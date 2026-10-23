@@ -253,6 +253,13 @@
       "when": 1792685458089,
       "tag": "0035_read_watermark",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792787782173,
+      "tag": "0036_post_client_id",
+      "breakpoints": true
     }
   ]
 }

@@ -1878,6 +1878,7 @@ export interface components {
             contentType: components["schemas"]["PostContentType"];
             content: string;
             attachmentId?: number | null;
+            clientId?: string | null;
         };
         InvalidPostsRequestEncoded: {
             /** @enum {string} */
