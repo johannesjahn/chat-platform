@@ -9,6 +9,7 @@ import {
   isValidRoomName,
   RealtimeConnections,
   type RealtimeEvent,
+  SESSION_REVOKED_CLOSE_CODE,
 } from "./Realtime.ts";
 import { allowedOrigins } from "./WebOrigin.ts";
 import { WsTicket } from "./WsTicket.ts";
@@ -254,7 +255,13 @@ const wsHandler = Effect.gen(function* () {
   // One stable function per connection — RealtimeConnections keys its
   // per-room/per-user membership on this exact reference.
   const write = (chunk: string) => writer.write(chunk);
-  const unregister = yield* connections.register(userId, write);
+  const unregister = yield* connections.register(
+    userId,
+    write,
+    writer.write(
+      new Socket.CloseEvent(SESSION_REVOKED_CLOSE_CODE, "Session revoked"),
+    ),
+  );
 
   // `register` only pushes a `presence` event for a state *transition* (see
   // Realtime.ts), so a client connecting after others are already online

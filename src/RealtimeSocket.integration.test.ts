@@ -69,6 +69,10 @@ beforeAll(async () => {
       // in-memory PubSub fallback regardless of whatever REDIS_URL the host
       // running the suite happens to have set (see PubSub.ts).
       REDIS_URL: "",
+      // Lets each registration below claim its own client address (see
+      // `registerAndLogin`), so signup's per-IP cap doesn't bound how many
+      // users this file can create.
+      TRUST_PROXY: "loopback",
     },
     stdio: "ignore",
   });
@@ -83,12 +87,18 @@ afterAll(() => {
   if (dataDir) rmSync(dataDir, { recursive: true, force: true });
 });
 
+let registrations = 0;
+
 async function registerAndLogin(
   username: string,
 ): Promise<{ id: number; accessToken: string }> {
+  registrations++;
   const registerResponse = await fetch(`${apiUrl}/users/register`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Forwarded-For": `10.0.0.${registrations}`,
+    },
     body: JSON.stringify({ username, password: "password123" }),
   });
   const user = (await registerResponse.json()) as { id: number };
@@ -323,4 +333,64 @@ test("a comment event reaches only sockets subscribed to that post's room", asyn
 
   authorSocket.socket.close();
   viewerSocket.socket.close();
+}, 15_000);
+
+test("log out everywhere closes the user's open sockets with 4401, and a fresh session reconnects (issue #651)", async () => {
+  const alice = await registerAndLogin("revoke_alice");
+  const bob = await registerAndLogin("revoke_bob");
+
+  const tabA = await connect(alice.accessToken);
+  const tabB = await connect(alice.accessToken);
+  const bobSocket = await connect(bob.accessToken);
+  await Promise.all([tabA.ready, tabB.ready, bobSocket.ready]);
+
+  const closeCodes: Array<number> = [];
+  for (const { socket } of [tabA, tabB]) {
+    socket.onclose = (event) => closeCodes.push(event.code);
+  }
+  let bobClosed = false;
+  bobSocket.socket.onclose = () => {
+    bobClosed = true;
+  };
+
+  const loginResponse = await fetch(`${apiUrl}/users/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "revoke_alice", password: "password123" }),
+  });
+  const { refreshToken } = (await loginResponse.json()) as {
+    refreshToken: string;
+  };
+  await fetch(`${apiUrl}/users/logout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken, allSessions: true }),
+  });
+
+  await waitFor(() => closeCodes.length === 2);
+  expect(closeCodes).toEqual([4401, 4401]);
+
+  // The revoked session can't mint a ticket to reconnect with...
+  const staleTicket = await fetch(`${apiUrl}/realtime/ws-ticket`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${alice.accessToken}` },
+  });
+  expect(staleTicket.status).toBe(401);
+
+  // ...but a fresh login can, and someone else's socket was never touched.
+  const relogin = await fetch(`${apiUrl}/users/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "revoke_alice", password: "password123" }),
+  });
+  const { accessToken } = (await relogin.json()) as { accessToken: string };
+  const fresh = await connect(accessToken);
+  await fresh.ready;
+  await waitFor(() =>
+    fresh.messages.some((m) => m.type === "presence_snapshot"),
+  );
+  expect(bobClosed).toBe(false);
+
+  fresh.socket.close();
+  bobSocket.socket.close();
 }, 15_000);

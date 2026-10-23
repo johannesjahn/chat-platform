@@ -910,6 +910,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           yield* pubsub
             .publish("auth:invalidation", String(tokenUser.id))
             .pipe(Effect.ignore);
+          // Only "log out everywhere" revokes the other sessions' access
+          // tokens, so only it closes their sockets — a single-session
+          // logout leaves the user's other tabs connected.
+          if (payload.allSessions) {
+            yield* connections.disconnectUser(tokenUser.id);
+          }
         }),
       )
       .handle("changePassword", ({ payload }) =>
@@ -976,6 +982,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           yield* pubsub
             .publish("auth:invalidation", String(currentUser.id))
             .pipe(Effect.ignore);
+          yield* connections.disconnectUser(currentUser.id);
 
           // Reissue a fresh pair for this session — otherwise the caller
           // would be logged out by the very request that changed their
@@ -1238,6 +1245,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           yield* pubsub
             .publish("auth:invalidation", String(currentUser.id))
             .pipe(Effect.ignore);
+          yield* connections.disconnectUser(currentUser.id);
         }),
       )
       .handle("updateUserRole", ({ params: { id }, payload }) =>
@@ -1285,6 +1293,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           yield* pubsub
             .publish("auth:invalidation", String(id))
             .pipe(Effect.ignore);
+          yield* connections.disconnectUser(id);
 
           return toPublicUser(updated);
         }),
@@ -1343,6 +1352,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           yield* pubsub
             .publish("auth:invalidation", String(id))
             .pipe(Effect.ignore);
+          yield* connections.disconnectUser(id);
         }),
       )
       .handle("updateStatus", ({ payload }) =>
