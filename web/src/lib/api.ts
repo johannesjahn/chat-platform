@@ -70,10 +70,62 @@ function refreshSession(session: Session): Promise<Session | null> {
   return refreshInFlight;
 }
 
+// A copy of each authenticated request as it was before it was sent, keyed by
+// openapi-fetch's per-request id — sending consumes a request's body, so this
+// is what a replay after a reactive refresh (below) is built from.
+const replayable = new Map<string, Request>();
+
+// The `_tag` of a 401's error body. The bearer middleware's rejection is
+// `Unauthorized` (src/Auth.ts) — the access token is no good; an endpoint
+// that checks a password (change password, delete account) answers a wrong
+// one with `InvalidCredentials`, which says nothing about the session.
+async function unauthorizedTag(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.clone().json()) as { _tag?: unknown };
+    return typeof body._tag === "string" ? body._tag : null;
+  } catch {
+    return null;
+  }
+}
+
+// The server rejected `sent`'s access token — most likely it expired sooner
+// than this device's clock thought (clock skew, or a request in flight across
+// the expiry). Refresh once (single-flight, via `refreshSession`) and replay
+// the request with the new token. Returns the replay's response, or null if
+// there's nothing to replay with (the original response then stands).
+async function refreshAndReplay(
+  sent: Request,
+  copy: Request,
+  doFetch: typeof fetch,
+): Promise<Response | null> {
+  const session = getSession();
+  if (!session) return null;
+  const sentToken = sent.headers.get("Authorization")?.replace(/^Bearer /, "");
+  // Another request may already have refreshed while this one was out — then
+  // the stored token is the new one and it's only a matter of replaying.
+  const next =
+    session.accessToken === sentToken ? await refreshSession(session) : session;
+  // A failed refresh has already cleared the session; a network error leaves
+  // it alone (might just be offline) — either way there's no replay.
+  if (!next) return null;
+  copy.headers.set("Authorization", `Bearer ${next.accessToken}`);
+  const response = await doFetch(copy);
+  // Rejected even with a freshly issued token: the session really is dead
+  // (e.g. revoked by a password change on another device).
+  if (
+    response.status === 401 &&
+    (await unauthorizedTag(response)) === "Unauthorized"
+  ) {
+    clearSession();
+  }
+  return response;
+}
+
 // Attach the access token to every request so protected endpoints (e.g. the
-// user list) are authenticated, and drop the session if the server rejects it.
+// user list) are authenticated. A 401 `Unauthorized` gets one refresh and a
+// replay before the session is given up on (issue #656).
 fetchClient.use({
-  async onRequest({ request }) {
+  async onRequest({ request, id }) {
     let session = getSession();
     if (session) {
       const expiresAt = accessTokenExpiresAt(session.accessToken);
@@ -81,19 +133,26 @@ fetchClient.use({
         session = (await refreshSession(session)) ?? session;
       }
       request.headers.set("Authorization", `Bearer ${session.accessToken}`);
+      replayable.set(id, request.clone());
     }
     return request;
   },
-  onResponse({ response }) {
+  async onResponse({ request, response, options, id }) {
     // Any response at all — including error statuses — means the request
     // made it to the server and back, so the network path is up right now
     // (see reportConnectivity in lib/online.ts for why this matters more
     // than the browser's own online/offline events).
     reportConnectivity(true);
-    if (response.status === 401) clearSession();
-    return response;
+    const copy = replayable.get(id);
+    replayable.delete(id);
+    if (response.status !== 401 || !copy) return response;
+    // Only the bearer middleware's rejection means the session is in doubt —
+    // a wrong password on a signed-in endpoint must leave it alone.
+    if ((await unauthorizedTag(response)) !== "Unauthorized") return response;
+    return (await refreshAndReplay(request, copy, options.fetch)) ?? response;
   },
-  onError({ error }) {
+  onError({ error, id }) {
+    replayable.delete(id);
     // A deliberately aborted request (component unmount, query cancellation)
     // isn't a connectivity failure — only a genuine network-level failure
     // (the fetch itself rejecting) means we're offline.

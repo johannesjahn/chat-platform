@@ -61,6 +61,31 @@ test("changes password from settings and can log back in with the new one", asyn
   ).toBeVisible();
 });
 
+// A wrong *current* password is a 401 `InvalidCredentials` — it must show
+// inline and leave the session alone, not be mistaken for a dead token and
+// sign the user out of every tab (issue #656).
+test("a wrong current password shows an inline error and stays signed in", async ({
+  page,
+  signUp,
+}) => {
+  const { username } = await signUp(page);
+
+  await page.goto("/settings?section=password");
+  await page.fill("#current-password", "not-my-password");
+  await page.fill("#new-password", "playwright-new-pw-456");
+  await page.fill("#confirm-password", "playwright-new-pw-456");
+  await page.getByRole("button", { name: "Change password" }).click();
+  await expect(page.getByText("Incorrect current password")).toBeVisible();
+
+  expect(
+    await page.evaluate(() => localStorage.getItem("chat-platform-session")),
+  ).not.toBeNull();
+  await page.goto("/users");
+  await expect(
+    page.getByRole("navigation", { name: "Main" }).getByText(`@${username}`),
+  ).toBeVisible();
+});
+
 test("setting a display name replaces the username in the nav, but the profile page still shows both", async ({
   page,
   signUp,
