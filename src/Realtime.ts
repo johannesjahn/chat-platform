@@ -35,9 +35,15 @@ export type ChatDeletedEvent = {
 // Pushed to every connected user whenever a post is created, edited, or
 // deleted — the feed has no notion of "participants", so unlike chat events
 // this goes out to everyone, not a filtered subset.
+//
+// `change` says which of the three happened, so a client can act on just the
+// one post instead of refetching every feed page it has loaded (issue #662):
+// patch a post it has cached, drop a deleted one without a request, and only
+// look for something new on a "created".
 export type PostEvent = {
   readonly type: "post_changed";
   readonly postId: number;
+  readonly change: "created" | "updated" | "deleted";
 };
 
 // Pushed when a comment or reply on a post is created, edited, or deleted.

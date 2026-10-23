@@ -222,7 +222,10 @@ test("a chat event reaches only the chat's participants, and a post event reache
   );
   expect(
     carolSocket.messages.some(
-      (m) => m.type === "post_changed" && m.postId === post.id,
+      (m) =>
+        m.type === "post_changed" &&
+        m.postId === post.id &&
+        m.change === "created",
     ),
   ).toBe(true);
 

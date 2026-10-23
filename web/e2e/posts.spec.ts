@@ -407,3 +407,94 @@ test("switching post type keeps a separate draft per type (issue #524)", async (
   await page.getByRole("button", { name: "Image URL" }).click();
   await expect(page.locator("#content")).toHaveValue(url);
 });
+
+test("someone else's post, edit and delete reach a deeply scrolled feed without refetching its pages (issue #662)", async ({
+  page,
+  request,
+  apiUrl,
+  createUser,
+  signUp,
+}) => {
+  const author = await createUser();
+  const auth = { Authorization: `Bearer ${author.session.accessToken}` };
+  const postIds: number[] = [];
+  for (let i = 0; i < 20; i++) {
+    const response = await request.post(`${apiUrl}/posts`, {
+      headers: auth,
+      data: { contentType: "text", content: `Backlog post ${i}` },
+    });
+    expect(response.ok()).toBe(true);
+    postIds.push(((await response.json()) as { id: number }).id);
+  }
+
+  // Scroll the viewer's feed until all 20 are loaded — 5 + 5 pages of 3, so
+  // a feed-wide refetch would send 6 requests. Kept to 20 (not the issue's
+  // 40) because each page loads one scroll at a time, which under CI's
+  // e2e-stress load takes long enough to blow the budget.
+  await signUp(page);
+  const articles = page.getByRole("article");
+  await expect(async () => {
+    await page.getByTestId("feed-sentinel").scrollIntoViewIfNeeded();
+    await expect(articles).toHaveCount(20, { timeout: 1_000 });
+  }).toPass({ timeout: 60_000 });
+  await expect(page.getByText("You're all caught up.")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+
+  // From here on, count every posts request the viewer's tab sends.
+  const listRequests: string[] = [];
+  const singleRequests: string[] = [];
+  page.on("request", (req) => {
+    if (req.method() !== "GET") return;
+    const path = new URL(req.url()).pathname;
+    if (path === "/posts") listRequests.push(req.url());
+    else if (/^\/posts\/\d+$/.test(path)) singleRequests.push(req.url());
+  });
+  const settle = async () => {
+    await page.waitForTimeout(500);
+    await page.waitForLoadState("networkidle");
+  };
+
+  // A new post: one request for the newest page, and every loaded page stays.
+  const created = await request.post(`${apiUrl}/posts`, {
+    headers: auth,
+    data: { contentType: "text", content: "Fresh post from someone else" },
+  });
+  expect(created.ok()).toBe(true);
+  await expect(page.getByText("Fresh post from someone else")).toBeVisible({
+    timeout: 10_000,
+  });
+  await settle();
+  expect(listRequests.length + singleRequests.length).toBeLessThanOrEqual(1);
+  await expect(articles).toHaveCount(21);
+
+  // An edit of a post in view: refetched alone, patched in place.
+  listRequests.length = 0;
+  singleRequests.length = 0;
+  const edited = postIds[10]!;
+  const update = await request.put(`${apiUrl}/posts/${edited}`, {
+    headers: auth,
+    data: { contentType: "text", content: "Backlog post, edited" },
+  });
+  expect(update.ok()).toBe(true);
+  await expect(page.getByText("Backlog post, edited")).toBeVisible({
+    timeout: 10_000,
+  });
+  await settle();
+  expect(listRequests).toEqual([]);
+  expect(singleRequests.length).toBeLessThanOrEqual(1);
+
+  // A delete: removed without any request at all.
+  const deleted = postIds[15]!;
+  const removal = await request.delete(`${apiUrl}/posts/${deleted}`, {
+    headers: auth,
+  });
+  expect(removal.ok()).toBe(true);
+  await expect(page.getByText("Backlog post 15", { exact: true })).toHaveCount(
+    0,
+    { timeout: 10_000 },
+  );
+  await settle();
+  expect(listRequests).toEqual([]);
+  expect(singleRequests.length).toBeLessThanOrEqual(1);
+  await expect(articles).toHaveCount(20);
+});
