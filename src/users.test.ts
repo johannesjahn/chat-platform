@@ -1022,6 +1022,41 @@ test("replaying a rotated-away refresh token revokes the whole family, including
     }),
   ));
 
+test("two concurrent refreshes with the same token can't both succeed, and the race revokes the family (issue #650)", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* c.users.register({
+        payload: { username: "nell", password: "pw-nell1" },
+      });
+      const { refreshToken } = yield* c.users.login({
+        payload: { username: "nell", password: "pw-nell1" },
+      });
+
+      // Both requests read the row as unrevoked before either writes. This
+      // is a thief replaying a stolen token at the same moment the victim's
+      // client refreshes.
+      const results = yield* Effect.all(
+        [
+          c.users.refresh({ payload: { refreshToken } }).pipe(Effect.result),
+          c.users.refresh({ payload: { refreshToken } }).pipe(Effect.result),
+        ],
+        { concurrency: "unbounded" },
+      );
+      const winners = results.filter((r) => r._tag === "Success");
+      expect(winners).toHaveLength(1);
+
+      // The session didn't fork: whatever the winner got was revoked with
+      // the rest of the family when the loser was caught.
+      const winner = winners[0]!;
+      if (winner._tag !== "Success") throw new Error("unreachable");
+      const after = yield* c.users
+        .refresh({ payload: { refreshToken: winner.success.refreshToken } })
+        .pipe(Effect.flip);
+      expect(after._tag).toBe("InvalidCredentials");
+    }),
+  ));
+
 test("two concurrent login sessions each rotate independently", () =>
   run(
     Effect.gen(function* () {

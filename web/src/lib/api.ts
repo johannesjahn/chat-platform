@@ -6,6 +6,7 @@ import createFetchClient from "openapi-fetch";
 import createQueryClient from "openapi-react-query";
 import { clearSession, getSession, setSession } from "./auth";
 import { reportConnectivity } from "./online";
+import { createSessionRefresher } from "./sessionRefresh";
 import type { components, paths } from "./api-types";
 
 // `__E2E_API_URL__` is injected by Playwright (see `web/e2e/fixtures.ts`) so
@@ -36,39 +37,16 @@ function accessTokenExpiresAt(accessToken: string): number | null {
 
 const REFRESH_SKEW_MS = 30_000;
 
-// Deduplicates concurrent refreshes — several requests can notice an
-// about-to-expire token at once, but only one of them should call
-// `/users/refresh` (a refresh token is rotated on use, so a second call with
-// the now-stale refresh token would otherwise fail).
-let refreshInFlight: Promise<Session | null> | null = null;
-
-function refreshSession(session: Session): Promise<Session | null> {
-  if (!refreshInFlight) {
-    refreshInFlight = fetch(`${API_URL}/users/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: session.refreshToken }),
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          clearSession();
-          return null;
-        }
-        const { accessToken, refreshToken } = (await response.json()) as {
-          accessToken: string;
-          refreshToken: string;
-        };
-        const next: Session = { ...session, accessToken, refreshToken };
-        setSession(next);
-        return next;
-      })
-      .catch(() => null) // network error — leave the session alone, might just be offline
-      .finally(() => {
-        refreshInFlight = null;
-      });
-  }
-  return refreshInFlight;
-}
+// Rotates the session's tokens — once per tab at a time, and once across
+// tabs at a time (see sessionRefresh.ts).
+const refreshSession = createSessionRefresher({
+  apiUrl: API_URL,
+  getSession,
+  setSession,
+  clearSession,
+  fetch: (input, init) => fetch(input, init),
+  locks: typeof navigator === "undefined" ? undefined : navigator.locks,
+});
 
 // A copy of each authenticated request as it was before it was sent, keyed by
 // openapi-fetch's per-request id — sending consumes a request's body, so this

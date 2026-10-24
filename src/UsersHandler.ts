@@ -325,43 +325,66 @@ const recordAuthEvent = (
     1,
   );
 
-// Rotation info for a refresh: the row being replaced, identified by its own
-// jti plus the familyId it belongs to (every token descended from the same
-// login shares one, so the whole chain can be revoked at once on reuse).
-type Rotating = { readonly oldJti: string; readonly familyId: string };
-
 // Issues a refresh token for `user` and persists its jti so `POST
 // /users/refresh` can later look it up — a refresh token is only honored
-// while its row is present and unrevoked. A fresh login starts a new
-// family. On rotation, the old row is marked revoked (not deleted) and the
-// new row joins the same family, in one transaction, so the previous
-// refresh token stops working at the same instant the new one starts, while
-// still being available for reuse detection later.
+// while its row is present and unrevoked. Each call starts a new family
+// (a fresh login); refreshes go through `rotateRefreshToken` instead.
 const issueRefreshToken = (
   db: DrizzleDb,
   jwt: Jwt["Service"],
   user: TokenUser,
-  rotating?: Rotating,
 ): Effect.Effect<string> =>
   Effect.gen(function* () {
     const { token, jti, expiresAt } = yield* jwt.signRefreshToken(user);
-    const familyId = rotating?.familyId ?? crypto.randomUUID();
     yield* Effect.tryPromise(() =>
-      rotating
-        ? db.transaction(async (tx) => {
-            await tx
-              .update(refreshTokens)
-              .set({ revokedAt: new Date() })
-              .where(eq(refreshTokens.jti, rotating.oldJti));
-            await tx
-              .insert(refreshTokens)
-              .values({ jti, userId: user.id, familyId, expiresAt });
-          })
-        : db
-            .insert(refreshTokens)
-            .values({ jti, userId: user.id, familyId, expiresAt }),
+      db.insert(refreshTokens).values({
+        jti,
+        userId: user.id,
+        familyId: crypto.randomUUID(),
+        expiresAt,
+      }),
     ).pipe(Effect.orDie);
     return token;
+  });
+
+// Exchanges the refresh token `oldJti` for a new one in the same family:
+// the old row is marked revoked (not deleted, so a later replay can still be
+// recognised) and the new row inserted, in one transaction, so the old token
+// stops working at the same instant the new one starts.
+//
+// The revoke is conditional on the row still being unrevoked, and that's
+// what makes rotation single-use (issue #650). The caller has already read
+// the row as unrevoked, but two requests presenting the same token can both
+// get past that read before either writes. Under the condition only one of
+// them gets a row back; Postgres re-checks `revoked_at IS NULL` once the
+// winner's row lock is released. The loser gets `null` and inserts nothing.
+// To the caller that's the same as finding the token already revoked.
+const rotateRefreshToken = (
+  db: DrizzleDb,
+  jwt: Jwt["Service"],
+  user: TokenUser,
+  oldJti: string,
+): Effect.Effect<string | null> =>
+  Effect.gen(function* () {
+    const { token, jti, expiresAt } = yield* jwt.signRefreshToken(user);
+    const rotated = yield* Effect.tryPromise(() =>
+      db.transaction(async (tx) => {
+        const revoked = await tx
+          .update(refreshTokens)
+          .set({ revokedAt: new Date() })
+          .where(
+            and(eq(refreshTokens.jti, oldJti), isNull(refreshTokens.revokedAt)),
+          )
+          .returning({ familyId: refreshTokens.familyId });
+        const familyId = revoked[0]?.familyId;
+        if (familyId === undefined) return false;
+        await tx
+          .insert(refreshTokens)
+          .values({ jti, userId: user.id, familyId, expiresAt });
+        return true;
+      }),
+    ).pipe(Effect.orDie);
+    return rotated ? token : null;
   });
 
 // Revokes every still-active (unrevoked) row in a token family — called when
@@ -869,10 +892,25 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             tokenVersion: dbUser.tokenVersion,
           };
           const accessToken = yield* jwt.signAccessToken(newTokenUser);
-          const refreshToken = yield* issueRefreshToken(db, jwt, newTokenUser, {
-            oldJti: tokenUser.jti,
-            familyId: storedToken.familyId,
-          });
+          const refreshToken = yield* rotateRefreshToken(
+            db,
+            jwt,
+            newTokenUser,
+            tokenUser.jti,
+          );
+          // Another request rotated this same token between the read above
+          // and now. Only one of them may win, and one token presented twice
+          // is reuse whatever the timing, so this gets the same treatment as
+          // the already-revoked case above.
+          if (refreshToken === null) {
+            yield* revokeFamily(db, storedToken.familyId);
+            yield* recordAuthEvent("refresh", "failure");
+            return yield* Effect.fail(
+              new InvalidCredentials({
+                message: "Invalid or expired refresh token",
+              }),
+            );
+          }
           yield* recordAuthEvent("refresh", "success");
           return { accessToken, refreshToken };
         }),

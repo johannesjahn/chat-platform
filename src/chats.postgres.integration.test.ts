@@ -82,6 +82,41 @@ describeIfPostgres("chat transactions on real Postgres", () => {
   const query = <A>(f: () => Promise<A>) =>
     Effect.tryPromise(f).pipe(Effect.orDie);
 
+  // Not a chat transaction, but the same kind of race: refresh rotation is
+  // made single-use by a conditional UPDATE, and only a real pool overlaps
+  // the two requests' transactions so the loser waits on the winner's row
+  // lock and re-checks `revoked_at IS NULL` (issue #650).
+  test("concurrent refreshes with one token give at most one success", () =>
+    run(
+      Effect.gen(function* () {
+        const { client } = yield* createUser("unused");
+        yield* client.users.register({
+          payload: { username: "rotator", password: "pw-rotator1" },
+        });
+        const { refreshToken } = yield* client.users.login({
+          payload: { username: "rotator", password: "pw-rotator1" },
+        });
+
+        const results = yield* Effect.all(
+          Array.from({ length: 6 }, () =>
+            client.users
+              .refresh({ payload: { refreshToken } })
+              .pipe(Effect.result),
+          ),
+          { concurrency: "unbounded" },
+        );
+        const winners = results.filter((r) => r._tag === "Success");
+        expect(winners.length).toBeLessThanOrEqual(1);
+        for (const winner of winners) {
+          if (winner._tag !== "Success") continue;
+          const after = yield* client.users
+            .refresh({ payload: { refreshToken: winner.success.refreshToken } })
+            .pipe(Effect.flip);
+          expect(after._tag).toBe("InvalidCredentials");
+        }
+      }),
+    ));
+
   test("concurrent createDirectChat for one pair all succeed with one chat", () =>
     run(
       Effect.gen(function* () {
