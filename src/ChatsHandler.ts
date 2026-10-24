@@ -1333,7 +1333,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           // `serializable` isolation Postgres instead aborts one of them, and
           // `serializableTransaction` retries it — so the loser re-runs the
           // check, finds the winner's chat and returns it.
-          const chatRow = yield* serializableTransaction(db, async (tx) => {
+          const result = yield* serializableTransaction(db, async (tx) => {
             // A direct chat always has exactly the two participants it
             // was created with, so matching on "both ids are
             // participants of some direct chat, and it has exactly two
@@ -1363,7 +1363,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               const row = rows[0];
               if (!row)
                 throw new Error("Existing chat vanished mid-transaction");
-              return row;
+              return { row, created: false };
             }
 
             const now = new Date();
@@ -1393,8 +1393,9 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               },
             ]);
 
-            return newRow;
+            return { row: newRow, created: true };
           });
+          const chatRow = result.row;
 
           const participants = yield* getParticipants(db, chatRow.id);
           // A freshly created chat's row already carries its initial
@@ -1406,6 +1407,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             chatRow.version,
             participants.map((p) => p.userId),
           );
+          if (result.created) {
+            yield* connections.introduceContacts(
+              [payload.userId],
+              [currentUser.id, payload.userId],
+            );
+          }
           return yield* buildChat(
             db,
             storage,
@@ -1480,12 +1487,15 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
 
           const participants = yield* getParticipants(db, chatRow.id);
+          const participantIds = participants.map((p) => p.userId);
           yield* notifyChatUpdated(
             connections,
             chatRow.id,
             chatRow.version,
-            participants.map((p) => p.userId),
+            participantIds,
           );
+          // Everyone in a new group is new to it.
+          yield* connections.introduceContacts(participantIds, participantIds);
           return yield* buildChat(
             db,
             storage,
@@ -1767,7 +1777,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 )
                 .onConflictDoNothing();
             }
-            return { ok: true as const };
+            return { ok: true as const, newIds };
           });
 
           if (!result.ok)
@@ -1779,12 +1789,9 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
 
           const version = yield* bumpChatVersion(db, id);
           const participants = yield* getParticipants(db, id);
-          yield* notifyChatUpdated(
-            connections,
-            id,
-            version,
-            participants.map((p) => p.userId),
-          );
+          const participantIds = participants.map((p) => p.userId);
+          yield* notifyChatUpdated(connections, id, version, participantIds);
+          yield* connections.introduceContacts(result.newIds, participantIds);
           return yield* buildChat(
             db,
             storage,
@@ -3346,11 +3353,16 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
 
           const version = yield* bumpChatVersion(db, chatRow.id);
           const participants = yield* getParticipants(db, chatRow.id);
+          const participantIds = participants.map((p) => p.userId);
           yield* notifyChatUpdated(
             connections,
             chatRow.id,
             version,
-            participants.map((p) => p.userId),
+            participantIds,
+          );
+          yield* connections.introduceContacts(
+            [currentUser.id],
+            participantIds,
           );
           return yield* buildChat(
             db,

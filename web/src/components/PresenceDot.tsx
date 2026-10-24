@@ -14,6 +14,8 @@ export function PresenceDot({ online, className }: PresenceDotProps) {
     <span
       className={cn("relative inline-flex size-2.5 shrink-0", className)}
       aria-hidden="true"
+      // Decorative to assistive tech, so this is the e2e suite's handle on it.
+      data-online={online}
     >
       {online && (
         <span className="absolute inset-0 rounded-full bg-emerald-400 motion-safe:animate-presence-ping" />

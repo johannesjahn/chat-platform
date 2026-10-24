@@ -394,3 +394,86 @@ test("log out everywhere closes the user's open sockets with 4401, and a fresh s
   fresh.socket.close();
   bobSocket.socket.close();
 }, 15_000);
+
+// Issue #684: presence only reaches contacts, so two online users who just
+// became contacts have to be introduced — before, each saw the other offline
+// until one of them reconnected.
+test("starting a chat, adding someone, or joining via invite tells the new contacts they're online", async () => {
+  const stamp = Date.now();
+  const alice = await registerAndLogin(`intro_alice_${stamp}`);
+  const bob = await registerAndLogin(`intro_bob_${stamp}`);
+  const carol = await registerAndLogin(`intro_carol_${stamp}`);
+  const dave = await registerAndLogin(`intro_dave_${stamp}`);
+
+  const sockets = await Promise.all(
+    [alice, bob, carol, dave].map((user) => connect(user.accessToken)),
+  );
+  await Promise.all(sockets.map((s) => s.ready));
+  await Promise.all(
+    sockets.map((s) =>
+      waitFor(() => s.messages.some((m) => m.type === "presence_snapshot")),
+    ),
+  );
+  const [aliceSocket, bobSocket, carolSocket, daveSocket] = sockets as [
+    (typeof sockets)[number],
+    (typeof sockets)[number],
+    (typeof sockets)[number],
+    (typeof sockets)[number],
+  ];
+  const sawOnline = (
+    socket: (typeof sockets)[number],
+    userId: number,
+  ): boolean =>
+    socket.messages.some(
+      (m) => m.type === "presence" && m.userId === userId && m.online === true,
+    );
+
+  const post = (path: string, accessToken: string, body: unknown) =>
+    fetch(`${apiUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+  // A new DM: Alice and Bob were strangers, both online.
+  await post("/chats/direct", alice.accessToken, { userId: bob.id });
+  await waitFor(
+    () => sawOnline(aliceSocket, bob.id) && sawOnline(bobSocket, alice.id),
+  );
+
+  // A group of Alice and Bob gains Carol.
+  const groupResponse = await post("/chats/group", alice.accessToken, {
+    title: "intro",
+    participantIds: [bob.id],
+  });
+  const group = (await groupResponse.json()) as { id: number };
+  await post(`/chats/${group.id}/participants`, alice.accessToken, {
+    participantIds: [carol.id],
+  });
+  await waitFor(
+    () =>
+      sawOnline(carolSocket, alice.id) &&
+      sawOnline(carolSocket, bob.id) &&
+      sawOnline(aliceSocket, carol.id) &&
+      sawOnline(bobSocket, carol.id),
+  );
+
+  // Dave joins through an invite link.
+  const inviteResponse = await post(
+    `/chats/${group.id}/invites`,
+    alice.accessToken,
+    {},
+  );
+  const invite = (await inviteResponse.json()) as { code: string };
+  await post(`/chats/invites/${invite.code}/join`, dave.accessToken, {});
+  await waitFor(
+    () =>
+      [alice, bob, carol].every((user) => sawOnline(daveSocket, user.id)) &&
+      [aliceSocket, bobSocket, carolSocket].every((s) => sawOnline(s, dave.id)),
+  );
+
+  for (const s of sockets) s.socket.close();
+}, 15_000);

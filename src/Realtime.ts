@@ -317,6 +317,19 @@ export class RealtimeConnections extends Context.Service<
     readonly onlineContactIds: (
       userId: number,
     ) => Effect.Effect<ReadonlyArray<number>>;
+    // Called after `newUserIds` joined a chat whose members are now
+    // `memberIds` (issue #684). Presence only reaches contacts, and the
+    // audience is worked out when a presence event is sent or a socket
+    // opens — so two users who just *became* contacts would see each other
+    // offline until one of them reconnected. This sends `presence: online`
+    // both ways for every newcomer/member pair where both are online and
+    // neither has blocked the other. Redundant for a pair that were already
+    // contacts through another chat, which is harmless: the client only
+    // reacts to a change (see web/src/lib/presence.ts).
+    readonly introduceContacts: (
+      newUserIds: Iterable<number>,
+      memberIds: Iterable<number>,
+    ) => Effect.Effect<void>;
     // Named rooms — the generalized form of the post rooms above, used by
     // the games feature (`game-hub:<game>` for a lobby browser,
     // `game-lobby:<id>` for one lobby; see `isValidRoomName`). Same
@@ -759,6 +772,47 @@ export const RealtimeConnectionsLive = Layer.effect(
             Effect.flatMap((contacts) => presenceStore.onlineAmong(contacts)),
           );
 
+    const introduceContacts: RealtimeConnections["Service"]["introduceContacts"] =
+      (newUserIds, memberIds) =>
+        Effect.gen(function* () {
+          const members = new Set(memberIds);
+          const newcomers = [...new Set(newUserIds)];
+          // Only a pair that's online on both ends needs telling — anyone
+          // offline is already shown as offline.
+          const online = new Set(
+            yield* presenceStore.onlineAmong([
+              ...new Set([...members, ...newcomers]),
+            ]),
+          );
+          const introduced = new Set<number>();
+          for (const userId of newcomers) {
+            if (!online.has(userId)) continue;
+            introduced.add(userId);
+            // `contactsOf` reads the membership that just committed, and
+            // drops anyone on either side of a block.
+            const contacts = (yield* audience.contactsOf(userId)).filter(
+              (other) =>
+                members.has(other) &&
+                online.has(other) &&
+                // Two newcomers introduce each other once, not twice.
+                !introduced.has(other),
+            );
+            if (contacts.length === 0) continue;
+            yield* notifyUsers(contacts, {
+              type: "presence",
+              userId,
+              online: true,
+            });
+            for (const other of contacts) {
+              yield* notifyUsers([userId], {
+                type: "presence",
+                userId: other,
+                online: true,
+              });
+            }
+          }
+        });
+
     return {
       register,
       notifyUsers,
@@ -769,6 +823,7 @@ export const RealtimeConnectionsLive = Layer.effect(
       unsubscribePost,
       notifyPostRoom,
       onlineContactIds,
+      introduceContacts,
       subscribeRoom,
       unsubscribeRoom,
       isInRoom,
