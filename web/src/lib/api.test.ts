@@ -34,7 +34,50 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   return handler(request);
 }) as typeof fetch;
 
+// A minimal XMLHttpRequest for `uploadAttachment`, answered by the same
+// `handler` (and recorded in the same `requests`) as fetch.
+class FakeXMLHttpRequest {
+  status = 0;
+  responseText = "";
+  upload: { onprogress: ((event: ProgressEvent) => void) | null } = {
+    onprogress: null,
+  };
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+  private method = "GET";
+  private url = "";
+  private headers = new Headers();
+  open(method: string, url: string) {
+    this.method = method;
+    this.url = url;
+  }
+  setRequestHeader(name: string, value: string) {
+    this.headers.set(name, value);
+  }
+  send(body: FormData) {
+    const request = new Request(this.url, {
+      method: this.method,
+      headers: this.headers,
+      body,
+    });
+    requests.push(request);
+    void Promise.resolve(handler(request)).then(async (response) => {
+      this.status = response.status;
+      this.responseText = await response.text();
+      this.onload?.();
+    });
+  }
+  abort() {
+    this.onabort?.();
+  }
+}
+globalThis.XMLHttpRequest =
+  FakeXMLHttpRequest as unknown as typeof XMLHttpRequest;
+
 const { fetchClient } = await import("./api");
+const { uploadAttachment } = await import("./attachments");
+const { uploadAvatar } = await import("./avatar");
 
 // An unsigned JWT-shaped token — the client only decodes `exp` from it.
 function token(name: string, expiresInSeconds = 900): string {
@@ -194,4 +237,71 @@ test("a 401 to a signed-out request is left alone", async () => {
   expect(response.status).toBe(401);
   expect(requests).toHaveLength(1);
   expect(cleared).toBe(0);
+});
+
+// Uploads build their own request outside `fetchClient` (XHR for progress,
+// raw fetch for avatars) but still refresh the session (issue #685).
+describe("uploads", () => {
+  const png = () => new File(["png"], "a.png", { type: "image/png" });
+  const crop = { x: 0, y: 0, size: 256 };
+  const isUpload = (request: Request) => !isRefresh(request);
+  const acceptOnlyNew = (request: Request) => {
+    if (isRefresh(request)) {
+      return json(200, { accessToken: NEW, refreshToken: "refresh-2" });
+    }
+    return bearer(request) === `Bearer ${NEW}`
+      ? json(200, { id: 9 })
+      : unauthorized();
+  };
+
+  for (const [name, upload] of [
+    ["an attachment", () => uploadAttachment(png()).promise],
+    ["an avatar", () => uploadAvatar(png(), crop)],
+  ] as const) {
+    test(`${name} with an expired token refreshes before sending`, async () => {
+      session!.accessToken = token("old", -60);
+      handler = acceptOnlyNew;
+
+      expect(await upload()).toEqual({ id: 9 } as never);
+      expect(requests.filter(isRefresh)).toHaveLength(1);
+      expect(requests.filter(isUpload).map(bearer)).toEqual([`Bearer ${NEW}`]);
+      expect(session?.accessToken).toBe(NEW);
+    });
+
+    test(`${name} rejected with 401 Unauthorized is refreshed and re-sent`, async () => {
+      handler = acceptOnlyNew;
+
+      expect(await upload()).toEqual({ id: 9 } as never);
+      expect(requests.filter(isRefresh)).toHaveLength(1);
+      expect(requests.filter(isUpload).map(bearer)).toEqual([
+        `Bearer ${OLD}`,
+        `Bearer ${NEW}`,
+      ]);
+      // The re-sent request carries the file again.
+      const file = (await requests.at(-1)!.formData()).get("file") as File;
+      expect(await file.text()).toBe("png");
+    });
+
+    test(`${name} rejected even after a refresh clears the session`, async () => {
+      handler = (request) =>
+        isRefresh(request)
+          ? json(200, { accessToken: NEW, refreshToken: "refresh-2" })
+          : unauthorized();
+
+      await expect(upload()).rejects.toMatchObject({ status: 401 });
+      expect(requests.filter(isUpload)).toHaveLength(2);
+      expect(session).toBeNull();
+    });
+  }
+
+  test("an upload's other errors aren't retried", async () => {
+    handler = () => json(413, { _tag: "PayloadTooLarge", message: "Too big" });
+
+    await expect(uploadAttachment(png()).promise).rejects.toMatchObject({
+      status: 413,
+      message: "Too big",
+    });
+    expect(requests).toHaveLength(1);
+    expect(cleared).toBe(0);
+  });
 });
