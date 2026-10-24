@@ -66,37 +66,85 @@ async function unauthorizedTag(response: Response): Promise<string | null> {
   }
 }
 
-// The server rejected `sent`'s access token — most likely it expired sooner
-// than this device's clock thought (clock skew, or a request in flight across
-// the expiry). Refresh once (single-flight, via `refreshSession`) and replay
-// the request with the new token. Returns the replay's response, or null if
-// there's nothing to replay with (the original response then stands).
+// The server rejected `sentToken` — most likely it expired sooner than this
+// device's clock thought (clock skew, or a request in flight across the
+// expiry). Refresh once (single-flight, via `refreshSession`) and return the
+// token to retry with, or null if there's none (the rejection then stands).
+async function refreshRejectedToken(
+  sentToken: string | undefined,
+): Promise<string | null> {
+  const session = getSession();
+  if (!session) return null;
+  // Another request may already have refreshed while this one was out — then
+  // the stored token is the new one and it's only a matter of retrying.
+  const next =
+    session.accessToken === sentToken ? await refreshSession(session) : session;
+  // A failed refresh has already cleared the session; a network error leaves
+  // it alone (might just be offline) — either way there's no retry.
+  return next?.accessToken ?? null;
+}
+
+// Rejected even with a freshly issued token: the session really is dead
+// (e.g. revoked by a password change on another device).
+function rejectedAfterRefresh(tag: string | null): void {
+  if (tag === "Unauthorized") clearSession();
+}
+
 async function refreshAndReplay(
   sent: Request,
   copy: Request,
   doFetch: typeof fetch,
 ): Promise<Response | null> {
-  const session = getSession();
-  if (!session) return null;
   const sentToken = sent.headers.get("Authorization")?.replace(/^Bearer /, "");
-  // Another request may already have refreshed while this one was out — then
-  // the stored token is the new one and it's only a matter of replaying.
-  const next =
-    session.accessToken === sentToken ? await refreshSession(session) : session;
-  // A failed refresh has already cleared the session; a network error leaves
-  // it alone (might just be offline) — either way there's no replay.
-  if (!next) return null;
-  copy.headers.set("Authorization", `Bearer ${next.accessToken}`);
+  const token = await refreshRejectedToken(sentToken);
+  if (!token) return null;
+  copy.headers.set("Authorization", `Bearer ${token}`);
   const response = await doFetch(copy);
-  // Rejected even with a freshly issued token: the session really is dead
-  // (e.g. revoked by a password change on another device).
-  if (
-    response.status === 401 &&
-    (await unauthorizedTag(response)) === "Unauthorized"
-  ) {
-    clearSession();
+  if (response.status === 401) {
+    rejectedAfterRefresh(await unauthorizedTag(response));
   }
   return response;
+}
+
+// The stored access token, refreshed first if it expires within the skew —
+// null when signed out. For requests that can't go through `fetchClient`
+// (the XHR attachment upload, the avatar upload).
+export async function currentAccessToken(): Promise<string | null> {
+  let session = getSession();
+  if (!session) return null;
+  const expiresAt = accessTokenExpiresAt(session.accessToken);
+  if (expiresAt !== null && expiresAt - REFRESH_SKEW_MS <= Date.now()) {
+    session = (await refreshSession(session)) ?? session;
+  }
+  return session.accessToken;
+}
+
+function errorTag(body: unknown): string | null {
+  const tag = (body as { _tag?: unknown } | null)?._tag;
+  return typeof tag === "string" ? tag : null;
+}
+
+// What `fetchClient`'s middleware does for its own requests, for one sent
+// outside it: `send` makes the request with the given token (or none) and
+// reports its status and parsed error body. A 401 `Unauthorized` gets one
+// refresh and a resend, so `send` must be safe to call twice (issue #685).
+export async function sendWithSession<
+  T extends { status: number; body: unknown },
+>(send: (accessToken: string | null) => Promise<T>): Promise<T> {
+  const token = await currentAccessToken();
+  const result = await send(token);
+  if (
+    !token ||
+    result.status !== 401 ||
+    errorTag(result.body) !== "Unauthorized"
+  ) {
+    return result;
+  }
+  const next = await refreshRejectedToken(token);
+  if (!next) return result;
+  const retried = await send(next);
+  if (retried.status === 401) rejectedAfterRefresh(errorTag(retried.body));
+  return retried;
 }
 
 // Attach the access token to every request so protected endpoints (e.g. the
@@ -104,13 +152,9 @@ async function refreshAndReplay(
 // replay before the session is given up on (issue #656).
 fetchClient.use({
   async onRequest({ request, id }) {
-    let session = getSession();
-    if (session) {
-      const expiresAt = accessTokenExpiresAt(session.accessToken);
-      if (expiresAt !== null && expiresAt - REFRESH_SKEW_MS <= Date.now()) {
-        session = (await refreshSession(session)) ?? session;
-      }
-      request.headers.set("Authorization", `Bearer ${session.accessToken}`);
+    const token = await currentAccessToken();
+    if (token) {
+      request.headers.set("Authorization", `Bearer ${token}`);
       replayable.set(id, request.clone());
     }
     return request;

@@ -1,5 +1,4 @@
-import { API_URL } from "./api";
-import { getSession } from "./auth";
+import { API_URL, sendWithSession } from "./api";
 import type { components } from "./api-types";
 
 export type User = components["schemas"]["User"];
@@ -42,9 +41,10 @@ export type AvatarCropRegion = {
 // lib/attachments.ts, minus the upload-progress plumbing that needs
 // XMLHttpRequest: avatars are capped at MAX_AVATAR_UPLOAD_SIZE_BYTES (far
 // smaller than an attachment) and resolve quickly enough that a progress bar
-// isn't worth the complexity. Shared by `uploadAvatar` (a user's own avatar,
-// `/users/me/avatar`) and `uploadChatAvatar` (a group chat's, `/chats/:id/
-// avatar`) — same request shape, same response-handling, different target
+// isn't worth the complexity. Goes through `sendWithSession`, so an expired
+// access token is refreshed rather than sent as-is (issue #685). Shared by
+// `uploadAvatar` (a user's own avatar, `/users/me/avatar`) and
+// `uploadChatAvatar` (a group chat's, `/chats/:id/avatar`) — same request shape, same response-handling, different target
 // and resource type.
 async function postAvatarMultipart<T>(
   path: string,
@@ -57,21 +57,23 @@ async function postAvatarMultipart<T>(
   form.append("y", String(crop.y));
   form.append("size", String(crop.size));
 
-  const session = getSession();
-  const response = await fetch(`${API_URL}${path}`, {
-    method: "POST",
-    headers: session
-      ? { Authorization: `Bearer ${session.accessToken}` }
-      : undefined,
-    body: form,
+  // The same FormData can be sent again — a retry after a refresh resends it.
+  const { response, body } = await sendWithSession(async (accessToken) => {
+    const response = await fetch(`${API_URL}${path}`, {
+      method: "POST",
+      headers: accessToken
+        ? { Authorization: `Bearer ${accessToken}` }
+        : undefined,
+      body: form,
+    });
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      // ignore — surfaced as a generic status-code error below
+    }
+    return { status: response.status, response, body };
   });
-
-  let body: unknown = null;
-  try {
-    body = await response.json();
-  } catch {
-    // ignore — surfaced as a generic status-code error below
-  }
   if (!response.ok) {
     const message =
       (body as { message?: string } | null)?.message ??

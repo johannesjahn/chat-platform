@@ -1,5 +1,4 @@
-import { API_URL } from "./api";
-import { getSession } from "./auth";
+import { API_URL, sendWithSession } from "./api";
 import type { components } from "./api-types";
 
 export type Attachment = components["schemas"]["Attachment"];
@@ -76,45 +75,62 @@ export type AttachmentUpload = {
 // rest of the app uses) because it's the only browser API that exposes
 // upload progress events — needed for the composer's progress bar. This
 // posts a real `multipart/form-data` body, matching the shape
-// `POST /attachments` expects (see src/AttachmentsHandler.ts).
+// `POST /attachments` expects (see src/AttachmentsHandler.ts). It goes
+// through `sendWithSession`, so an expired access token is refreshed first
+// and a 401 `Unauthorized` is refreshed and re-sent with the same file —
+// the middleware that does this for `fetchClient` can't see an XHR
+// (issue #685).
 export function uploadAttachment(
   file: File,
   onProgress?: (fraction: number) => void,
 ): AttachmentUpload {
-  const xhr = new XMLHttpRequest();
-  const promise = new Promise<Attachment>((resolve, reject) => {
-    xhr.open("POST", `${API_URL}/attachments`);
-    const session = getSession();
-    if (session) {
-      xhr.setRequestHeader("Authorization", `Bearer ${session.accessToken}`);
-    }
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress?.(event.loaded / event.total);
-    };
-    xhr.onload = () => {
-      let body: unknown = null;
-      try {
-        body = JSON.parse(xhr.responseText);
-      } catch {
-        // ignore — surfaced as a generic status-code error below
-      }
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(body as Attachment);
-      } else {
-        const message =
-          (body as { message?: string } | null)?.message ??
-          `Upload failed (${xhr.status})`;
-        reject(new AttachmentUploadError(message, xhr.status));
-      }
-    };
-    xhr.onerror = () =>
-      reject(new AttachmentUploadError("Network error during upload", 0));
-    xhr.onabort = () =>
-      reject(new AttachmentUploadError("Upload cancelled", 0));
+  let current: XMLHttpRequest | null = null;
+  let aborted = false;
+  const cancelled = () => new AttachmentUploadError("Upload cancelled", 0);
 
-    const form = new FormData();
-    form.append("file", file, file.name);
-    xhr.send(form);
+  const send = (accessToken: string | null) =>
+    new Promise<{ status: number; body: unknown }>((resolve, reject) => {
+      // Aborted while the token was being refreshed — never send.
+      if (aborted) return reject(cancelled());
+      const xhr = new XMLHttpRequest();
+      current = xhr;
+      xhr.open("POST", `${API_URL}/attachments`);
+      if (accessToken) {
+        xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
+      }
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress?.(event.loaded / event.total);
+      };
+      xhr.onload = () => {
+        let body: unknown = null;
+        try {
+          body = JSON.parse(xhr.responseText);
+        } catch {
+          // ignore — surfaced as a generic status-code error below
+        }
+        resolve({ status: xhr.status, body });
+      };
+      xhr.onerror = () =>
+        reject(new AttachmentUploadError("Network error during upload", 0));
+      xhr.onabort = () => reject(cancelled());
+
+      const form = new FormData();
+      form.append("file", file, file.name);
+      xhr.send(form);
+    });
+
+  const promise = sendWithSession(send).then(({ status, body }) => {
+    if (status >= 200 && status < 300) return body as Attachment;
+    const message =
+      (body as { message?: string } | null)?.message ??
+      `Upload failed (${status})`;
+    throw new AttachmentUploadError(message, status);
   });
-  return { promise, abort: () => xhr.abort() };
+  return {
+    promise,
+    abort: () => {
+      aborted = true;
+      current?.abort();
+    },
+  };
 }
