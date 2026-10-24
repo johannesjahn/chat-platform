@@ -584,6 +584,19 @@ jobs:
     if: github.event_name == 'push' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Playwright's own image ships Chromium and every system library it
+    # needs. Installing those on the bare runner (`playwright install-deps`)
+    # was an `apt-get` of ~26 MB, mostly fonts, on every run — and whichever
+    # shard drew a slow Ubuntu mirror spent 6–11 minutes on it (39 kB/s),
+    # making it the slowest job of every CI run. The tag must match web/'s
+    # pinned @playwright/test exactly (the browsers in /ms-playwright are
+    # built for that version); Renovate bumps the two together — see the
+    # "Playwright" group in .github/renovate.json5. `--ipc=host`, per
+    # Playwright's Docker docs: Docker's default 64 MB /dev/shm is too small
+    # for Chromium, which otherwise crashes under load.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --ipc=host
     strategy:
       fail-fast: false
       matrix:
@@ -598,9 +611,6 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
           web: true
-
-      - name: Set up Playwright
-        uses: ./.github/actions/setup-playwright
 
       # Each test boots its own backend process (see web/e2e/backend.ts), so
       # running everything on one runner means all shards' backends and
@@ -631,6 +641,10 @@ jobs:
     if: github.event_name == 'pull_request' && needs.changes.outputs.e2e_specs == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Same image as the e2e job — see the comment there.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -640,14 +654,12 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
           web: true
 
-      - name: Set up Playwright
-        uses: ./.github/actions/setup-playwright
-
       # The changed paths are repo-relative; Playwright runs from web/, so
       # strip the prefix. They're passed through the environment and read as
       # JSON, never spliced into the script, so a file name can't inject
       # shell. Every project runs, so a changed `@layout` test is also
-      # repeated on the phone and wide layouts.
+      # repeated on the phone and wide layouts. Parsed with Bun rather than
+      # `jq`, which the Playwright image doesn't ship.
       #
       # `--timeout` triples the default 30s per-test budget (tests that set
       # their own keep it). With every core busy, a test that takes a few
@@ -660,7 +672,7 @@ jobs:
           SPECS: ${{ needs.changes.outputs.e2e_specs_files }}
           REPEAT_EACH: 5
         run: |
-          mapfile -t specs < <(jq -r '.[] | sub("^web/"; "")' <<< "$SPECS")
+          mapfile -t specs < <(bun -e 'for (const f of JSON.parse(process.env.SPECS)) console.log(f.replace(/^web\//, ""))')
           echo "Repeating each of these ${REPEAT_EACH} times:"
           printf '  %s\n' "${specs[@]}"
           bun run test:e2e --repeat-each="$REPEAT_EACH" --retries=0 --workers=100% --timeout=90000 "${specs[@]}"

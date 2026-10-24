@@ -18,6 +18,35 @@ inputs:
 runs:
   using: composite
   steps:
+    # oven-sh/setup-bun extracts Bun's release zip with the system `unzip`,
+    # which the Playwright container image the e2e jobs run in doesn't ship
+    # (and installing it would mean an `apt-get update` — the very step those
+    # jobs moved into the container to avoid). So where `unzip` is missing,
+    # fetch the same release zip and unpack it with Python's zipfile into
+    # ~/.bun/bin; setup-bun then finds a binary of the requested version
+    # there and uses it instead of downloading its own. A no-op on the
+    # hosted runner, which has `unzip`.
+    - name: Pre-install Bun without unzip
+      if: runner.os == 'Linux'
+      shell: bash
+      env:
+        BUN_VERSION: ${{ inputs.bun-version }}
+      run: |
+        if command -v unzip >/dev/null; then exit 0; fi
+        case "$(uname -m)" in
+          x86_64) arch=x64 ;;
+          aarch64) arch=aarch64 ;;
+          *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+        esac
+        tmp="$(mktemp -d)"
+        curl -fsSL --retry 4 -o "$tmp/bun.zip" \
+          "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${arch}.zip"
+        python3 -m zipfile -e "$tmp/bun.zip" "$tmp"
+        mkdir -p "$HOME/.bun/bin"
+        install -m 755 "$tmp/bun-linux-${arch}/bun" "$HOME/.bun/bin/bun"
+        rm -rf "$tmp"
+        "$HOME/.bun/bin/bun" --version
+
     - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       with:
         bun-version: ${{ inputs.bun-version }}
