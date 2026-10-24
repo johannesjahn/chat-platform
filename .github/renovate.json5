@@ -74,6 +74,17 @@
       matchPackageNames: ["effect", "@effect/**"],
       groupName: "effect",
     },
+    // ci.yml's e2e jobs run in mcr.microsoft.com/playwright, whose bundled
+    // browsers are built for one exact Playwright release: an image that
+    // drifts from web/'s pinned @playwright/test fails every e2e test with
+    // "Executable doesn't exist". The github-actions manager reads the
+    // `container:` image (depType "container"), so group it with the npm
+    // package into one PR. Listed after the web minor/patch group so it wins
+    // for @playwright/test, majors included.
+    {
+      matchPackageNames: ["@playwright/test", "mcr.microsoft.com/playwright"],
+      groupName: "Playwright",
+    },
     // depTypes: ["action"] scopes this to actual `uses: owner/action@...`
     // pins. The github-actions manager also extracts ci.yml's `services:`
     // block images (redis/postgres, depType "service") as its own
