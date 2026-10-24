@@ -1,6 +1,6 @@
 name: Set up Bun and install dependencies
 description: >-
-  Installs Bun, restores the Bun install cache, and runs
+  Installs Bun and runs
   `bun install --frozen-lockfile` for the requested workspaces. Requires the
   repo to be checked out first (it's a local action).
 
@@ -51,23 +51,12 @@ runs:
       with:
         bun-version: ${{ inputs.bun-version }}
 
-    # The key names the install set and hashes only that set's lockfiles.
-    # actions/cache saves only on an exact-key miss and never overwrites, so
-    # when every job shared one key, whichever job finished first after a
-    # lockfile change saved the cache — often one that installed only root
-    # or only web/ — and every later run hit that incomplete entry exactly,
-    # never re-saved, and re-downloaded the missing half (issue #473).
-    # Falling back to another set's cache is fine: the install below fills
-    # in whatever's missing, and this set's key is then saved complete.
-    - name: Cache Bun install cache
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: ~/.bun/install/cache
-        key: bun-${{ runner.os }}-root=${{ inputs.root }}-web=${{ inputs.web }}-${{ hashFiles('bun.lock', 'web/bun.lock') }}
-        restore-keys: |
-          bun-${{ runner.os }}-root=${{ inputs.root }}-web=${{ inputs.web }}-
-          bun-${{ runner.os }}-
-
+    # No install cache, on purpose. Bun's global cache holds every package
+    # it has extracted, so it ran to 520–610 MB, and restoring it took 16–32s
+    # in every job — longer than the install it was meant to speed up, since
+    # a cold `bun install --frozen-lockfile` straight from the registry takes
+    # a few seconds. (It had its own bugs too: issue #473, an incomplete
+    # entry shared across install sets that was never re-saved.)
     - name: Install backend dependencies
       if: inputs.root == 'true'
       shell: bash
