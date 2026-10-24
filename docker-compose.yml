@@ -98,7 +98,7 @@ services:
   # volume is root-owned (the chart runs it non-root — see
   # garage-statefulset.yaml).
   garage:
-    image: dxflrs/garage:v2.4.1
+    image: dxflrs/garage:v2.5.0
     command: ["/garage", "server", "--single-node", "--default-bucket"]
     environment:
       # Garage refuses to start without an RPC secret (64 hex chars) even on
