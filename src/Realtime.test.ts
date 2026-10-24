@@ -333,6 +333,72 @@ test("onlineContactIds reflects only the user's contacts with a live connection"
   );
 });
 
+// Issue #684: after a chat's membership changes, the users who just became
+// contacts are told about each other right away, not on their next connect.
+test("introduceContacts tells online newcomers and members about each other", async () => {
+  // A group of 1 (owner), 2, 3 and 4, which 5 and 6 just joined. 4 is
+  // offline; 3 and 5 have blocked each other, so the audience leaves that
+  // pair out (as PresenceAudienceLive would).
+  const members = [1, 2, 3, 4, 5, 6];
+  const pairs = members
+    .flatMap((a) => members.map((b) => [a, b] as const))
+    .filter(([a, b]) => a < b && !(a === 3 && b === 5));
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const writers = new Map(
+        [1, 2, 3, 5, 6].map((userId) => [userId, recordingWriter()]),
+      );
+      for (const [userId, writer] of writers) {
+        yield* connections.register(userId, writer.write);
+      }
+      for (const writer of writers.values()) writer.received.length = 0;
+
+      yield* connections.introduceContacts([5, 6], members);
+
+      const onlineIds = (userId: number) =>
+        writers
+          .get(userId)!
+          .received.map((chunk) => JSON.parse(chunk))
+          .map((event) => {
+            expect(event.type).toBe("presence");
+            expect(event.online).toBe(true);
+            return event.userId as number;
+          })
+          .sort((a, b) => a - b);
+
+      expect(onlineIds(1)).toEqual([5, 6]);
+      expect(onlineIds(2)).toEqual([5, 6]);
+      expect(onlineIds(3)).toEqual([6]);
+      expect(onlineIds(5)).toEqual([1, 2, 6]);
+      expect(onlineIds(6)).toEqual([1, 2, 3, 5]);
+    }).pipe(
+      Effect.provide(
+        RealtimeConnectionsLive.pipe(
+          Layer.provide(InMemoryPubSubLive),
+          Layer.provide(InMemoryPresenceStoreLive),
+          Layer.provide(staticPresenceAudience(pairs)),
+        ),
+      ),
+    ),
+  );
+});
+
+test("introduceContacts sends nothing for an offline newcomer", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const alice = recordingWriter();
+      yield* connections.register(1, alice.write);
+      alice.received.length = 0;
+
+      yield* connections.introduceContacts([2], [1, 2]);
+
+      expect(alice.received).toEqual([]);
+    }),
+  );
+});
+
 // Issue #660: presence and status used to go to every socket in the
 // deployment, including people who'd never interacted with the user.
 test("presence transitions reach only sockets of users who share a chat with the user", async () => {
