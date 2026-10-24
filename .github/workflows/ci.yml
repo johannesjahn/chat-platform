@@ -600,7 +600,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        # Eight, not four: once setup shrank to ~1 minute, test time was
+        # ~90% of a shard and splits evenly, so each doubling of shards
+        # roughly halves it (four shards ran ~7 minutes each). Runner minutes
+        # are free on a public repo; the cost is concurrency — the free plan
+        # runs 20 jobs at once and a full run has ~22, but most of the rest
+        # finish within a minute, so the queueing is brief.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
