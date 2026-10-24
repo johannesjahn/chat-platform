@@ -474,12 +474,18 @@ const getUnreadCount = (
 
 // The messages a participant has read, as identified by their read
 // watermark (`chat_participants.last_read_message_id`, issue #659).
-type MessageReadKey = Pick<DbMessage, "id" | "chatId" | "senderId">;
+type MessageReadKey = Pick<
+  DbMessage,
+  "id" | "chatId" | "senderId" | "createdAt"
+>;
 
 // Who has read each of `rows`: every current participant of its chat, other
-// than its sender, whose watermark has reached it. One query over the
-// participants of the chats involved (a handful of rows each), never over
-// the message history. Ids are ascending, so the order is stable.
+// than its sender, whose watermark has reached it and who was in the chat
+// when it was sent — a joiner's watermark starts at the newest message
+// (issue #686), which means "nothing unread", not "read the backlog". One
+// query over the participants of the chats involved (a handful of rows
+// each), never over the message history. Ids are ascending, so the order is
+// stable.
 const getReadersForMessages = (
   db: DrizzleDb,
   rows: ReadonlyArray<MessageReadKey>,
@@ -495,6 +501,7 @@ const getReadersForMessages = (
           chatId: chatParticipants.chatId,
           userId: chatParticipants.userId,
           lastRead: chatParticipants.lastReadMessageId,
+          joinedAt: chatParticipants.joinedAt,
         })
         .from(chatParticipants)
         .where(
@@ -514,7 +521,8 @@ const getReadersForMessages = (
               w.chatId === row.chatId &&
               w.userId !== row.senderId &&
               w.lastRead !== null &&
-              w.lastRead >= row.id,
+              w.lastRead >= row.id &&
+              w.joinedAt <= row.createdAt,
           )
           .map((w) => w.userId),
       );
@@ -666,6 +674,21 @@ const getLastMessagesForChats = (
     }
     return byChat;
   });
+
+// The read watermark a new participant row starts at: the chat's newest
+// message id at the moment they join, so a joiner — new, or rejoining after
+// leaving or being removed, which deleted their old row and its watermark —
+// starts with nothing unread, and only messages sent after joining count
+// (issue #686). Evaluated inside the insert, so it sees the same snapshot.
+// Null for a chat with no messages yet, which reads the same as "nothing
+// read" with nothing to read.
+const newestMessageIdIn = (chatId: number) =>
+  sql<number | null>`(
+    SELECT newest.id FROM ${messages} AS newest
+    WHERE newest.chat_id = ${chatId}
+    ORDER BY newest.id DESC
+    LIMIT 1
+  )`;
 
 const getUnreadCountsForChats = (
   db: DrizzleDb,
@@ -1739,6 +1762,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                     chatId: id,
                     userId,
                     joinedAt: now,
+                    lastReadMessageId: newestMessageIdIn(id),
                   })),
                 )
                 .onConflictDoNothing();
@@ -3304,6 +3328,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               userId: currentUser.id,
               joinedAt: new Date(),
               role: "member",
+              lastReadMessageId: newestMessageIdIn(chatRow.id),
             });
             return { ok: true as const, joined: true };
           });

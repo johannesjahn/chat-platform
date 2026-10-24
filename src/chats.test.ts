@@ -1151,6 +1151,108 @@ test("migration 0035 back-fills each participant's read watermark from message_r
     }),
   ));
 
+// Issue #686: the read watermark lives on the participant row, so leaving
+// or being removed used to take it with it, and a rejoin counted the whole
+// history as unread. A joiner now starts at the chat's newest message.
+test("rejoining a group keeps its history read, and only later messages count as unread", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+      let last = 0;
+      for (let i = 0; i < 5; i++)
+        last = (yield* alice.client.chats.createMessage({
+          params: { id: chat.id },
+          payload: { contentType: "text", content: `m${i}` },
+        })).id;
+      const read = yield* bob.client.chats.markRead({
+        params: { id: chat.id },
+        payload: { messageId: last },
+      });
+      expect(read.unreadCount).toBe(0);
+
+      yield* alice.client.chats.removeParticipant({
+        params: { id: chat.id, userId: bob.user.id },
+      });
+      yield* alice.client.chats.addParticipants({
+        params: { id: chat.id },
+        payload: { participantIds: [bob.user.id] },
+      });
+      const rejoined = yield* bob.client.chats.getChat({
+        params: { id: chat.id },
+      });
+      expect(rejoined.unreadCount).toBe(0);
+
+      yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: { contentType: "text", content: "after rejoin" },
+      });
+      const after = yield* bob.client.chats.getChat({
+        params: { id: chat.id },
+      });
+      expect(after.unreadCount).toBe(1);
+    }),
+  ));
+
+test("joining a group with history, by invite or by being added, starts with nothing unread", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+      for (let i = 0; i < 3; i++)
+        yield* alice.client.chats.createMessage({
+          params: { id: chat.id },
+          payload: { contentType: "text", content: `m${i}` },
+        });
+
+      // Bob leaves on his own and comes back through an invite.
+      yield* bob.client.chats.leaveChat({ params: { id: chat.id } });
+      const invite = yield* alice.client.chats.createChatInvite({
+        params: { id: chat.id },
+        payload: {},
+      });
+      const joined = yield* bob.client.chats.joinChatViaInvite({
+        params: { code: invite.code },
+      });
+      expect(joined.unreadCount).toBe(0);
+
+      // Carol is brand new to the group.
+      const added = yield* alice.client.chats.addParticipants({
+        params: { id: chat.id },
+        payload: { participantIds: [carol.user.id] },
+      });
+      expect(added.participants.map((p) => p.userId)).toContain(carol.user.id);
+      const carolView = yield* carol.client.chats.getChat({
+        params: { id: chat.id },
+      });
+      expect(carolView.unreadCount).toBe(0);
+      // Starting with nothing unread isn't a read receipt for the backlog.
+      const backlog = yield* alice.client.chats.listMessages({
+        params: { id: chat.id },
+        query: {},
+      });
+      for (const m of backlog.messages) expect(m.readByUserIds).toEqual([]);
+
+      yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: { contentType: "text", content: "welcome" },
+      });
+      for (const member of [bob, carol]) {
+        const view = yield* member.client.chats.getChat({
+          params: { id: chat.id },
+        });
+        expect(view.unreadCount).toBe(1);
+      }
+    }),
+  ));
+
 test("updateMessage lets the sender edit their message and bumps updatedAt past createdAt, but forbids others", () =>
   run(
     Effect.gen(function* () {
