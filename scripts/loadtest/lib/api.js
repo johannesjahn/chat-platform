@@ -22,55 +22,66 @@ export const authHeaders = (accessToken) => ({
   Authorization: `Bearer ${accessToken}`,
 });
 
-// Fixed and well over MIN_PASSWORD_LENGTH (see src/Api.ts) by default — every
-// load-test account shares this password since none of it is real user data.
-// Overridable so it's not a hardcoded, publicly-known credential on any
-// target where that'd matter — see scripts/loadtest/README.md's warning
-// against pointing these at shared/production environments.
-export const TEST_PASSWORD = __ENV.TEST_PASSWORD || "LoadTest-12345";
+// Google ID tokens for the load-test accounts, keyed by username — written by
+// `bun run loadtest:tokens` (scripts/loadtest/mint-google-tokens.ts), since
+// k6 can't sign RS256 tokens itself. Read in the init context, as `open`
+// requires; the path is relative to this file.
+const GOOGLE_ID_TOKENS = JSON.parse(
+  open(__ENV.GOOGLE_ID_TOKENS_FILE || "../google-id-tokens.json"),
+);
 
-// Registers `username` if it doesn't already exist, otherwise logs it in —
-// either way returns {id, username, accessToken}. Idempotent across runs on
-// purpose: /users/register is capped at 5 attempts per source IP per hour
-// (see UsersHandler.ts), which a k6 run driving from a single machine would
-// blow through immediately if every run tried to create fresh accounts. By
-// registering once and logging in on every later run against the same
-// backend, only the very first run against a given target spends any of
-// that budget — see scripts/loadtest/README.md.
+const postJson = (path, body, name, expectedStatuses) =>
+  http.post(`${BASE_URL}${path}`, JSON.stringify(body), {
+    headers: JSON_HEADERS,
+    tags: { name },
+    responseCallback: http.expectedStatuses(...expectedStatuses),
+  });
+
+// Signs `username`'s Google account in, picking that username first if the
+// account doesn't exist yet — either way returns {id, username, accessToken}.
+// Idempotent across runs on purpose: the username step is capped at 5 per
+// source IP per hour (see UsersHandler.ts), which a k6 run driving from a
+// single machine would blow through immediately if every run created fresh
+// accounts. By signing up once and just signing in on every later run against
+// the same backend, only the very first run against a given target spends
+// any of that budget — see scripts/loadtest/README.md.
 export function loginOrRegister(username) {
-  const registerRes = http.post(
-    `${BASE_URL}/users/register`,
-    JSON.stringify({ username, password: TEST_PASSWORD }),
-    {
-      headers: JSON_HEADERS,
-      tags: { name: "register" },
-      // 409 (already registered, expected on every run but the first) isn't
-      // a failure — without this, k6's default "any 4xx/5xx counts against
-      // http_req_failed" marks it as one anyway, diluting that threshold
-      // with an outcome this function already treats as success below.
-      responseCallback: http.expectedStatuses(201, 409),
-    },
-  );
-  if (registerRes.status !== 201 && registerRes.status !== 409) {
+  const idToken = GOOGLE_ID_TOKENS[username];
+  if (!idToken) {
     throw new Error(
-      `loginOrRegister(${username}): register failed with ${registerRes.status}: ${registerRes.body}`,
+      `loginOrRegister(${username}): no ID token for it — run \`bun run loadtest:tokens\` with a count covering it`,
     );
   }
 
-  const loginRes = http.post(
-    `${BASE_URL}/users/login`,
-    JSON.stringify({ username, password: TEST_PASSWORD }),
-    { headers: JSON_HEADERS, tags: { name: "login" } },
+  const loginRes = postJson(
+    "/users/login/google",
+    { idToken },
+    "loginGoogle",
+    [200],
   );
-  check(loginRes, { "login succeeded": (r) => r.status === 200 });
+  check(loginRes, { "google sign-in succeeded": (r) => r.status === 200 });
   if (loginRes.status !== 200) {
     throw new Error(
-      `loginOrRegister(${username}): login failed with ${loginRes.status}: ${loginRes.body}`,
+      `loginOrRegister(${username}): Google sign-in failed with ${loginRes.status}: ${loginRes.body}`,
     );
   }
 
-  const body = loginRes.json();
-  return { id: body.user.id, username, accessToken: body.accessToken };
+  let session = loginRes.json();
+  if (session.needsUsername) {
+    const registerRes = postJson(
+      "/users/register/google",
+      { pendingToken: session.pendingToken, username },
+      "registerGoogle",
+      [201],
+    );
+    if (registerRes.status !== 201) {
+      throw new Error(
+        `loginOrRegister(${username}): username step failed with ${registerRes.status}: ${registerRes.body}`,
+      );
+    }
+    session = registerRes.json();
+  }
+  return { id: session.user.id, username, accessToken: session.accessToken };
 }
 
 // Mints a single-use /ws ticket (see src/WsTicket.ts) for `accessToken`'s

@@ -12,9 +12,13 @@ export default async function globalSetup() {
   try {
     const page = await browser.newPage();
     await page.goto(`${baseURL}/`, { waitUntil: "networkidle" });
-    // The unauthenticated app redirects to the login page; visit register too
-    // so its route chunks are transformed as well.
-    await page.goto(`${baseURL}/register`, { waitUntil: "networkidle" });
+    // The unauthenticated app redirects to the login page; visit the admin
+    // password form too so its route chunks are transformed as well. (The
+    // real Google script this loads is stood in for in the tests themselves
+    // — see e2e/google.ts — and failing to fetch it here is harmless.)
+    await page.goto(`${baseURL}/login?method=password`, {
+      waitUntil: "networkidle",
+    });
   } finally {
     await browser.close();
   }

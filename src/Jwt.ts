@@ -4,6 +4,10 @@ import { Config, Context, Data, Effect, Layer } from "effect";
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 15; // 15 minutes
 // Long-lived token used only to mint new access tokens.
 const REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+// Carries a verified Google `sub` from a first sign-in to the username step
+// (issue #693) — long enough to pick a name, short enough that a leaked one
+// is soon useless.
+const GOOGLE_PENDING_TOKEN_TTL_SECONDS = 60 * 10; // 10 minutes
 
 export type TokenType = "access" | "refresh";
 
@@ -29,6 +33,18 @@ export type TokenClaims = {
   // or, in future, a password change — invalidates every access and refresh
   // token issued before the bump, immediately rather than at their own TTL.
   readonly tokenVersion: number;
+};
+
+// What a pending-signup token carries: no user yet (no `users` row exists
+// until a username is picked), only the Google account it was issued for.
+// The distinct `type` keeps it from ever passing as an access or refresh
+// token, and vice versa.
+type GooglePendingClaims = {
+  readonly type: "google-pending";
+  readonly googleSub: string;
+  readonly iat: number;
+  readonly exp: number;
+  readonly jti: string;
 };
 
 export type TokenUser = {
@@ -64,7 +80,7 @@ const importKey = (secret: string): Promise<CryptoKey> =>
 
 // Signs a compact HS256 JWT. Uses Web Crypto (built into Bun) — no dependency.
 const signHs256 = async (
-  payload: TokenClaims,
+  payload: TokenClaims | GooglePendingClaims,
   secret: string,
 ): Promise<string> => {
   const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
@@ -81,10 +97,11 @@ const signHs256 = async (
 
 // Verifies an HS256 JWT's signature (constant-time via Web Crypto) and returns
 // its claims, or null if the token is malformed or the signature doesn't match.
-const verifyHs256 = async (
+// Callers check `type` before trusting the rest of the shape.
+const verifyHs256 = async <Claims extends { type: string; exp: number }>(
   token: string,
   secret: string,
-): Promise<TokenClaims | null> => {
+): Promise<Claims | null> => {
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   const [header, body, signature] = parts;
@@ -105,9 +122,7 @@ const verifyHs256 = async (
   );
   if (!valid) return null;
   try {
-    return JSON.parse(
-      Buffer.from(body!, "base64url").toString(),
-    ) as TokenClaims;
+    return JSON.parse(Buffer.from(body!, "base64url").toString()) as Claims;
   } catch {
     return null;
   }
@@ -134,6 +149,12 @@ export class Jwt extends Context.Service<
     readonly verifyRefreshToken: (
       token: string,
     ) => Effect.Effect<RefreshTokenUser, InvalidToken>;
+    readonly signGooglePendingToken: (
+      googleSub: string,
+    ) => Effect.Effect<string>;
+    readonly verifyGooglePendingToken: (
+      token: string,
+    ) => Effect.Effect<{ readonly googleSub: string }, InvalidToken>;
   }
 >()("Jwt") {}
 
@@ -176,7 +197,9 @@ export const JwtLive = Layer.effect(
       type: TokenType,
     ): Effect.Effect<RefreshTokenUser, InvalidToken> =>
       Effect.gen(function* () {
-        const claims = yield* Effect.promise(() => verifyHs256(token, secret));
+        const claims = yield* Effect.promise(() =>
+          verifyHs256<TokenClaims>(token, secret),
+        );
         const now = Math.floor(Date.now() / 1000);
         if (!claims || claims.type !== type || claims.exp <= now)
           return yield* Effect.fail(
@@ -201,6 +224,37 @@ export const JwtLive = Layer.effect(
         sign(user, "refresh", REFRESH_TOKEN_TTL_SECONDS),
       verifyAccessToken: (token) => verify(token, "access"),
       verifyRefreshToken: (token) => verify(token, "refresh"),
+      signGooglePendingToken: (googleSub) =>
+        Effect.promise(() => {
+          const now = Math.floor(Date.now() / 1000);
+          return signHs256(
+            {
+              type: "google-pending",
+              googleSub,
+              iat: now,
+              exp: now + GOOGLE_PENDING_TOKEN_TTL_SECONDS,
+              jti: crypto.randomUUID(),
+            },
+            secret,
+          );
+        }),
+      verifyGooglePendingToken: (token) =>
+        Effect.gen(function* () {
+          const claims = yield* Effect.promise(() =>
+            verifyHs256<GooglePendingClaims>(token, secret),
+          );
+          const now = Math.floor(Date.now() / 1000);
+          if (
+            !claims ||
+            claims.type !== "google-pending" ||
+            typeof claims.googleSub !== "string" ||
+            claims.exp <= now
+          )
+            return yield* Effect.fail(
+              new InvalidToken({ reason: "invalid or expired pending token" }),
+            );
+          return { googleSub: claims.googleSub };
+        }),
     };
   }),
 );

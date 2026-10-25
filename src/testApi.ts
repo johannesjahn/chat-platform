@@ -18,6 +18,11 @@ import { Db } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { EngagementHandlerLive } from "./EngagementHandler.ts";
 import { GamesHandlerLive } from "./GamesHandler.ts";
+import { GoogleIdTokenLive } from "./GoogleIdToken.ts";
+import {
+  GOOGLE_TEST_CLIENT_ID,
+  GOOGLE_TEST_PUBLIC_KEY,
+} from "./GoogleTestSigner.ts";
 import { JwtLive } from "./Jwt.ts";
 import { NotificationsHandlerLive } from "./NotificationsHandler.ts";
 import { PostsHandlerLive } from "./PostsHandler.ts";
@@ -40,6 +45,11 @@ import { InMemoryWsTicketLive } from "./WsTicket.ts";
 
 // JwtLive reads JWT_SECRET from config; provide a deterministic test secret.
 process.env.JWT_SECRET ??= "test-secret";
+// Google ID tokens are checked against the committed test key instead of
+// Google's JWKS, so tests sign in with tokens from `mintGoogleIdToken` —
+// through the same endpoints as production (see testUsers.ts).
+process.env.GOOGLE_CLIENT_ID ??= GOOGLE_TEST_CLIENT_ID;
+process.env.GOOGLE_TEST_PUBLIC_KEY ??= GOOGLE_TEST_PUBLIC_KEY;
 
 const ApiLive = HttpApiBuilder.layer(ChatApi).pipe(
   Layer.provide([
@@ -74,6 +84,7 @@ const ServicesLive = Layer.mergeAll(
       InMemoryPresenceStoreLive,
       InMemoryRateLimiterLive,
       JwtLive,
+      GoogleIdTokenLive,
       InMemoryWsTicketLive,
       AttachmentStorageLive,
     ),

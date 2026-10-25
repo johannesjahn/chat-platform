@@ -12,6 +12,7 @@ import { Db } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { chatInvites, messageReads, messages, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signInTestUser, signUpTestUser } from "./testUsers.ts";
 
 const run = makeTestRun();
 
@@ -27,13 +28,9 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-const registerAndLogin = (username: string, password: string) =>
+const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return { user, accessToken, client: yield* makeAuthedClient(accessToken) };
   });
 
@@ -41,7 +38,7 @@ const registerAndLogin = (username: string, password: string) =>
 // registration always creates a "user") and returns a freshly-authenticated
 // client for them — role is baked into the JWT at sign time, so a promoted
 // user must log in again to get a token reflecting it.
-const promoteToAdmin = (username: string, password: string) =>
+const promoteToAdmin = (username: string) =>
   Effect.gen(function* () {
     const db = yield* Db;
     yield* Effect.tryPromise(() =>
@@ -50,18 +47,15 @@ const promoteToAdmin = (username: string, password: string) =>
         .set({ role: "admin" })
         .where(eq(users.username, username)),
     ).pipe(Effect.orDie);
-    const c = yield* makeClient;
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { accessToken } = yield* signInTestUser(username);
     return yield* makeAuthedClient(accessToken);
   });
 
 test("createDirectChat creates a chat between two users", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
 
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
@@ -79,8 +73,8 @@ test("createDirectChat creates a chat between two users", () =>
 test("createDirectChat is idempotent regardless of who initiates", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
 
       const first = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
@@ -100,7 +94,7 @@ test("createDirectChat is idempotent regardless of who initiates", () =>
 test("createDirectChat rejects chatting with yourself", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const result = yield* alice.client.chats
         .createDirectChat({ payload: { userId: alice.user.id } })
         .pipe(Effect.flip);
@@ -111,7 +105,7 @@ test("createDirectChat rejects chatting with yourself", () =>
 test("createDirectChat 404s for a nonexistent user", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const result = yield* alice.client.chats
         .createDirectChat({ payload: { userId: 9999 } })
         .pipe(Effect.flip);
@@ -122,9 +116,9 @@ test("createDirectChat 404s for a nonexistent user", () =>
 test("listChats only returns chats the current user participates in, newest activity first", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
 
       const chatWithBob = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
@@ -149,7 +143,7 @@ test("listChats only returns chats the current user participates in, newest acti
       const bobChats = yield* bob.client.chats.listChats({ query: {} });
       expect(bobChats.chats.map((c) => c.id)).toEqual([chatWithBob.id]);
 
-      const daveResult = yield* registerAndLogin("dave", "pw-testpass");
+      const daveResult = yield* registerAndLogin("dave");
       const daveChats = yield* daveResult.client.chats.listChats({
         query: {},
       });
@@ -160,7 +154,7 @@ test("listChats only returns chats the current user participates in, newest acti
 test("listChats paginates newest-first with a keyset cursor, without gaps or duplicates", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       // Direct DB inserts (bypassing register, same as
       // `insertDummyUsers`'s own rationale below) — this test just needs 5
       // other users to start direct chats with, not accounts that can log
@@ -209,7 +203,7 @@ test("listChats paginates newest-first with a keyset cursor, without gaps or dup
 test("listChats rejects a malformed cursor", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const result = yield* alice.client.chats
         .listChats({ query: { cursor: "not-a-real-cursor" } })
         .pipe(Effect.flip);
@@ -220,7 +214,7 @@ test("listChats rejects a malformed cursor", () =>
 test("listChats rejects a limit above the max", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       yield* alice.client.chats
         .listChats({ query: { limit: 101 } })
         .pipe(Effect.flip);
@@ -230,9 +224,9 @@ test("listChats rejects a limit above the max", () =>
 test("createGroupChat creates a chat with the creator plus given participants", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
 
       const chat = yield* alice.client.chats.createGroupChat({
         payload: {
@@ -252,8 +246,8 @@ test("createGroupChat creates a chat with the creator plus given participants", 
 test("createGroupChat rejects duplicate participant ids", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const result = yield* alice.client.chats
         .createGroupChat({
           payload: {
@@ -269,8 +263,8 @@ test("createGroupChat rejects duplicate participant ids", () =>
 test("createGroupChat rejects including yourself in participantIds", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const result = yield* alice.client.chats
         .createGroupChat({
           payload: {
@@ -286,7 +280,7 @@ test("createGroupChat rejects including yourself in participantIds", () =>
 test("createGroupChat 404s when a participant doesn't exist", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const result = yield* alice.client.chats
         .createGroupChat({
           payload: { title: "Ghost", participantIds: [9999] },
@@ -299,9 +293,9 @@ test("createGroupChat 404s when a participant doesn't exist", () =>
 test("addParticipants lets the creator add people, up to the group cap", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
 
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
@@ -346,8 +340,8 @@ const insertDummyUsers = (count: number) =>
 test("addParticipants is forbidden for non-creators and rejects exceeding the cap", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -386,8 +380,8 @@ test("addParticipants is forbidden for non-creators and rejects exceeding the ca
 test("updateChat lets the creator rename a group chat, but not others", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Old title", participantIds: [bob.user.id] },
       });
@@ -408,8 +402,8 @@ test("updateChat lets the creator rename a group chat, but not others", () =>
 test("updateChat rejects renaming a direct chat", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -423,9 +417,9 @@ test("updateChat rejects renaming a direct chat", () =>
 test("createMessage sends a message, bumps chat activity, and is forbidden for non-participants", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const eve = yield* registerAndLogin("eve", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const eve = yield* registerAndLogin("eve");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -475,8 +469,8 @@ test("createMessage sends a message, bumps chat activity, and is forbidden for n
 test("createMessage is idempotent per clientId (issue #567)", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -506,8 +500,8 @@ test("createMessage is idempotent per clientId (issue #567)", () =>
 test("createMessage rejects content over the max length", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -523,8 +517,8 @@ test("createMessage rejects content over the max length", () =>
 test("createMessage creates an image_url message from an allowlisted host", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -543,8 +537,8 @@ test("createMessage creates an image_url message from an allowlisted host", () =
 test("createMessage rejects an image_url from a non-allowlisted host", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -563,8 +557,8 @@ test("createMessage rejects an image_url from a non-allowlisted host", () =>
 test("createMessage rejects a data: image_url", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -583,8 +577,8 @@ test("createMessage rejects a data: image_url", () =>
 test("createMessage supports replying to a message, exposing a parent preview", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -625,8 +619,8 @@ test("createMessage supports replying to a message, exposing a parent preview", 
 test("createMessage truncates a long parent preview and uses the sender's display name", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       yield* alice.client.users.updateProfile({
         payload: { displayName: "Alice A.", avatarUrl: null },
       });
@@ -658,9 +652,9 @@ test("createMessage truncates a long parent preview and uses the sender's displa
 test("createMessage 404s when replying to a message from another chat", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chatAB = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -704,8 +698,8 @@ test("createMessage 404s when replying to a message from another chat", () =>
 test("deleting a quoted message leaves the reply, with its parent preview nulled", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -741,8 +735,8 @@ test("deleting a quoted message leaves the reply, with its parent preview nulled
 test("editing a reply preserves its parent preview", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -773,9 +767,9 @@ test("editing a reply preserves its parent preview", () =>
 test("listMessages returns the newest window by default, oldest-first, and is forbidden for non-participants", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const eve = yield* registerAndLogin("eve", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const eve = yield* registerAndLogin("eve");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -830,8 +824,8 @@ test("listMessages returns the newest window by default, oldest-first, and is fo
 test("listMessages rejects a malformed cursor and setting both before and after", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -865,8 +859,8 @@ test("listMessages rejects a malformed cursor and setting both before and after"
 test("markRead marks messages up to a point as read and updates unreadCount + readByUserIds", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -938,8 +932,8 @@ const medianMs = (samples: number[]) =>
 test("listChats doesn't slow down with already-read history, and markRead copes with a 50k-message chat (issues #659, #648)", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -990,9 +984,9 @@ test("listChats doesn't slow down with already-read history, and markRead copes 
 test("markRead only moves the read watermark forward, and a repeat with nothing new is a no-op", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: {
           title: "Crew",
@@ -1063,9 +1057,9 @@ test("markRead only moves the read watermark forward, and a repeat with nothing 
 test("listChats pairs each chat with its own newest message", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const withBob = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1099,8 +1093,8 @@ test("listChats pairs each chat with its own newest message", () =>
 test("migration 0035 back-fills each participant's read watermark from message_reads", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1157,8 +1151,8 @@ test("migration 0035 back-fills each participant's read watermark from message_r
 test("rejoining a group keeps its history read, and only later messages count as unread", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -1200,9 +1194,9 @@ test("rejoining a group keeps its history read, and only later messages count as
 test("joining a group with history, by invite or by being added, starts with nothing unread", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -1256,8 +1250,8 @@ test("joining a group with history, by invite or by being added, starts with not
 test("updateMessage lets the sender edit their message and bumps updatedAt past createdAt, but forbids others", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1287,12 +1281,12 @@ test("updateMessage lets the sender edit their message and bumps updatedAt past 
 test("updateMessage 404s for a message that doesn't belong to the given chat", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chatAB = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
-      const eve = yield* registerAndLogin("eve", "pw-testpass");
+      const eve = yield* registerAndLogin("eve");
       const chatAE = yield* alice.client.chats.createDirectChat({
         payload: { userId: eve.user.id },
       });
@@ -1314,8 +1308,8 @@ test("updateMessage 404s for a message that doesn't belong to the given chat", (
 test("deleteMessage removes the message and its read receipts, and is forbidden for non-senders", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1368,8 +1362,8 @@ const reactionOf = (
 test("a new message starts with no reactions", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1384,8 +1378,8 @@ test("a new message starts with no reactions", () =>
 test("addMessageReaction/removeMessageReaction toggle reaction state, visible to any participant", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1429,8 +1423,8 @@ test("addMessageReaction/removeMessageReaction toggle reaction state, visible to
 test("addMessageReaction is idempotent, and a user can react with more than one distinct emoji", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1469,9 +1463,9 @@ test("addMessageReaction is idempotent, and a user can react with more than one 
 test("addMessageReaction is forbidden for non-participants and 404s for a missing message", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const eve = yield* registerAndLogin("eve", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const eve = yield* registerAndLogin("eve");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1501,8 +1495,8 @@ test("addMessageReaction is forbidden for non-participants and 404s for a missin
 test("addMessageReaction rejects an emoji outside the standard set", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1526,8 +1520,8 @@ test("addMessageReaction rejects an emoji outside the standard set", () =>
 test("a new message starts unpinned and unstarred", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1548,8 +1542,8 @@ test("a new message starts unpinned and unstarred", () =>
 test("pinMessage/unpinMessage toggle chat-wide pin state, visible to every participant", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1594,8 +1588,8 @@ test("pinMessage/unpinMessage toggle chat-wide pin state, visible to every parti
 test("pinMessage is idempotent, and the pinned list is newest-pin-first", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1633,9 +1627,9 @@ test("pinMessage is idempotent, and the pinned list is newest-pin-first", () =>
 test("pinMessage is forbidden for non-participants and 404s for a message in another chat", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const eve = yield* registerAndLogin("eve", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const eve = yield* registerAndLogin("eve");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1665,8 +1659,8 @@ test("pinMessage is forbidden for non-participants and 404s for a message in ano
 test("starMessage/unstarMessage are private per-user bookmarks", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1721,9 +1715,9 @@ test("starMessage/unstarMessage are private per-user bookmarks", () =>
 test("starMessage is idempotent and forbidden for non-participants", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const eve = yield* registerAndLogin("eve", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const eve = yield* registerAndLogin("eve");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1754,8 +1748,8 @@ test("starMessage is idempotent and forbidden for non-participants", () =>
 test("deleting a pinned-and-starred message removes it from both lists", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1795,9 +1789,9 @@ test("deleting a pinned-and-starred message removes it from both lists", () =>
 test("chat version increments on every participant-visible mutation, and only then", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
 
       const created = yield* alice.client.chats.createGroupChat({
         payload: { title: "Trip planning", participantIds: [bob.user.id] },
@@ -1863,9 +1857,9 @@ test("chat version increments on every participant-visible mutation, and only th
 test("getChat 404s for a missing chat and is forbidden for non-participants", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const eve = yield* registerAndLogin("eve", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const eve = yield* registerAndLogin("eve");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -1885,8 +1879,8 @@ test("getChat 404s for a missing chat and is forbidden for non-participants", ()
 test("createDirectChat does not create duplicate chats when two requests race", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
 
       // Both requests see no existing chat and try to create one
       // concurrently — without the fix, this would leave two separate
@@ -1912,8 +1906,8 @@ test("createDirectChat does not create duplicate chats when two requests race", 
 test("addParticipants does not exceed the group cap when two requests race", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Race", participantIds: [bob.user.id] },
       });
@@ -1967,8 +1961,8 @@ test("addParticipants does not exceed the group cap when two requests race", () 
 test("deleting a group chat's creator sets createdBy to null instead of deleting the chat", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Survives", participantIds: [bob.user.id] },
       });
@@ -2067,7 +2061,7 @@ test("every chats endpoint rejects an unauthenticated request", () =>
 test("createGroupChat's participant list is capped at the schema level", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const pool = yield* insertDummyUsers(MAX_GROUP_PARTICIPANTS);
 
       // Exactly at the limit (19 others + the creator = 20 total) succeeds.
@@ -2100,8 +2094,8 @@ test("createGroupChat's participant list is capped at the schema level", () =>
 test("addParticipants's participant list is capped at the schema level", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -2124,9 +2118,9 @@ test("addParticipants's participant list is capped at the schema level", () =>
 test("addParticipants rejects adding people to a direct chat", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -2144,8 +2138,8 @@ test("addParticipants rejects adding people to a direct chat", () =>
 test("sendTyping succeeds for a participant", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -2157,9 +2151,9 @@ test("sendTyping succeeds for a participant", () =>
 test("sendTyping is forbidden for a non-participant", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const eve = yield* registerAndLogin("eve", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const eve = yield* registerAndLogin("eve");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -2174,7 +2168,7 @@ test("sendTyping is forbidden for a non-participant", () =>
 test("sendTyping 404s for a nonexistent chat", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const result = yield* alice.client.chats
         .sendTyping({ params: { id: 9999 } })
         .pipe(Effect.flip);
@@ -2185,9 +2179,9 @@ test("sendTyping 404s for a nonexistent chat", () =>
 test("markRead 404s for a missing chat or a message from a different chat", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
 
       const chatAB = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
@@ -2227,9 +2221,9 @@ test("markRead 404s for a missing chat or a message from a different chat", () =
 test("leaveChat lets a non-creator leave, keeping the chat for the rest", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: {
           title: "Group",
@@ -2259,8 +2253,8 @@ test("leaveChat lets a non-creator leave, keeping the chat for the rest", () =>
 test("leaveChat rejects leaving a direct chat", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -2278,9 +2272,9 @@ test("leaveChat transfers ownership to the longest-standing remaining participan
       // bob and carol are added to the group in the same insert, so they
       // share a joinedAt — the tie-break (lowest userId) picks bob, since he
       // registered (and so got his id) before carol.
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: {
           title: "Group",
@@ -2312,9 +2306,9 @@ test("leaveChat transfers ownership to the longest-standing remaining participan
 test("removeParticipant lets the creator remove someone, and an admin who isn't a participant too", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: {
           title: "Group",
@@ -2335,8 +2329,8 @@ test("removeParticipant lets the creator remove someone, and an admin who isn't 
         .pipe(Effect.flip);
       expect(forbidden._tag).toBe("Forbidden");
 
-      yield* registerAndLogin("dave", "pw-testpass");
-      const adminClient = yield* promoteToAdmin("dave", "pw-testpass");
+      yield* registerAndLogin("dave");
+      const adminClient = yield* promoteToAdmin("dave");
       const asAdmin = yield* adminClient.chats.removeParticipant({
         params: { id: chat.id, userId: carol.user.id },
       });
@@ -2349,9 +2343,9 @@ test("removeParticipant lets the creator remove someone, and an admin who isn't 
 test("removeParticipant rejects removing yourself, a non-participant, or the chat's last participant", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -2369,8 +2363,8 @@ test("removeParticipant rejects removing yourself, a non-participant, or the cha
       // Shrink the chat down to bob alone (ownership transfers to him),
       // then have an admin try to remove the last remaining participant.
       yield* alice.client.chats.leaveChat({ params: { id: chat.id } });
-      yield* registerAndLogin("erin", "pw-testpass");
-      const adminClient = yield* promoteToAdmin("erin", "pw-testpass");
+      yield* registerAndLogin("erin");
+      const adminClient = yield* promoteToAdmin("erin");
       const removeLast = yield* adminClient.chats
         .removeParticipant({ params: { id: chat.id, userId: bob.user.id } })
         .pipe(Effect.flip);
@@ -2381,9 +2375,9 @@ test("removeParticipant rejects removing yourself, a non-participant, or the cha
 test("removeParticipant transfers ownership when the removed participant was the creator", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: {
           title: "Group",
@@ -2391,8 +2385,8 @@ test("removeParticipant transfers ownership when the removed participant was the
         },
       });
 
-      yield* registerAndLogin("dave", "pw-testpass");
-      const adminClient = yield* promoteToAdmin("dave", "pw-testpass");
+      yield* registerAndLogin("dave");
+      const adminClient = yield* promoteToAdmin("dave");
       yield* adminClient.chats.removeParticipant({
         params: { id: chat.id, userId: alice.user.id },
       });
@@ -2410,8 +2404,8 @@ test("removeParticipant transfers ownership when the removed participant was the
 test("deleteChat lets the creator (or an admin) delete a group chat outright", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
 
       const directChat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
@@ -2441,9 +2435,9 @@ test("deleteChat lets the creator (or an admin) delete a group chat outright", (
 test("transferOwnership lets the creator hand off ownership, and 404s for a non-participant target", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -2478,9 +2472,9 @@ test("transferOwnership lets the creator hand off ownership, and 404s for a non-
 test("transferOwnership: once a chat is ownerless, any participant can claim it, but a non-participant still can't", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const dave = yield* registerAndLogin("dave", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const dave = yield* registerAndLogin("dave");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -2525,8 +2519,8 @@ test("transferOwnership: once a chat is ownerless, any participant can claim it,
 test("group chat creation seeds the creator as owner and everyone else as member", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -2540,8 +2534,8 @@ test("group chat creation seeds the creator as owner and everyone else as member
 test("direct chat participants are always plain members", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -2552,9 +2546,9 @@ test("direct chat participants are always plain members", () =>
 test("updateParticipantRole: only the owner can promote/demote, and not the owner themselves", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: {
           title: "Group",
@@ -2612,10 +2606,10 @@ test("updateParticipantRole: only the owner can promote/demote, and not the owne
 test("admins (not just the owner) can rename, add/remove participants, and delete any message", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
-      const dave = yield* registerAndLogin("dave", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
+      const dave = yield* registerAndLogin("dave");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: {
           title: "Group",
@@ -2665,8 +2659,8 @@ test("admins (not just the owner) can rename, add/remove participants, and delet
 test("removeParticipant refuses to let a chat-level admin remove the owner", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -2687,9 +2681,9 @@ test("removeParticipant refuses to let a chat-level admin remove the owner", () 
 test("createChatInvite is owner/admin only, and joinChatViaInvite adds the redeemer as a member", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -2739,7 +2733,7 @@ test("createChatInvite is owner/admin only, and joinChatViaInvite adds the redee
 test("joinChatViaInvite 404s for an unknown code", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const result = yield* alice.client.chats
         .joinChatViaInvite({ params: { code: "does-not-exist" } })
         .pipe(Effect.flip);
@@ -2750,8 +2744,8 @@ test("joinChatViaInvite 404s for an unknown code", () =>
 test("revokeChatInvite invalidates the code for future joins", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -2764,7 +2758,7 @@ test("revokeChatInvite invalidates the code for future joins", () =>
         params: { id: chat.id, inviteId: invite.id },
       });
 
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const carol = yield* registerAndLogin("carol");
       const result = yield* carol.client.chats
         .joinChatViaInvite({ params: { code: invite.code } })
         .pipe(Effect.flip);
@@ -2780,10 +2774,10 @@ test("revokeChatInvite invalidates the code for future joins", () =>
 test("joinChatViaInvite enforces expiry and maxUses", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
-      const dave = yield* registerAndLogin("dave", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
+      const dave = yield* registerAndLogin("dave");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -2825,7 +2819,7 @@ test("joinChatViaInvite enforces expiry and maxUses", () =>
 test("joinChatViaInvite rejects joining once the group is at its participant cap", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const others = yield* insertDummyUsers(MAX_GROUP_PARTICIPANTS - 1);
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [others[0]!.id] },
@@ -2839,7 +2833,7 @@ test("joinChatViaInvite rejects joining once the group is at its participant cap
         params: { id: chat.id },
         payload: {},
       });
-      const outsider = yield* registerAndLogin("outsider", "pw-testpass");
+      const outsider = yield* registerAndLogin("outsider");
       const result = yield* outsider.client.chats
         .joinChatViaInvite({ params: { code: invite.code } })
         .pipe(Effect.flip);
@@ -2854,10 +2848,10 @@ test("joinChatViaInvite rejects joining once the group is at its participant cap
 test("joinChatViaInvite serializes concurrent redemptions against maxUses", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
-      const dave = yield* registerAndLogin("dave", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
+      const dave = yield* registerAndLogin("dave");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
@@ -2898,8 +2892,8 @@ test("joinChatViaInvite serializes concurrent redemptions against maxUses", () =
 test("createChatInvite doesn't count revoked/expired invites toward the per-chat cap", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });

@@ -1,7 +1,9 @@
 import type { BrowserContext, ConsoleMessage, Page } from "@playwright/test";
 import { test as base } from "@playwright/test";
+import { googleSubFor, signUpOverHttp } from "../../src/GoogleTestSigner";
 import type { components } from "../src/lib/api-types";
-import { startTestBackend } from "./backend";
+import { type AdminAccount, startTestBackend } from "./backend";
+import { routeGoogleIdentity } from "./google";
 import { randomUsername } from "./helpers";
 
 type Session = components["schemas"]["LoginResponse"];
@@ -65,28 +67,14 @@ function isApiResponseError(message: ConsoleMessage, apiUrl: string): boolean {
 
 export type TestUser = {
   username: string;
-  password: string;
+  // The Google account the user signs in with — hand it to
+  // `signInWithGoogle`/`useGoogleAccount` (google.ts) to sign back in.
+  sub: string;
   session: Session;
 };
 
 // Must match STORAGE_KEY in src/lib/auth.ts.
 const SESSION_STORAGE_KEY = "chat-platform-session";
-
-const TEST_PASSWORD = "playwright-pw-123";
-
-async function postJson(url: string, body: unknown): Promise<Response> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    throw new Error(
-      `POST ${url} failed with ${response.status}: ${await response.text()}`,
-    );
-  }
-  return response;
-}
 
 // Extends Playwright's `test` with an `apiUrl` fixture: a dedicated backend
 // process + SQLite file, started fresh for every test and torn down after.
@@ -95,17 +83,23 @@ async function postJson(url: string, body: unknown): Promise<Response> {
 // (e.g. to simulate two separate users) must call `injectApiUrl` themselves
 // before creating pages from those contexts.
 //
-// Test users are created over the API rather than through the register form:
-// driving the form costs a full page load of /register plus the client-side
-// hop to the feed per user (~3s each on CI), which in multi-user tests was
-// most of the default 30s budget. The form itself is covered by auth.spec.ts.
+// Test users are created over the API rather than through the sign-in UI —
+// but through the same endpoints a browser uses: a Google ID token (minted
+// with the test key the backend trusts) to `POST /users/login/google`, then
+// the username step, `POST /users/register/google`. Driving the UI costs a
+// full page load per user (~3s each on CI), which in multi-user tests was
+// most of the default 30s budget. The UI itself is covered by auth.spec.ts.
 //
-// - `createUser()` just creates a user and returns its credentials and
+// - `createUser()` just creates a user and returns its Google `sub` and
 //   session — for users that only need to *exist* (e.g. the other side of a
 //   direct chat), with no browser context of their own.
 // - `signUp(page)` also signs `page`'s browser context in as that user and
-//   leaves `page` on the feed, the same end state the register form leaves.
+//   leaves `page` on the feed, the same end state the sign-up flow leaves.
+// - `admins` (an option: `test.use({ admins: [...] })`) are admin password
+//   accounts created before the backend starts, by the same code as the
+//   `create-admin` CLI — there's no HTTP endpoint that makes one.
 export const test = base.extend<{
+  admins: AdminAccount[];
   apiUrl: string;
   injectApiUrl: InjectApiUrl;
   consoleErrors: ConsoleErrors;
@@ -113,8 +107,9 @@ export const test = base.extend<{
   createUser: () => Promise<TestUser>;
   signUp: (page: Page) => Promise<TestUser>;
 }>({
-  apiUrl: async ({}, use) => {
-    const backend = await startTestBackend();
+  admins: [[], { option: true }],
+  apiUrl: async ({ admins }, use) => {
+    const backend = await startTestBackend(admins);
     await use(backend.apiUrl);
     await backend.stop();
   },
@@ -178,6 +173,7 @@ export const test = base.extend<{
   injectApiUrl: async ({ apiUrl, consoleErrors }, use) => {
     await use(async (context) => {
       consoleErrors.watch(context, apiUrl);
+      await routeGoogleIdentity(context);
       await context.addInitScript((url) => {
         (window as unknown as { __E2E_API_URL__?: string }).__E2E_API_URL__ =
           url;
@@ -195,14 +191,11 @@ export const test = base.extend<{
   createUser: async ({ apiUrl }, use) => {
     await use(async () => {
       const username = randomUsername();
-      const password = TEST_PASSWORD;
-      await postJson(`${apiUrl}/users/register`, { username, password });
-      const login = await postJson(`${apiUrl}/users/login`, {
-        username,
-        password,
+      const sub = googleSubFor(username);
+      const session = await signUpOverHttp<Session>(apiUrl, username, {
+        sub,
       });
-      const session = (await login.json()) as Session;
-      return { username, password, session };
+      return { username, sub, session };
     });
   },
   signUp: async ({ createUser }, use) => {

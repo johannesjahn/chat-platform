@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { signInWithGoogle } from "./google";
 import { logOut, persistedQueryCache } from "./helpers";
 
 test("losing connectivity mid-session keeps already-loaded messages on screen and shows an offline banner, and persists the cache to localStorage for a later reload", async ({
@@ -285,7 +286,7 @@ test("a post queued offline by one user isn't sent under a different user who lo
   context,
   signUp,
 }) => {
-  const { username: usernameA, password: passwordA } = await signUp(page);
+  const { sub: subA } = await signUp(page);
 
   await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
   await page.getByRole("link", { name: "New post" }).click();
@@ -304,7 +305,7 @@ test("a post queued offline by one user isn't sent under a different user who lo
   await logOut(page);
   await expect(page.getByTestId("pending-post")).toHaveCount(0);
 
-  // Reconnect and register a second user on this same browser — the queued
+  // Reconnect and sign up a second user on this same browser — the queued
   // item belongs to A (see lib/offlineQueue.ts's per-item `ownerId`), so it
   // must neither send nor even render for B, despite the connectivity
   // restore that would otherwise trigger a replay.
@@ -318,9 +319,7 @@ test("a post queued offline by one user isn't sent under a different user who lo
   // proving it wasn't silently dropped, just correctly held back from B.
   await logOut(page);
   await page.goto("/login");
-  await page.fill("#username", usernameA);
-  await page.fill("#password", passwordA);
-  await page.getByRole("button", { name: "Log in" }).click();
+  await signInWithGoogle(page, subA);
   await expect(page).toHaveURL("/");
 
   await expect(page.getByTestId("pending-post")).toHaveCount(0);

@@ -107,18 +107,12 @@ export function DesktopSidebar({
       {session && onLogout ? (
         <AccountMenu session={session} onLogout={onLogout} />
       ) : (
-        <div className="flex flex-col gap-2">
-          <Button asChild variant="ghost" size="sm" className="w-full">
-            <Link to="/login" search={{ redirect }}>
-              Log in
-            </Link>
-          </Button>
-          <Button asChild size="sm" className="w-full">
-            <Link to="/register" search={{ redirect }}>
-              Register
-            </Link>
-          </Button>
-        </div>
+        // No "Register": a first Google sign-in creates the account.
+        <Button asChild size="sm" className="w-full">
+          <Link to="/login" search={{ redirect }}>
+            Log in
+          </Link>
+        </Button>
       )}
       {/* The build tag the phone/tablet layout pins to the screen's corner
           (VersionFooter) lives here at `lg`+, where that corner is the

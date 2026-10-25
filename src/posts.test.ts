@@ -8,6 +8,7 @@ import { Db } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signInTestUser, signUpTestUser } from "./testUsers.ts";
 
 // `effect` may also require `Db` directly (e.g. to promote a user to admin
 // out-of-band, the way it'd happen in production) — it shares the exact same
@@ -29,13 +30,9 @@ const makeAuthedClient = (token: string) =>
   });
 
 // Registers a user and logs in, returning the user plus an access token.
-const registerAndLogin = (username: string, password: string) =>
+const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return { user, accessToken };
   });
 
@@ -67,10 +64,7 @@ test("createPost rejects an unauthenticated request", () =>
 test("createPost creates a text post owned by the current user", () =>
   run(
     Effect.gen(function* () {
-      const { user, accessToken } = yield* registerAndLogin(
-        "alice",
-        "pw-testpass",
-      );
+      const { user, accessToken } = yield* registerAndLogin("alice");
       const authed = yield* makeAuthedClient(accessToken);
       const post = yield* authed.posts.createPost({
         payload: { contentType: "text", content: "hello world" },
@@ -90,7 +84,7 @@ test("createPost creates a text post owned by the current user", () =>
 test('createPost increments content_created_total{type="post"}', () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("dana", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("dana");
       const authed = yield* makeAuthedClient(accessToken);
       const postsCreated = Metric.withAttributes(contentCreatedTotal, {
         type: "post",
@@ -108,10 +102,10 @@ test("createPost is idempotent per author and clientId (issue #657)", () =>
   run(
     Effect.gen(function* () {
       const alice = yield* makeAuthedClient(
-        (yield* registerAndLogin("alice", "pw-testpass")).accessToken,
+        (yield* registerAndLogin("alice")).accessToken,
       );
       const bob = yield* makeAuthedClient(
-        (yield* registerAndLogin("bob", "pw-testpass")).accessToken,
+        (yield* registerAndLogin("bob")).accessToken,
       );
       const create = (
         client: typeof alice,
@@ -149,7 +143,7 @@ test("createPost is idempotent per author and clientId (issue #657)", () =>
 test("createPost creates an image_url post", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("bob", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("bob");
       const authed = yield* makeAuthedClient(accessToken);
       const post = yield* authed.posts.createPost({
         payload: {
@@ -165,7 +159,7 @@ test("createPost creates an image_url post", () =>
 test("createPost rejects an image_url from a non-allowlisted host", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("bobby", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("bobby");
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.posts
         .createPost({
@@ -181,7 +175,7 @@ test("createPost rejects an image_url from a non-allowlisted host", () =>
 test("createPost rejects a non-https image_url", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("bobbi", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("bobbi");
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.posts
         .createPost({
@@ -197,7 +191,7 @@ test("createPost rejects a non-https image_url", () =>
 test("createPost rejects a javascript: image_url", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("bobette", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("bobette");
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.posts
         .createPost({
@@ -221,10 +215,7 @@ test("createPost rejects a javascript: image_url", () =>
 test("HttpApiDecodeError response keeps a Schema.filter refinement's own message", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "rawbobby",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("rawbobby");
       const client = yield* HttpClient.HttpClient;
       const request = HttpClientRequest.post("http://localhost/posts", {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -248,10 +239,7 @@ test("HttpApiDecodeError response keeps a Schema.filter refinement's own message
 test("HttpApiDecodeError response replaces a structural type mismatch with a generic message", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "rawbobbi",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("rawbobbi");
       const client = yield* HttpClient.HttpClient;
       const request = HttpClientRequest.post("http://localhost/posts", {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -283,7 +271,7 @@ test("HttpApiDecodeError response replaces a structural type mismatch with a gen
 test("createPost rejects content over the max length", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("carol", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("carol");
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.posts
         .createPost({
@@ -296,7 +284,7 @@ test("createPost rejects content over the max length", () =>
 test("createPost rejects an empty content string", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("dave", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("dave");
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.posts
         .createPost({ payload: { contentType: "text", content: "" } })
@@ -307,7 +295,7 @@ test("createPost rejects an empty content string", () =>
 test("createPost rejects an invalid content type", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("erin", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("erin");
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.posts
         .createPost({
@@ -323,7 +311,7 @@ test("createPost rejects an invalid content type", () =>
 test("getPost rejects an unauthenticated request", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("frank", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("frank");
       const authed = yield* makeAuthedClient(accessToken);
       const created = yield* authed.posts.createPost({
         payload: { contentType: "text", content: "post" },
@@ -340,7 +328,7 @@ test("getPost rejects an unauthenticated request", () =>
 test("getPost returns the post for an authenticated request", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("frankie", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("frankie");
       const authed = yield* makeAuthedClient(accessToken);
       const created = yield* authed.posts.createPost({
         payload: { contentType: "text", content: "post" },
@@ -365,7 +353,7 @@ test("listPosts rejects an unauthenticated request", () =>
 test("listPosts returns a default first page with a null nextCursor", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("olga", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("olga");
       const authed = yield* makeAuthedClient(accessToken);
       for (let i = 0; i < 3; i++) {
         yield* authed.posts.createPost({
@@ -383,7 +371,7 @@ test("listPosts returns a default first page with a null nextCursor", () =>
 test("listPosts paginates newest-first with a keyset cursor, without gaps or duplicates", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("pete", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("pete");
       const authed = yield* makeAuthedClient(accessToken);
       const created = [];
       for (let i = 0; i < 5; i++) {
@@ -425,7 +413,7 @@ test("listPosts paginates newest-first with a keyset cursor, without gaps or dup
 test("listPosts rejects a limit above the max", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("quinn", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("quinn");
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.posts
         .listPosts({ query: { limit: 101 } })
@@ -436,7 +424,7 @@ test("listPosts rejects a limit above the max", () =>
 test("listPosts rejects a malformed cursor", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("ruth", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("ruth");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
         .listPosts({ query: { cursor: "not-a-real-cursor" } })
@@ -448,7 +436,7 @@ test("listPosts rejects a malformed cursor", () =>
 test("getPost returns 404 for a missing id", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("sam", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("sam");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
         .getPost({ params: { id: 9999 } })
@@ -460,7 +448,7 @@ test("getPost returns 404 for a missing id", () =>
 test("updatePost allows the author to edit their post", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("grace", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("grace");
       const authed = yield* makeAuthedClient(accessToken);
       const created = yield* authed.posts.createPost({
         payload: { contentType: "text", content: "original" },
@@ -483,13 +471,13 @@ test("updatePost allows the author to edit their post", () =>
 test("updatePost rejects edits from a user who doesn't own the post", () =>
   run(
     Effect.gen(function* () {
-      const author = yield* registerAndLogin("henry", "pw-testpass");
+      const author = yield* registerAndLogin("henry");
       const authorClient = yield* makeAuthedClient(author.accessToken);
       const created = yield* authorClient.posts.createPost({
         payload: { contentType: "text", content: "mine" },
       });
 
-      const intruder = yield* registerAndLogin("iris", "pw-testpass");
+      const intruder = yield* registerAndLogin("iris");
       const intruderClient = yield* makeAuthedClient(intruder.accessToken);
       const result = yield* intruderClient.posts
         .updatePost({
@@ -504,18 +492,15 @@ test("updatePost rejects edits from a user who doesn't own the post", () =>
 test("updatePost allows an admin to edit another user's post", () =>
   run(
     Effect.gen(function* () {
-      const author = yield* registerAndLogin("oscar", "pw-testpass");
+      const author = yield* registerAndLogin("oscar");
       const authorClient = yield* makeAuthedClient(author.accessToken);
       const created = yield* authorClient.posts.createPost({
         payload: { contentType: "text", content: "mine" },
       });
 
-      yield* registerAndLogin("paula", "pw-testpass");
+      yield* registerAndLogin("paula");
       yield* promoteToAdmin("paula");
-      const c = yield* makeClient;
-      const { accessToken: adminToken } = yield* c.users.login({
-        payload: { username: "paula", password: "pw-testpass" },
-      });
+      const { accessToken: adminToken } = yield* signInTestUser("paula");
       const adminClient = yield* makeAuthedClient(adminToken);
 
       const updated = yield* adminClient.posts.updatePost({
@@ -530,7 +515,7 @@ test("updatePost allows an admin to edit another user's post", () =>
 test("updatePost returns 404 for a missing post", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("jack", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("jack");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.posts
         .updatePost({
@@ -545,7 +530,7 @@ test("updatePost returns 404 for a missing post", () =>
 test("deletePost allows the author to delete their post", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("karen", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("karen");
       const authed = yield* makeAuthedClient(accessToken);
       const created = yield* authed.posts.createPost({
         payload: { contentType: "text", content: "to delete" },
@@ -563,13 +548,13 @@ test("deletePost allows the author to delete their post", () =>
 test("deletePost rejects deletes from a user who doesn't own the post", () =>
   run(
     Effect.gen(function* () {
-      const author = yield* registerAndLogin("liam", "pw-testpass");
+      const author = yield* registerAndLogin("liam");
       const authorClient = yield* makeAuthedClient(author.accessToken);
       const created = yield* authorClient.posts.createPost({
         payload: { contentType: "text", content: "mine" },
       });
 
-      const intruder = yield* registerAndLogin("mona", "pw-testpass");
+      const intruder = yield* registerAndLogin("mona");
       const intruderClient = yield* makeAuthedClient(intruder.accessToken);
       const result = yield* intruderClient.posts
         .deletePost({ params: { id: created.id } })
@@ -581,18 +566,15 @@ test("deletePost rejects deletes from a user who doesn't own the post", () =>
 test("deletePost allows an admin to delete another user's post", () =>
   run(
     Effect.gen(function* () {
-      const author = yield* registerAndLogin("quincy", "pw-testpass");
+      const author = yield* registerAndLogin("quincy");
       const authorClient = yield* makeAuthedClient(author.accessToken);
       const created = yield* authorClient.posts.createPost({
         payload: { contentType: "text", content: "mine" },
       });
 
-      yield* registerAndLogin("rachel", "pw-testpass");
+      yield* registerAndLogin("rachel");
       yield* promoteToAdmin("rachel");
-      const c = yield* makeClient;
-      const { accessToken: adminToken } = yield* c.users.login({
-        payload: { username: "rachel", password: "pw-testpass" },
-      });
+      const { accessToken: adminToken } = yield* signInTestUser("rachel");
       const adminClient = yield* makeAuthedClient(adminToken);
 
       yield* adminClient.posts.deletePost({ params: { id: created.id } });
@@ -607,7 +589,7 @@ test("deletePost allows an admin to delete another user's post", () =>
 test("deletePost rejects an unauthenticated request", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("nina", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("nina");
       const authed = yield* makeAuthedClient(accessToken);
       const created = yield* authed.posts.createPost({
         payload: { contentType: "text", content: "post" },

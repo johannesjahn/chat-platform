@@ -15,66 +15,22 @@ import { Label } from "@/components/ui/label";
 import { errorMessage } from "@/lib/errors";
 import { useTheme } from "@/lib/theme";
 
-type AuthFormProps = {
-  // Which credential the password field holds, for password managers
-  // (issue #500): "register" asks for a *new* password, so managers offer to
-  // generate and save one; "login" asks for the account's current one.
-  mode: "login" | "register";
+type AuthShellProps = {
   title: string;
   description: string;
-  submitLabel: string;
-  onSubmit: (credentials: {
-    username: string;
-    password: string;
-  }) => Promise<void>;
-  footer: ReactNode;
-  // Set on the register form to enforce and hint at the server's minimum
-  // password length (issue #45); omitted on login, where an existing
-  // account's password — possibly shorter, from before this floor existed —
-  // must still be accepted.
-  minPasswordLength?: number;
-  // Likewise for the username (issue #483) — register only, so an account
-  // whose name predates the floor can still log in.
-  minUsernameLength?: number;
-  // And the characters a new username may use (issue #493) — the `@mention`
-  // token class, so every new account can be mentioned. Register only.
-  usernamePattern?: RegExp;
+  footer?: ReactNode;
+  children: ReactNode;
 };
 
-export function AuthForm({
-  mode,
+// The card every auth screen sits in — sign-in, the admin password form and
+// the username step — over the interactive dot field.
+export function AuthShell({
   title,
   description,
-  submitLabel,
-  onSubmit,
   footer,
-  minPasswordLength,
-  minUsernameLength,
-  usernamePattern,
-}: AuthFormProps) {
+  children,
+}: AuthShellProps) {
   const { resolved: theme } = useTheme();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  // Counts submissions so the error panel can be re-keyed per attempt.
-  const [attempt, setAttempt] = useState(0);
-
-  const usernameTooShort =
-    minUsernameLength !== undefined &&
-    username.length > 0 &&
-    username.length < minUsernameLength;
-  const usernameBadChars =
-    usernamePattern !== undefined &&
-    username.length > 0 &&
-    !usernamePattern.test(username);
-  const usernameInvalid = usernameTooShort || usernameBadChars;
-  const tooShort =
-    minPasswordLength !== undefined &&
-    password.length > 0 &&
-    password.length < minPasswordLength;
-
   return (
     <main className="relative flex min-h-[calc(100vh-57px)] items-center justify-center overflow-hidden px-4 py-16">
       {/* reactbits dot field — interactive background for the auth screens. */}
@@ -95,142 +51,192 @@ export function AuthForm({
           </CardTitle>
           <CardDescription>{description}</CardDescription>
         </CardHeader>
-        <CardContent>
-          {error && (
-            <p
-              // Re-keyed on the attempt counter rather than on the message, so
-              // a second failure with the *same* text is still visibly a new
-              // rejection instead of an unchanged screen.
-              key={attempt}
-              role="alert"
-              className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive motion-safe:animate-shake"
-            >
-              {error}
-            </p>
-          )}
-          <form
-            id="auth-form"
-            className="flex flex-col gap-4"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              setError(null);
-              setAttempt((prev) => prev + 1);
-              setPending(true);
-              try {
-                await onSubmit({ username, password });
-              } catch (err) {
-                setError(errorMessage(err));
-              } finally {
-                setPending(false);
-              }
-            }}
-          >
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="username">Username</Label>
-              <Input
-                id="username"
-                name="username"
-                autoComplete="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                minLength={minUsernameLength}
-                aria-invalid={usernameInvalid || undefined}
-                aria-describedby={
-                  minUsernameLength !== undefined ||
-                  usernamePattern !== undefined
-                    ? "username-hint"
-                    : undefined
-                }
-                required
-              />
-              {(minUsernameLength !== undefined ||
-                usernamePattern !== undefined) && (
-                <p
-                  id="username-hint"
-                  className={
-                    usernameInvalid
-                      ? "text-sm text-destructive"
-                      : "text-sm text-muted-foreground"
-                  }
-                >
-                  {usernameBadChars
-                    ? 'Username may only use letters (A-Z), digits, "_", "." and "-", and can\'t end in "." or "-".'
-                    : usernameTooShort
-                      ? `Username must be at least ${minUsernameLength} characters.`
-                      : [
-                          minUsernameLength !== undefined &&
-                            `At least ${minUsernameLength} characters`,
-                          usernamePattern !== undefined &&
-                            'letters, digits, "_", "." and "-"',
-                        ]
-                          .filter(Boolean)
-                          .join(": ") + "."}
-                </p>
-              )}
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete={
-                    mode === "register" ? "new-password" : "current-password"
-                  }
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  minLength={minPasswordLength}
-                  required
-                  className="pr-10"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute top-0 right-0 text-muted-foreground hover:bg-transparent"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  aria-pressed={showPassword}
-                  aria-controls="password"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                >
-                  {showPassword ? (
-                    <EyeOff className="size-4" />
-                  ) : (
-                    <Eye className="size-4" />
-                  )}
-                </Button>
-              </div>
-              {minPasswordLength !== undefined && (
-                <p
-                  className={
-                    tooShort
-                      ? "text-sm text-destructive"
-                      : "text-sm text-muted-foreground"
-                  }
-                >
-                  {tooShort
-                    ? `Password must be at least ${minPasswordLength} characters.`
-                    : `At least ${minPasswordLength} characters.`}
-                </p>
-              )}
-            </div>
-            <Button
-              type="submit"
-              className="mt-1 w-full"
-              disabled={
-                pending || !username || !password || tooShort || usernameInvalid
-              }
-            >
-              {pending && <Loader2 className="size-4 animate-spin" />}
-              {pending ? "Please wait…" : submitLabel}
-            </Button>
-          </form>
-        </CardContent>
-        <CardFooter>
-          <p className="text-sm text-muted-foreground">{footer}</p>
-        </CardFooter>
+        <CardContent>{children}</CardContent>
+        {footer && (
+          <CardFooter>
+            <p className="text-sm text-muted-foreground">{footer}</p>
+          </CardFooter>
+        )}
       </Card>
     </main>
+  );
+}
+
+// An auth screen's rejection — re-keyed by the caller on each attempt (not
+// on the message), so a second failure with the *same* text is still
+// visibly a new rejection instead of an unchanged screen.
+export function AuthError({ children }: { children: ReactNode }) {
+  return (
+    <p
+      role="alert"
+      className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive motion-safe:animate-shake"
+    >
+      {children}
+    </p>
+  );
+}
+
+type AuthFormProps = {
+  // "login" is the admin password sign-in (username + current password —
+  // `autocomplete="current-password"` for password managers, issue #500);
+  // "username" is the username step of a first Google sign-in, with no
+  // password at all.
+  mode: "login" | "username";
+  title: string;
+  description: string;
+  submitLabel: string;
+  onSubmit: (credentials: {
+    username: string;
+    password: string;
+  }) => Promise<void>;
+  footer: ReactNode;
+  // Set on the username step to enforce and hint at the server's minimum
+  // username length (issue #483) — never on login, so an account whose name
+  // predates the floor can still sign in.
+  minUsernameLength?: number;
+  // And the characters a new username may use (issue #493) — the `@mention`
+  // token class, so every new account can be mentioned. Username step only.
+  usernamePattern?: RegExp;
+};
+
+export function AuthForm({
+  mode,
+  title,
+  description,
+  submitLabel,
+  onSubmit,
+  footer,
+  minUsernameLength,
+  usernamePattern,
+}: AuthFormProps) {
+  const withPassword = mode === "login";
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  // Counts submissions so the error panel can be re-keyed per attempt.
+  const [attempt, setAttempt] = useState(0);
+
+  const usernameTooShort =
+    minUsernameLength !== undefined &&
+    username.length > 0 &&
+    username.length < minUsernameLength;
+  const usernameBadChars =
+    usernamePattern !== undefined &&
+    username.length > 0 &&
+    !usernamePattern.test(username);
+  const usernameInvalid = usernameTooShort || usernameBadChars;
+
+  return (
+    <AuthShell title={title} description={description} footer={footer}>
+      {error && <AuthError key={attempt}>{error}</AuthError>}
+      <form
+        id="auth-form"
+        className="flex flex-col gap-4"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setError(null);
+          setAttempt((prev) => prev + 1);
+          setPending(true);
+          try {
+            await onSubmit({ username, password });
+          } catch (err) {
+            setError(errorMessage(err));
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="username">Username</Label>
+          <Input
+            id="username"
+            name="username"
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            minLength={minUsernameLength}
+            aria-invalid={usernameInvalid || undefined}
+            aria-describedby={
+              minUsernameLength !== undefined || usernamePattern !== undefined
+                ? "username-hint"
+                : undefined
+            }
+            required
+          />
+          {(minUsernameLength !== undefined ||
+            usernamePattern !== undefined) && (
+            <p
+              id="username-hint"
+              className={
+                usernameInvalid
+                  ? "text-sm text-destructive"
+                  : "text-sm text-muted-foreground"
+              }
+            >
+              {usernameBadChars
+                ? 'Username may only use letters (A-Z), digits, "_", "." and "-", and can\'t end in "." or "-".'
+                : usernameTooShort
+                  ? `Username must be at least ${minUsernameLength} characters.`
+                  : [
+                      minUsernameLength !== undefined &&
+                        `At least ${minUsernameLength} characters`,
+                      usernamePattern !== undefined &&
+                        'letters, digits, "_", "." and "-"',
+                    ]
+                      .filter(Boolean)
+                      .join(": ") + "."}
+            </p>
+          )}
+        </div>
+        {withPassword && (
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="password">Password</Label>
+            <div className="relative">
+              <Input
+                id="password"
+                name="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="pr-10"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute top-0 right-0 text-muted-foreground hover:bg-transparent"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
+                aria-controls="password"
+                onClick={() => setShowPassword((prev) => !prev)}
+              >
+                {showPassword ? (
+                  <EyeOff className="size-4" />
+                ) : (
+                  <Eye className="size-4" />
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+        <Button
+          type="submit"
+          className="mt-1 w-full"
+          disabled={
+            pending ||
+            !username ||
+            (withPassword && !password) ||
+            usernameInvalid
+          }
+        >
+          {pending && <Loader2 className="size-4 animate-spin" />}
+          {pending ? "Please wait…" : submitLabel}
+        </Button>
+      </form>
+    </AuthShell>
   );
 }

@@ -18,7 +18,7 @@ test("a signed-in user opening /login or /register is sent to the feed", async (
 
   await page.goto("/register");
   await expect(page).toHaveURL("/");
-  await expect(page.locator("#password")).toHaveCount(0);
+  await expect(page.locator("#username")).toHaveCount(0);
 });
 
 test("a signed-in user opening /login with a redirect is sent to its target", async ({
@@ -48,5 +48,7 @@ test("logging out from settings lands on the feed", async ({
   // Signed out again, the auth pages are reachable as before.
   await page.goto("/login");
   await expect(page).toHaveURL("/login");
-  await expect(page.locator("#password")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Continue with Google" }),
+  ).toBeVisible();
 });

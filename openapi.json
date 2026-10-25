@@ -372,21 +372,21 @@
         }
       }
     },
-    "/users/register": {
-      "post": {
+    "/users/login/config": {
+      "get": {
         "tags": [
           "users"
         ],
-        "operationId": "users.register",
+        "operationId": "users.getAuthConfig",
         "parameters": [],
         "security": [],
         "responses": {
-          "201": {
-            "description": "User",
+          "200": {
+            "description": "AuthConfig",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/User"
+                  "$ref": "#/components/schemas/AuthConfig"
                 }
               }
             }
@@ -397,6 +397,110 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HttpApiDecodeErrorEncoded"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/login/google": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users.loginGoogle",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "GoogleLoginResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleLoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HttpApiDecodeError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "InvalidCredentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidCredentialsEncoded"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "TooManyRequests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyRequestsEncoded"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleLoginBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/users/register/google": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users.registerGoogle",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "201": {
+            "description": "LoginResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HttpApiDecodeError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "InvalidCredentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidCredentialsEncoded"
                 }
               }
             }
@@ -426,7 +530,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RegisterBody"
+                "$ref": "#/components/schemas/GoogleRegisterBody"
               }
             }
           },
@@ -639,6 +743,16 @@
                       "$ref": "#/components/schemas/UnauthorizedEncoded"
                     }
                   ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenEncoded"
                 }
               }
             }
@@ -11444,18 +11558,36 @@
         "additionalProperties": false
       },
       "DeleteAccountBody": {
-        "type": "object",
-        "properties": {
-          "password": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "password": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "required": [
+              "password"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "idToken": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              }
+            },
+            "required": [
+              "idToken"
+            ],
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "password"
-        ],
-        "additionalProperties": false
+        ]
       },
       "UserProfile": {
         "type": "object",
@@ -11687,14 +11819,25 @@
           },
           "refreshToken": {
             "type": "string"
+          },
+          "authMethod": {
+            "$ref": "#/components/schemas/AuthMethod"
           }
         },
         "required": [
           "user",
           "accessToken",
-          "refreshToken"
+          "refreshToken",
+          "authMethod"
         ],
         "additionalProperties": false
+      },
+      "AuthMethod": {
+        "type": "string",
+        "enum": [
+          "google",
+          "password"
+        ]
       },
       "LoginBody": {
         "type": "object",
@@ -11736,9 +11879,13 @@
         ],
         "additionalProperties": false
       },
-      "RegisterBody": {
+      "GoogleRegisterBody": {
         "type": "object",
         "properties": {
+          "pendingToken": {
+            "type": "string",
+            "maxLength": 1024
+          },
           "username": {
             "type": "string",
             "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
@@ -11749,16 +11896,73 @@
                 "pattern": "^[A-Za-z0-9_.-]*[A-Za-z0-9_]$"
               }
             ]
-          },
-          "password": {
-            "type": "string",
-            "minLength": 4,
-            "maxLength": 128
           }
         },
         "required": [
-          "username",
-          "password"
+          "pendingToken",
+          "username"
+        ],
+        "additionalProperties": false
+      },
+      "GoogleLoginResponse": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/LoginResponse"
+          },
+          {
+            "$ref": "#/components/schemas/GoogleNeedsUsername"
+          }
+        ]
+      },
+      "GoogleNeedsUsername": {
+        "type": "object",
+        "properties": {
+          "needsUsername": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "pendingToken": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "needsUsername",
+          "pendingToken"
+        ],
+        "additionalProperties": false
+      },
+      "GoogleLoginBody": {
+        "type": "object",
+        "properties": {
+          "idToken": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "idToken"
+        ],
+        "additionalProperties": false
+      },
+      "AuthConfig": {
+        "type": "object",
+        "properties": {
+          "googleClientId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "googleClientId"
         ],
         "additionalProperties": false
       },

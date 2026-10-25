@@ -15,7 +15,7 @@ import {
   randomText,
 } from "./lib/api.js";
 
-// Kept small by default so setup() stays well inside /users/register's
+// Kept small by default so setup() stays well inside /users/register/google's
 // 5-per-IP-per-hour budget on a fresh backend (see lib/api.js). Raise VUS
 // independently of USERS to add concurrency without registering more
 // accounts — VUs just share the pool round-robin.

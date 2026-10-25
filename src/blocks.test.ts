@@ -4,6 +4,7 @@ import { HttpApiClient } from "effect/http-api";
 import { Effect } from "effect";
 import { ChatApi } from "./Api.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signUpTestUser } from "./testUsers.ts";
 
 const run = makeTestRun();
 
@@ -19,23 +20,17 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-const registerAndLogin = (username: string, password: string) =>
+const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return { user, accessToken, client: yield* makeAuthedClient(accessToken) };
   });
-
-const PW = "pw-testpass";
 
 test("setBlock records a block and listBlocks returns it", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", PW);
-      const bob = yield* registerAndLogin("bob", PW);
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
 
       const entry = yield* alice.client.users.setBlock({
         params: { id: bob.user.id },
@@ -54,8 +49,8 @@ test("setBlock records a block and listBlocks returns it", () =>
 test("setBlock upgrades a mute to a block in place (no duplicate row)", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", PW);
-      const bob = yield* registerAndLogin("bob", PW);
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
 
       yield* alice.client.users.setBlock({
         params: { id: bob.user.id },
@@ -76,8 +71,8 @@ test("setBlock upgrades a mute to a block in place (no duplicate row)", () =>
 test("removeBlock lifts the relationship and is idempotent", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", PW);
-      const bob = yield* registerAndLogin("bob", PW);
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
 
       yield* alice.client.users.setBlock({
         params: { id: bob.user.id },
@@ -95,7 +90,7 @@ test("removeBlock lifts the relationship and is idempotent", () =>
 test("setBlock rejects blocking yourself", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", PW);
+      const alice = yield* registerAndLogin("alice");
       const result = yield* alice.client.users
         .setBlock({
           params: { id: alice.user.id },
@@ -109,7 +104,7 @@ test("setBlock rejects blocking yourself", () =>
 test("setBlock 404s for a non-existent target", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", PW);
+      const alice = yield* registerAndLogin("alice");
       const result = yield* alice.client.users
         .setBlock({ params: { id: 999999 }, payload: { type: "block" } })
         .pipe(Effect.flip);
@@ -129,9 +124,9 @@ test("listBlocks requires authentication", () =>
 test("listPosts hides posts from blocked and muted authors, restored on removeBlock", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", PW);
-      const bob = yield* registerAndLogin("bob", PW);
-      const carol = yield* registerAndLogin("carol", PW);
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
 
       yield* bob.client.posts.createPost({
         payload: { contentType: "text", content: "bob post" },
@@ -174,10 +169,10 @@ test("listPosts hides posts from blocked and muted authors, restored on removeBl
 test("comments and replies from blocked and muted authors are hidden, restored on removeBlock", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", PW);
-      const bob = yield* registerAndLogin("bob", PW);
-      const carol = yield* registerAndLogin("carol", PW);
-      const dave = yield* registerAndLogin("dave", PW);
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
+      const dave = yield* registerAndLogin("dave");
 
       const post = yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "alice post" },
@@ -295,8 +290,8 @@ test("comments and replies from blocked and muted authors are hidden, restored o
 test("createMessage is rejected in a direct chat when either party has blocked the other", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", PW);
-      const bob = yield* registerAndLogin("bob", PW);
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
 
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
@@ -336,8 +331,8 @@ test("createMessage is rejected in a direct chat when either party has blocked t
 test("a mute does not block direct messaging", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", PW);
-      const bob = yield* registerAndLogin("bob", PW);
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
 
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
@@ -359,9 +354,9 @@ test("a mute does not block direct messaging", () =>
 test("createMessage succeeds in a group chat where a participant muted the sender", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", PW);
-      const bob = yield* registerAndLogin("bob", PW);
-      const carol = yield* registerAndLogin("carol", PW);
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
 
       const chat = yield* alice.client.chats.createGroupChat({
         payload: {

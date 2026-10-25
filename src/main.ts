@@ -14,6 +14,7 @@ import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { DbLive } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
 import { globalRateLimit } from "./GlobalRateLimit.ts";
+import { GoogleIdTokenLive } from "./GoogleIdToken.ts";
 import { HealthRouteLive, ReadyRouteLive } from "./Health.ts";
 import { JwtLive } from "./Jwt.ts";
 import { MetricsRouteLive, recordHttpMetrics } from "./Metrics.ts";
@@ -117,6 +118,7 @@ const ServicesLive = Layer.mergeAll(
       PubSubLive,
       PresenceStoreLive,
       JwtLive,
+      GoogleIdTokenLive,
       RateLimiterLive,
       WsTicketLive,
       AttachmentStorageLive,

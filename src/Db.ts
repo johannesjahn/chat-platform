@@ -66,3 +66,21 @@ export const runMigrations = async (): Promise<void> => {
     await client.close();
   }
 };
+
+// A connection for a one-shot script (scripts/create-admin.ts) rather than
+// the server: the same database the app would use, migrated first when it's
+// PGlite (as DbLive does), plus a `close` the script calls before exiting so
+// a PGlite data directory is left cleanly shut down.
+export const connectDb = async (): Promise<{
+  readonly db: DrizzleDb;
+  readonly close: () => Promise<void>;
+}> => {
+  if (process.env.DATABASE_URL) {
+    const db = drizzleBunSql(process.env.DATABASE_URL, { schema });
+    return { db, close: () => db.$client.close() };
+  }
+  const client = await createPglite();
+  const db = drizzlePglite({ client, schema });
+  await migratePglite(db, { migrationsFolder: "./drizzle" });
+  return { db, close: () => client.close() };
+};

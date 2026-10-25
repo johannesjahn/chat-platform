@@ -5,19 +5,13 @@ import { Effect } from "effect";
 import { ChatApi } from "./Api.ts";
 import { PresenceAudience, PresenceAudienceLive } from "./PresenceAudience.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signUpTestUser } from "./testUsers.ts";
 
 const run = makeTestRun();
 
-const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
-
 const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const password = "pw-testpass";
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     const client = yield* HttpApiClient.make(ChatApi, {
       baseUrl: "http://localhost",
       transformClient: (inner) =>

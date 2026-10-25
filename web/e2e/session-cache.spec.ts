@@ -1,4 +1,5 @@
 import { expect, test } from "./fixtures";
+import { signInWithGoogle } from "./google";
 import { logOut, persistedQueryCache } from "./helpers";
 
 // Issue #478: the persisted query cache used to outlive a logout, and query
@@ -36,9 +37,7 @@ test("logging out wipes cached chats, and the next account on the same browser c
   await expect.poll(() => persistedQueryCache(page)).not.toContain(secret);
 
   await page.goto("/login");
-  await page.fill("#username", nextUser.username);
-  await page.fill("#password", nextUser.password);
-  await page.getByRole("button", { name: "Log in" }).click();
+  await signInWithGoogle(page, nextUser.sub);
   await expect(page).toHaveURL("/");
 
   await page.goto(chatUrl);

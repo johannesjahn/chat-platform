@@ -4,6 +4,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import {
+  GOOGLE_TEST_CLIENT_ID,
+  GOOGLE_TEST_PUBLIC_KEY,
+  googleSubFor,
+  signInOverHttp,
+  signUpOverHttp,
+} from "./GoogleTestSigner.ts";
 
 // This is the one test in the suite that runs the real thing: a real
 // `bun run start` process, listening on a real port, with a real
@@ -65,6 +72,9 @@ beforeAll(async () => {
       // A PGlite data directory, not a single file — see Db.ts.
       DB_PATH: dataDir,
       JWT_SECRET: "realtime-integration-test-secret",
+      // Users sign up with Google ID tokens minted by the test signer.
+      GOOGLE_CLIENT_ID: GOOGLE_TEST_CLIENT_ID,
+      GOOGLE_TEST_PUBLIC_KEY,
       // This test only exercises single-instance delivery, so force the
       // in-memory PubSub fallback regardless of whatever REDIS_URL the host
       // running the suite happens to have set (see PubSub.ts).
@@ -93,24 +103,9 @@ async function registerAndLogin(
   username: string,
 ): Promise<{ id: number; accessToken: string }> {
   registrations++;
-  const registerResponse = await fetch(`${apiUrl}/users/register`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Forwarded-For": `10.0.0.${registrations}`,
-    },
-    body: JSON.stringify({ username, password: "password123" }),
+  const { user, accessToken } = await signUpOverHttp(apiUrl, username, {
+    headers: { "X-Forwarded-For": `10.0.0.${registrations}` },
   });
-  const user = (await registerResponse.json()) as { id: number };
-
-  const loginResponse = await fetch(`${apiUrl}/users/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password: "password123" }),
-  });
-  const { accessToken } = (await loginResponse.json()) as {
-    accessToken: string;
-  };
   return { id: user.id, accessToken };
 }
 
@@ -353,14 +348,10 @@ test("log out everywhere closes the user's open sockets with 4401, and a fresh s
     bobClosed = true;
   };
 
-  const loginResponse = await fetch(`${apiUrl}/users/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: "revoke_alice", password: "password123" }),
-  });
-  const { refreshToken } = (await loginResponse.json()) as {
-    refreshToken: string;
-  };
+  const { refreshToken } = await signInOverHttp(
+    apiUrl,
+    googleSubFor("revoke_alice"),
+  );
   await fetch(`${apiUrl}/users/logout`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -378,12 +369,10 @@ test("log out everywhere closes the user's open sockets with 4401, and a fresh s
   expect(staleTicket.status).toBe(401);
 
   // ...but a fresh login can, and someone else's socket was never touched.
-  const relogin = await fetch(`${apiUrl}/users/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: "revoke_alice", password: "password123" }),
-  });
-  const { accessToken } = (await relogin.json()) as { accessToken: string };
+  const { accessToken } = await signInOverHttp(
+    apiUrl,
+    googleSubFor("revoke_alice"),
+  );
   const fresh = await connect(accessToken);
   await fresh.ready;
   await waitFor(() =>

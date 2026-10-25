@@ -1,12 +1,11 @@
 import { expect, test } from "./fixtures";
 
-// The admin dashboard's *happy* path is covered by src/admin.test.ts, which
-// can promote a user in the database directly; e2e drives the real backend in
-// its own process, so there's no way from here to mint an admin. What these
-// tests do cover is the half that only exists in the browser: that a regular
-// account is never shown the entrance, and that reaching the route anyway
-// lands on the refusal rather than a broken page or a spinner that never
-// resolves.
+// The admin dashboard's numbers are covered by src/admin.test.ts. These cover
+// the half that only exists in the browser: that a regular account is never
+// shown the entrance, that reaching the route anyway lands on the refusal
+// rather than a broken page or a spinner that never resolves — and that an
+// admin, made with the `create-admin` CLI and signed in through the admin
+// password form, does get the dashboard.
 
 test("a regular user gets no Admin nav entry", async ({ page, signUp }) => {
   await signUp(page);
@@ -40,4 +39,24 @@ test("a signed-out visitor visiting /admin is prompted to log in", async ({
   await expect(
     page.getByText("Log in to view the admin dashboard"),
   ).toBeVisible();
+});
+
+test.describe("an admin password account", () => {
+  const admin = { username: "e2e_root", password: "root-pw-1234" };
+  test.use({ admins: [admin] });
+
+  test("signs in through the admin form and opens the dashboard", async ({
+    page,
+  }) => {
+    await page.goto("/login?method=password&redirect=%2Fadmin");
+    await page.fill("#username", admin.username);
+    await page.fill("#password", admin.password);
+    await page.getByRole("button", { name: "Log in" }).click();
+
+    await expect(page).toHaveURL("/admin");
+    await expect(
+      page.getByRole("heading", { name: "Admin dashboard" }),
+    ).toBeVisible();
+    await expect(page.getByText("Totals")).toBeVisible();
+  });
 });
