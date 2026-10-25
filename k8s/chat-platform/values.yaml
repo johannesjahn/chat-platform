@@ -273,7 +273,7 @@ garage:
   # `FROM scratch` — just the binary, run as the non-root uid below.
   image:
     repository: dxflrs/garage
-    tag: "v2.4.1"
+    tag: "v2.5.0"
 
   # For the initContainer that chowns the data volume to
   # securityContext.runAsUser/runAsGroup below on every start (see
