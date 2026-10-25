@@ -134,6 +134,69 @@ This is a two-package repo:
 - **Frontend** (`web/`): TanStack Start (React) in SPA mode, calling the backend
   over HTTP. Has its own `package.json`.
 
+## Authentication
+
+Everyone signs in with Google (issue #693); username/password exists only for
+the few admin accounts without a Google account, and as the break-glass way
+in when Google is down. Google only replaces _how identity is proven_ — the
+session that follows is the same JWT access token + rotated refresh token +
+`tokenVersion` revocation either way (`issueSession` in
+[`src/UsersHandler.ts`](src/UsersHandler.ts)).
+
+- **Google Identity Services, no redirect flow.** The frontend's button
+  ([`GoogleSignInButton`](web/src/components/GoogleSignInButton.tsx)) hands
+  the browser an ID token; `POST /users/login/google` verifies it
+  ([`src/GoogleIdToken.ts`](src/GoogleIdToken.ts) — signature against
+  Google's JWKS, `aud` = `GOOGLE_CLIENT_ID`, both `iss` spellings, `exp`).
+  The client id is public and served by `GET /users/login/config`. Unset
+  `GOOGLE_CLIENT_ID` turns Google sign-in off.
+- **No user row until a username is picked.** An unknown `sub` gets
+  `{ needsUsername, pendingToken }` — a 10-minute token signed with
+  `JWT_SECRET` whose distinct `type` keeps it from passing as an access or
+  refresh token. `POST /users/register/google` exchanges it plus a username
+  (same rules and case-insensitive uniqueness as before) for the account and
+  its first session; the web app holds it in sessionStorage on `/register`.
+  So no placeholder names reach mentions, search or lookups. There is no
+  `/users/register` — no HTTP endpoint creates a password account.
+- **Only `google_sub` is stored** (migration `0037`) — no email, name or
+  picture. `password_hash` is nullable, and `users_credential_check`
+  requires one of the two.
+- **Password login is admin-only, server-side.** `POST /users/login`
+  succeeds only for `role = 'admin'` with a hash set; a Google account,
+  a non-admin or a missing user takes the same dummy-hash verify and the same
+  `InvalidCredentials` as a wrong password. Admin accounts are created and
+  reset only by `bun run create-admin <username> [--reset]`
+  ([`scripts/create-admin.ts`](scripts/create-admin.ts) →
+  [`src/adminAccounts.ts`](src/adminAccounts.ts)); `--reset` bumps
+  `tokenVersion`. `changePassword` is `Forbidden` for a Google account.
+- **Deleting an account re-proves identity**: `{ password }` for a password
+  account, `{ idToken }` — a Google sign-in for the same `sub`, issued in
+  the last five minutes — for a Google one. `LoginResponse.authMethod` tells
+  the client which (and hides the Password settings from Google accounts).
+
+**Testing: a fake Google signer, not a test-only signup path.**
+[`src/GoogleTestSigner.ts`](src/GoogleTestSigner.ts) holds a committed RS256
+test key pair and `mintGoogleIdToken({ sub, aud?, iss?, iat?, exp? })`.
+Setting `GOOGLE_TEST_PUBLIC_KEY` (its public JWK) points verification at it —
+every other check stays identical — and a process with
+`NODE_ENV=production` (the Docker image sets it) **refuses to start** with it
+set. Tests sign in through the production endpoints only:
+
+- backend tests: [`src/testApi.ts`](src/testApi.ts) configures the test key;
+  `signUpTestUser`/`signInTestUser`/`googleIdTokenFor` in
+  [`src/testUsers.ts`](src/testUsers.ts) (the Google `sub` is derived from
+  the username, `googleSubFor`). Admins: `createAdminAccount`, or a direct
+  insert for legacy/non-admin password rows.
+- e2e: the per-test backend trusts the test key;
+  `createUser` signs up over the API and returns `{ username, sub, session }`.
+  Every context is served a stand-in for the GIS script
+  ([`web/e2e/google.ts`](web/e2e/google.ts)) whose button hands the app the
+  token chosen with `useGoogleAccount(page, sub)` — `signInWithGoogle` does both. Admin password accounts come from the `admins` option
+  (`test.use({ admins: [...] })`), created by running the `create-admin` CLI
+  against the backend's data directory before it boots.
+- load tests: k6 can't sign RS256, so `bun run loadtest:tokens` pre-mints
+  tokens (see [`scripts/loadtest/README.md`](scripts/loadtest/README.md)).
+
 ## Search
 
 Search (`GET /search`, plus `/search/{users,posts,comments,messages}`) is built

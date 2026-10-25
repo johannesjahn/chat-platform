@@ -142,8 +142,9 @@ const Username = Schema.Trimmed.check(Schema.isNonEmpty()).check(
 // Floor for newly registered usernames (issue #483) — equal to
 // `MIN_USER_SEARCH_QUERY_LENGTH`, so every account can be found through the
 // people search, which won't run a narrower query for a non-admin. Like
-// `NewPassword` below, only applied at registration: `Username` alone stays
-// the login schema, so accounts created before this floor can still sign in.
+// `NewPassword` below, only applied where a name is picked (the Google
+// username step, and scripts/create-admin.ts): `Username` alone stays the
+// login schema.
 export const MIN_USERNAME_LENGTH = 3;
 
 // Characters a newly registered username may use (issue #493): exactly the
@@ -158,7 +159,7 @@ export const USERNAME_PATTERN = /^[A-Za-z0-9_.-]*[A-Za-z0-9_]$/u;
 export const USERNAME_PATTERN_MESSAGE =
   'Username may only contain letters (A-Z), digits, "_", "." and "-", and must not end in "." or "-"';
 
-const NewUsername = Username.check(
+export const NewUsername = Username.check(
   Schema.isMinLength(MIN_USERNAME_LENGTH),
   Schema.isPattern(USERNAME_PATTERN, { message: USERNAME_PATTERN_MESSAGE }),
 );
@@ -193,28 +194,81 @@ const Password = Schema.NonEmptyString.check(
   Schema.isMaxLength(MAX_PASSWORD_LENGTH),
 );
 
-// Only applied where a password is being newly *set* (registration, password
-// change) — `Password` alone remains the decode schema for login and
+// Only applied where a password is being newly *set* (scripts/create-admin.ts,
+// password change) — `Password` alone remains the decode schema for login and
 // `currentPassword`, so accounts created before this floor existed can still
 // authenticate with their existing (possibly shorter) password.
-const NewPassword = Password.check(Schema.isMinLength(MIN_PASSWORD_LENGTH));
-
-export const RegisterBody = Schema.Struct({
-  username: NewUsername,
-  password: NewPassword,
-}).annotate({ identifier: "RegisterBody" });
+export const NewPassword = Password.check(
+  Schema.isMinLength(MIN_PASSWORD_LENGTH),
+);
 
 export const LoginBody = Schema.Struct({
   username: Username,
   password: Password,
 }).annotate({ identifier: "LoginBody" });
 
+// How an account proves who it is (issue #693): Google for everyone, a
+// password only for the few admin accounts made with scripts/create-admin.ts.
+// Lets the client pick the right re-confirmation for account deletion and
+// hide the password settings from a Google account.
+export const AuthMethod = Schema.Literals(["google", "password"]).annotate({
+  identifier: "AuthMethod",
+});
+export type AuthMethod = typeof AuthMethod.Type;
+
 export const LoginResponse = Schema.Struct({
   user: User,
   accessToken: Schema.String,
   refreshToken: Schema.String,
+  authMethod: AuthMethod,
 }).annotate({ identifier: "LoginResponse" });
 export type LoginResponse = typeof LoginResponse.Type;
+
+// Google ID tokens are a few hundred bytes to ~1.5KB; anything this long is
+// garbage, not worth a signature check.
+const MAX_GOOGLE_ID_TOKEN_LENGTH = 4096;
+
+// The ID token (a JWT) the Google Identity Services button hands the
+// browser, verified server-side against Google's keys (GoogleIdToken.ts).
+const GoogleIdTokenValue = Schema.NonEmptyString.check(
+  Schema.isMaxLength(MAX_GOOGLE_ID_TOKEN_LENGTH),
+);
+
+export const GoogleLoginBody = Schema.Struct({
+  idToken: GoogleIdTokenValue,
+}).annotate({ identifier: "GoogleLoginBody" });
+
+// A first Google sign-in: the Google account is verified but has no user yet,
+// and none is created until a username is picked — so no placeholder name
+// ever shows up in mentions, search or lookups. `pendingToken` (a ~10 minute
+// token signed by this server, carrying only the Google `sub`) is what
+// `POST /users/register/google` exchanges for the new account.
+export const GoogleNeedsUsername = Schema.Struct({
+  needsUsername: Schema.Literal(true),
+  pendingToken: Schema.String,
+}).annotate({ identifier: "GoogleNeedsUsername" });
+
+export const GoogleLoginResponse = Schema.Union([
+  LoginResponse,
+  GoogleNeedsUsername,
+]).annotate({ identifier: "GoogleLoginResponse" });
+
+// Same bound as a refresh token — both are tokens this server signed.
+const MAX_PENDING_TOKEN_LENGTH = 1024;
+
+export const GoogleRegisterBody = Schema.Struct({
+  pendingToken: Schema.String.check(
+    Schema.isMaxLength(MAX_PENDING_TOKEN_LENGTH),
+  ),
+  username: NewUsername,
+}).annotate({ identifier: "GoogleRegisterBody" });
+
+// What the client needs to render the sign-in page. The OAuth client id is
+// public (it's in every Google button's markup); null means Google sign-in
+// isn't configured on this deployment.
+export const AuthConfig = Schema.Struct({
+  googleClientId: Schema.NullOr(Schema.String),
+}).annotate({ identifier: "AuthConfig" });
 
 // A well-formed token signed by this server is well under this (see
 // Jwt.ts) — anything longer is necessarily garbage, not worth spending a
@@ -263,11 +317,13 @@ export const UpdateProfileBody = Schema.Struct({
 }).annotate({ identifier: "UpdateProfileBody" });
 
 // Deleting an account is irreversible, so — like `changePassword` — it
-// requires re-proving the current password rather than trusting the bearer
-// token alone.
-export const DeleteAccountBody = Schema.Struct({
-  password: Password,
-}).annotate({ identifier: "DeleteAccountBody" });
+// requires re-proving who you are rather than trusting the bearer token
+// alone: a password account with its password, a Google account with a
+// *fresh* Google ID token for the same account (issue #693).
+export const DeleteAccountBody = Schema.Union([
+  Schema.Struct({ password: Password }),
+  Schema.Struct({ idToken: GoogleIdTokenValue }),
+]).annotate({ identifier: "DeleteAccountBody" });
 
 export const UpdateUserRoleBody = Schema.Struct({
   role: UserRole,
@@ -1330,13 +1386,37 @@ const UsersGroup = HttpApiGroup.make("users")
     }).middleware(Authentication),
   )
   .add(
-    HttpApiEndpoint.post("register", "/users/register", {
-      payload: RegisterBody,
-      success: User.pipe(HttpApiSchema.status(201)),
-      error: [UsernameTaken, TooManyRequests],
+    // Public sign-in configuration — the Google OAuth client id the
+    // frontend initializes its button with.
+    HttpApiEndpoint.get("getAuthConfig", "/users/login/config", {
+      success: AuthConfig,
     }),
   )
   .add(
+    // Signs in with a Google ID token (issue #693) — the default for every
+    // account. A known Google account gets the same session `login` issues;
+    // an unknown one gets `needsUsername` and a pending token for
+    // `registerGoogle` instead, with no account created yet.
+    HttpApiEndpoint.post("loginGoogle", "/users/login/google", {
+      payload: GoogleLoginBody,
+      success: GoogleLoginResponse,
+      error: [InvalidCredentials, TooManyRequests],
+    }),
+  )
+  .add(
+    // The username step of a first Google sign-in: creates the account for
+    // the pending token's Google `sub` and returns its first session. The
+    // only way an account is created over HTTP.
+    HttpApiEndpoint.post("registerGoogle", "/users/register/google", {
+      payload: GoogleRegisterBody,
+      success: LoginResponse.pipe(HttpApiSchema.status(201)),
+      error: [InvalidCredentials, UsernameTaken, TooManyRequests],
+    }),
+  )
+  .add(
+    // Password sign-in — admin accounts only (issue #693). Anyone else, a
+    // Google account included, gets the same `InvalidCredentials` as a wrong
+    // password.
     HttpApiEndpoint.post("login", "/users/login", {
       payload: LoginBody,
       success: LoginResponse,
@@ -1367,10 +1447,11 @@ const UsersGroup = HttpApiGroup.make("users")
     // `logout`'s `allSessions` option — while reissuing a fresh access +
     // refresh pair for the session making this request, so it isn't logged
     // out by its own password change.
+    // A Google account has no password to change (`Forbidden`).
     HttpApiEndpoint.post("changePassword", "/users/me/password", {
       payload: ChangePasswordBody,
       success: RefreshResponse,
-      error: [InvalidCredentials, TooManyRequests],
+      error: [InvalidCredentials, Forbidden, TooManyRequests],
     }).middleware(Authentication),
   )
   .add(

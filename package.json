@@ -19,7 +19,9 @@
     "bump": "bun run scripts/bump.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run scripts/migrate.ts",
+    "create-admin": "bun run scripts/create-admin.ts",
     "db:backfill-avatars": "bun run scripts/backfill-avatars.ts",
+    "loadtest:tokens": "bun run scripts/loadtest/mint-google-tokens.ts",
     "loadtest:http": "k6 run scripts/loadtest/http-crud.js",
     "loadtest:ws": "k6 run scripts/loadtest/ws-fanout.js"
   },
@@ -29,6 +31,7 @@
     "blurhash": "2.0.5",
     "drizzle-orm": "0.45.4",
     "effect": "4.0.6",
+    "jose": "6.2.13",
     "sharp": "0.35.5"
   },
   "devDependencies": {

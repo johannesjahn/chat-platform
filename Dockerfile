@@ -33,6 +33,9 @@ RUN chown -R bun:bun /app
 USER bun
 
 ENV PORT=3000
+# Marks this as a production process — among other things, the backend then
+# refuses to start with GOOGLE_TEST_PUBLIC_KEY set (see src/GoogleIdToken.ts).
+ENV NODE_ENV=production
 EXPOSE 3000
 
 # Liveness only (see src/Health.ts) — readiness (DB/Redis reachability) is a

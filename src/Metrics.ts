@@ -117,7 +117,9 @@ export const rateLimitRejectionsTotal = Metric.counter(
   { description: "Requests rejected by a rate limiter, labeled by limiter." },
 );
 
-// Labeled by `event` ("signup"/"login"/"refresh") and `outcome`
+// Labeled by `event` ("google_login"/"google_signup" for Google sign-in and
+// its username step, "login" for the admin password login, "refresh") and
+// `outcome`
 // ("success"/"failure") — an auth funnel, never by username/user id.
 // Rate-limit rejections on these same endpoints are counted separately via
 // rateLimitRejectionsTotal rather than as a "failure" here, so the two don't

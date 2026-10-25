@@ -1,65 +1,67 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { AuthForm } from "../components/AuthForm";
-import {
-  $api,
-  MIN_PASSWORD_LENGTH,
-  MIN_USERNAME_LENGTH,
-  USERNAME_PATTERN,
-  usersQueryKey,
-} from "../lib/api";
-import { setSession } from "../lib/auth";
+import { $api, MIN_USERNAME_LENGTH, USERNAME_PATTERN } from "../lib/api";
+import { clearPendingSignup, getPendingSignup } from "../lib/googleSignIn";
 import { redirectIfSignedIn, validateAuthSearch } from "../lib/redirect";
+import { useCompleteSignIn } from "../lib/signIn";
 import { staticTitle } from "../lib/title";
 
+// The username step of a first Google sign-in (issue #693): /login verified
+// the Google account and left a pending token, and the account is created
+// here once a name is picked. Without a pending token there's nothing to
+// finish, so it's back to /login.
 export const Route = createFileRoute("/register")({
-  head: () => staticTitle("Create an account"),
+  head: () => staticTitle("Pick a username"),
   validateSearch: validateAuthSearch,
-  beforeLoad: redirectIfSignedIn,
+  beforeLoad: ({ search }) => {
+    redirectIfSignedIn({ search });
+    if (typeof window !== "undefined" && !getPendingSignup()) {
+      throw redirect({
+        to: "/login",
+        search: { redirect: search.redirect },
+        replace: true,
+      });
+    }
+  },
   component: RegisterPage,
 });
 
 function RegisterPage() {
-  const router = useRouter();
-  const queryClient = useQueryClient();
   const { redirect } = Route.useSearch();
-  const register = $api.useMutation("post", "/users/register");
-  const login = $api.useMutation("post", "/users/login");
+  const completeSignIn = useCompleteSignIn(redirect);
+  const registerGoogle = $api.useMutation("post", "/users/register/google");
 
   return (
     <AuthForm
-      mode="register"
-      title="Create an account"
-      description="Pick a username and password to get started."
-      submitLabel="Register"
-      minPasswordLength={MIN_PASSWORD_LENGTH}
+      mode="username"
+      title="Pick a username"
+      description="One last step: choose the name people see and @mention you by. It can't be changed later."
+      submitLabel="Create account"
       minUsernameLength={MIN_USERNAME_LENGTH}
       usernamePattern={USERNAME_PATTERN}
-      onSubmit={async ({ username, password }) => {
-        await register.mutateAsync({ body: { username, password } });
-        // Registration succeeded — log straight in for a smooth first visit.
-        const session = await login.mutateAsync({
-          body: { username, password },
-        });
-        setSession(session);
-        await queryClient.invalidateQueries({ queryKey: usersQueryKey });
-        if (redirect) {
-          // A full in-app href (path + search + hash), already vetted by
-          // validateAuthSearch — so it's pushed as-is rather than via `to`.
-          router.history.push(redirect);
-        } else {
-          await router.navigate({ to: "/" });
+      onSubmit={async ({ username }) => {
+        const pendingToken = getPendingSignup();
+        if (!pendingToken) {
+          throw new Error(
+            "Your Google sign-in has expired. Please sign in again.",
+          );
         }
+        const session = await registerGoogle.mutateAsync({
+          body: { pendingToken, username },
+        });
+        clearPendingSignup();
+        await completeSignIn(session);
       }}
       footer={
         <>
-          Already have an account?{" "}
+          Not you?{" "}
           <Link
             to="/login"
             search={{ redirect }}
+            onClick={clearPendingSignup}
             className="font-medium text-primary hover:underline"
           >
-            Log in
+            Use another Google account
           </Link>
         </>
       }

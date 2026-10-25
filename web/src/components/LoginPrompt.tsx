@@ -33,14 +33,11 @@ export function LoginPrompt({
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="flex gap-2">
+        {/* One way in for new and returning users alike: a first Google
+            sign-in creates the account. */}
         <Button asChild>
           <Link to="/login" search={{ redirect }}>
             Log in
-          </Link>
-        </Button>
-        <Button asChild variant="outline">
-          <Link to="/register" search={{ redirect }}>
-            Create an account
           </Link>
         </Button>
       </CardContent>

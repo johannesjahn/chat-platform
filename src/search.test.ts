@@ -5,6 +5,7 @@ import { Effect } from "effect";
 import { ChatApi } from "./Api.ts";
 import { buildSnippet } from "./search.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signUpTestUser } from "./testUsers.ts";
 
 process.env.JWT_SECRET ??= "test-secret";
 
@@ -22,13 +23,9 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-const registerAndLogin = (username: string, password: string) =>
+const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return { user, accessToken, client: yield* makeAuthedClient(accessToken) };
   });
 
@@ -104,7 +101,7 @@ test("searchPosts rejects an unauthenticated request", () =>
 test("searchPosts finds a matching text post and highlights the match", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "The quick brown fox jumps" },
       });
@@ -129,7 +126,7 @@ test("searchPosts finds a matching text post and highlights the match", () =>
 test("searchPosts matches a fragment inside a word (contains, not whole-word)", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "a fragmentary thought" },
       });
@@ -146,7 +143,7 @@ test("searchPosts matches a fragment inside a word (contains, not whole-word)", 
 test("searchPosts matches a half-typed word as a prefix", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "deployment notes for today" },
       });
@@ -160,7 +157,7 @@ test("searchPosts matches a half-typed word as a prefix", () =>
 test("searchPosts requires every token of a multi-word query to match", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "the quick brown fox" },
       });
@@ -178,7 +175,7 @@ test("searchPosts requires every token of a multi-word query to match", () =>
 test("searchPosts matches stemmed terms (english config)", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "I love running every day" },
       });
@@ -194,7 +191,7 @@ test("searchPosts matches stemmed terms (english config)", () =>
 test("searchPosts ignores non-text posts (image URLs aren't searched)", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       yield* alice.client.posts.createPost({
         payload: {
           contentType: "image_url",
@@ -211,8 +208,8 @@ test("searchPosts ignores non-text posts (image URLs aren't searched)", () =>
 test("searchPosts hides posts by a blocked or muted author", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       yield* bob.client.posts.createPost({
         payload: { contentType: "text", content: "a pineapple announcement" },
       });
@@ -233,7 +230,7 @@ test("searchPosts hides posts by a blocked or muted author", () =>
       expect(after.results.length).toBe(0);
 
       // Muting is the softer option, but it hides posts just the same.
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const carol = yield* registerAndLogin("carol");
       yield* carol.client.posts.createPost({
         payload: { contentType: "text", content: "a pineapple sequel" },
       });
@@ -251,9 +248,9 @@ test("searchPosts hides posts by a blocked or muted author", () =>
 test("searchPosts fills a page past hidden authors instead of coming back short", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const visible: number[] = [];
       for (let i = 0; i < 3; i++) {
         const post = yield* carol.client.posts.createPost({
@@ -291,7 +288,7 @@ test("searchPosts fills a page past hidden authors instead of coming back short"
 test("searchPosts does not interpret query text as SQL or tsquery operators", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "harmless content here" },
       });
@@ -312,7 +309,7 @@ test("searchPosts does not interpret query text as SQL or tsquery operators", ()
 test("searchPosts tokenizes away wildcards instead of matching everything", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "alphabet soup" },
       });
@@ -332,8 +329,8 @@ test("searchPosts tokenizes away wildcards instead of matching everything", () =
 test("users.searchUsers matches wildcards literally, not as patterns", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      yield* registerAndLogin("bob");
       // The directory search passes `q` through as an ILIKE pattern, so its
       // wildcards must be escaped: "%a%" must find nobody, not everybody.
       const escaped = yield* alice.client.users.searchUsers({
@@ -350,7 +347,7 @@ test("users.searchUsers matches wildcards literally, not as patterns", () =>
 test("searchPosts snippet keeps HTML-like content inert (no raw markup)", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const content = "beware the <script>alert(1)</script> danger";
       yield* alice.client.posts.createPost({
         payload: { contentType: "text", content },
@@ -373,7 +370,7 @@ test("searchPosts snippet keeps HTML-like content inert (no raw markup)", () =>
 test("searchPosts paginates newest-match-first with an opaque cursor", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const created: number[] = [];
       for (let i = 0; i < 3; i++) {
         const post = yield* alice.client.posts.createPost({
@@ -402,7 +399,7 @@ test("searchPosts paginates newest-match-first with an opaque cursor", () =>
 test("searchPosts rejects a malformed cursor", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const result = yield* alice.client.search
         .searchPosts({ query: { q: "apple", cursor: "!!!not-base64!!!" } })
         .pipe(Effect.flip);
@@ -417,7 +414,7 @@ test("searchPosts rejects a malformed cursor", () =>
 test("searchComments finds a matching comment", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const post = yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "a post to comment on" },
       });
@@ -439,7 +436,7 @@ test("searchComments finds a matching comment", () =>
 test("searchComments finds a matching reply and flags its parent", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const post = yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "a post to comment on" },
       });
@@ -465,9 +462,9 @@ test("searchComments finds a matching reply and flags its parent", () =>
 test("searchComments hides comments and replies by a blocked or muted author", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const post = yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "a post to comment on" },
       });
@@ -518,9 +515,9 @@ test("searchComments hides comments and replies by a blocked or muted author", (
 test("searchMessages only returns messages from the caller's own chats", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
 
       // Alice <-> Bob chat with a matching message.
       const aliceBob = yield* alice.client.chats.createDirectChat({
@@ -561,8 +558,8 @@ test("searchMessages only returns messages from the caller's own chats", () =>
 test("searchMessages finds a fragment inside a word", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
@@ -582,9 +579,9 @@ test("searchMessages finds a fragment inside a word", () =>
 test("searchMessages finds nothing for a term only in someone else's chat", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const bobCarol = yield* bob.client.chats.createDirectChat({
         payload: { userId: carol.user.id },
       });
@@ -607,9 +604,9 @@ test("searchMessages finds nothing for a term only in someone else's chat", () =
 test("searchUsers matches a fragment of a username or display name", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      yield* registerAndLogin("bobby", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      yield* registerAndLogin("bobby");
+      const carol = yield* registerAndLogin("carol");
       yield* carol.client.users.updateProfile({
         payload: { displayName: "Caroline Fitzgerald", avatarUrl: null },
       });
@@ -639,10 +636,10 @@ test("searchUsers matches a fragment of a username or display name", () =>
 test("searchUsers ranks an exact username, then a prefix, then a fragment", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      yield* registerAndLogin("zoemander", "pw-testpass"); // contains "man"
-      yield* registerAndLogin("mandy", "pw-testpass"); // starts with "man"
-      yield* registerAndLogin("man", "pw-testpass"); // exact
+      const alice = yield* registerAndLogin("alice");
+      yield* registerAndLogin("zoemander"); // contains "man"
+      yield* registerAndLogin("mandy"); // starts with "man"
+      yield* registerAndLogin("man"); // exact
 
       const page = yield* alice.client.search.searchUsers({
         query: { q: "man" },
@@ -658,9 +655,9 @@ test("searchUsers ranks an exact username, then a prefix, then a fragment", () =
 test("searchUsers paginates with an opaque cursor", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       for (const name of ["searcher1", "searcher2", "searcher3"])
-        yield* registerAndLogin(name, "pw-testpass");
+        yield* registerAndLogin(name);
 
       const first = yield* alice.client.search.searchUsers({
         query: { q: "searcher", limit: 2 },
@@ -682,8 +679,8 @@ test("searchUsers paginates with an opaque cursor", () =>
 test("searchUsers keeps the directory's narrowness floor for non-admins", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      yield* registerAndLogin("bob", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      yield* registerAndLogin("bob");
 
       // Two characters is enough to search *content* but not to browse
       // people (issue #48) — the section comes back empty rather than
@@ -710,7 +707,7 @@ test("searchUsers keeps the directory's narrowness floor for non-admins", () =>
 test("searchUsers rejects a malformed cursor", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const result = yield* alice.client.search
         .searchUsers({ query: { q: "alice", cursor: "not-a-cursor" } })
         .pipe(Effect.flip);
@@ -725,8 +722,8 @@ test("searchUsers rejects a malformed cursor", () =>
 test("searchAll returns people, posts, comments and messages in one request", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("kumquatfan", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("kumquatfan");
 
       const post = yield* alice.client.posts.createPost({
         payload: { contentType: "text", content: "kumquat harvest is early" },
@@ -759,7 +756,7 @@ test("searchAll returns people, posts, comments and messages in one request", ()
 test("searchAll previews each section and hands over a cursor to continue", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
       const created: number[] = [];
       for (let i = 0; i < 4; i++) {
         const post = yield* alice.client.posts.createPost({
@@ -788,9 +785,9 @@ test("searchAll previews each section and hands over a cursor to continue", () =
 test("searchAll scopes messages to the caller and hides blocked authors", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
 
       yield* bob.client.posts.createPost({
         payload: { contentType: "text", content: "blocked tangerine post" },

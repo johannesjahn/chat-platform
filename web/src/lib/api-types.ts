@@ -68,7 +68,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/users/register": {
+    "/users/login/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["users.getAuthConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/login/google": {
         parameters: {
             query?: never;
             header?: never;
@@ -77,7 +93,23 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["users.register"];
+        post: operations["users.loginGoogle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/register/google": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["users.registerGoogle"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1920,6 +1952,8 @@ export interface components {
         };
         DeleteAccountBody: {
             password: string;
+        } | {
+            idToken: string;
         };
         UserProfile: {
             id: number;
@@ -1957,7 +1991,10 @@ export interface components {
             user: components["schemas"]["User"];
             accessToken: string;
             refreshToken: string;
+            authMethod: components["schemas"]["AuthMethod"];
         };
+        /** @enum {string} */
+        AuthMethod: "google" | "password";
         LoginBody: {
             username: string;
             password: string;
@@ -1967,9 +2004,21 @@ export interface components {
             _tag: "UsernameTaken";
             message: string;
         };
-        RegisterBody: {
+        GoogleRegisterBody: {
+            pendingToken: string;
             username: string & unknown;
-            password: string;
+        };
+        GoogleLoginResponse: components["schemas"]["LoginResponse"] | components["schemas"]["GoogleNeedsUsername"];
+        GoogleNeedsUsername: {
+            /** @enum {boolean} */
+            needsUsername: true;
+            pendingToken: string;
+        };
+        GoogleLoginBody: {
+            idToken: string;
+        };
+        AuthConfig: {
+            googleClientId: string | null;
         };
         UserPostsPage: {
             posts: components["schemas"]["Post"][];
@@ -2233,26 +2282,22 @@ export interface operations {
             };
         };
     };
-    "users.register": {
+    "users.getAuthConfig": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RegisterBody"];
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description User */
-            201: {
+            /** @description AuthConfig */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["User"];
+                    "application/json": components["schemas"]["AuthConfig"];
                 };
             };
             /** @description HttpApiDecodeError */
@@ -2262,6 +2307,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
+                };
+            };
+        };
+    };
+    "users.loginGoogle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoogleLoginBody"];
+            };
+        };
+        responses: {
+            /** @description GoogleLoginResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleLoginResponse"];
+                };
+            };
+            /** @description HttpApiDecodeError */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
+                };
+            };
+            /** @description InvalidCredentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvalidCredentialsEncoded"];
+                };
+            };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
+                };
+            };
+        };
+    };
+    "users.registerGoogle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoogleRegisterBody"];
+            };
+        };
+        responses: {
+            /** @description LoginResponse */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description HttpApiDecodeError */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
+                };
+            };
+            /** @description InvalidCredentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvalidCredentialsEncoded"];
                 };
             };
             /** @description UsernameTaken */
@@ -2455,6 +2593,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvalidCredentialsEncoded"] | components["schemas"]["UnauthorizedEncoded"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
                 };
             };
             /** @description TooManyRequests */

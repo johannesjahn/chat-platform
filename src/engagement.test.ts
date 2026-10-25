@@ -8,6 +8,7 @@ import { Db } from "./Db.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signInTestUser, signUpTestUser } from "./testUsers.ts";
 
 const run = makeTestRun();
 
@@ -23,13 +24,9 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-const registerAndLogin = (username: string, password: string) =>
+const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return { user, accessToken };
   });
 
@@ -48,10 +45,7 @@ const promoteToAdmin = (username: string) =>
 // exercise the engagement endpoints against it.
 const setupPostBy = (username: string) =>
   Effect.gen(function* () {
-    const { user, accessToken } = yield* registerAndLogin(
-      username,
-      "pw-testpass",
-    );
+    const { user, accessToken } = yield* registerAndLogin(username);
     const authed = yield* makeAuthedClient(accessToken);
     const post = yield* authed.posts.createPost({
       payload: { contentType: "text", content: `post by ${username}` },
@@ -194,7 +188,7 @@ test("reactions from different users accumulate; reactedByMe is per-user", () =>
         payload: { emoji: "👍" },
       });
 
-      const bob = yield* registerAndLogin("erin", "pw-testpass");
+      const bob = yield* registerAndLogin("erin");
       const bobClient = yield* makeAuthedClient(bob.accessToken);
       const state = yield* bobClient.comments.addPostReaction({
         params: { id: post.id },
@@ -215,7 +209,7 @@ test("reactions from different users accumulate; reactedByMe is per-user", () =>
       });
 
       // A third user who hasn't reacted sees the count but reactedByMe false.
-      const carol = yield* registerAndLogin("frank", "pw-testpass");
+      const carol = yield* registerAndLogin("frank");
       const carolClient = yield* makeAuthedClient(carol.accessToken);
       const seen = yield* carolClient.posts.getPost({
         params: { id: post.id },
@@ -280,7 +274,7 @@ test("addPostReaction rejects an emoji outside the standard set", () =>
 test("addPostReaction returns 404 for a missing post", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("heidi", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("heidi");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
         .addPostReaction({ params: { id: 9999 }, payload: { emoji: "👍" } })
@@ -439,7 +433,7 @@ test('createComment increments content_created_total{type="comment"}', () =>
 test("createComment returns 404 for a missing post", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("mallory", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("mallory");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
         .createComment({
@@ -674,7 +668,7 @@ test("createReply rejects replying to a reply (depth cap)", () =>
 test("createReply returns 404 for a missing parent comment", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("walter", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("walter");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
         .createReply({ params: { id: 9999 }, payload: { content: "x" } })
@@ -724,7 +718,7 @@ test("addCommentReaction/removeCommentReaction toggle reaction state on a commen
 test("addCommentReaction returns 404 for a missing comment", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("yvonne", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("yvonne");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.comments
         .addCommentReaction({ params: { id: 9999 }, payload: { emoji: "👍" } })
@@ -760,7 +754,7 @@ test("updateComment rejects edits from a non-owner", () =>
         params: { id: post.id },
         payload: { content: "mine" },
       });
-      const intruder = yield* registerAndLogin("bianca", "pw-testpass");
+      const intruder = yield* registerAndLogin("bianca");
       const intruderClient = yield* makeAuthedClient(intruder.accessToken);
       const result = yield* intruderClient.comments
         .updateComment({
@@ -781,12 +775,9 @@ test("deleteComment lets the author delete; an admin can delete anyone's", () =>
         payload: { content: "to delete by admin" },
       });
 
-      yield* registerAndLogin("diana", "pw-testpass");
+      yield* registerAndLogin("diana");
       yield* promoteToAdmin("diana");
-      const c = yield* makeClient;
-      const { accessToken: adminToken } = yield* c.users.login({
-        payload: { username: "diana", password: "pw-testpass" },
-      });
+      const { accessToken: adminToken } = yield* signInTestUser("diana");
       const adminClient = yield* makeAuthedClient(adminToken);
       yield* adminClient.comments.deleteComment({ params: { id: comment.id } });
 

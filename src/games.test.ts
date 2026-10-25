@@ -14,14 +14,13 @@ import {
 } from "./db/schema.ts";
 import { MAX_PLAUSIBLE_WPM, TYPING_COUNTDOWN_MS } from "./games/typing.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signUpTestUser } from "./testUsers.ts";
 
 // Same shape as admin.test.ts's harness: `effect` also gets `Db` directly,
 // sharing the API layer's in-memory instance, so a test can fast-forward a
 // race's clock (move `startsAt` into the past — no endpoint lets it) and seed
 // back-dated results for the leaderboard.
 const run = makeTestRun();
-
-const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
 const makeAuthedClient = (token: string) =>
   HttpApiClient.make(ChatApi, {
@@ -33,13 +32,9 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-const registerAndLogin = (username: string, password: string) =>
+const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return { user, accessToken };
   });
 
@@ -93,7 +88,7 @@ test("lobbyPhase walks waiting → countdown → racing → finished off the clo
 test("creating a lobby seats the caller as host and hides the passage until the start", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
       const c = yield* makeAuthedClient(alice.accessToken);
 
       const lobby = yield* c.games.createGameLobby(game);
@@ -113,8 +108,8 @@ test("creating a lobby seats the caller as host and hides the passage until the 
 test("a race runs start → finish with a server-timed, server-scored result", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
-      const bob = yield* registerAndLogin("bob", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const a = yield* makeAuthedClient(alice.accessToken);
       const b = yield* makeAuthedClient(bob.accessToken);
 
@@ -216,7 +211,7 @@ test("a race runs start → finish with a server-timed, server-scored result", (
 test("finishing implausibly fast is rejected and never reaches the leaderboard", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
       const a = yield* makeAuthedClient(alice.accessToken);
       const lobby = yield* a.games.createGameLobby(game);
       const started = yield* a.games.startGameLobby(lobbyPath(lobby.id));
@@ -247,8 +242,8 @@ test("finishing implausibly fast is rejected and never reaches the leaderboard",
 test("finishing is only for seated players, and not after the time limit", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
-      const eve = yield* registerAndLogin("eve", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
+      const eve = yield* registerAndLogin("eve");
       const a = yield* makeAuthedClient(alice.accessToken);
       const e = yield* makeAuthedClient(eve.accessToken);
       const lobby = yield* a.games.createGameLobby(game);
@@ -289,8 +284,8 @@ test("finishing is only for seated players, and not after the time limit", () =>
 test("a full lobby turns new players away", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
-      const bob = yield* registerAndLogin("bob", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const a = yield* makeAuthedClient(alice.accessToken);
       const b = yield* makeAuthedClient(bob.accessToken);
       const lobby = yield* a.games.createGameLobby(game);
@@ -312,8 +307,8 @@ test("a full lobby turns new players away", () =>
 test("the host leaving hands the lobby on, and the last one out closes it", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
-      const bob = yield* registerAndLogin("bob", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const a = yield* makeAuthedClient(alice.accessToken);
       const b = yield* makeAuthedClient(bob.accessToken);
       const lobby = yield* a.games.createGameLobby(game);
@@ -335,8 +330,8 @@ test("the host leaving hands the lobby on, and the last one out closes it", () =
 test("sitting down in one lobby stands you up from any other", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
-      const bob = yield* registerAndLogin("bob", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const a = yield* makeAuthedClient(alice.accessToken);
       const b = yield* makeAuthedClient(bob.accessToken);
       const first = yield* a.games.createGameLobby(game);
@@ -358,9 +353,9 @@ test("sitting down in one lobby stands you up from any other", () =>
 test("quick play joins an open lobby with room, or opens one", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
-      const bob = yield* registerAndLogin("bob", "s3cret-pw");
-      const carol = yield* registerAndLogin("carol", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const a = yield* makeAuthedClient(alice.accessToken);
       const b = yield* makeAuthedClient(bob.accessToken);
       const c = yield* makeAuthedClient(carol.accessToken);
@@ -387,8 +382,8 @@ test("quick play joins an open lobby with room, or opens one", () =>
 test("a rematch resets the lobby for another round once the race is over", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
-      const bob = yield* registerAndLogin("bob", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const a = yield* makeAuthedClient(alice.accessToken);
       const b = yield* makeAuthedClient(bob.accessToken);
       const lobby = yield* a.games.createGameLobby(game);
@@ -431,7 +426,7 @@ test("the leaderboard ranks by best score, counts wins, and always includes me",
   run(
     Effect.gen(function* () {
       const db = yield* Db;
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
       const [speedy, steady] = yield* Effect.promise(() =>
         db
           .insert(users)
@@ -513,8 +508,8 @@ test("the leaderboard ranks by best score, counts wins, and always includes me",
 test("the lobby chat takes lines from players and spectators, even mid-race", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
-      const bob = yield* registerAndLogin("bob", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const a = yield* makeAuthedClient(alice.accessToken);
       const b = yield* makeAuthedClient(bob.accessToken);
       const lobby = yield* a.games.createGameLobby(game);
@@ -558,8 +553,8 @@ test("the lobby chat takes lines from players and spectators, even mid-race", ()
 test("the lobby chat hides blocked authors and is rate-limited", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
-      const bob = yield* registerAndLogin("bob", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const a = yield* makeAuthedClient(alice.accessToken);
       const b = yield* makeAuthedClient(bob.accessToken);
       const lobby = yield* a.games.createGameLobby(game);
@@ -598,7 +593,7 @@ test("the lobby chat hides blocked authors and is rate-limited", () =>
 test("a lobby's chat goes with the lobby", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
       const a = yield* makeAuthedClient(alice.accessToken);
       const lobby = yield* a.games.createGameLobby(game);
       yield* a.games.postGameChat({

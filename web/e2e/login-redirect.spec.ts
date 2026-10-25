@@ -1,7 +1,9 @@
+import { googleSubFor } from "../../src/GoogleTestSigner";
 import { expect, test } from "./fixtures";
+import { signInWithGoogle } from "./google";
 import { randomUsername } from "./helpers";
 
-// Issue #481: logging in (or registering) from a "Log in to …" prompt used
+// Issue #481: logging in (or signing up) from a "Log in to …" prompt used
 // to always land on the feed, losing the link the visitor came for.
 
 test("logging in from an invite link's prompt returns to the invite", async ({
@@ -31,15 +33,13 @@ test("logging in from an invite link's prompt returns to the invite", async ({
   await page.goto(`/chats/join/${code}`);
   await page.getByRole("main").getByRole("link", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/login\?/);
-  await page.fill("#username", invitee.username);
-  await page.fill("#password", invitee.password);
-  await page.getByRole("button", { name: "Log in" }).click();
+  await signInWithGoogle(page, invitee.sub);
 
   await expect(page).toHaveURL(`/chats/join/${code}`);
   await expect(page.getByText("You've been invited to a chat")).toBeVisible();
 });
 
-test("registering from a post's prompt returns to the post, even after hopping via the login page", async ({
+test("signing up from a post's prompt returns to the post, through the username step", async ({
   page,
   apiUrl,
   request,
@@ -56,20 +56,20 @@ test("registering from a post's prompt returns to the post, even after hopping v
   await page.goto(`/posts/${postId}`);
   await page.getByRole("main").getByRole("link", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/login\?/);
-  // Changing their mind on the login page keeps the original target.
-  await page.getByRole("main").getByRole("link", { name: "Register" }).click();
+  // A Google account with no user yet: the username step keeps the
+  // original target.
+  const username = randomUsername();
+  await signInWithGoogle(page, googleSubFor(username));
   await expect(page).toHaveURL(/\/register\?/);
   // The route swap runs through a view transition, so the outgoing login
-  // form's fields can still be the ones a fill lands in — retry until the
-  // register form actually holds the values.
-  const username = randomUsername();
-  const register = page.getByRole("button", { name: "Register" });
+  // page can still be the one a fill lands in — retry until the username
+  // form actually holds the value.
+  const create = page.getByRole("button", { name: "Create account" });
   await expect(async () => {
     await page.fill("#username", username);
-    await page.fill("#password", "playwright-pw-123");
-    await expect(register).toBeEnabled({ timeout: 1000 });
+    await expect(create).toBeEnabled({ timeout: 1000 });
   }).toPass();
-  await register.click();
+  await create.click();
 
   await expect(page).toHaveURL(`/posts/${postId}`);
   await expect(page.getByText("Worth signing up for")).toBeVisible();
@@ -81,8 +81,6 @@ test("a redirect pointing off-site is ignored", async ({
 }) => {
   const user = await createUser();
   await page.goto("/login?redirect=%2F%2Fexample.com%2Fphish");
-  await page.fill("#username", user.username);
-  await page.fill("#password", user.password);
-  await page.getByRole("button", { name: "Log in" }).click();
+  await signInWithGoogle(page, user.sub);
   await expect(page).toHaveURL("/");
 });

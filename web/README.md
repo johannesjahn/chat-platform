@@ -90,8 +90,8 @@ per-endpoint code is generated; the path/body/response types are all inferred:
 
 ```ts
 const { data: users } = $api.useQuery("get", "/users");
-const login = $api.useMutation("post", "/users/login");
-await login.mutateAsync({ body: { username, password } });
+const loginGoogle = $api.useMutation("post", "/users/login/google");
+await loginGoogle.mutateAsync({ body: { idToken } });
 ```
 
 Data fetching runs through [TanStack Query](https://tanstack.com/query); the
@@ -105,5 +105,9 @@ provider is set up in `src/routes/__root.tsx`.
 ## Pages
 
 - `/` — welcome + list of registered users (`GET /users`)
-- `/register` — create an account (`POST /users/register`, then auto-login)
-- `/login` — log in and store the issued access/refresh JWTs (`POST /users/login`)
+- `/login` — "Continue with Google" (Google Identity Services → `POST
+/users/login/google`), storing the issued access/refresh JWTs; a first
+  sign-in goes on to `/register`. `/login?method=password` is the admin-only
+  password form (`POST /users/login`)
+- `/register` — the username step after a first Google sign-in (`POST
+/users/register/google`); without a pending sign-in it redirects to `/login`

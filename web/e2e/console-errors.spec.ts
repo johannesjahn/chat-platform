@@ -6,14 +6,14 @@ import { expect, test } from "./fixtures";
 
 test("a console.error fails the test", async ({ page }) => {
   test.fail();
-  await page.goto("/login");
+  await page.goto("/login?method=password");
   await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
   await page.evaluate(() => console.error("e2e: an unexpected error"));
 });
 
 test("an unhandled rejection fails the test", async ({ page }) => {
   test.fail();
-  await page.goto("/login");
+  await page.goto("/login?method=password");
   await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
   await page.evaluate(() => {
     void Promise.reject(new Error("e2e: an unhandled rejection"));
@@ -27,7 +27,7 @@ test("an error the test allowed doesn't fail it", async ({
   allowConsoleErrors,
 }) => {
   allowConsoleErrors(/^e2e: an expected error$/);
-  await page.goto("/login");
+  await page.goto("/login?method=password");
   await expect(page.getByRole("button", { name: "Log in" })).toBeVisible();
   await page.evaluate(() => console.error("e2e: an expected error"));
 });

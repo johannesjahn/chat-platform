@@ -9,12 +9,11 @@ import { ATTACHMENT_QUOTA_MAX_BYTES } from "./AttachmentsHandler.ts";
 import { Db } from "./Db.ts";
 import { attachments, messages, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
+import { googleIdTokenFor, signUpTestUser } from "./testUsers.ts";
 
 // Forwarding chat messages (issue #601).
 
 const run = makeTestRun();
-
-const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
 const makeAuthedClient = (token: string) =>
   HttpApiClient.make(ChatApi, {
@@ -28,15 +27,9 @@ const makeAuthedClient = (token: string) =>
 
 const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const password = "pw-testpass";
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return {
       user,
-      password,
       accessToken,
       client: yield* makeAuthedClient(accessToken),
     };
@@ -341,7 +334,7 @@ test("a forwarded attachment is a copy the forwarder owns, and outlives the orig
         params: { id: upload.id },
       });
       yield* alice.client.users.deleteAccount({
-        payload: { password: alice.password },
+        payload: { idToken: yield* googleIdTokenFor(alice.user.username) },
       });
 
       const page = yield* carol.client.chats.listMessages({

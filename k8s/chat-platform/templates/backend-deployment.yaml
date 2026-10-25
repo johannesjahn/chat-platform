@@ -53,6 +53,8 @@ spec:
               value: {{ .Values.backend.port | quote }}
             - name: WEB_ORIGIN
               value: {{ .Values.backend.webOrigin | quote }}
+            - name: GOOGLE_CLIENT_ID
+              value: {{ .Values.backend.googleClientId | quote }}
             {{- include "chat-platform.postgresEnv" . | nindent 12 }}
             - name: REDIS_PASSWORD
               valueFrom:

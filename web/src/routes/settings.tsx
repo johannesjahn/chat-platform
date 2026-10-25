@@ -19,6 +19,7 @@ import { Avatar, type AvatarVariants } from "@/components/Avatar";
 import { AvatarCropDialog } from "@/components/AvatarCropDialog";
 import { filterRailRowClassName } from "@/components/filterRailStyles";
 import { LoginPrompt } from "@/components/LoginPrompt";
+import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 import { GradientText } from "@/components/reactbits/GradientText";
 import {
   Card,
@@ -97,6 +98,14 @@ export const Route = createFileRoute("/settings")({
   component: SettingsPage,
 });
 
+// Only an admin password account has a password to change (issue #693) — a
+// Google account gets no "Password" section at all.
+function useSections() {
+  const session = useSession();
+  const hasPassword = session?.authMethod === "password";
+  return SECTIONS.filter(({ value }) => value !== "password" || hasPassword);
+}
+
 function SectionCard({ section }: { section: Section }) {
   switch (section) {
     case "profile":
@@ -118,7 +127,14 @@ function SectionCard({ section }: { section: Section }) {
 
 function SettingsPage() {
   const session = useSession();
-  const { section = "profile" } = Route.useSearch();
+  const sections = useSections();
+  const { section: requested = "profile" } = Route.useSearch();
+  // A section this account doesn't have (`?section=password` on a Google
+  // account) falls back to the first one.
+  const section = sections.some((s) => s.value === requested)
+    ? requested
+    : "profile";
+  const hasPassword = sections.some((s) => s.value === "password");
   // Below `lg` it's every card in one column, as it always was; at `lg`+ a
   // sidebar picks one section at a time — the desktop settings pattern
   // rather than one long scroll (issue #554).
@@ -131,7 +147,7 @@ function SettingsPage() {
           aria-label="Settings sections"
           className="sticky top-10 hidden w-52 shrink-0 flex-col gap-0.5 self-start lg:flex"
         >
-          {SECTIONS.map(({ value, label, icon: Icon }) => (
+          {sections.map(({ value, label, icon: Icon }) => (
             <Link
               key={value}
               to="/settings"
@@ -173,7 +189,7 @@ function SettingsPage() {
             <AppearanceCard />
             <BlockedUsersCard />
             <BrowserNotificationsCard />
-            <ChangePasswordCard />
+            {hasPassword && <ChangePasswordCard />}
             <DeleteAccountCard />
           </>
         )}
@@ -940,6 +956,33 @@ function DeleteAccountCard() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  // Irreversible, so the bearer token alone isn't enough: a password account
+  // re-enters its password, a Google account signs in with Google again
+  // (a fresh ID token for the same Google account — issue #693).
+  const withPassword = session?.authMethod === "password";
+
+  async function confirmAndDelete(
+    body: { password: string } | { idToken: string },
+  ) {
+    setError(null);
+    if (!session) return;
+    const ok = await confirm({
+      title: "Delete your account?",
+      description:
+        "Your profile, posts, comments, and messages are permanently removed and you'll be signed out. This can't be undone.",
+      confirmLabel: "Delete account",
+    });
+    if (!ok) return;
+    try {
+      await deleteAccount.mutateAsync({ body });
+      clearSession();
+      await router.navigate({ to: "/" });
+      router.invalidate();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
   return (
     <Card className="w-full border-destructive/40 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
       <CardHeader>
@@ -958,52 +1001,54 @@ function DeleteAccountCard() {
             {error}
           </p>
         )}
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            setError(null);
-            if (!session) return;
-            const ok = await confirm({
-              title: "Delete your account?",
-              description:
-                "Your profile, posts, comments, and messages are permanently removed and you'll be signed out. This can't be undone.",
-              confirmLabel: "Delete account",
-            });
-            if (!ok) return;
-            try {
-              await deleteAccount.mutateAsync({ body: { password } });
-              clearSession();
-              await router.navigate({ to: "/" });
-              router.invalidate();
-            } catch (err) {
-              setError(errorMessage(err));
-            }
-          }}
-        >
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="delete-password">Confirm your password</Label>
-            <Input
-              id="delete-password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          <Button
-            type="submit"
-            variant="destructive"
-            className="mt-1 w-full"
-            disabled={deleteAccount.isPending || !password}
+        {withPassword ? (
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              await confirmAndDelete({ password });
+            }}
           >
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="delete-password">Confirm your password</Label>
+              <Input
+                id="delete-password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+            <Button
+              type="submit"
+              variant="destructive"
+              className="mt-1 w-full"
+              disabled={deleteAccount.isPending || !password}
+            >
+              {deleteAccount.isPending && (
+                <Loader2 className="size-4 animate-spin" />
+              )}
+              {deleteAccount.isPending ? "Please wait…" : "Delete my account"}
+            </Button>
+          </form>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              To confirm it&apos;s you, sign in with your Google account again.
+            </p>
+            <GoogleSignInButton
+              text="signin_with"
+              onCredential={(idToken) => confirmAndDelete({ idToken })}
+            />
             {deleteAccount.isPending && (
-              <Loader2 className="size-4 animate-spin" />
+              <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Deleting your account…
+              </p>
             )}
-            {deleteAccount.isPending ? "Please wait…" : "Delete my account"}
-          </Button>
-        </form>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

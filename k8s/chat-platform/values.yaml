@@ -24,6 +24,14 @@ backend:
   # its *.workers.dev URL: "https://chat.example.com,https://chat-platform.<subdomain>.workers.dev".
   webOrigin: "https://nacho.johannes-jahn.com"
 
+  # OAuth client id of the Google Cloud "Web application" client behind
+  # "Continue with Google" (issue #693) — public, so a plain value rather than
+  # a secret. Add `webOrigin`'s origin(s) to the client's authorized
+  # JavaScript origins. Empty turns Google sign-in off, leaving only the admin
+  # password accounts (`kubectl exec` into a backend pod and run
+  # `bun run create-admin <username>`).
+  googleClientId: ""
+
   service:
     type: ClusterIP
     port: 80
