@@ -19,6 +19,7 @@ import {
   users,
 } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signInTestUser, signUpTestUser } from "./testUsers.ts";
 
 // Same shape as posts.test.ts's harness: `effect` also gets `Db` directly,
 // sharing the API layer's in-memory instance, so a test can seed rows with
@@ -38,33 +39,26 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-const registerAndLogin = (username: string, password: string) =>
+const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return { user, accessToken };
   });
 
 // Registration always creates a "user", and the role is baked into the JWT
 // at sign time — so promoting has to happen in the DB and the user has to
 // log in again for a token that reflects it (same as posts.test.ts).
-const registerAdmin = (username: string, password: string) =>
+const registerAdmin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
     const db = yield* Db;
-    const user = yield* c.users.register({ payload: { username, password } });
+    const { user } = yield* signUpTestUser(username);
     yield* Effect.tryPromise(() =>
       db
         .update(users)
         .set({ role: "admin" })
         .where(eq(users.username, username)),
     ).pipe(Effect.orDie);
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { accessToken } = yield* signInTestUser(username);
     return { user, accessToken };
   });
 
@@ -182,7 +176,7 @@ test("getAdminStats rejects an unauthenticated request", () =>
 test("getAdminStats rejects a non-admin caller with 403 Forbidden", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("regular", "s3cret-pw");
+      const { accessToken } = yield* registerAndLogin("regular");
       const c = yield* makeAuthedClient(accessToken);
       const result = yield* c.admin
         .getAdminStats({ query: {} })
@@ -195,7 +189,7 @@ test("getAdminStats reports lifetime totals across every content type", () =>
   run(
     Effect.gen(function* () {
       yield* seedActivity;
-      const { accessToken } = yield* registerAdmin("root", "s3cret-pw");
+      const { accessToken } = yield* registerAdmin("root");
       const c = yield* makeAuthedClient(accessToken);
 
       const stats = yield* c.admin.getAdminStats({ query: {} });
@@ -218,7 +212,7 @@ test("getAdminStats counts new content per trailing window, and active users ded
   run(
     Effect.gen(function* () {
       yield* seedActivity;
-      const { accessToken } = yield* registerAdmin("root", "s3cret-pw");
+      const { accessToken } = yield* registerAdmin("root");
       const c = yield* makeAuthedClient(accessToken);
 
       const { activity } = yield* c.admin.getAdminStats({ query: {} });
@@ -258,7 +252,7 @@ test("getAdminStats returns a zero-filled daily timeline ending today", () =>
   run(
     Effect.gen(function* () {
       yield* seedActivity;
-      const { accessToken } = yield* registerAdmin("root", "s3cret-pw");
+      const { accessToken } = yield* registerAdmin("root");
       const c = yield* makeAuthedClient(accessToken);
 
       const { timeline } = yield* c.admin.getAdminStats({
@@ -287,7 +281,7 @@ test("getAdminStats returns a zero-filled daily timeline ending today", () =>
 test("getAdminStats defaults the timeline to 14 days and rejects an out-of-range days param", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAdmin("root", "s3cret-pw");
+      const { accessToken } = yield* registerAdmin("root");
       const c = yield* makeAuthedClient(accessToken);
 
       const stats = yield* c.admin.getAdminStats({ query: {} });
@@ -312,7 +306,7 @@ test("getAdminStats defaults the timeline to 14 days and rejects an out-of-range
 test("getAdminStats reports healthy dependencies and this process's runtime counters", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAdmin("root", "s3cret-pw");
+      const { accessToken } = yield* registerAdmin("root");
       const c = yield* makeAuthedClient(accessToken);
 
       const { health } = yield* c.admin.getAdminStats({ query: {} });
@@ -352,7 +346,7 @@ test("getAdminStats reports healthy dependencies and this process's runtime coun
 test("getAdminStats reports an empty deployment as all zeroes rather than failing", () =>
   run(
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAdmin("root", "s3cret-pw");
+      const { accessToken } = yield* registerAdmin("root");
       const c = yield* makeAuthedClient(accessToken);
 
       const stats = yield* c.admin.getAdminStats({ query: {} });

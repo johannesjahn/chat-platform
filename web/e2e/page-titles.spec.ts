@@ -8,13 +8,13 @@ test("signed-out pages carry their own title and heading", async ({ page }) => {
   await page.goto("/login");
   await expect(page).toHaveTitle("Log in · Chat Platform");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Welcome back" }),
+    page.getByRole("heading", { level: 1, name: "Welcome" }),
   ).toBeVisible();
 
-  await page.goto("/register");
-  await expect(page).toHaveTitle("Create an account · Chat Platform");
+  await page.goto("/login?method=password");
+  await expect(page).toHaveTitle("Log in · Chat Platform");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "Create an account",
+    "Admin sign-in",
   );
 });
 

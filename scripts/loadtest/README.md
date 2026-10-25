@@ -28,24 +28,41 @@ horizontally-scaled fan-out (the default `bun run dev` uses the in-memory
 `docker-compose.yml` stack, which is closer to the Kubernetes deployment
 topology than local dev mode:
 
+Every account signs in with Google, so the target has to accept ID tokens
+signed by the repo's test key (`src/GoogleTestSigner.ts`) — set these in
+`.env` before bringing the stack up (the values are what
+`GOOGLE_TEST_CLIENT_ID`/`GOOGLE_TEST_PUBLIC_KEY` there export; `bun -e` prints
+them), plus `NODE_ENV=development`, since the image's `NODE_ENV=production`
+refuses the test key:
+
+```bash
+bun -e 'import { GOOGLE_TEST_CLIENT_ID as id, GOOGLE_TEST_PUBLIC_KEY as key } from "./src/GoogleTestSigner.ts"; console.log(`GOOGLE_CLIENT_ID=${id}\nGOOGLE_TEST_PUBLIC_KEY=${key}\nNODE_ENV=development`)' >> .env
+```
+
 ```bash
 cp .env.example .env   # fill in JWT_SECRET/POSTGRES_PASSWORD/REDIS_PASSWORD if not already
+# …plus the two Google test settings above
 docker compose up --build -d
 
+bun run loadtest:tokens   # pre-mints ID tokens — k6 can't sign RS256 itself
 bun run loadtest:http
 bun run loadtest:ws
 ```
 
+`loadtest:tokens` writes `scripts/loadtest/google-id-tokens.json` (gitignored)
+with a token per load-test account, 20 per scenario by default (`bun run
+loadtest:tokens 50` for more); `lib/api.js` reads it. The tokens expire after
+an hour — re-run it before a later session.
+
 Both default to `BASE_URL=http://localhost:3000` (docker-compose's exposed
 port), overridable with `-e BASE_URL=...` / `-e WS_URL=...`.
 
-**Don't point `BASE_URL` at a shared or production deployment.** `setup()`
-seeds accounts with fixed, deterministic usernames (`loadtest-http-0`,
-`loadtest-ws-0`, …) and a hardcoded shared password (`TEST_PASSWORD` in
-`lib/api.js`) — fine against a disposable docker-compose/dev target, but
-anyone who's read this file could log into those same accounts on any real
-deployment they end up seeded on. Override `-e TEST_PASSWORD=...` if you
-ever do need to run against a non-disposable target.
+**Don't point `BASE_URL` at a shared or production deployment.** The
+scripts only work against a backend that trusts the committed test key — and
+anyone holding that key can sign in as any account on such a backend, which
+is why a production process (`NODE_ENV=production`) refuses to start with
+`GOOGLE_TEST_PUBLIC_KEY` set. Keep it to disposable docker-compose/dev
+targets.
 
 ## Rate limits shape the defaults
 
@@ -53,20 +70,21 @@ The backend's auth rate limiters (`src/UsersHandler.ts`) are tuned for real
 traffic, not a load generator running from a single source IP, and they
 directly constrain how these scripts are written:
 
-- **`/users/register` allows only 5 attempts per source IP per hour.** Both
-  scripts' `setup()` uses `loginOrRegister` (`lib/api.js`), which registers a
-  fixed, deterministic set of accounts (`loadtest-http-0`, `loadtest-ws-0`,
-  …) once and logs the same accounts back in on every later run — so only
-  the _first_ run against a given backend spends any of that budget. Raising
+- **`/users/register/google` (the username step of a first sign-in) allows
+  only 5 attempts per source IP per hour.** Both scripts' `setup()` uses
+  `loginOrRegister` (`lib/api.js`), which signs up a fixed, deterministic set
+  of accounts (`loadtest-http-0`, `loadtest-ws-0`, …) once and signs the same
+  accounts back in on every later run — so only the _first_ run against a
+  given backend spends any of that budget. Raising
   `USERS`/`WS_PARTICIPANTS` (see below) raises how many accounts a first run
   needs to register; keep it at or under 5 unless you've already seeded more
   accounts in an earlier run, or are running against a target where you've
   deliberately loosened this limit. Both also need at least 2 accounts —
   `createGroupChat` requires at least one participant besides the creator —
   and refuse to start below that.
-- **`/users/login` allows 20 attempts per IP / 5 per account per 15
-  minutes.** Only hit once per user in `setup()`, so this isn't a practical
-  constraint at the default participant counts.
+- **`/users/login/google` allows 20 attempts per IP per 15 minutes.** Only
+  hit once per user in `setup()`, so this isn't a practical constraint at the
+  default participant counts.
 - **Engagement writes (reactions/comments/replies) are capped at 120 per user
   per minute** (`src/EngagementHandler.ts`), and the global per-IP limiter
   caps all requests at 1000/minute (`src/GlobalRateLimit.ts`).

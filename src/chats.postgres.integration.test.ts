@@ -12,6 +12,7 @@ import * as schema from "./db/schema.ts";
 import { Jwt, JwtLive } from "./Jwt.ts";
 import { makeTestRun } from "./testApi.ts";
 import { resetTestDb } from "./testDb.ts";
+import { signUpTestUser } from "./testUsers.ts";
 
 // createDirectChat, addParticipants and joinChatViaInvite close their
 // check-then-write races with `serializable` transactions, which Postgres
@@ -90,12 +91,7 @@ describeIfPostgres("chat transactions on real Postgres", () => {
     run(
       Effect.gen(function* () {
         const { client } = yield* createUser("unused");
-        yield* client.users.register({
-          payload: { username: "rotator", password: "pw-rotator1" },
-        });
-        const { refreshToken } = yield* client.users.login({
-          payload: { username: "rotator", password: "pw-rotator1" },
-        });
+        const { refreshToken } = yield* signUpTestUser("rotator");
 
         const results = yield* Effect.all(
           Array.from({ length: 6 }, () =>

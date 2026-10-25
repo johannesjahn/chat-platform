@@ -7,6 +7,7 @@ import { ChatApi, MAX_AVATAR_UPLOAD_SIZE_BYTES } from "./Api.ts";
 import { AvatarRouteLive } from "./AvatarRoute.ts";
 import { AVATAR_VARIANT_PX, MIN_AVATAR_SOURCE_PX } from "./ImageProcessing.ts";
 import { makeTestRun } from "./testApi.ts";
+import { googleIdTokenFor, signUpTestUser } from "./testUsers.ts";
 
 process.env.JWT_SECRET ??= "test-secret";
 
@@ -14,8 +15,6 @@ process.env.JWT_SECRET ??= "test-secret";
 // multipart endpoint, so this hands back the raw web `handler` too, for
 // driving it with a real `multipart/form-data` body the way a browser would.
 const run = makeTestRun({ routes: AvatarRouteLive });
-
-const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
 const makeAuthedClient = (token: string) =>
   HttpApiClient.make(ChatApi, {
@@ -27,13 +26,9 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-const registerAndLogin = (username: string, password: string) =>
+const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return { user, accessToken };
   });
 
@@ -102,10 +97,7 @@ test("uploadAvatar rejects an unauthenticated request", () =>
 test("uploadAvatar rejects an unsupported mime type", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "avatarer1",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("avatarer1");
       const result = yield* Effect.promise(() =>
         uploadAvatarFile(
           handler,
@@ -128,10 +120,7 @@ test("uploadAvatar rejects an unsupported mime type", () =>
 test("uploadAvatar rejects a source image smaller than the minimum dimensions", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "avatarer2",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("avatarer2");
       const png = yield* Effect.promise(() =>
         makePng(MIN_AVATAR_SOURCE_PX - 1, MIN_AVATAR_SOURCE_PX - 1),
       );
@@ -153,10 +142,7 @@ test("uploadAvatar rejects a source image smaller than the minimum dimensions", 
 test("uploadAvatar rejects a crop region outside the image bounds", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "avatarer3",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("avatarer3");
       const png = yield* Effect.promise(() =>
         makePng(MIN_AVATAR_SOURCE_PX, MIN_AVATAR_SOURCE_PX),
       );
@@ -178,10 +164,7 @@ test("uploadAvatar rejects a crop region outside the image bounds", () =>
 test("uploadAvatar rejects a file over the size limit", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "avatarer4",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("avatarer4");
       const oversized = new Uint8Array(MAX_AVATAR_UPLOAD_SIZE_BYTES + 1);
       const result = yield* Effect.promise(() =>
         uploadAvatarFile(
@@ -203,10 +186,7 @@ test("uploadAvatar rejects a file over the size limit", () =>
 test("uploadAvatar stores 3 fixed-size variants, clears avatarUrl, and is reflected by getUser", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { user, accessToken } = yield* registerAndLogin(
-        "avatarer5",
-        "pw-testpass",
-      );
+      const { user, accessToken } = yield* registerAndLogin("avatarer5");
       const authed = yield* makeAuthedClient(accessToken);
 
       // Give the account an external avatarUrl first, so the upload below
@@ -309,11 +289,8 @@ const uploadChatAvatarFile = async (
 test("uploadChatAvatar rejects an unauthenticated request", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "groupavatarer1",
-        "pw-testpass",
-      );
-      const other = yield* registerAndLogin("groupavatarer1b", "pw-testpass");
+      const { accessToken } = yield* registerAndLogin("groupavatarer1");
+      const other = yield* registerAndLogin("groupavatarer1b");
       const authed = yield* makeAuthedClient(accessToken);
       const chat = yield* authed.chats.createGroupChat({
         payload: { title: "Group 1", participantIds: [other.user.id] },
@@ -338,8 +315,8 @@ test("uploadChatAvatar rejects an unauthenticated request", () =>
 test("uploadChatAvatar is forbidden for a member who isn't the owner or an admin", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const owner = yield* registerAndLogin("groupavatarer2", "pw-testpass");
-      const member = yield* registerAndLogin("groupavatarer3", "pw-testpass");
+      const owner = yield* registerAndLogin("groupavatarer2");
+      const member = yield* registerAndLogin("groupavatarer3");
       const ownerClient = yield* makeAuthedClient(owner.accessToken);
       const chat = yield* ownerClient.chats.createGroupChat({
         payload: { title: "Group 2", participantIds: [member.user.id] },
@@ -365,8 +342,8 @@ test("uploadChatAvatar is forbidden for a member who isn't the owner or an admin
 test("uploadChatAvatar rejects uploading to a direct chat", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("groupavatarer4", "pw-testpass");
-      const bob = yield* registerAndLogin("groupavatarer5", "pw-testpass");
+      const alice = yield* registerAndLogin("groupavatarer4");
+      const bob = yield* registerAndLogin("groupavatarer5");
       const aliceClient = yield* makeAuthedClient(alice.accessToken);
       const chat = yield* aliceClient.chats.createDirectChat({
         payload: { userId: bob.user.id },
@@ -392,8 +369,8 @@ test("uploadChatAvatar rejects uploading to a direct chat", () =>
 test("uploadChatAvatar stores 3 fixed-size variants and is reflected by getChat and listChats", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const owner = yield* registerAndLogin("groupavatarer6", "pw-testpass");
-      const other = yield* registerAndLogin("groupavatarer6b", "pw-testpass");
+      const owner = yield* registerAndLogin("groupavatarer6");
+      const other = yield* registerAndLogin("groupavatarer6b");
       const authed = yield* makeAuthedClient(owner.accessToken);
       const chat = yield* authed.chats.createGroupChat({
         payload: { title: "Group 6", participantIds: [other.user.id] },
@@ -440,8 +417,8 @@ test("uploadChatAvatar stores 3 fixed-size variants and is reflected by getChat 
 test("deleteChatAvatar clears an uploaded group avatar and is forbidden for a plain member", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const owner = yield* registerAndLogin("groupavatarer7", "pw-testpass");
-      const member = yield* registerAndLogin("groupavatarer8", "pw-testpass");
+      const owner = yield* registerAndLogin("groupavatarer7");
+      const member = yield* registerAndLogin("groupavatarer8");
       const ownerClient = yield* makeAuthedClient(owner.accessToken);
       const memberClient = yield* makeAuthedClient(member.accessToken);
       const chat = yield* ownerClient.chats.createGroupChat({
@@ -521,8 +498,8 @@ const expectAvatarsGone = (
 test("deleteChat removes the group avatar's objects from storage (issue #652)", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const owner = yield* registerAndLogin("groupavatarer9", "pw-testpass");
-      const member = yield* registerAndLogin("groupavatarer9b", "pw-testpass");
+      const owner = yield* registerAndLogin("groupavatarer9");
+      const member = yield* registerAndLogin("groupavatarer9b");
       const ownerClient = yield* makeAuthedClient(owner.accessToken);
       const chat = yield* ownerClient.chats.createGroupChat({
         payload: { title: "Group 9", participantIds: [member.user.id] },
@@ -542,8 +519,8 @@ test("deleteChat removes the group avatar's objects from storage (issue #652)", 
 test("the last member leaving a group removes its avatar's objects from storage (issue #652)", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const owner = yield* registerAndLogin("groupavatarer10", "pw-testpass");
-      const member = yield* registerAndLogin("groupavatarer10b", "pw-testpass");
+      const owner = yield* registerAndLogin("groupavatarer10");
+      const member = yield* registerAndLogin("groupavatarer10b");
       const ownerClient = yield* makeAuthedClient(owner.accessToken);
       const memberClient = yield* makeAuthedClient(member.accessToken);
       const chat = yield* ownerClient.chats.createGroupChat({
@@ -573,10 +550,7 @@ test("the last member leaving a group removes its avatar's objects from storage 
 test("deleteAccount removes the account's avatar objects from storage", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "avatarer11",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("avatarer11");
       const authed = yield* makeAuthedClient(accessToken);
       const size = MIN_AVATAR_SOURCE_PX;
       const png = yield* Effect.promise(() => makePng(size, size));
@@ -595,7 +569,7 @@ test("deleteAccount removes the account's avatar objects from storage", () =>
       );
 
       yield* authed.users.deleteAccount({
-        payload: { password: "pw-testpass" },
+        payload: { idToken: yield* googleIdTokenFor("avatarer11") },
       });
 
       yield* expectAvatarsGone(handler, urls);
@@ -605,10 +579,7 @@ test("deleteAccount removes the account's avatar objects from storage", () =>
 test("updateProfile clears an uploaded avatar back to an external avatarUrl", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "avatarer6",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("avatarer6");
       const authed = yield* makeAuthedClient(accessToken);
 
       const size = 300;

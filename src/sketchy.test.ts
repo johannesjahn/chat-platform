@@ -16,6 +16,7 @@ import {
 import { DRAWING_COUNTDOWN_MS } from "./games/drawing/rules.ts";
 import { revealDurationMs } from "./games/drawing/timeline.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signUpTestUser } from "./testUsers.ts";
 
 // Sketchy (issue #440) end to end through the real HTTP API. Same harness as
 // games.test.ts, with one addition: the PubSub every realtime event fans
@@ -42,8 +43,6 @@ const run = makeTestRun({
   },
 });
 
-const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
-
 const makeAuthedClient = (token: string) =>
   HttpApiClient.make(ChatApi, {
     baseUrl: "http://localhost",
@@ -63,13 +62,7 @@ type Player = {
 
 const signUp = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({
-      payload: { username, password: "s3cret-pw" },
-    });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password: "s3cret-pw" },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return {
       id: user.id,
       name: username,

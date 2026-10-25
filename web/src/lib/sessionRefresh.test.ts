@@ -26,6 +26,7 @@ const session = (refreshToken: string): Session => ({
   user: { id: 1, username: "ada" } as Session["user"],
   accessToken: `access-${refreshToken}`,
   refreshToken,
+  authMethod: "google",
 });
 
 let refreshSession: (stale: Session) => Promise<Session | null>;

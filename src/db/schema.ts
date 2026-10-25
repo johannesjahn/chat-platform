@@ -22,7 +22,16 @@ export const users = pgTable(
   {
     id: serial("id").primaryKey(),
     username: text("username").notNull(),
-    passwordHash: text("password_hash").notNull(),
+    // Null for a Google account (issue #693): password login is only for the
+    // few admin accounts created with `scripts/create-admin.ts`, and only an
+    // admin with a hash set can use it (see `login` in UsersHandler.ts).
+    passwordHash: text("password_hash"),
+    // Google's `sub` for an account that signs in with Google — the only
+    // thing kept from the ID token (no email, name or picture: the same GDPR
+    // scoping as the rest of the app). One provider, so a column rather than
+    // an identities table. Every account has this, a password hash, or both
+    // (`users_credential_check` below).
+    googleSub: text("google_sub").unique(),
     // Optional profile fields (issue #67) — null means "unset", falling back
     // to `username` (display name) or initials (avatar) in the UI.
     displayName: text("display_name"),
@@ -104,6 +113,10 @@ export const users = pgTable(
     // registerable, since login rate-limiting and lookups already treat
     // usernames case-insensitively (see issue #175).
     uniqueIndex("users_username_lower_idx").on(sql`lower(${table.username})`),
+    check(
+      "users_credential_check",
+      sql`${table.passwordHash} IS NOT NULL OR ${table.googleSub} IS NOT NULL`,
+    ),
   ],
 );
 

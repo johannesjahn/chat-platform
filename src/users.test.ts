@@ -18,6 +18,16 @@ import {
   MIN_USERNAME_LENGTH,
   USERNAME_PATTERN,
 } from "./Api.ts";
+import {
+  AdminAccountError,
+  createAdminAccount,
+  resetAdminPassword,
+} from "./adminAccounts.ts";
+import {
+  GOOGLE_TEST_CLIENT_ID,
+  googleSubFor,
+  mintGoogleIdToken,
+} from "./GoogleTestSigner.ts";
 import { extractMentionedUsernames } from "./notifications.ts";
 import { Db } from "./Db.ts";
 import { authEventsTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
@@ -28,6 +38,11 @@ import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
 import { users } from "./db/schema.ts";
 import { eq } from "drizzle-orm";
 import { makeTestRun } from "./testApi.ts";
+import {
+  googleIdTokenFor,
+  signInTestUser,
+  signUpTestUser,
+} from "./testUsers.ts";
 
 const run = makeTestRun();
 
@@ -39,7 +54,7 @@ const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 // (see Metrics.test.ts's websocketConnectionsActive test for the same
 // reasoning).
 const authEventCount = (
-  event: "signup" | "login" | "refresh",
+  event: "google_login" | "google_signup" | "login" | "refresh",
   outcome: "success" | "failure",
 ) =>
   Metric.value(
@@ -85,89 +100,369 @@ test("searchUsers rejects a bogus bearer token", () =>
     }),
   ));
 
-test('register returns the created user with an id and no password, incrementing auth_events_total{event="signup",outcome="success"}', () =>
+// The first half of a first Google sign-in: verifies a fresh ID token for
+// `sub` and returns the pending token the username step takes.
+const pendingTokenFor = (sub: string) =>
+  Effect.gen(function* () {
+    const c = yield* makeClient;
+    const idToken = yield* Effect.promise(() => mintGoogleIdToken({ sub }));
+    const result = yield* c.users.loginGoogle({ payload: { idToken } });
+    if (!("needsUsername" in result))
+      return yield* Effect.die(new Error(`${sub} is already registered`));
+    return result.pendingToken;
+  });
+
+// A password admin, made by the same code as scripts/create-admin.ts.
+const createAdmin = (username: string, password: string) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    return yield* Effect.promise(() =>
+      createAdminAccount(db, username, password),
+    );
+  });
+
+// A password account written straight to the database, for the cases the
+// CLI won't make: a non-admin with a password (e.g. an admin since demoted),
+// or credentials predating today's username/password rules.
+const insertPasswordUser = (
+  username: string,
+  password: string,
+  role: "user" | "admin",
+) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    const passwordHash = yield* Effect.promise(() =>
+      Bun.password.hash(password, { algorithm: "argon2id" }),
+    );
+    const rows = yield* Effect.promise(() =>
+      db
+        .insert(users)
+        .values({ username, passwordHash, role })
+        .returning({ id: users.id }),
+    );
+    return rows[0]!;
+  });
+
+// Sends a request raw, so the server's own validation is what's exercised
+// (the typed client would reject a malformed payload itself).
+const postRaw = (path: string, body: unknown) =>
+  Effect.gen(function* () {
+    const http = yield* HttpClient.HttpClient;
+    const response = yield* http.execute(
+      HttpClientRequest.post(`http://localhost${path}`).pipe(
+        HttpClientRequest.bodyJsonUnsafe(body),
+      ),
+    );
+    return { status: response.status, body: yield* response.text };
+  });
+
+test('a first Google sign-in asks for a username without creating an account, incrementing auth_events_total{event="google_login",outcome="success"}', () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const before = yield* authEventCount("signup", "success");
-      const user = yield* c.users.register({
-        payload: { username: "alice", password: "s3cret-pw" },
+      const db = yield* Db;
+      const before = yield* authEventCount("google_login", "success");
+      const idToken = yield* Effect.promise(() =>
+        mintGoogleIdToken({ sub: "google-first" }),
+      );
+      const result = yield* c.users.loginGoogle({ payload: { idToken } });
+      expect(result).toEqual({
+        needsUsername: true,
+        pendingToken: expect.any(String),
       });
-      expect(user.username).toBe("alice");
-      expect(typeof user.id).toBe("number");
-      expect(user.role).toBe("user");
-      expect(user).not.toHaveProperty("password");
-      expect(user).not.toHaveProperty("passwordHash");
-      expect(yield* authEventCount("signup", "success")).toBe(before + 1);
+      // No placeholder row: nothing to show up in mentions, search or lookups
+      // until a name is picked.
+      expect(yield* Effect.promise(() => db.select().from(users))).toEqual([]);
+      expect(yield* authEventCount("google_login", "success")).toBe(before + 1);
     }),
   ));
 
-test("register rejects a username over the maximum length", () =>
+test('the username step creates the account and returns a session, incrementing auth_events_total{event="google_signup",outcome="success"}', () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users
-        .register({
-          payload: {
-            username: "a".repeat(MAX_USERNAME_LENGTH + 1),
-            password: "s3cret-pw",
-          },
-        })
-        .pipe(Effect.flip);
+      const db = yield* Db;
+      const before = yield* authEventCount("google_signup", "success");
+      const pendingToken = yield* pendingTokenFor("google-alice");
+      const session = yield* c.users.registerGoogle({
+        payload: { pendingToken, username: "alice" },
+      });
+      expect(session.user.username).toBe("alice");
+      expect(session.user.role).toBe("user");
+      expect(session.authMethod).toBe("google");
+      expect(session.user).not.toHaveProperty("googleSub");
+      expect(session.user).not.toHaveProperty("passwordHash");
+      expect(yield* authEventCount("google_signup", "success")).toBe(
+        before + 1,
+      );
+
+      // The session works, and the row holds only Google's `sub` — no
+      // password and nothing else from the token.
+      const authed = yield* makeAuthedClient(session.accessToken);
+      const me = yield* authed.users.getUser({
+        params: { id: session.user.id },
+      });
+      expect(me.username).toBe("alice");
+      const [row] = yield* Effect.promise(() =>
+        db.select().from(users).where(eq(users.id, session.user.id)),
+      );
+      expect(row!.googleSub).toBe("google-alice");
+      expect(row!.passwordHash).toBeNull();
     }),
   ));
 
-test("register rejects a username under the minimum length", () =>
+test("a returning Google sign-in gets a session for the same account", () =>
   run(
     Effect.gen(function* () {
-      // Sent raw: the typed client would reject the payload itself, before
-      // it ever reached the server's validation.
-      const http = yield* HttpClient.HttpClient;
-      const response = yield* http.execute(
-        HttpClientRequest.post("http://localhost/users/register").pipe(
-          HttpClientRequest.bodyJsonUnsafe({
-            username: "a".repeat(MIN_USERNAME_LENGTH - 1),
-            password: "s3cret-pw",
+      const c = yield* makeClient;
+      const created = yield* signUpTestUser("bob");
+      const idToken = yield* Effect.promise(() =>
+        mintGoogleIdToken({ sub: googleSubFor("bob") }),
+      );
+      const session = yield* c.users.loginGoogle({ payload: { idToken } });
+      if ("needsUsername" in session) throw new Error("expected a session");
+      expect(session.user.id).toBe(created.user.id);
+      expect(session.authMethod).toBe("google");
+      expect(decodeClaims(session.accessToken).type).toBe("access");
+      expect(decodeClaims(session.refreshToken).type).toBe("refresh");
+    }),
+  ));
+
+test('loginGoogle rejects an expired token, a wrong audience or issuer, and a tampered signature, incrementing auth_events_total{event="google_login",outcome="failure"}', () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* signUpTestUser("carol");
+      const sub = googleSubFor("carol");
+      const now = Math.floor(Date.now() / 1000);
+      const genuine = yield* Effect.promise(() => mintGoogleIdToken({ sub }));
+      const [header, body, signature] = genuine.split(".");
+      // Same header and signature, but a payload claiming another account.
+      const forgedBody = Buffer.from(
+        JSON.stringify({
+          ...JSON.parse(Buffer.from(body!, "base64url").toString()),
+          sub: "someone-else",
+        }),
+      ).toString("base64url");
+      const rejected = {
+        expired: yield* Effect.promise(() =>
+          mintGoogleIdToken({ sub, exp: now - 60 }),
+        ),
+        "wrong aud": yield* Effect.promise(() =>
+          mintGoogleIdToken({
+            sub,
+            aud: "another-app.apps.googleusercontent.com",
           }),
         ),
+        "wrong iss": yield* Effect.promise(() =>
+          mintGoogleIdToken({ sub, iss: "https://evil.example" }),
+        ),
+        "tampered payload": `${header}.${forgedBody}.${signature}`,
+        "tampered signature": `${header}.${body}.${signature!.slice(0, -4)}AAAA`,
+        "not a jwt": "not-a-token",
+      };
+      const before = yield* authEventCount("google_login", "failure");
+      for (const [label, idToken] of Object.entries(rejected)) {
+        const result = yield* c.users
+          .loginGoogle({ payload: { idToken } })
+          .pipe(Effect.flip);
+        expect(result._tag, label).toBe("InvalidCredentials");
+      }
+      expect(yield* authEventCount("google_login", "failure")).toBe(
+        before + Object.keys(rejected).length,
       );
-      expect(response.status).toBe(400);
-      // Exactly the minimum is fine.
-      const c = yield* makeClient;
-      const user = yield* c.users.register({
-        payload: {
-          username: "a".repeat(MIN_USERNAME_LENGTH),
-          password: "s3cret-pw",
-        },
-      });
-      expect(user.username).toBe("a".repeat(MIN_USERNAME_LENGTH));
+      // Both spellings of Google's issuer are genuine.
+      for (const iss of [
+        "accounts.google.com",
+        "https://accounts.google.com",
+      ]) {
+        const idToken = yield* Effect.promise(() =>
+          mintGoogleIdToken({ sub, iss }),
+        );
+        const session = yield* c.users.loginGoogle({ payload: { idToken } });
+        expect("user" in session, iss).toBe(true);
+      }
     }),
   ));
 
-test("register rejects usernames outside the @mention character set (issue #493)", () =>
+test("registerGoogle rejects an expired, forged or wrong-kind pending token", () =>
   run(
     Effect.gen(function* () {
-      // Sent raw, like the minimum-length test above, so the server's own
-      // validation is what's exercised.
-      const http = yield* HttpClient.HttpClient;
-      const register = (username: string) =>
-        http
-          .execute(
-            HttpClientRequest.post("http://localhost/users/register").pipe(
-              HttpClientRequest.bodyJsonUnsafe({
-                username,
-                password: "s3cret-pw",
-              }),
-            ),
-          )
-          .pipe(
-            Effect.flatMap((response) =>
-              response.text.pipe(
-                Effect.map((body) => ({ status: response.status, body })),
-              ),
-            ),
-          );
+      const c = yield* makeClient;
+      const pendingToken = yield* pendingTokenFor("google-dora");
+      // Tokens of the other kinds, from a password login so this test's
+      // registerGoogle calls stay within the per-IP signup budget.
+      yield* createAdmin("someone", "s3cret-pw");
+      const session = yield* c.users.login({
+        payload: { username: "someone", password: "s3cret-pw" },
+      });
+      const [header, body, signature] = pendingToken.split(".");
+      const claims = JSON.parse(Buffer.from(body!, "base64url").toString());
+      const reencode = (value: unknown) =>
+        Buffer.from(JSON.stringify(value)).toString("base64url");
+      const rejected = {
+        // Re-signed claims can't be produced without the server's secret, so
+        // these keep the original signature over edited claims.
+        "edited exp": `${header}.${reencode({ ...claims, exp: 1 })}.${signature}`,
+        "forged sub": `${header}.${reencode({ ...claims, googleSub: "x" })}.${signature}`,
+        "an access token": session.accessToken,
+        "a refresh token": session.refreshToken,
+        garbage: "garbage",
+      };
+      const before = yield* authEventCount("google_signup", "failure");
+      for (const [label, token] of Object.entries(rejected)) {
+        const result = yield* c.users
+          .registerGoogle({
+            payload: { pendingToken: token, username: "dora" },
+          })
+          .pipe(Effect.flip);
+        expect(result._tag, label).toBe("InvalidCredentials");
+      }
+      expect(yield* authEventCount("google_signup", "failure")).toBe(
+        before + Object.keys(rejected).length,
+      );
+    }),
+  ));
 
+test("a pending token stops working after its ten minutes", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const realNow = Date.now;
+      const pendingToken = yield* pendingTokenFor("google-late");
+      try {
+        Date.now = () => realNow() + 10 * 60 * 1000 + 1000;
+        const result = yield* c.users
+          .registerGoogle({ payload: { pendingToken, username: "late" } })
+          .pipe(Effect.flip);
+        expect(result._tag).toBe("InvalidCredentials");
+      } finally {
+        Date.now = realNow;
+      }
+    }),
+  ));
+
+test("a pending token is no access token", () =>
+  run(
+    Effect.gen(function* () {
+      const pendingToken = yield* pendingTokenFor("google-sneaky");
+      const authed = yield* makeAuthedClient(pendingToken);
+      const result = yield* authed.users
+        .searchUsers({ query: { q: "abc" } })
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Unauthorized");
+    }),
+  ));
+
+test('registerGoogle with a taken username returns a 409 conflict, case-insensitively, incrementing auth_events_total{event="google_signup",outcome="failure"}', () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* signUpTestUser("Dave");
+      const pendingToken = yield* pendingTokenFor("google-other-dave");
+      const before = yield* authEventCount("google_signup", "failure");
+      for (const username of ["Dave", "dave"]) {
+        const result = yield* c.users
+          .registerGoogle({ payload: { pendingToken, username } })
+          .pipe(Effect.flip);
+        expect(result._tag).toBe("UsernameTaken");
+        expect((result as { message: string }).message).toContain(username);
+      }
+      expect(yield* authEventCount("google_signup", "failure")).toBe(
+        before + 2,
+      );
+      // The pending token is still good for a free name.
+      const session = yield* c.users.registerGoogle({
+        payload: { pendingToken, username: "dave2" },
+      });
+      expect(session.user.username).toBe("dave2");
+    }),
+  ));
+
+test("a pending token can't create a second account for the same Google account", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const pendingToken = yield* pendingTokenFor("google-twice");
+      yield* c.users.registerGoogle({
+        payload: { pendingToken, username: "first" },
+      });
+      const result = yield* c.users
+        .registerGoogle({ payload: { pendingToken, username: "second" } })
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidCredentials");
+    }),
+  ));
+
+test('registerGoogle is rate-limited per IP, incrementing rate_limit_rejections_total{limiter="register"}', () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const before = yield* rateLimitRejectionCount("register");
+      // REGISTER_MAX_ATTEMPTS_PER_IP = 5 (UsersHandler.ts). Every call in
+      // this in-process test harness resolves to the same "unknown" IP (no
+      // real socket/remoteAddress), so they all land in one bucket.
+      for (let i = 0; i < 5; i++) yield* signUpTestUser(`ratelimited-${i}`);
+      const pendingToken = yield* pendingTokenFor("google-tripped");
+      const result = yield* c.users
+        .registerGoogle({
+          payload: { pendingToken, username: "ratelimited-tripped" },
+        })
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("TooManyRequests");
+      expect(yield* rateLimitRejectionCount("register")).toBe(before + 1);
+    }),
+  ));
+
+test('loginGoogle is rate-limited per IP, incrementing rate_limit_rejections_total{limiter="google-login"}', () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const before = yield* rateLimitRejectionCount("google-login");
+      // GOOGLE_LOGIN_MAX_ATTEMPTS_PER_IP = 20 — failed attempts count too.
+      for (let i = 0; i < 20; i++) {
+        yield* c.users
+          .loginGoogle({ payload: { idToken: "not-a-token" } })
+          .pipe(Effect.flip);
+      }
+      const idToken = yield* Effect.promise(() =>
+        mintGoogleIdToken({ sub: "google-limited" }),
+      );
+      const result = yield* c.users
+        .loginGoogle({ payload: { idToken } })
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("TooManyRequests");
+      expect(yield* rateLimitRejectionCount("google-login")).toBe(before + 1);
+    }),
+  ));
+
+test("registerGoogle rejects a username over the maximum length or under the minimum", () =>
+  run(
+    Effect.gen(function* () {
+      const pendingToken = yield* pendingTokenFor("google-lengths");
+      for (const username of [
+        "a".repeat(MAX_USERNAME_LENGTH + 1),
+        "a".repeat(MIN_USERNAME_LENGTH - 1),
+      ]) {
+        const { status } = yield* postRaw("/users/register/google", {
+          pendingToken,
+          username,
+        });
+        expect(status, username).toBe(400);
+      }
+      // Exactly the minimum is fine.
+      const { status } = yield* postRaw("/users/register/google", {
+        pendingToken,
+        username: "a".repeat(MIN_USERNAME_LENGTH),
+      });
+      expect(status).toBe(201);
+    }),
+  ));
+
+test("registerGoogle rejects usernames outside the @mention character set (issue #493)", () =>
+  run(
+    Effect.gen(function* () {
+      const pendingToken = yield* pendingTokenFor("google-charset");
       for (const username of [
         "bad name 😀", // the issue's example: a space and an emoji
         "with space",
@@ -179,14 +474,21 @@ test("register rejects usernames outside the @mention character set (issue #493)
         "trailing.",
         "trailing-",
       ]) {
-        const { status, body } = yield* register(username);
+        const { status, body } = yield* postRaw("/users/register/google", {
+          pendingToken,
+          username,
+        });
         expect(status, username).toBe(400);
         expect(body).toContain("may only contain letters");
       }
 
-      // Everything the mention parser accepts as a whole name still works.
-      for (const username of ["alice", "Bob_99", "j.doe", "x-y_z", ".dot"]) {
-        const { status } = yield* register(username);
+      // Everything the mention parser accepts as a whole name still works
+      // (one per Google account — each gets a single account).
+      for (const username of ["Bob_99", "j.doe", "x-y_z", ".dot"]) {
+        const { status } = yield* postRaw("/users/register/google", {
+          pendingToken: yield* pendingTokenFor(`google-${username}`),
+          username,
+        });
         expect(status, username).toBe(201);
       }
     }),
@@ -205,29 +507,6 @@ test("every username USERNAME_PATTERN accepts parses back whole as a mention", (
   }
 });
 
-test("a username created before the charset rule can still log in (issue #493)", () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      // Register a valid name, then rename it in the database to one the
-      // new rule rejects — standing in for an account that predates it.
-      const user = yield* c.users.register({
-        payload: { username: "legacy", password: "s3cret-pw" },
-      });
-      const db = yield* Db;
-      yield* Effect.promise(() =>
-        db
-          .update(users)
-          .set({ username: "legacy name 😀" })
-          .where(eq(users.id, user.id)),
-      );
-      const session = yield* c.users.login({
-        payload: { username: "legacy name 😀", password: "s3cret-pw" },
-      });
-      expect(session.user.username).toBe("legacy name 😀");
-    }),
-  ));
-
 test("every registrable username is long enough to be found by people search", () => {
   // Issue #483: a non-admin can't run a people search shorter than
   // MIN_USER_SEARCH_QUERY_LENGTH, so a shorter username would be unfindable.
@@ -236,47 +515,97 @@ test("every registrable username is long enough to be found by people search", (
   );
 });
 
-test("register rejects a password over the maximum length", () =>
+test("there is no password signup endpoint", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users
-        .register({
-          payload: {
-            username: "alice2",
-            password: "a".repeat(MAX_PASSWORD_LENGTH + 1),
-          },
-        })
-        .pipe(Effect.flip);
-    }),
-  ));
-
-test("register rejects a password under the minimum length", () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users
-        .register({
-          payload: {
-            username: "alice3",
-            password: "a".repeat(MIN_PASSWORD_LENGTH - 1),
-          },
-        })
-        .pipe(Effect.flip);
-    }),
-  ));
-
-test("register accepts a password at exactly the minimum length", () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      const user = yield* c.users.register({
-        payload: {
-          username: "alice4",
-          password: "a".repeat(MIN_PASSWORD_LENGTH),
-        },
+      const { status } = yield* postRaw("/users/register", {
+        username: "sneaky",
+        password: "s3cret-pw",
       });
-      expect(user.username).toBe("alice4");
+      expect(status).toBe(404);
+    }),
+  ));
+
+test("getAuthConfig exposes the Google client id", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      expect(yield* c.users.getAuthConfig()).toEqual({
+        googleClientId: GOOGLE_TEST_CLIENT_ID,
+      });
+    }),
+  ));
+
+test("createAdminAccount makes an admin that signs in with its password, and enforces the signup rules", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const db = yield* Db;
+      yield* createAdmin("rootadmin", "s3cret-pw");
+      const session = yield* c.users.login({
+        payload: { username: "rootadmin", password: "s3cret-pw" },
+      });
+      expect(session.user.role).toBe("admin");
+      expect(session.authMethod).toBe("password");
+
+      for (const [username, password] of [
+        ["rootadmin", "another-pw"], // taken
+        ["ROOTADMIN", "another-pw"], // taken, case-insensitively
+        ["ab", "another-pw"], // too short
+        ["bad name", "another-pw"], // outside the charset
+        ["okname", "a".repeat(MIN_PASSWORD_LENGTH - 1)],
+        ["okname", "a".repeat(MAX_PASSWORD_LENGTH + 1)],
+      ] as const) {
+        const error = yield* Effect.promise(() =>
+          createAdminAccount(db, username, password).then(
+            () => null,
+            (e: unknown) => e,
+          ),
+        );
+        expect(error, `${username}/${password.length}`).toBeInstanceOf(
+          AdminAccountError,
+        );
+      }
+    }),
+  ));
+
+test("resetAdminPassword changes the password and signs every session out", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const db = yield* Db;
+      yield* createAdmin("resetme", "old-password");
+      const session = yield* c.users.login({
+        payload: { username: "resetme", password: "old-password" },
+      });
+
+      yield* Effect.promise(() =>
+        resetAdminPassword(db, "resetme", "new-password"),
+      );
+
+      const oldLogin = yield* c.users
+        .login({ payload: { username: "resetme", password: "old-password" } })
+        .pipe(Effect.flip);
+      expect(oldLogin._tag).toBe("InvalidCredentials");
+      yield* c.users.login({
+        payload: { username: "resetme", password: "new-password" },
+      });
+      // The refresh token from before the reset is gone, and the access
+      // token carries a stale token_version.
+      const refreshed = yield* c.users
+        .refresh({ payload: { refreshToken: session.refreshToken } })
+        .pipe(Effect.flip);
+      expect(refreshed._tag).toBe("InvalidCredentials");
+
+      // Only an admin's password is reset.
+      yield* signUpTestUser("notadmin");
+      const error = yield* Effect.promise(() =>
+        resetAdminPassword(db, "notadmin", "new-password").then(
+          () => null,
+          (e: unknown) => e,
+        ),
+      );
+      expect(error).toBeInstanceOf(AdminAccountError);
     }),
   ));
 
@@ -284,9 +613,7 @@ test("changePassword rejects a new password under the minimum length", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "xena", password: "pw-xena12" },
-      });
+      yield* createAdmin("xena", "pw-xena12");
       const { accessToken } = yield* c.users.login({
         payload: { username: "xena", password: "pw-xena12" },
       });
@@ -302,22 +629,29 @@ test("changePassword rejects a new password under the minimum length", () =>
     }),
   ));
 
+test("changePassword is refused for a Google account, which has no password", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* signUpTestUser("googler");
+      const authed = yield* makeAuthedClient(accessToken);
+      const result = yield* authed.users
+        .changePassword({
+          payload: {
+            currentPassword: "anything-at-all",
+            newPassword: "new-password-1",
+          },
+        })
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("Forbidden");
+    }),
+  ));
+
 test("searchUsers returns matching users, case-insensitively, without password data", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "alexander", password: "pw-alexander" },
-      });
-      yield* c.users.register({
-        payload: { username: "alexina", password: "pw-alexina" },
-      });
-      yield* c.users.register({
-        payload: { username: "bob", password: "pw-bob123" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "bob", password: "pw-bob123" },
-      });
+      yield* signUpTestUser("alexander");
+      yield* signUpTestUser("alexina");
+      const { accessToken } = yield* signUpTestUser("bob");
 
       const authed = yield* makeAuthedClient(accessToken);
       const results = yield* authed.users.searchUsers({
@@ -332,13 +666,7 @@ test("searchUsers returns matching users, case-insensitively, without password d
 test("searchUsers rejects a non-admin's query shorter than the minimum length", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "cesar", password: "pw-cesar" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "cesar", password: "pw-cesar" },
-      });
+      const { accessToken } = yield* signUpTestUser("cesar");
 
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
@@ -362,9 +690,7 @@ test("searchUsers lets an admin browse the full directory with a query shorter t
           .returning(),
       );
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "nolan", password: "pw-nolan123" },
-      });
+      yield* signUpTestUser("nolan");
       const { accessToken } = yield* c.users.login({
         payload: { username: "adminnora", password: "pw-adminnora" },
       });
@@ -391,13 +717,7 @@ test("searchUsers lets an admin browse the full directory with a query shorter t
 test("searchUsers rejects a query longer than the maximum length", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "cyrus", password: "pw-cyrus" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "cyrus", password: "pw-cyrus" },
-      });
+      const { accessToken } = yield* signUpTestUser("cyrus");
 
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.users
@@ -411,13 +731,7 @@ test("searchUsers rejects a query longer than the maximum length", () =>
 test("searchUsers returns no results for a query that matches nobody", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "dahlia", password: "pw-dahlia" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "dahlia", password: "pw-dahlia" },
-      });
+      const { accessToken } = yield* signUpTestUser("dahlia");
 
       const authed = yield* makeAuthedClient(accessToken);
       const results = yield* authed.users.searchUsers({
@@ -441,16 +755,8 @@ test("lookupUsersByUsername rejects an unauthenticated request", () =>
 test("lookupUsersByUsername resolves a batch of names case-insensitively, skipping the ones that don't exist", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "Mira", password: "pw-mira123" },
-      });
-      yield* c.users.register({
-        payload: { username: "quinn", password: "pw-quinn123" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "quinn", password: "pw-quinn123" },
-      });
+      yield* signUpTestUser("Mira");
+      const { accessToken } = yield* signUpTestUser("quinn");
 
       const authed = yield* makeAuthedClient(accessToken);
       const results = yield* authed.users.lookupUsersByUsername({
@@ -466,13 +772,7 @@ test("lookupUsersByUsername resolves a batch of names case-insensitively, skippi
 test("lookupUsersByUsername ignores blank and duplicate names", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "rowan", password: "pw-rowan123" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "rowan", password: "pw-rowan123" },
-      });
+      const { accessToken } = yield* signUpTestUser("rowan");
 
       const authed = yield* makeAuthedClient(accessToken);
       const results = yield* authed.users.lookupUsersByUsername({
@@ -492,13 +792,7 @@ test("lookupUsersByUsername ignores blank and duplicate names", () =>
 test("lookupUsersByUsername rejects a batch naming more than the maximum number of users", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "sasha", password: "pw-sasha123" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "sasha", password: "pw-sasha123" },
-      });
+      const { accessToken } = yield* signUpTestUser("sasha");
 
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
@@ -518,13 +812,7 @@ test("lookupUsersByUsername rejects a batch naming more than the maximum number 
 test("lookupUsersByUsername rejects a parameter longer than the maximum length", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "tobias", password: "pw-tobias123" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "tobias", password: "pw-tobias123" },
-      });
+      const { accessToken } = yield* signUpTestUser("tobias");
 
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.users
@@ -541,9 +829,7 @@ test("getUser rejects an unauthenticated request", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const created = yield* c.users.register({
-        payload: { username: "carol", password: "pw-carol" },
-      });
+      const { user: created } = yield* signUpTestUser("carol");
       const result = yield* c.users
         .getUser({ params: { id: created.id } })
         .pipe(Effect.flip);
@@ -554,13 +840,7 @@ test("getUser rejects an unauthenticated request", () =>
 test("getUser returns the correct user after registration", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const created = yield* c.users.register({
-        payload: { username: "carol", password: "pw-carol" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "carol", password: "pw-carol" },
-      });
+      const { user: created, accessToken } = yield* signUpTestUser("carol");
       const authed = yield* makeAuthedClient(accessToken);
       const fetched = yield* authed.users.getUser({
         params: { id: created.id },
@@ -572,13 +852,7 @@ test("getUser returns the correct user after registration", () =>
 test("getUser returns 404 for a missing id", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "dave", password: "pw-dave1" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "dave", password: "pw-dave1" },
-      });
+      const { accessToken } = yield* signUpTestUser("dave");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
         .getUser({ params: { id: 9999 } })
@@ -591,9 +865,7 @@ test("listUserPosts rejects an unauthenticated request", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const created = yield* c.users.register({
-        payload: { username: "erin", password: "pw-erin1" },
-      });
+      const { user: created } = yield* signUpTestUser("erin");
       const result = yield* c.users
         .listUserPosts({ params: { id: created.id }, query: {} })
         .pipe(Effect.flip);
@@ -604,13 +876,7 @@ test("listUserPosts rejects an unauthenticated request", () =>
 test("listUserPosts returns 404 for a missing id", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "frank", password: "pw-frank1" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "frank", password: "pw-frank1" },
-      });
+      const { accessToken } = yield* signUpTestUser("frank");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
         .listUserPosts({ params: { id: 9999 }, query: {} })
@@ -622,21 +888,11 @@ test("listUserPosts returns 404 for a missing id", () =>
 test("listUserPosts returns only the target user's posts, newest-first, with a total count", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const author = yield* c.users.register({
-        payload: { username: "grace", password: "pw-grace1" },
-      });
-      const { accessToken: authorToken } = yield* c.users.login({
-        payload: { username: "grace", password: "pw-grace1" },
-      });
+      const { user: author, accessToken: authorToken } =
+        yield* signUpTestUser("grace");
       const authorClient = yield* makeAuthedClient(authorToken);
 
-      yield* c.users.register({
-        payload: { username: "henry", password: "pw-henry1" },
-      });
-      const { accessToken: otherToken } = yield* c.users.login({
-        payload: { username: "henry", password: "pw-henry1" },
-      });
+      const { accessToken: otherToken } = yield* signUpTestUser("henry");
       const otherClient = yield* makeAuthedClient(otherToken);
       yield* otherClient.posts.createPost({
         payload: { contentType: "text", content: "not grace's post" },
@@ -668,13 +924,7 @@ test("listUserPosts returns only the target user's posts, newest-first, with a t
 test("listUserPosts paginates newest-first with a keyset cursor", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const author = yield* c.users.register({
-        payload: { username: "iris", password: "pw-iris01" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "iris", password: "pw-iris01" },
-      });
+      const { user: author, accessToken } = yield* signUpTestUser("iris");
       const authed = yield* makeAuthedClient(accessToken);
       const created = [];
       for (let i = 0; i < 3; i++) {
@@ -711,13 +961,7 @@ test("listUserPosts paginates newest-first with a keyset cursor", () =>
 test("listUserPosts rejects a malformed cursor", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const author = yield* c.users.register({
-        payload: { username: "jack", password: "pw-jack01" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "jack", password: "pw-jack01" },
-      });
+      const { user: author, accessToken } = yield* signUpTestUser("jack");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.users
         .listUserPosts({
@@ -726,59 +970,6 @@ test("listUserPosts rejects a malformed cursor", () =>
         })
         .pipe(Effect.flip);
       expect(result._tag).toBe("InvalidPostsRequest");
-    }),
-  ));
-
-test('register is rate-limited per IP, incrementing rate_limit_rejections_total{limiter="register"}', () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      const before = yield* rateLimitRejectionCount("register");
-      // REGISTER_MAX_ATTEMPTS_PER_IP = 5 (UsersHandler.ts). Every call in
-      // this in-process test harness resolves to the same "unknown" IP (no
-      // real socket/remoteAddress), so they all land in one bucket.
-      for (let i = 0; i < 5; i++) {
-        yield* c.users.register({
-          payload: { username: `ratelimited-${i}`, password: "pw-testpass" },
-        });
-      }
-      const result = yield* c.users
-        .register({
-          payload: { username: "ratelimited-tripped", password: "pw-testpass" },
-        })
-        .pipe(Effect.flip);
-      expect(result._tag).toBe("TooManyRequests");
-      expect(yield* rateLimitRejectionCount("register")).toBe(before + 1);
-    }),
-  ));
-
-test('register with a duplicate username returns a 409 conflict, incrementing auth_events_total{event="signup",outcome="failure"}', () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "dave", password: "password-1" },
-      });
-      const before = yield* authEventCount("signup", "failure");
-      const result = yield* c.users
-        .register({ payload: { username: "dave", password: "password-2" } })
-        .pipe(Effect.flip);
-      expect((result as { message: string }).message).toContain("dave");
-      expect(yield* authEventCount("signup", "failure")).toBe(before + 1);
-    }),
-  ));
-
-test("register with a username differing only by case from an existing one returns a 409 conflict", () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "Bob", password: "password-1" },
-      });
-      const result = yield* c.users
-        .register({ payload: { username: "bob", password: "password-2" } })
-        .pipe(Effect.flip);
-      expect((result as { message: string }).message).toContain("bob");
     }),
   ));
 
@@ -799,27 +990,28 @@ const decodeClaims = (token: string) => {
   };
 };
 
-test('login succeeds and returns the user plus signed access and refresh JWTs, incrementing auth_events_total{event="login",outcome="success"}', () =>
+test('login succeeds for an admin and returns the user plus signed access and refresh JWTs, incrementing auth_events_total{event="login",outcome="success"}', () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const created = yield* c.users.register({
-        payload: { username: "erin", password: "correct-horse" },
-      });
+      const { id } = yield* createAdmin("erin", "correct-horse");
       const before = yield* authEventCount("login", "success");
-      const { user, accessToken, refreshToken } = yield* c.users.login({
-        payload: { username: "erin", password: "correct-horse" },
-      });
+      const { user, accessToken, refreshToken, authMethod } =
+        yield* c.users.login({
+          payload: { username: "erin", password: "correct-horse" },
+        });
       expect(yield* authEventCount("login", "success")).toBe(before + 1);
-      expect(user).toEqual(created);
+      expect(user.id).toBe(id);
+      expect(user.username).toBe("erin");
+      expect(authMethod).toBe("password");
 
       const access = decodeClaims(accessToken);
       const refresh = decodeClaims(refreshToken);
 
       for (const claims of [access, refresh]) {
-        expect(claims.sub).toBe(created.id);
+        expect(claims.sub).toBe(id);
         expect(claims.username).toBe("erin");
-        expect(claims.role).toBe("user");
+        expect(claims.role).toBe("admin");
         expect(claims.exp).toBeGreaterThan(claims.iat);
         expect(claims.tokenVersion).toBe(0);
       }
@@ -832,88 +1024,72 @@ test('login succeeds and returns the user plus signed access and refresh JWTs, i
     }),
   ));
 
-test("login accepts a pre-existing account whose password predates the minimum length", () =>
+test("login refuses a Google account and a non-admin password account exactly like a wrong password", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* signUpTestUser("googleonly");
+      // A password account that isn't (or is no longer) an admin.
+      yield* insertPasswordUser("demoted", "s3cret-pw", "user");
+      yield* createAdmin("realadmin", "s3cret-pw");
+
+      const before = yield* authEventCount("login", "failure");
+      const refusals = [];
+      for (const [username, password] of [
+        ["googleonly", "s3cret-pw"],
+        ["demoted", "s3cret-pw"], // the right password, but not an admin
+        ["realadmin", "wrong-pw"],
+        ["ghost", "s3cret-pw"], // no such account
+      ] as const) {
+        const result = yield* c.users
+          .login({ payload: { username, password } })
+          .pipe(Effect.flip);
+        expect(result._tag, username).toBe("InvalidCredentials");
+        refusals.push((result as { message: string }).message);
+      }
+      // Nothing tells the cases apart.
+      expect(new Set(refusals).size).toBe(1);
+      expect(yield* authEventCount("login", "failure")).toBe(before + 4);
+    }),
+  ));
+
+test("login accepts a pre-existing admin whose password predates the minimum length", () =>
   run(
     Effect.gen(function* () {
       // Simulates an account created before MIN_PASSWORD_LENGTH existed —
-      // bypasses the register endpoint (and its now-enforced minimum) by
-      // inserting the row directly, with a short password hashed the same
-      // way the handler would.
-      const db = yield* Db;
-      const shortPassword = "short1";
-      const passwordHash = yield* Effect.tryPromise(() =>
-        Bun.password.hash(shortPassword, { algorithm: "argon2id" }),
-      );
-      yield* Effect.tryPromise(() =>
-        db
-          .insert(users)
-          .values({ username: "legacyuser", passwordHash })
-          .returning(),
-      );
-
+      // inserted directly, since scripts/create-admin.ts enforces the
+      // minimum.
+      yield* insertPasswordUser("legacyuser", "short1", "admin");
       const c = yield* makeClient;
       const { user } = yield* c.users.login({
-        payload: { username: "legacyuser", password: shortPassword },
+        payload: { username: "legacyuser", password: "short1" },
       });
       expect(user.username).toBe("legacyuser");
     }),
   ));
 
-test("login accepts a pre-existing account whose username predates the minimum length", () =>
+test("login accepts a pre-existing admin whose username predates the minimum length or the charset rule", () =>
   run(
     Effect.gen(function* () {
-      // Like the short-password case above: inserted directly, since the
-      // register endpoint no longer accepts a name this short.
-      const db = yield* Db;
-      const passwordHash = yield* Effect.tryPromise(() =>
-        Bun.password.hash("pw-legacy1", { algorithm: "argon2id" }),
-      );
-      yield* Effect.tryPromise(() =>
-        db.insert(users).values({ username: "jo", passwordHash }).returning(),
-      );
-
+      // Inserted directly, since no signup path accepts these names anymore.
       const c = yield* makeClient;
+      for (const username of ["jo", "legacy name 😀"]) {
+        yield* insertPasswordUser(username, "pw-legacy1", "admin");
+        const { user } = yield* c.users.login({
+          payload: { username, password: "pw-legacy1" },
+        });
+        expect(user.username).toBe(username);
+      }
+    }),
+  ));
+
+test("login succeeds regardless of the casing used, matching the admin account", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      yield* createAdmin("Isabel", "pw-isabel1");
       const { user } = yield* c.users.login({
-        payload: { username: "jo", password: "pw-legacy1" },
-      });
-      expect(user.username).toBe("jo");
-    }),
-  ));
-
-test('login fails with a wrong password, incrementing auth_events_total{event="login",outcome="failure"}', () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "frank", password: "right-pw" },
-      });
-      const before = yield* authEventCount("login", "failure");
-      yield* c.users
-        .login({ payload: { username: "frank", password: "wrong-pw" } })
-        .pipe(Effect.flip);
-      expect(yield* authEventCount("login", "failure")).toBe(before + 1);
-    }),
-  ));
-
-test("login fails for an unknown username", () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users
-        .login({ payload: { username: "ghost", password: "whatever" } })
-        .pipe(Effect.flip);
-    }),
-  ));
-
-test("login succeeds regardless of the casing used, matching the registered account", () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "Isabel", password: "pw-isabel" },
-      });
-      const { user } = yield* c.users.login({
-        payload: { username: "isabel", password: "pw-isabel" },
+        payload: { username: "isabel", password: "pw-isabel1" },
       });
       expect(user.username).toBe("Isabel");
     }),
@@ -923,12 +1099,7 @@ test('refresh exchanges a valid refresh token for a new, working access token, i
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "hana", password: "pw-hana1" },
-      });
-      const { refreshToken } = yield* c.users.login({
-        payload: { username: "hana", password: "pw-hana1" },
-      });
+      const { refreshToken } = yield* signUpTestUser("hana");
 
       const before = yield* authEventCount("refresh", "success");
       const refreshed = yield* c.users.refresh({
@@ -951,12 +1122,7 @@ test("refresh rotates the refresh token", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "ivan", password: "pw-ivan1" },
-      });
-      const { refreshToken } = yield* c.users.login({
-        payload: { username: "ivan", password: "pw-ivan1" },
-      });
+      const { refreshToken } = yield* signUpTestUser("ivan");
 
       const first = yield* c.users.refresh({ payload: { refreshToken } });
       expect(first.refreshToken).not.toBe(refreshToken);
@@ -973,12 +1139,7 @@ test("refresh rejects the previous refresh token once it's been rotated away", (
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "kate", password: "pw-kate1" },
-      });
-      const { refreshToken } = yield* c.users.login({
-        payload: { username: "kate", password: "pw-kate1" },
-      });
+      const { refreshToken } = yield* signUpTestUser("kate");
 
       yield* c.users.refresh({ payload: { refreshToken } });
 
@@ -995,12 +1156,7 @@ test("replaying a rotated-away refresh token revokes the whole family, including
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "nora", password: "pw-nora1" },
-      });
-      const { refreshToken } = yield* c.users.login({
-        payload: { username: "nora", password: "pw-nora1" },
-      });
+      const { refreshToken } = yield* signUpTestUser("nora");
 
       // Simulates theft: someone rotates the token first (the legitimate
       // client, in the normal case), then the original (now stale) token
@@ -1026,12 +1182,7 @@ test("two concurrent refreshes with the same token can't both succeed, and the r
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "nell", password: "pw-nell1" },
-      });
-      const { refreshToken } = yield* c.users.login({
-        payload: { username: "nell", password: "pw-nell1" },
-      });
+      const { refreshToken } = yield* signUpTestUser("nell");
 
       // Both requests read the row as unrevoked before either writes. This
       // is a thief replaying a stolen token at the same moment the victim's
@@ -1061,15 +1212,9 @@ test("two concurrent login sessions each rotate independently", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "liam", password: "pw-liam1" },
-      });
-      const sessionA = yield* c.users.login({
-        payload: { username: "liam", password: "pw-liam1" },
-      });
-      const sessionB = yield* c.users.login({
-        payload: { username: "liam", password: "pw-liam1" },
-      });
+      yield* signUpTestUser("liam");
+      const sessionA = yield* signInTestUser("liam");
+      const sessionB = yield* signInTestUser("liam");
 
       // Rotating session A must not invalidate session B's still-unused
       // refresh token — each login's refresh token is tracked by its own
@@ -1088,12 +1233,7 @@ test("refresh rejects an access token used in place of a refresh token", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "jack", password: "pw-jack1" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "jack", password: "pw-jack1" },
-      });
+      const { accessToken } = yield* signUpTestUser("jack");
 
       const result = yield* c.users
         .refresh({ payload: { refreshToken: accessToken } })
@@ -1119,12 +1259,7 @@ test("logout revokes the presented refresh token", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "maya", password: "pw-maya1" },
-      });
-      const { refreshToken } = yield* c.users.login({
-        payload: { username: "maya", password: "pw-maya1" },
-      });
+      const { refreshToken } = yield* signUpTestUser("maya");
 
       yield* c.users.logout({ payload: { refreshToken } });
 
@@ -1139,15 +1274,9 @@ test("logout only revokes the presented session, leaving others intact", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "noah", password: "pw-noah1" },
-      });
-      const sessionA = yield* c.users.login({
-        payload: { username: "noah", password: "pw-noah1" },
-      });
-      const sessionB = yield* c.users.login({
-        payload: { username: "noah", password: "pw-noah1" },
-      });
+      yield* signUpTestUser("noah");
+      const sessionA = yield* signInTestUser("noah");
+      const sessionB = yield* signInTestUser("noah");
 
       yield* c.users.logout({
         payload: { refreshToken: sessionA.refreshToken },
@@ -1164,15 +1293,9 @@ test("logout with allSessions revokes every session for the user", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "olga", password: "pw-olga1" },
-      });
-      const sessionA = yield* c.users.login({
-        payload: { username: "olga", password: "pw-olga1" },
-      });
-      const sessionB = yield* c.users.login({
-        payload: { username: "olga", password: "pw-olga1" },
-      });
+      yield* signUpTestUser("olga");
+      const sessionA = yield* signInTestUser("olga");
+      const sessionB = yield* signInTestUser("olga");
 
       yield* c.users.logout({
         payload: { refreshToken: sessionA.refreshToken, allSessions: true },
@@ -1191,12 +1314,7 @@ test("logout with allSessions immediately invalidates outstanding access tokens,
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "petra", password: "pw-petra" },
-      });
-      const { accessToken, refreshToken } = yield* c.users.login({
-        payload: { username: "petra", password: "pw-petra" },
-      });
+      const { accessToken, refreshToken } = yield* signUpTestUser("petra");
 
       // Sanity check: the access token works before the forced logout.
       const authedBefore = yield* makeAuthedClient(accessToken);
@@ -1221,19 +1339,12 @@ test("a fresh login after a forced logout still works", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "quinn", password: "pw-quinn" },
-      });
-      const { refreshToken } = yield* c.users.login({
-        payload: { username: "quinn", password: "pw-quinn" },
-      });
+      const { refreshToken } = yield* signUpTestUser("quinn");
       yield* c.users.logout({
         payload: { refreshToken, allSessions: true },
       });
 
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "quinn", password: "pw-quinn" },
-      });
+      const { accessToken } = yield* signInTestUser("quinn");
       const authed = yield* makeAuthedClient(accessToken);
       const results = yield* authed.users.searchUsers({
         query: { q: "quinn" },
@@ -1246,15 +1357,9 @@ test("refresh rejects a token signed under a token_version invalidated by a forc
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "ravi", password: "pw-ravi1" },
-      });
-      const sessionA = yield* c.users.login({
-        payload: { username: "ravi", password: "pw-ravi1" },
-      });
-      const sessionB = yield* c.users.login({
-        payload: { username: "ravi", password: "pw-ravi1" },
-      });
+      yield* signUpTestUser("ravi");
+      const sessionA = yield* signInTestUser("ravi");
+      const sessionB = yield* signInTestUser("ravi");
 
       yield* c.users.logout({
         payload: { refreshToken: sessionA.refreshToken, allSessions: true },
@@ -1297,9 +1402,7 @@ test("changePassword rejects a wrong current password", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "sam", password: "pw-sam12" },
-      });
+      yield* createAdmin("sam", "pw-sam12");
       const { accessToken } = yield* c.users.login({
         payload: { username: "sam", password: "pw-sam12" },
       });
@@ -1317,9 +1420,7 @@ test("changePassword updates the password and lets the caller log in with the ne
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "tara", password: "old-pw-tara" },
-      });
+      yield* createAdmin("tara", "old-pw-tara");
       const { accessToken } = yield* c.users.login({
         payload: { username: "tara", password: "old-pw-tara" },
       });
@@ -1343,9 +1444,7 @@ test("changePassword returns a working access token for the calling session, des
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "uma", password: "old-pw-uma" },
-      });
+      yield* createAdmin("uma", "old-pw-uma");
       const { accessToken } = yield* c.users.login({
         payload: { username: "uma", password: "old-pw-uma" },
       });
@@ -1374,9 +1473,7 @@ test("changePassword revokes every other session's refresh token", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "vince", password: "old-pw-vince" },
-      });
+      yield* createAdmin("vince", "old-pw-vince");
       const sessionA = yield* c.users.login({
         payload: { username: "vince", password: "old-pw-vince" },
       });
@@ -1402,11 +1499,9 @@ test("changePassword is rate-limited per account after repeated wrong attempts",
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "wendy", password: "pw-wendy" },
-      });
+      yield* createAdmin("wendy", "pw-wendy123");
       const { accessToken } = yield* c.users.login({
-        payload: { username: "wendy", password: "pw-wendy" },
+        payload: { username: "wendy", password: "pw-wendy123" },
       });
       const authed = yield* makeAuthedClient(accessToken);
       // CHANGE_PASSWORD_MAX_ATTEMPTS_PER_ACCOUNT is 5 (UsersHandler.ts).
@@ -1420,32 +1515,6 @@ test("changePassword is rate-limited per account after repeated wrong attempts",
       const result = yield* authed.users
         .changePassword({
           payload: { currentPassword: "wrong-pw", newPassword: "new-pw12" },
-        })
-        .pipe(Effect.flip);
-      const left = result as {
-        _tag: string;
-        retryAfterSeconds: number;
-      };
-      expect(left._tag).toBe("TooManyRequests");
-      expect(left.retryAfterSeconds).toBeGreaterThan(0);
-    }),
-  ));
-
-test("register is rate-limited per IP after repeated attempts", () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      // REGISTER_MAX_ATTEMPTS_PER_IP is 5 (UsersHandler.ts) — the test
-      // harness has no real socket, so every call in this test shares one
-      // "unknown" IP bucket regardless of username.
-      for (let i = 0; i < 5; i++) {
-        yield* c.users.register({
-          payload: { username: `reguser${i}`, password: "pw-register" },
-        });
-      }
-      const result = yield* c.users
-        .register({
-          payload: { username: "reguser5", password: "pw-register" },
         })
         .pipe(Effect.flip);
       const left = result as {
@@ -1488,9 +1557,7 @@ test("successful logins don't count toward the per-account login limit", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "multidevice", password: "pw-multi" },
-      });
+      yield* createAdmin("multidevice", "pw-multi");
       // Well past the 5-failure account bucket (but under the per-IP cap of
       // 20): someone signing in on several devices must never be locked out.
       for (let i = 0; i < 10; i++) {
@@ -1506,9 +1573,7 @@ test("a successful login clears the account's earlier failed attempts", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "typo-prone", password: "pw-right" },
-      });
+      yield* createAdmin("typo-prone", "pw-right");
       const fail = c.users
         .login({ payload: { username: "typo-prone", password: "pw-wrong" } })
         .pipe(Effect.flip);
@@ -1530,9 +1595,7 @@ test("concurrent wrong-password logins can't race past the per-account limit", (
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "raced", password: "pw-raced" },
-      });
+      yield* createAdmin("raced", "pw-raced");
       // Issue #543: the account buckets used to be checked up front but only
       // consumed after the (slow) password check, so every concurrent guess
       // passed the check and reached verification. Under the per-IP cap of
@@ -1580,13 +1643,7 @@ test("refresh is rate-limited per IP after repeated attempts", () =>
 test("authentication token version check is cached for 5 seconds and respects expiration", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "cachetest", password: "pw-cachetest" },
-      });
-      const { user, accessToken } = yield* c.users.login({
-        payload: { username: "cachetest", password: "pw-cachetest" },
-      });
+      const { user, accessToken } = yield* signUpTestUser("cachetest");
 
       const authed = yield* makeAuthedClient(accessToken);
 
@@ -1622,13 +1679,7 @@ test("authentication token version check is cached for 5 seconds and respects ex
 test("authentication token version cache is immediately evicted via PubSub invalidation events", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "pubsubtest", password: "pw-pubsubtest" },
-      });
-      const { user, accessToken } = yield* c.users.login({
-        payload: { username: "pubsubtest", password: "pw-pubsubtest" },
-      });
+      const { user, accessToken } = yield* signUpTestUser("pubsubtest");
 
       const authed = yield* makeAuthedClient(accessToken);
 
@@ -1672,13 +1723,7 @@ test("updateProfile rejects an unauthenticated request", () =>
 test("updateProfile updates displayName and avatarUrl, reflected by getUser, without changing username", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const created = yield* c.users.register({
-        payload: { username: "xander", password: "pw-xander" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "xander", password: "pw-xander" },
-      });
+      const { user: created, accessToken } = yield* signUpTestUser("xander");
       const authed = yield* makeAuthedClient(accessToken);
 
       const updated = yield* authed.users.updateProfile({
@@ -1710,13 +1755,7 @@ test("updateProfile updates displayName and avatarUrl, reflected by getUser, wit
 test("updateProfile rejects a displayName over the maximum length", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "victor", password: "pw-victor" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "victor", password: "pw-victor" },
-      });
+      const { accessToken } = yield* signUpTestUser("victor");
       const authed = yield* makeAuthedClient(accessToken);
 
       yield* authed.users
@@ -1733,13 +1772,7 @@ test("updateProfile rejects a displayName over the maximum length", () =>
 test("updateProfile rejects an avatarUrl on a disallowed host", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "ulysses", password: "pw-ulysses" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "ulysses", password: "pw-ulysses" },
-      });
+      const { accessToken } = yield* signUpTestUser("ulysses");
       const authed = yield* makeAuthedClient(accessToken);
 
       yield* authed.users
@@ -1756,13 +1789,7 @@ test("updateProfile rejects an avatarUrl on a disallowed host", () =>
 test("updateProfile clears displayName and avatarUrl when set to null after being set", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "tobias", password: "pw-tobias" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "tobias", password: "pw-tobias" },
-      });
+      const { accessToken } = yield* signUpTestUser("tobias");
       const authed = yield* makeAuthedClient(accessToken);
 
       yield* authed.users.updateProfile({
@@ -1782,16 +1809,9 @@ test("updateProfile clears displayName and avatarUrl when set to null after bein
 test("updateProfile sets a bio, shown to other users by getUser", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const created = yield* c.users.register({
-        payload: { username: "beatrix", password: "pw-beatrix" },
-      });
-      yield* c.users.register({
-        payload: { username: "viewer", password: "pw-viewer" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "beatrix", password: "pw-beatrix" },
-      });
+      const { user: created } = yield* signUpTestUser("beatrix");
+      yield* signUpTestUser("viewer");
+      const { accessToken } = yield* signInTestUser("beatrix");
       const authed = yield* makeAuthedClient(accessToken);
 
       const updated = yield* authed.users.updateProfile({
@@ -1803,9 +1823,7 @@ test("updateProfile sets a bio, shown to other users by getUser", () =>
       });
       expect(updated.bio).toBe("Coffee, climbing\nand compilers.");
 
-      const viewerLogin = yield* c.users.login({
-        payload: { username: "viewer", password: "pw-viewer" },
-      });
+      const viewerLogin = yield* signInTestUser("viewer");
       const viewer = yield* makeAuthedClient(viewerLogin.accessToken);
       const fetched = yield* viewer.users.getUser({
         params: { id: created.id },
@@ -1817,13 +1835,7 @@ test("updateProfile sets a bio, shown to other users by getUser", () =>
 test("updateProfile keeps the bio when it's omitted and clears it on null", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "cornelia", password: "pw-cornelia" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "cornelia", password: "pw-cornelia" },
-      });
+      const { accessToken } = yield* signUpTestUser("cornelia");
       const authed = yield* makeAuthedClient(accessToken);
 
       yield* authed.users.updateProfile({
@@ -1846,13 +1858,7 @@ test("updateProfile keeps the bio when it's omitted and clears it on null", () =
 test("updateProfile rejects a bio over the maximum length or blank", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "desmond", password: "pw-desmond" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "desmond", password: "pw-desmond" },
-      });
+      const { accessToken } = yield* signUpTestUser("desmond");
       const authed = yield* makeAuthedClient(accessToken);
 
       yield* authed.users
@@ -1896,9 +1902,7 @@ test("deleteAccount rejects a wrong password", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "susan", password: "pw-susan12" },
-      });
+      yield* createAdmin("susan", "pw-susan12");
       const { accessToken } = yield* c.users.login({
         payload: { username: "susan", password: "pw-susan12" },
       });
@@ -1910,37 +1914,83 @@ test("deleteAccount rejects a wrong password", () =>
     }),
   ));
 
-test("deleteAccount removes the account, cascading to its posts, and prevents future login", () =>
+test("deleteAccount lets an admin password account confirm with its password", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const created = yield* c.users.register({
-        payload: { username: "ronny", password: "pw-ronny12" },
-      });
+      yield* createAdmin("leaving", "pw-leaving1");
       const { accessToken } = yield* c.users.login({
-        payload: { username: "ronny", password: "pw-ronny12" },
+        payload: { username: "leaving", password: "pw-leaving1" },
       });
+      const authed = yield* makeAuthedClient(accessToken);
+      yield* authed.users.deleteAccount({
+        payload: { password: "pw-leaving1" },
+      });
+      const result = yield* c.users
+        .login({ payload: { username: "leaving", password: "pw-leaving1" } })
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("InvalidCredentials");
+    }),
+  ));
+
+test("deleteAccount refuses a Google account confirming with a password, another Google account's token, or a stale token", () =>
+  run(
+    Effect.gen(function* () {
+      const { accessToken } = yield* signUpTestUser("careful");
+      yield* signUpTestUser("bystander");
+      const authed = yield* makeAuthedClient(accessToken);
+      const sub = googleSubFor("careful");
+      const now = Math.floor(Date.now() / 1000);
+      // Still unexpired, but signed in an hour-long token's middle age —
+      // re-confirming needs a sign-in made just now.
+      const stale = yield* Effect.promise(() =>
+        mintGoogleIdToken({ sub, iat: now - 10 * 60 }),
+      );
+      for (const [label, payload] of [
+        ["a password", { password: "anything-at-all" }],
+        [
+          "someone else's token",
+          { idToken: yield* googleIdTokenFor("bystander") },
+        ],
+        ["a stale token", { idToken: stale }],
+        ["garbage", { idToken: "garbage" }],
+      ] as const) {
+        const result = yield* authed.users
+          .deleteAccount({ payload })
+          .pipe(Effect.flip);
+        expect(result._tag, label).toBe("InvalidCredentials");
+      }
+      // Still there.
+      const me = yield* authed.users.getUser({
+        params: { id: decodeClaims(accessToken).sub },
+      });
+      expect(me.username).toBe("careful");
+    }),
+  ));
+
+test("deleteAccount removes a Google account after a fresh Google sign-in, cascading to its posts — signing in again starts over", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const { user: created, accessToken } = yield* signUpTestUser("ronny");
       const authed = yield* makeAuthedClient(accessToken);
       const post = yield* authed.posts.createPost({
         payload: { contentType: "text", content: "hello world" },
       });
 
       yield* authed.users.deleteAccount({
-        payload: { password: "pw-ronny12" },
+        payload: { idToken: yield* googleIdTokenFor("ronny") },
       });
 
-      yield* c.users
-        .login({ payload: { username: "ronny", password: "pw-ronny12" } })
-        .pipe(Effect.flip);
+      // The Google account is a stranger again: no session, just the
+      // username step.
+      const again = yield* c.users.loginGoogle({
+        payload: { idToken: yield* googleIdTokenFor("ronny") },
+      });
+      expect("needsUsername" in again).toBe(true);
 
-      // Register a fresh user just to get an authenticated client to look up
-      // the now-deleted account/post through.
-      yield* c.users.register({
-        payload: { username: "sabrina", password: "pw-sabrina" },
-      });
-      const { accessToken: otherToken } = yield* c.users.login({
-        payload: { username: "sabrina", password: "pw-sabrina" },
-      });
+      // A fresh user to look up the now-deleted account/post through.
+      const { accessToken: otherToken } = yield* signUpTestUser("sabrina");
       const otherAuthed = yield* makeAuthedClient(otherToken);
 
       const getUserResult = yield* otherAuthed.users
@@ -1959,19 +2009,12 @@ test("deleteAccount immediately invalidates the caller's own outstanding tokens 
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "quincy", password: "pw-quincy1" },
-      });
-      const sessionA = yield* c.users.login({
-        payload: { username: "quincy", password: "pw-quincy1" },
-      });
-      const sessionB = yield* c.users.login({
-        payload: { username: "quincy", password: "pw-quincy1" },
-      });
+      const sessionA = yield* signUpTestUser("quincy");
+      const sessionB = yield* signInTestUser("quincy");
 
       const authedA = yield* makeAuthedClient(sessionA.accessToken);
       yield* authedA.users.deleteAccount({
-        payload: { password: "pw-quincy1" },
+        payload: { idToken: yield* googleIdTokenFor("quincy") },
       });
 
       yield* c.users
@@ -1983,22 +2026,18 @@ test("deleteAccount immediately invalidates the caller's own outstanding tokens 
 test("deleteAccount is rate-limited per account after repeated wrong attempts", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "percy", password: "pw-percy12" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "percy", password: "pw-percy12" },
-      });
+      const { accessToken } = yield* signUpTestUser("percy");
       const authed = yield* makeAuthedClient(accessToken);
       // DELETE_ACCOUNT_MAX_ATTEMPTS_PER_ACCOUNT is 5 (UsersHandler.ts).
       for (let i = 0; i < 5; i++) {
         yield* authed.users
-          .deleteAccount({ payload: { password: "wrong-pw" } })
+          .deleteAccount({ payload: { idToken: "wrong-token" } })
           .pipe(Effect.flip);
       }
       const result = yield* authed.users
-        .deleteAccount({ payload: { password: "wrong-pw" } })
+        .deleteAccount({
+          payload: { idToken: yield* googleIdTokenFor("percy") },
+        })
         .pipe(Effect.flip);
       const left = result as {
         _tag: string;
@@ -2013,9 +2052,7 @@ test("updateUserRole rejects an unauthenticated request", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const created = yield* c.users.register({
-        payload: { username: "opal", password: "pw-opal123" },
-      });
+      const { user: created } = yield* signUpTestUser("opal");
       const result = yield* c.users
         .updateUserRole({
           params: { id: created.id },
@@ -2029,16 +2066,8 @@ test("updateUserRole rejects an unauthenticated request", () =>
 test("updateUserRole rejects a non-admin caller with Forbidden", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const target = yield* c.users.register({
-        payload: { username: "nadia", password: "pw-nadia12" },
-      });
-      yield* c.users.register({
-        payload: { username: "myron", password: "pw-myron12" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "myron", password: "pw-myron12" },
-      });
+      const { user: target } = yield* signUpTestUser("nadia");
+      const { accessToken } = yield* signUpTestUser("myron");
       const authed = yield* makeAuthedClient(accessToken);
 
       const result = yield* authed.users
@@ -2096,12 +2125,8 @@ test("updateUserRole promotes a user to admin, immediately invalidating their ou
       );
 
       const c = yield* makeClient;
-      const target = yield* c.users.register({
-        payload: { username: "louise", password: "pw-louise1" },
-      });
-      const targetSession = yield* c.users.login({
-        payload: { username: "louise", password: "pw-louise1" },
-      });
+      const { user: target } = yield* signUpTestUser("louise");
+      const targetSession = yield* signInTestUser("louise");
 
       const { accessToken: adminToken } = yield* c.users.login({
         payload: { username: "adminkarl", password: "pw-admin456" },
@@ -2126,9 +2151,7 @@ test("updateUserRole promotes a user to admin, immediately invalidating their ou
       expect(staleResult._tag).toBe("Unauthorized");
 
       // A fresh login reflects the new role.
-      const { user: reloggedUser } = yield* c.users.login({
-        payload: { username: "louise", password: "pw-louise1" },
-      });
+      const { user: reloggedUser } = yield* signInTestUser("louise");
       expect(reloggedUser.role).toBe("admin");
     }),
   ));
@@ -2137,9 +2160,7 @@ test("deleteUser rejects an unauthenticated request", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const created = yield* c.users.register({
-        payload: { username: "unauthtarget", password: "pw-target12" },
-      });
+      const { user: created } = yield* signUpTestUser("unauthtarget");
       const result = yield* c.users
         .deleteUser({ params: { id: created.id } })
         .pipe(Effect.flip);
@@ -2150,16 +2171,8 @@ test("deleteUser rejects an unauthenticated request", () =>
 test("deleteUser rejects a non-admin caller with Forbidden", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const target = yield* c.users.register({
-        payload: { username: "victim1", password: "pw-victim12" },
-      });
-      yield* c.users.register({
-        payload: { username: "regular1", password: "pw-regular1" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "regular1", password: "pw-regular1" },
-      });
+      const { user: target } = yield* signUpTestUser("victim1");
+      const { accessToken } = yield* signUpTestUser("regular1");
       const authed = yield* makeAuthedClient(accessToken);
 
       const result = yield* authed.users
@@ -2253,12 +2266,8 @@ test("deleteUser removes the target, cascading to its posts, and invalidates its
       );
 
       const c = yield* makeClient;
-      const target = yield* c.users.register({
-        payload: { username: "doomed1", password: "pw-doomed12" },
-      });
-      const targetSession = yield* c.users.login({
-        payload: { username: "doomed1", password: "pw-doomed12" },
-      });
+      const { user: target } = yield* signUpTestUser("doomed1");
+      const targetSession = yield* signInTestUser("doomed1");
       const targetAuthed = yield* makeAuthedClient(targetSession.accessToken);
       const post = yield* targetAuthed.posts.createPost({
         payload: { contentType: "text", content: "about to be deleted" },
@@ -2288,28 +2297,23 @@ test("deleteUser removes the target, cascading to its posts, and invalidates its
         .pipe(Effect.flip);
       expect(staleResult._tag).toBe("Unauthorized");
 
-      // The target's refresh token no longer works either, and they can't
-      // log back in.
+      // The target's refresh token no longer works either, and signing in
+      // with their Google account again finds no account.
       yield* c.users
         .refresh({ payload: { refreshToken: targetSession.refreshToken } })
         .pipe(Effect.flip);
 
-      yield* c.users
-        .login({ payload: { username: "doomed1", password: "pw-doomed12" } })
-        .pipe(Effect.flip);
+      const again = yield* c.users.loginGoogle({
+        payload: { idToken: yield* googleIdTokenFor("doomed1") },
+      });
+      expect("needsUsername" in again).toBe(true);
     }),
   ));
 
 test("updateStatus sets and clears statusText/statusEmoji, reflected by getUser", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const created = yield* c.users.register({
-        payload: { username: "stella", password: "pw-stella1" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "stella", password: "pw-stella1" },
-      });
+      const { user: created, accessToken } = yield* signUpTestUser("stella");
       const authed = yield* makeAuthedClient(accessToken);
 
       const updated = yield* authed.users.updateStatus({
@@ -2337,13 +2341,7 @@ test("updateStatus sets and clears statusText/statusEmoji, reflected by getUser"
 test("updateStatus sets a future statusExpiresAt from expiresInMinutes", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "tobias", password: "pw-tobias1" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "tobias", password: "pw-tobias1" },
-      });
+      const { accessToken } = yield* signUpTestUser("tobias");
       const authed = yield* makeAuthedClient(accessToken);
 
       const before = Date.now();
@@ -2365,13 +2363,7 @@ test("updateStatus sets a future statusExpiresAt from expiresInMinutes", () =>
 test("updateStatus rejects a statusText over the maximum length", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "ursula", password: "pw-ursula1" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "ursula", password: "pw-ursula1" },
-      });
+      const { accessToken } = yield* signUpTestUser("ursula");
       const authed = yield* makeAuthedClient(accessToken);
 
       yield* authed.users
@@ -2388,13 +2380,7 @@ test("updateStatus rejects a statusText over the maximum length", () =>
 test("updateStatus rejects a statusEmoji over the maximum length", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "vance", password: "pw-vance123" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "vance", password: "pw-vance123" },
-      });
+      const { accessToken } = yield* signUpTestUser("vance");
       const authed = yield* makeAuthedClient(accessToken);
 
       yield* authed.users
@@ -2411,13 +2397,7 @@ test("updateStatus rejects a statusEmoji over the maximum length", () =>
 test("updateStatus rejects expiresInMinutes when clearing the status", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      yield* c.users.register({
-        payload: { username: "wendy", password: "pw-wendy123" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "wendy", password: "pw-wendy123" },
-      });
+      const { accessToken } = yield* signUpTestUser("wendy");
       const authed = yield* makeAuthedClient(accessToken);
 
       yield* authed.users
@@ -2435,13 +2415,7 @@ test("updateStatus rejects expiresInMinutes when clearing the status", () =>
 test("a status past its expiry reads back as null everywhere", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const created = yield* c.users.register({
-        payload: { username: "xena", password: "pw-xena1234" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "xena", password: "pw-xena1234" },
-      });
+      const { user: created, accessToken } = yield* signUpTestUser("xena");
       const authed = yield* makeAuthedClient(accessToken);
 
       yield* authed.users.updateStatus({
@@ -2529,15 +2503,9 @@ test("logout with allSessions closes the user's open sockets, and only theirs", 
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const me = yield* c.users.register({
-        payload: { username: "wsrevoke1", password: "pw-wsrevoke1" },
-      });
-      const other = yield* c.users.register({
-        payload: { username: "wsrevoke2", password: "pw-wsrevoke2" },
-      });
-      const { refreshToken } = yield* c.users.login({
-        payload: { username: "wsrevoke1", password: "pw-wsrevoke1" },
-      });
+      const { user: me } = yield* signUpTestUser("wsrevoke1");
+      const { user: other } = yield* signUpTestUser("wsrevoke2");
+      const { refreshToken } = yield* signInTestUser("wsrevoke1");
       const tabA = yield* openSocket(me.id);
       const tabB = yield* openSocket(me.id);
       const theirs = yield* openSocket(other.id);
@@ -2554,12 +2522,7 @@ test("a single-session logout leaves the user's other sockets open", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const me = yield* c.users.register({
-        payload: { username: "wsrevoke3", password: "pw-wsrevoke3" },
-      });
-      const { refreshToken } = yield* c.users.login({
-        payload: { username: "wsrevoke3", password: "pw-wsrevoke3" },
-      });
+      const { user: me, refreshToken } = yield* signUpTestUser("wsrevoke3");
       const tab = yield* openSocket(me.id);
 
       yield* c.users.logout({ payload: { refreshToken } });
@@ -2572,9 +2535,7 @@ test("changePassword closes the user's open sockets", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
-      const me = yield* c.users.register({
-        payload: { username: "wsrevoke4", password: "pw-wsrevoke4" },
-      });
+      const me = yield* createAdmin("wsrevoke4", "pw-wsrevoke4");
       const { accessToken } = yield* c.users.login({
         payload: { username: "wsrevoke4", password: "pw-wsrevoke4" },
       });
@@ -2595,18 +2556,12 @@ test("changePassword closes the user's open sockets", () =>
 test("deleteAccount closes the user's open sockets", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
-      const me = yield* c.users.register({
-        payload: { username: "wsrevoke5", password: "pw-wsrevoke5" },
-      });
-      const { accessToken } = yield* c.users.login({
-        payload: { username: "wsrevoke5", password: "pw-wsrevoke5" },
-      });
+      const { user: me, accessToken } = yield* signUpTestUser("wsrevoke5");
       const tab = yield* openSocket(me.id);
 
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.users.deleteAccount({
-        payload: { password: "pw-wsrevoke5" },
+        payload: { idToken: yield* googleIdTokenFor("wsrevoke5") },
       });
 
       expect(tab.closed).toBe(1);
@@ -2616,11 +2571,8 @@ test("deleteAccount closes the user's open sockets", () =>
 test("an admin's role change or deletion closes the target's open sockets", () =>
   run(
     Effect.gen(function* () {
-      const c = yield* makeClient;
       const admin = yield* insertAdmin("wsrevokeadmin", "pw-wsrevokeadmin");
-      const target = yield* c.users.register({
-        payload: { username: "wsrevoke6", password: "pw-wsrevoke6" },
-      });
+      const { user: target } = yield* signUpTestUser("wsrevoke6");
 
       const beforeRoleChange = yield* openSocket(target.id);
       yield* admin.users.updateUserRole({

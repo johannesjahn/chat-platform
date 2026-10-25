@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { signInWithGoogle } from "./google";
 import { logOut } from "./helpers";
 
 // Issue #603: the prerendered SPA shell has no session, so until the bundle
@@ -75,9 +76,7 @@ test("the session marker hydrates cleanly and follows login and logout", async (
   await expect(page.locator("html")).toHaveAttribute("data-session", "out");
 
   await page.goto("/login");
-  await page.fill("#username", user.username);
-  await page.fill("#password", user.password);
-  await page.getByRole("button", { name: "Log in" }).click();
+  await signInWithGoogle(page, user.sub);
   await expect(page).toHaveURL("/");
   await expect(page.locator("html")).toHaveAttribute("data-session", "in");
 

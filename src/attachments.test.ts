@@ -20,6 +20,11 @@ import {
 import { Db } from "./Db.ts";
 import { attachments, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
+import {
+  googleIdTokenFor,
+  signInTestUser,
+  signUpTestUser,
+} from "./testUsers.ts";
 
 process.env.JWT_SECRET ??= "test-secret";
 
@@ -41,15 +46,9 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
-
-const registerAndLogin = (username: string, password: string) =>
+const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return { user, accessToken };
   });
 
@@ -160,10 +159,7 @@ test("uploadAttachment rejects an unauthenticated request", () =>
 test("uploadAttachment rejects an unsupported mime type", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader1",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader1");
       const result = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
           filename: "script.js",
@@ -178,10 +174,7 @@ test("uploadAttachment rejects an unsupported mime type", () =>
 test("uploadAttachment rejects a PDF file", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader-pdf",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader-pdf");
       const result = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
           filename: "report.pdf",
@@ -196,10 +189,7 @@ test("uploadAttachment rejects a PDF file", () =>
 test("uploadAttachment rejects a file over the size limit", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader2",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader2");
       const oversized = new Uint8Array(MAX_ATTACHMENT_SIZE_BYTES + 1);
       const result = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
@@ -215,10 +205,7 @@ test("uploadAttachment rejects a file over the size limit", () =>
 test("uploadAttachment stores the file and returns metadata with a usable url", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader3",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader3");
       const data = yield* Effect.promise(() => makePng(40, 30));
       const result = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
@@ -266,10 +253,7 @@ test("uploadAttachment stores the file and returns metadata with a usable url", 
 test("uploadAttachment scales an oversized image down to the max dimension", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader-scale",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader-scale");
       // 3000x1500 exceeds the 2048px longest-edge cap — the 2:1 aspect ratio
       // should be preserved through the scale-down.
       const data = yield* Effect.promise(() => makePng(3000, 1500));
@@ -297,10 +281,7 @@ test("uploadAttachment scales an oversized image down to the max dimension", () 
 test("uploadAttachment rejects a file claiming an image mime type it isn't", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader-badimg",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader-badimg");
       const result = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
           filename: "not-a-photo.png",
@@ -315,10 +296,7 @@ test("uploadAttachment rejects a file claiming an image mime type it isn't", () 
 test("uploadAttachment stores a video file transcoded to webm", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader-video",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader-video");
       const data = yield* Effect.promise(() => makeMp4(320, 240));
       const result = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
@@ -355,10 +333,7 @@ test("uploadAttachment stores a video file transcoded to webm", () =>
 test("uploadAttachment scales an oversized video down to the max dimension", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader-vscale",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader-vscale");
       // 1920x1080 exceeds the 1280px longest-edge cap — the 16:9 aspect
       // ratio should be preserved through the scale-down.
       const data = yield* Effect.promise(() => makeMp4(1920, 1080));
@@ -382,10 +357,7 @@ test("uploadAttachment scales an oversized video down to the max dimension", () 
 test("uploadAttachment rejects a file claiming a video mime type it isn't", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader-badvideo",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader-badvideo");
       const result = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
           filename: "not-a-video.mp4",
@@ -400,10 +372,7 @@ test("uploadAttachment rejects a file claiming a video mime type it isn't", () =
 test("uploadAttachment transcodes audio to Ogg/Opus and shrinks the size", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader-audio",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader-audio");
       const data = yield* Effect.promise(() => makeWav(1, 1));
       const result = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
@@ -449,10 +418,7 @@ test("uploadAttachment transcodes audio to Ogg/Opus and shrinks the size", () =>
 test("uploadAttachment downmixes an audio file with more than stereo channels", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader-audio-downmix",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader-audio-downmix");
       // 6-channel (5.1) source — should be downmixed to stereo rather than
       // rejected or carried through as-is (issue #252).
       const data = yield* Effect.promise(() => makeWav(0.5, 6));
@@ -473,10 +439,7 @@ test("uploadAttachment downmixes an audio file with more than stereo channels", 
 test("uploadAttachment rejects a file claiming an audio mime type it isn't", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "uploader-badaudio",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("uploader-badaudio");
       const result = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
           filename: "not-a-song.mp3",
@@ -491,8 +454,8 @@ test("uploadAttachment rejects a file claiming an audio mime type it isn't", () 
 test("createMessage attaches an uploaded file the sender owns", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice-att", "pw-testpass");
-      const bob = yield* registerAndLogin("bob-att", "pw-testpass");
+      const alice = yield* registerAndLogin("alice-att");
+      const bob = yield* registerAndLogin("bob-att");
       const authedAlice = yield* makeAuthedClient(alice.accessToken);
 
       const data = yield* Effect.promise(() => makeWav(0.5, 1));
@@ -540,8 +503,8 @@ test("createMessage attaches an uploaded file the sender owns", () =>
 test("createMessage rejects an attachmentId the sender doesn't own", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice-att2", "pw-testpass");
-      const bob = yield* registerAndLogin("bob-att2", "pw-testpass");
+      const alice = yield* registerAndLogin("alice-att2");
+      const bob = yield* registerAndLogin("bob-att2");
       const authedBob = yield* makeAuthedClient(bob.accessToken);
 
       const data = yield* Effect.promise(() => makeWav(0.5, 1));
@@ -574,10 +537,7 @@ test("createMessage rejects an attachmentId the sender doesn't own", () =>
 test("createPost attaches an uploaded file", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "poster-att",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("poster-att");
       const authed = yield* makeAuthedClient(accessToken);
 
       const data = yield* Effect.promise(() => makeMp4(320, 240));
@@ -639,10 +599,7 @@ test("CreatePostBody accepts a well-formed attachment payload", () => {
 test("uploadAttachment rejects an upload that would exceed the per-user storage quota", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { user, accessToken } = yield* registerAndLogin(
-        "uploader-quota",
-        "pw-testpass",
-      );
+      const { user, accessToken } = yield* registerAndLogin("uploader-quota");
       const db = yield* Db;
       yield* Effect.promise(() =>
         db.insert(attachments).values({
@@ -671,10 +628,8 @@ test("uploadAttachment rejects an upload that would exceed the per-user storage 
 test("uploadAttachment succeeds when comfortably under the per-user storage quota", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { user, accessToken } = yield* registerAndLogin(
-        "uploader-quota-ok",
-        "pw-testpass",
-      );
+      const { user, accessToken } =
+        yield* registerAndLogin("uploader-quota-ok");
       const db = yield* Db;
       yield* Effect.promise(() =>
         db.insert(attachments).values({
@@ -716,10 +671,7 @@ const storageUsedBytes = (userId: number) =>
 test("storage used tracks uploads and deletes through the API", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { user, accessToken } = yield* registerAndLogin(
-        "uploader-counter",
-        "pw-testpass",
-      );
+      const { user, accessToken } = yield* registerAndLogin("uploader-counter");
       expect(yield* storageUsedBytes(user.id)).toBe(0);
 
       const data = yield* Effect.promise(() => makePng(10, 10));
@@ -754,14 +706,8 @@ test("storage used tracks uploads and deletes through the API", () =>
 test("storage used follows direct writes to attachments", () =>
   run(() =>
     Effect.gen(function* () {
-      const { user: alice } = yield* registerAndLogin(
-        "counter-alice",
-        "pw-testpass",
-      );
-      const { user: bob } = yield* registerAndLogin(
-        "counter-bob",
-        "pw-testpass",
-      );
+      const { user: alice } = yield* registerAndLogin("counter-alice");
+      const { user: bob } = yield* registerAndLogin("counter-bob");
       const db = yield* Db;
       const [row] = yield* Effect.promise(() =>
         db
@@ -798,7 +744,6 @@ test("deleting an attachment frees its quota for the next upload", () =>
     Effect.gen(function* () {
       const { user, accessToken } = yield* registerAndLogin(
         "uploader-quota-freed",
-        "pw-testpass",
       );
       const db = yield* Db;
       const [big] = yield* Effect.promise(() =>
@@ -846,10 +791,7 @@ test("deleteAttachment rejects an unauthenticated request", () =>
 test("deleteAttachment removes an attachment owned by the caller", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "deleter1",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("deleter1");
       const data = yield* Effect.promise(() => makePng(10, 10));
       const upload = yield* Effect.promise(() =>
         uploadFile(handler, accessToken, {
@@ -876,8 +818,8 @@ test("deleteAttachment removes an attachment owned by the caller", () =>
 test("deleteAttachment 404s for an attachment the caller doesn't own", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice-del", "pw-testpass");
-      const bob = yield* registerAndLogin("bob-del", "pw-testpass");
+      const alice = yield* registerAndLogin("alice-del");
+      const bob = yield* registerAndLogin("bob-del");
 
       const data = yield* Effect.promise(() => makePng(10, 10));
       const upload = yield* Effect.promise(() =>
@@ -906,10 +848,7 @@ test("deleteAttachment 404s for an attachment the caller doesn't own", () =>
 test("deleteAttachment 404s for a nonexistent attachment id", () =>
   run(() =>
     Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin(
-        "deleter-missing",
-        "pw-testpass",
-      );
+      const { accessToken } = yield* registerAndLogin("deleter-missing");
       const authed = yield* makeAuthedClient(accessToken);
       const result = yield* authed.attachments
         .deleteAttachment({ params: { id: 999999 } })
@@ -967,8 +906,8 @@ const storedObjects = (storageKeys: ReadonlyArray<string>) =>
 test("deleteAccount removes the account's attachment objects from storage (issue #652)", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("erasure1", "pw-testpass");
-      const bob = yield* registerAndLogin("erasure1b", "pw-testpass");
+      const alice = yield* registerAndLogin("erasure1");
+      const bob = yield* registerAndLogin("erasure1b");
       const { ids, storageKeys } = yield* uploadTwoAttachments(
         handler,
         alice.accessToken,
@@ -988,7 +927,7 @@ test("deleteAccount removes the account's attachment objects from storage (issue
       expect(yield* storedObjects(storageKeys)).toEqual(storageKeys);
 
       yield* aliceClient.users.deleteAccount({
-        payload: { password: "pw-testpass" },
+        payload: { idToken: yield* googleIdTokenFor("erasure1") },
       });
 
       expect(yield* storedObjects(storageKeys)).toEqual([]);
@@ -998,8 +937,8 @@ test("deleteAccount removes the account's attachment objects from storage (issue
 test("an admin's deleteUser removes the account's attachment objects from storage (issue #652)", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
-      const target = yield* registerAndLogin("erasure2", "pw-testpass");
-      const admin = yield* registerAndLogin("erasure2admin", "pw-testpass");
+      const target = yield* registerAndLogin("erasure2");
+      const admin = yield* registerAndLogin("erasure2admin");
       const db = yield* Db;
       yield* Effect.promise(() =>
         db
@@ -1008,9 +947,7 @@ test("an admin's deleteUser removes the account's attachment objects from storag
           .where(eq(users.id, admin.user.id)),
       );
       // Log in again so the token carries the admin role.
-      const { accessToken } = yield* (yield* makeClient).users.login({
-        payload: { username: "erasure2admin", password: "pw-testpass" },
-      });
+      const { accessToken } = yield* signInTestUser("erasure2admin");
       const { storageKeys } = yield* uploadTwoAttachments(
         handler,
         target.accessToken,

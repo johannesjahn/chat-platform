@@ -8,14 +8,13 @@ import { Db } from "./Db.ts";
 import { gameLobbies, gameResults } from "./db/schema.ts";
 import { extractMentionedUsernames } from "./notifications.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signUpTestUser } from "./testUsers.ts";
 
 // Same shape as games.test.ts's harness: `effect` also gets `Db` directly,
 // sharing the API layer's in-memory instance, so a test can fast-forward a
 // race's clock (move `startsAt` into the past — no endpoint lets it) and seed
 // back-dated results for the leaderboard.
 const run = makeTestRun();
-
-const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
 const makeAuthedClient = (token: string) =>
   HttpApiClient.make(ChatApi, {
@@ -27,13 +26,9 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-const registerAndLogin = (username: string, password: string) =>
+const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return { user, accessToken };
   });
 
@@ -51,10 +46,7 @@ const expectFailure = <A, E>(
 
 const setup = (username: string) =>
   Effect.gen(function* () {
-    const { user, accessToken } = yield* registerAndLogin(
-      username,
-      "pw-testpass",
-    );
+    const { user, accessToken } = yield* registerAndLogin(username);
     const client = yield* makeAuthedClient(accessToken);
     return { user, client };
   });

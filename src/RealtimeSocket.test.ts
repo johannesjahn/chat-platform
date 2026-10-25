@@ -5,6 +5,7 @@ import { Effect } from "effect";
 import { ChatApi } from "./Api.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signUpTestUser } from "./testUsers.ts";
 
 // These only exercise the pre-upgrade auth checks in RealtimeSocket.ts (the
 // paths that return a plain 401 without ever calling
@@ -40,16 +41,9 @@ test("GET /ws with an unknown ticket is rejected", async () => {
   );
 });
 
-const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
-
 const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const password = "password123";
-    yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { accessToken } = yield* signUpTestUser(username);
     return accessToken;
   });
 

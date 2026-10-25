@@ -573,7 +573,9 @@ function Nav({
             <MenuLink to="/admin" icon={Gauge} label="Admin" />
           )}
           <ThemeToggle variant="menu" />
-          {session ? (
+          {/* Signed out, the bar's own "Log in" is all the panel needs — no
+              "Register": a first Google sign-in creates the account. */}
+          {session && (
             <>
               <Button
                 asChild
@@ -597,12 +599,6 @@ function Nav({
                 Log out
               </Button>
             </>
-          ) : (
-            <Button asChild className="mt-1">
-              <Link to="/register" search={{ redirect }}>
-                Register
-              </Link>
-            </Button>
           )}
         </div>
       </Collapse>
@@ -612,18 +608,13 @@ function Nav({
 
 function SignedOutNavActions({ redirect }: { redirect: string | undefined }) {
   return (
-    <>
-      <Button asChild variant="ghost" size="sm">
-        <Link to="/login" search={{ redirect }}>
-          Log in
-        </Link>
-      </Button>
-      <Button asChild size="sm" className="hidden sm:inline-flex">
-        <Link to="/register" search={{ redirect }}>
-          Register
-        </Link>
-      </Button>
-    </>
+    // Signing in with Google creates the account on first use, so there's
+    // no separate "Register" (issue #693).
+    <Button asChild size="sm">
+      <Link to="/login" search={{ redirect }}>
+        Log in
+      </Link>
+    </Button>
   );
 }
 

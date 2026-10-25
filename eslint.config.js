@@ -44,6 +44,9 @@ export default tseslint.config(
         __ENV: "readonly",
         __VU: "readonly",
         __ITER: "readonly",
+        // k6's init-context file reader (lib/api.js reads the pre-minted
+        // Google ID tokens with it).
+        open: "readonly",
         console: "readonly",
       },
     },

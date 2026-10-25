@@ -15,6 +15,7 @@ import { Cache, Effect, Metric } from "effect";
 import { setLogUser } from "./RedactedLogger.ts";
 import {
   ALLOWED_AVATAR_MIME_TYPES,
+  type AuthMethod,
   AvatarTooLarge,
   ChatApi,
   DEFAULT_POSTS_LIMIT,
@@ -42,6 +43,7 @@ import {
   generateAvatarToken,
 } from "./avatars.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
+import { GoogleIdToken } from "./GoogleIdToken.ts";
 import { processAvatar } from "./ImageProcessing.ts";
 import { withMediaProcessingPermit } from "./MediaProcessingLimit.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
@@ -81,10 +83,20 @@ const LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP = 5;
 const LOGIN_MAX_FAILURES_PER_ACCOUNT = 50;
 const LOGIN_WINDOW_SECONDS = 15 * 60;
 
+// Google sign-in has no account bucket to key on before the token is
+// verified, and a guess can't succeed without Google's signature anyway — so
+// it's capped per IP only, with login's per-IP budget.
+const GOOGLE_LOGIN_MAX_ATTEMPTS_PER_IP = LOGIN_MAX_ATTEMPTS_PER_IP;
+const GOOGLE_LOGIN_WINDOW_SECONDS = LOGIN_WINDOW_SECONDS;
+
 // Registration has no natural "account" bucket (that's what's being
 // created), so it's capped per IP only.
 const REGISTER_MAX_ATTEMPTS_PER_IP = 5;
 const REGISTER_WINDOW_SECONDS = 60 * 60;
+
+// Deleting a Google account re-confirms with a Google sign-in made just now,
+// not whichever ID token the browser last saw (those live for an hour).
+const DELETE_ACCOUNT_GOOGLE_MAX_AGE_SECONDS = 5 * 60;
 
 // Refreshing is routine/automatic (a client does it roughly once per access
 // token lifetime), so its limit is looser than login's — it exists mainly as
@@ -311,13 +323,13 @@ export const publicUserColumns = {
 } as const;
 
 // Auth funnel counter (issue #196) — labeled only by `event`
-// ("signup"/"login"/"refresh") and `outcome` ("success"/"failure"), never by
-// username/user id. A request rejected by enforceRateLimit above is counted
+// ("google_login"/"google_signup"/"login"/"refresh") and `outcome`
+// ("success"/"failure"), never by username/user id. A request rejected by enforceRateLimit above is counted
 // there instead (as a rate_limit_rejections_total, not an auth_events_total
 // failure), so a single rejected request isn't double-counted across both
 // metrics.
 const recordAuthEvent = (
-  event: "signup" | "login" | "refresh",
+  event: "google_login" | "google_signup" | "login" | "refresh",
   outcome: "success" | "failure",
 ) =>
   Metric.update(
@@ -387,6 +399,33 @@ const rotateRefreshToken = (
     return rotated ? token : null;
   });
 
+// A fresh session for a user who just proved who they are — the same access
+// + refresh pair whichever way they did it (issue #693: Google only replaces
+// how identity is proven, not the session that follows).
+const issueSession = (
+  db: DrizzleDb,
+  jwt: Jwt["Service"],
+  user: UserRow & { tokenVersion: number },
+  authMethod: AuthMethod,
+) =>
+  Effect.gen(function* () {
+    const tokenUser = {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
+    };
+    const accessToken = yield* jwt.signAccessToken(tokenUser);
+    const refreshToken = yield* issueRefreshToken(db, jwt, tokenUser);
+    yield* setLogUser(user.username);
+    return {
+      user: toPublicUser(user),
+      accessToken,
+      refreshToken,
+      authMethod,
+    };
+  });
+
 // Revokes every still-active (unrevoked) row in a token family — called when
 // a refresh token is replayed after having already been rotated away, which
 // means it was stolen: the thief and the legitimate holder now both think
@@ -440,6 +479,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
     const connections = yield* RealtimeConnections;
     const pubsub = yield* PubSub;
     const jwt = yield* Jwt;
+    const google = yield* GoogleIdToken;
     const tokenVersionCache = yield* TokenVersionCache;
     return handlers
       .handle("searchUsers", ({ query: { q } }) =>
@@ -650,7 +690,45 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           };
         }),
       )
-      .handle("register", ({ payload }) =>
+      .handle("getAuthConfig", () =>
+        Effect.succeed({ googleClientId: google.clientId }),
+      )
+      .handle("loginGoogle", ({ payload }) =>
+        Effect.gen(function* () {
+          const ip = yield* clientIp;
+          yield* enforceRateLimit(
+            limiter,
+            `google-login:ip:${ip}`,
+            GOOGLE_LOGIN_MAX_ATTEMPTS_PER_IP,
+            GOOGLE_LOGIN_WINDOW_SECONDS,
+          );
+
+          const { sub } = yield* google.verify(payload.idToken).pipe(
+            Effect.mapError(
+              () =>
+                new InvalidCredentials({
+                  message: "Google sign-in failed. Please try again.",
+                }),
+            ),
+            Effect.tapError(() => recordAuthEvent("google_login", "failure")),
+          );
+
+          const rows = yield* Effect.tryPromise(() =>
+            db.select().from(users).where(eq(users.googleSub, sub)).limit(1),
+          ).pipe(Effect.orDie);
+          const user = rows[0];
+          yield* recordAuthEvent("google_login", "success");
+          if (!user) {
+            // First sign-in. No row yet — `registerGoogle` creates it once a
+            // username is picked, so an abandoned signup leaves nothing
+            // behind and no placeholder name is ever visible to others.
+            const pendingToken = yield* jwt.signGooglePendingToken(sub);
+            return { needsUsername: true as const, pendingToken };
+          }
+          return yield* issueSession(db, jwt, user, "google");
+        }),
+      )
+      .handle("registerGoogle", ({ payload }) =>
         Effect.gen(function* () {
           const ip = yield* clientIp;
           yield* enforceRateLimit(
@@ -659,6 +737,31 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             REGISTER_MAX_ATTEMPTS_PER_IP,
             REGISTER_WINDOW_SECONDS,
           );
+
+          const { googleSub } = yield* jwt
+            .verifyGooglePendingToken(payload.pendingToken)
+            .pipe(
+              Effect.mapError(
+                () =>
+                  new InvalidCredentials({
+                    message:
+                      "Your Google sign-in has expired. Please sign in again.",
+                  }),
+              ),
+              Effect.tapError(() =>
+                recordAuthEvent("google_signup", "failure"),
+              ),
+            );
+
+          const usernameTaken = () =>
+            Effect.gen(function* () {
+              yield* recordAuthEvent("google_signup", "failure");
+              return yield* Effect.fail(
+                new UsernameTaken({
+                  message: `Username "${payload.username}" is already taken`,
+                }),
+              );
+            });
 
           const existing = yield* Effect.tryPromise(() =>
             db
@@ -672,46 +775,41 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               )
               .limit(1),
           ).pipe(Effect.orDie);
-          if (existing[0]) {
-            yield* recordAuthEvent("signup", "failure");
-            return yield* Effect.fail(
-              new UsernameTaken({
-                message: `Username "${payload.username}" is already taken`,
-              }),
-            );
-          }
+          if (existing[0]) return yield* usernameTaken();
 
-          const passwordHash = yield* hashPassword(payload.password);
-
+          // `onConflictDoNothing` rather than letting a unique violation
+          // surface as a 500: a name taken between the check above and here,
+          // or this Google account registered meanwhile (the form submitted
+          // twice, two tabs), comes back as no row instead.
           const rows = yield* Effect.tryPromise(() =>
             db
               .insert(users)
-              // Registration always creates a "user" — admins are promoted
-              // out-of-band, never via this endpoint.
-              .values({
-                username: payload.username,
-                passwordHash,
-                role: "user",
-              })
-              .returning({
-                id: users.id,
-                username: users.username,
-                displayName: users.displayName,
-                avatarUrl: users.avatarUrl,
-                avatarSmallKey: users.avatarSmallKey,
-                avatarMediumKey: users.avatarMediumKey,
-                avatarLargeKey: users.avatarLargeKey,
-                role: users.role,
-                statusText: users.statusText,
-                statusEmoji: users.statusEmoji,
-                statusExpiresAt: users.statusExpiresAt,
-              }),
+              // Always a "user" — admins are promoted out-of-band or created
+              // with scripts/create-admin.ts, never via this endpoint.
+              .values({ username: payload.username, googleSub, role: "user" })
+              .onConflictDoNothing()
+              .returning(),
           ).pipe(Effect.orDie);
-          if (!rows[0])
-            return yield* Effect.die(new Error("INSERT returned no rows"));
-          yield* recordAuthEvent("signup", "success");
-          yield* setLogUser(rows[0].username);
-          return toPublicUser(rows[0]);
+          const user = rows[0];
+          if (!user) {
+            const registered = yield* Effect.tryPromise(() =>
+              db
+                .select({ id: users.id })
+                .from(users)
+                .where(eq(users.googleSub, googleSub))
+                .limit(1),
+            ).pipe(Effect.orDie);
+            if (!registered[0]) return yield* usernameTaken();
+            yield* recordAuthEvent("google_signup", "failure");
+            return yield* Effect.fail(
+              new InvalidCredentials({
+                message:
+                  "This Google account already has an account. Please sign in again.",
+              }),
+            );
+          }
+          yield* recordAuthEvent("google_signup", "success");
+          return yield* issueSession(db, jwt, user, "google");
         }),
       )
       .handle("login", ({ payload }) =>
@@ -756,11 +854,19 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
 
           // Always run a verify — against a dummy hash when the user is
-          // missing — so timing doesn't reveal whether the username exists.
+          // missing or has no password (a Google account) — so timing
+          // doesn't reveal whether the username exists or how it signs in.
+          // Only an admin may sign in with a password at all (issue #693);
+          // anyone else is refused exactly like a wrong password.
           const user = rows[0];
-          const hash = user ? user.passwordHash : yield* dummyHash();
+          const hash = user?.passwordHash ?? (yield* dummyHash());
           const valid = yield* verifyPassword(payload.password, hash);
-          if (!user || !valid) {
+          if (
+            !user ||
+            user.passwordHash === null ||
+            user.role !== "admin" ||
+            !valid
+          ) {
             yield* recordAuthEvent("login", "failure");
             return yield* Effect.fail(
               new InvalidCredentials({
@@ -776,18 +882,8 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           yield* limiter.reset(accountIpKey);
           yield* limiter.refund(accountKey);
 
-          const publicUser = toPublicUser(user);
-          const tokenUser = {
-            id: user.id,
-            username: user.username,
-            role: user.role,
-            tokenVersion: user.tokenVersion,
-          };
-          const accessToken = yield* jwt.signAccessToken(tokenUser);
-          const refreshToken = yield* issueRefreshToken(db, jwt, tokenUser);
           yield* recordAuthEvent("login", "success");
-          yield* setLogUser(user.username);
-          return { user: publicUser, accessToken, refreshToken };
+          return yield* issueSession(db, jwt, user, "password");
         }),
       )
       .handle("refresh", ({ payload }) =>
@@ -977,8 +1073,16 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               .limit(1),
           ).pipe(Effect.orDie);
           const dbUser = rows[0];
+          if (dbUser && dbUser.passwordHash === null)
+            return yield* Effect.fail(
+              new Forbidden({
+                message:
+                  "This account signs in with Google and has no password to change",
+              }),
+            );
           const valid =
             dbUser &&
+            dbUser.passwordHash !== null &&
             (yield* verifyPassword(
               payload.currentPassword,
               dbUser.passwordHash,
@@ -1258,6 +1362,7 @@ export const UsersHandlerLive = HttpApiBuilder.group(
             db
               .select({
                 passwordHash: users.passwordHash,
+                googleSub: users.googleSub,
                 avatarSmallKey: users.avatarSmallKey,
                 avatarMediumKey: users.avatarMediumKey,
                 avatarLargeKey: users.avatarLargeKey,
@@ -1267,13 +1372,39 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               .limit(1),
           ).pipe(Effect.orDie);
           const dbUser = rows[0];
-          const valid =
-            dbUser &&
-            (yield* verifyPassword(payload.password, dbUser.passwordHash));
-          if (!valid)
+          if (!dbUser)
             return yield* Effect.fail(
               new InvalidCredentials({ message: "Incorrect password" }),
             );
+
+          // A password account confirms with its password, a Google account
+          // with a fresh Google sign-in for the *same* Google account — a
+          // token for some other account of the caller's proves nothing.
+          if ("password" in payload) {
+            const valid =
+              dbUser.passwordHash !== null &&
+              (yield* verifyPassword(payload.password, dbUser.passwordHash));
+            if (!valid)
+              return yield* Effect.fail(
+                new InvalidCredentials({ message: "Incorrect password" }),
+              );
+          } else {
+            const confirmed = yield* google
+              .verify(payload.idToken, {
+                maxAgeSeconds: DELETE_ACCOUNT_GOOGLE_MAX_AGE_SECONDS,
+              })
+              .pipe(Effect.orElseSucceed(() => null));
+            if (
+              !confirmed ||
+              dbUser.googleSub === null ||
+              confirmed.sub !== dbUser.googleSub
+            )
+              return yield* Effect.fail(
+                new InvalidCredentials({
+                  message: "Couldn't confirm it's you with Google",
+                }),
+              );
+          }
 
           yield* deleteUserAndObjects(db, storage, currentUser.id, [
             dbUser.avatarSmallKey,

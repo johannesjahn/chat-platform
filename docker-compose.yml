@@ -168,6 +168,15 @@ services:
       # forge an admin access token (see src/Jwt.ts).
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a long random secret before running docker compose up}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3001}
+      # Google sign-in (see .env.example). Unset leaves only the admin
+      # password accounts (`docker compose exec app bun run create-admin
+      # <username>`).
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      # Load tests only (scripts/loadtest/README.md) — they also set
+      # NODE_ENV=development, since the image's NODE_ENV=production refuses
+      # the test key.
+      GOOGLE_TEST_PUBLIC_KEY: ${GOOGLE_TEST_PUBLIC_KEY:-}
+      NODE_ENV: ${NODE_ENV:-production}
       # `app` reaches Garage over the compose network by service name, but a
       # presigned URL handed to the browser needs the host-mapped address
       # instead — see src/AttachmentStorage.ts's S3_PUBLIC_ENDPOINT.

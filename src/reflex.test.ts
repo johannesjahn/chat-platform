@@ -28,6 +28,7 @@ import {
   type ReflexTap,
 } from "./games/reflex.ts";
 import { makeTestRun } from "./testApi.ts";
+import { signUpTestUser } from "./testUsers.ts";
 
 // Reflex Rush end to end: the pure schedule/scoring module first, then the
 // game through the real HTTP API on the same harness as games.test.ts.
@@ -37,8 +38,6 @@ import { makeTestRun } from "./testApi.ts";
 // race's clock (move `startsAt` into the past — no endpoint lets it) and seed
 // back-dated results for the leaderboard.
 const run = makeTestRun();
-
-const makeClient = HttpApiClient.make(ChatApi, { baseUrl: "http://localhost" });
 
 const makeAuthedClient = (token: string) =>
   HttpApiClient.make(ChatApi, {
@@ -50,13 +49,9 @@ const makeAuthedClient = (token: string) =>
       ),
   });
 
-const registerAndLogin = (username: string, password: string) =>
+const registerAndLogin = (username: string) =>
   Effect.gen(function* () {
-    const c = yield* makeClient;
-    const user = yield* c.users.register({ payload: { username, password } });
-    const { accessToken } = yield* c.users.login({
-      payload: { username, password },
-    });
+    const { user, accessToken } = yield* signUpTestUser(username);
     return { user, accessToken };
   });
 
@@ -304,7 +299,7 @@ const planOf = (lobby: GameLobby): ReflexPlan => {
 test("a solo game runs start → finish, scored server-side and settled onto the leaderboard", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
       const a = yield* makeAuthedClient(alice.accessToken);
 
       const created = yield* a.games.createGameLobby(game);
@@ -386,9 +381,9 @@ test("a solo game runs start → finish, scored server-side and settled onto the
 test("a duel places by score once everyone is in, and a no-show is left off", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
-      const bob = yield* registerAndLogin("bob", "s3cret-pw");
-      const carol = yield* registerAndLogin("carol", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const carol = yield* registerAndLogin("carol");
       const a = yield* makeAuthedClient(alice.accessToken);
       const b = yield* makeAuthedClient(bob.accessToken);
       const c = yield* makeAuthedClient(carol.accessToken);
@@ -449,8 +444,8 @@ test("a duel places by score once everyone is in, and a no-show is left off", ()
 test("finishing is only for seated players of a started Reflex Rush game", () =>
   run(
     Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "s3cret-pw");
-      const bob = yield* registerAndLogin("bob", "s3cret-pw");
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
       const a = yield* makeAuthedClient(alice.accessToken);
       const b = yield* makeAuthedClient(bob.accessToken);
       const taps = Array.from({ length: REFLEX_ROUNDS }, () => MISS);
