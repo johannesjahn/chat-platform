@@ -347,7 +347,7 @@ jobs:
     # (issue #654). Everything else uses the in-memory PubSub and PGlite.
     services:
       redis:
-        image: redis:8.10.2-alpine
+        image: redis:8.10.3-alpine
         ports:
           - 6379:6379
         options: >-
