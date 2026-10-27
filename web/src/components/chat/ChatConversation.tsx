@@ -75,6 +75,7 @@ import {
 } from "@/lib/offlineQueue";
 import { useOnlineStatus } from "@/lib/online";
 import { usePageVisible } from "@/lib/pageVisibility";
+import { useIsDesktop } from "@/lib/media";
 import { useIsOnline } from "@/lib/presence";
 import { isStatusVisible, useUserStatus } from "@/lib/status";
 import { clearTyping, useTypingUsers } from "@/lib/typing";
@@ -294,6 +295,9 @@ export function ChatConversation({
   autoFocusComposer?: boolean;
 }) {
   const docked = variant === "docked";
+  // A phone thread is as narrow as a docked window, so its bubbles float
+  // their actions the same way (see `compact` on MessageBubble).
+  const isDesktop = useIsDesktop();
   const session = useSession();
   const queryClient = useQueryClient();
   const isOnline = useOnlineStatus();
@@ -1034,7 +1038,7 @@ export function ChatConversation({
                             : undefined
                         }
                         onEditEnd={focusComposer}
-                        compact={docked}
+                        compact={docked || !isDesktop}
                         senderLabel={
                           chat.type === "group" && sender
                             ? userLabel(sender)

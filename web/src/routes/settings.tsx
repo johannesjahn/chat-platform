@@ -751,7 +751,7 @@ function EditProfileCard() {
           </div>
           <div className="flex flex-col gap-2">
             <Label>Username</Label>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground wrap-anywhere">
               @{session?.user.username}
             </p>
           </div>

@@ -83,7 +83,9 @@ export function NotificationRow({
         </span>
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-sm">
+        {/* A name or handle is one unbroken word; let it break rather than
+            push the row wider than the inbox. */}
+        <span className="text-sm wrap-anywhere">
           <span className="font-medium">{userLabel(n.actor)}</span>{" "}
           {userHandle(n.actor) && (
             <span className="text-muted-foreground">

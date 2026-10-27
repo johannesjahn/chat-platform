@@ -677,6 +677,9 @@ jobs:
         env:
           SPECS: ${{ needs.changes.outputs.e2e_specs_files }}
           REPEAT_EACH: 5
+        # Inside a job `container`, a `run` step defaults to `sh`, which has
+        # neither `mapfile` nor process substitution.
+        shell: bash
         run: |
           mapfile -t specs < <(bun -e 'for (const f of JSON.parse(process.env.SPECS)) console.log(f.replace(/^web\//, ""))')
           echo "Repeating each of these ${REPEAT_EACH} times:"

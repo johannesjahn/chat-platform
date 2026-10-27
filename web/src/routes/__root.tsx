@@ -559,7 +559,9 @@ function Nav({
               >
                 <Link to="/users/$id" params={{ id: String(session.user.id) }}>
                   <NavIcon icon={User} />
-                  {userLabel(session.user)}
+                  <span className="min-w-0 truncate">
+                    {userLabel(session.user)}
+                  </span>
                 </Link>
               </Button>
               <MenuLink to="/settings" icon={Settings} label="Settings" />
