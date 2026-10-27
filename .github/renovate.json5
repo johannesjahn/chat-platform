@@ -182,14 +182,14 @@
       enabled: false,
     },
 
-    // TypeScript runs as two side-by-side installs (see "TypeScript 7 +
-    // the TS 6 compatibility layer" in CLAUDE.md): `@typescript/native` is
-    // an alias for typescript@7 and provides the `tsc` every `typecheck`
-    // script runs, while `typescript` is an alias for the
-    // @typescript/typescript6 compatibility package, which re-exports the
-    // TS 6 JS API for tools that `import "typescript"` — typescript-eslint
-    // and openapi-typescript, neither of which runs on TS 7 (7.0 ships no
-    // JS API). Keep the compat package on 6.x until both support TS 7.1's
+    // Type checking is `bun check` (Bun's built-in port of typescript-go),
+    // so its TypeScript version moves with BUN_VERSION, not with a package
+    // here (see "TypeScript 7 + the TS 6 compatibility layer" in
+    // CLAUDE.md). `typescript` is an alias for the @typescript/typescript6
+    // compatibility package, which re-exports the TS 6 JS API for tools
+    // that `import "typescript"` — typescript-eslint and
+    // openapi-typescript, neither of which runs on TS 7 (7.0 ships no JS
+    // API). Keep the compat package on 6.x until both support TS 7.1's
     // new API. (matchDepNames, not matchPackageNames: for an npm alias
     // the package name is the alias target, @typescript/typescript6.)
     //

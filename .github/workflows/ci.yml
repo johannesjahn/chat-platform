@@ -185,7 +185,7 @@ jobs:
           root: false
           web: true
 
-      # `typecheck` only tsc --noEmit's web/; that catches type errors but not
+      # `typecheck` only type-checks web/ (`bun check`); that catches type errors but not
       # a bundler failure (e.g. an unresolvable import, an invalid Vite/Rollup
       # config) that only vite build itself would hit. Run the same production
       # build used to ship (web/package.json's "build" script, both the

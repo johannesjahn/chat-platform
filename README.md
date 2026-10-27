@@ -103,14 +103,19 @@ directly**; re-run the relevant command instead. All are gitignored.
 
 ## Lint, format, typecheck
 
-Prettier and ESLint are configured **once at the repo root** and cover both the
-backend and the `web/` frontend (single `eslint.config.js` + `.prettierrc.json`).
+Formatting and ESLint are configured **once at the repo root** and cover both
+the backend and the `web/` frontend (single `eslint.config.js` +
+`.prettierrc.json`). Formatting and type checking use Bun's built-in
+`bun fmt` (Prettier-compatible, reads `.prettierrc.json`/`.prettierignore`) and
+`bun check` (a port of typescript-go that reads `tsconfig.json`), so they need
+**Bun 1.4.4 or newer** — the version pinned in CI and the `Dockerfile`.
 
 ```bash
-bun run format         # write Prettier formatting
+bun run format         # write formatting (bun fmt)
 bun run format:check   # verify formatting (used in CI)
 bun run lint           # ESLint (bun run lint:fix to autofix)
-bun run typecheck      # backend types; run the same in web/ for the frontend
+bun run typecheck      # backend types (bun check); run the same in web/ for the frontend
+bun run test:changed   # only the backend tests your uncommitted changes can affect
 ```
 
 ## Load testing

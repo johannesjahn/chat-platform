@@ -531,18 +531,23 @@ To add a notification type: add it to `NotificationType` (Api.ts), call
 icon in `web/src/components/NotificationRow.tsx` / `NOTIFICATION_ICONS`, a
 target in `notificationTarget`, and a preview in `NotificationPreviewPane`.
 
-Tooling (Prettier, ESLint, TypeScript) lives at the root and covers **both**
+Tooling (formatting, ESLint, TypeScript) lives at the root and covers **both**
 packages — there is a single `eslint.config.js` and `.prettierrc.json`. Run
-lint/format from the repo root; run `typecheck` per package.
+lint/format from the repo root; run `typecheck` per package. Formatting is
+Bun's built-in `bun fmt` (Prettier-compatible: it reads `.prettierrc.json` and
+`.prettierignore`, and its output matches Prettier's on this repo), so
+Prettier itself isn't a dependency; `bun fmt` and `bun check` both need Bun
+1.4.4+.
 
 ### TypeScript 7 + the TS 6 compatibility layer
 
-Both packages compile/typecheck with **TypeScript 7** (the native Go port) but
-keep the **TypeScript 6 JS API** installed for tooling, since TS 7.0 ships no
-JS API. In each `package.json`:
+Both packages typecheck with **TypeScript 7** via `bun check` — Bun's
+built-in port of typescript-go (Bun 1.4.3+), which reads `tsconfig.json`,
+reports the same errors as `tsc` 7, and runs ~10× faster here. Its TypeScript
+version therefore moves with the pinned Bun version (`BUN_VERSION` /
+`Dockerfile`), not with a package. Each package still keeps the
+**TypeScript 6 JS API** installed for tooling, since TS 7.0 ships no JS API:
 
-- `"@typescript/native": "npm:typescript@7.x"` — provides the `tsc` binary
-  every `typecheck` script runs.
 - `"typescript": "npm:@typescript/typescript6@6.x"` — the official
   compatibility package: re-exports the TS 6 API (and a `tsc6` binary), so
   anything that does `import "typescript"` — typescript-eslint,
@@ -588,6 +593,10 @@ regenerated from scratch.
   truncates it; CI provides one): PGlite is a single connection, so only a
   real pool makes concurrent requests race through the chats handlers'
   `serializableTransaction`s (issue #654).
+  `bun run test:changed` adds `--changed`: only the files whose import graph
+  reaches an uncommitted change run — a local shortcut; CI always runs all.
+  (`--timings` was tried and doesn't help: `chats.test.ts` alone is ~95% of
+  the suite's wall time, so ordering files can't shorten it.)
   `--parallel` is safe here because PGlite instances, ports (integration
   tests grab a free ephemeral port), and Redis usage (only one file touches
   it) are all already isolated per file/process — don't add `test.concurrent`
