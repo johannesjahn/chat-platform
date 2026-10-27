@@ -752,7 +752,7 @@ function PostRow({ result }: { result: PostSearchResult }) {
           />
           <SearchHighlight
             snippet={snippet}
-            className="line-clamp-3 text-muted-foreground group-hover:text-foreground"
+            className="line-clamp-3 text-muted-foreground wrap-anywhere group-hover:text-foreground"
           />
         </span>
       </Link>
@@ -792,7 +792,7 @@ function CommentRow({ result }: { result: CommentSearchResult }) {
           />
           <SearchHighlight
             snippet={snippet}
-            className="line-clamp-3 text-muted-foreground group-hover:text-foreground"
+            className="line-clamp-3 text-muted-foreground wrap-anywhere group-hover:text-foreground"
           />
         </span>
       </Link>
@@ -843,7 +843,7 @@ function MessageRow({
           />
           <SearchHighlight
             snippet={snippet}
-            className="line-clamp-3 text-muted-foreground group-hover:text-foreground"
+            className="line-clamp-3 text-muted-foreground wrap-anywhere group-hover:text-foreground"
           />
         </span>
       </Link>

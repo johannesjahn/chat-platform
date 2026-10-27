@@ -429,12 +429,14 @@ function CommentItem({
             highlighted && "bg-primary/10 ring-1 ring-primary/50",
           )}
         >
-          <div className="flex items-baseline gap-2">
+          {/* Wraps, and the name breaks, so a long name pushes the time onto
+              the next line instead of out of the bubble. */}
+          <div className="flex flex-wrap items-baseline gap-x-2">
             <ProfileHoverCard userId={comment.authorId}>
               <Link
                 to="/users/$id"
                 params={{ id: String(comment.authorId) }}
-                className="text-sm font-medium hover:underline"
+                className="min-w-0 text-sm font-medium wrap-anywhere hover:underline"
               >
                 {authorLabel}
                 {authorHandle && (

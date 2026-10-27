@@ -209,20 +209,23 @@ function UserProfilePage() {
               aria-hidden
               className="hidden h-24 bg-[radial-gradient(120%_140%_at_0%_0%,oklch(0.62_0.19_277/0.55),transparent_60%),radial-gradient(120%_140%_at_100%_100%,oklch(0.72_0.14_210/0.4),transparent_60%)] lg:block"
             />
-            <CardHeader className="flex flex-row items-center gap-4 lg:flex-col lg:items-start lg:gap-3">
+            {/* Wraps so that, on a phone, the Message button drops onto its
+                own full-width row instead of being pushed off the card by the
+                name beside it; a long name wraps rather than overflowing. */}
+            <CardHeader className="flex flex-row flex-wrap items-center gap-4 lg:flex-col lg:flex-nowrap lg:items-start lg:gap-3">
               <Avatar
                 name={user.displayName || user.username}
                 avatarUrl={user.avatarUrl}
                 avatarVariants={user.avatarVariants}
                 size="xl"
-                className="lg:-mt-16 lg:ring-4 lg:ring-card"
+                className="shrink-0 lg:-mt-16 lg:ring-4 lg:ring-card"
               />
-              <div className="flex flex-1 flex-col leading-tight">
-                <h1 className="text-xl font-semibold">
+              <div className="flex min-w-0 flex-1 flex-col leading-tight lg:w-full">
+                <h1 className="text-xl font-semibold wrap-anywhere">
                   {user.displayName || `@${user.username}`}
                 </h1>
                 {user.displayName && (
-                  <span className="text-sm text-muted-foreground">
+                  <span className="text-sm text-muted-foreground wrap-anywhere">
                     @{user.username}
                   </span>
                 )}
@@ -241,7 +244,7 @@ function UserProfilePage() {
                   size="sm"
                   disabled={directChat.isPending}
                   onClick={() => void startDirectChat()}
-                  className="lg:w-full"
+                  className="w-full sm:w-auto lg:w-full"
                 >
                   {directChat.isPending ? (
                     <Loader2 className="size-4 animate-spin" />
@@ -271,7 +274,7 @@ function UserProfilePage() {
                     {blockError}
                   </p>
                 )}
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <span className="text-sm text-muted-foreground">Privacy</span>
                   <BlockUserControls userId={user.id} onError={setBlockError} />
                 </div>
@@ -284,7 +287,7 @@ function UserProfilePage() {
                     {roleError}
                   </p>
                 )}
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <span className="text-sm text-muted-foreground">
                     Admin role
                   </span>
@@ -320,7 +323,7 @@ function UserProfilePage() {
                     {deleteError}
                   </p>
                 )}
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <span className="text-sm text-muted-foreground">
                     Delete this user
                   </span>

@@ -15,10 +15,57 @@ async function waitForPanelToSettle(panel: Locator) {
     .toBe(0);
 }
 
+// Long-presses `target` (a message's text) until the bubble's action group is
+// revealed, then lifts the finger — the only way to reach a message's actions
+// on a device with no hover.
+async function longPress(target: Locator, actionGroup: Locator) {
+  // Emulate a stationary long press: dispatch a real touchstart on the bubble,
+  // hold past the ~450ms threshold without moving, then release — exactly what
+  // the component's onTouchStart/Move/End handlers listen for. Dispatched from
+  // within the bubble so the event bubbles up to the handler on the content
+  // column, and with no touchmove in between so the "moved → it's a scroll"
+  // guard never cancels it.
+  await target.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    const touch = new Touch({
+      identifier: 1,
+      target: el,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    });
+    el.dispatchEvent(
+      new TouchEvent("touchstart", {
+        bubbles: true,
+        cancelable: true,
+        touches: [touch],
+        targetTouches: [touch],
+        changedTouches: [touch],
+      }),
+    );
+  });
+
+  // Wait for the press to actually reveal the group (opacity animates to 1)
+  // before lifting the finger — polling on the outcome rather than a fixed
+  // hold avoids a race where a busy main thread delays the ~450ms timer past a
+  // hard-coded wait, and the touchend then cancels it.
+  await expect(actionGroup).toHaveCSS("opacity", "1");
+  await target.evaluate((el) => {
+    el.dispatchEvent(
+      new TouchEvent("touchend", {
+        bubbles: true,
+        cancelable: true,
+        touches: [],
+        targetTouches: [],
+        changedTouches: [],
+      }),
+    );
+  });
+}
+
 test(
   "reacting to a chat message from the hover button adds a pill below the bubble",
   { tag: "@layout" },
-  async ({ browser, injectApiUrl, signUp }) => {
+  async ({ browser, injectApiUrl, isMobile, signUp }) => {
     // A direct chat needs a second user to exist, but only A drives the UI —
     // A reacts to their own message (any participant may react, so the sender
     // reacting to their own message is a valid case and keeps the test to a
@@ -49,7 +96,18 @@ test(
     // The "add a reaction" trigger only appears on hover, beside the bubble —
     // the same hover-only affordance as the edit/delete buttons — rather than
     // occupying permanent space below every message.
-    await bubble.hover();
+    // A phone has no hover: there the group floats over the bubble and is
+    // only reachable by a long press.
+    if (isMobile) {
+      await longPress(
+        bubble.getByText("React to this chat message"),
+        bubble.locator("div", {
+          has: pageA.getByRole("button", { name: "Add a reaction" }),
+        }),
+      );
+    } else {
+      await bubble.hover();
+    }
     await bubble.getByRole("button", { name: "Add a reaction" }).click();
     await pageA.getByRole("button", { name: "React with 👍" }).click();
 
@@ -109,48 +167,8 @@ test("long-pressing a chat message on touch opens the reaction picker (issue #30
   });
   await expect(actionGroup).toHaveCSS("opacity", "0");
 
-  // Emulate a stationary long press: dispatch a real touchstart on the bubble,
-  // hold past the ~450ms threshold without moving, then release — exactly what
-  // the component's onTouchStart/Move/End handlers listen for. Dispatched from
-  // within the bubble so the event bubbles up to the handler on the content
-  // column, and with no touchmove in between so the "moved → it's a scroll"
-  // guard never cancels it.
   const target = bubble.getByText("Long-press to react on mobile");
-  await target.evaluate((el) => {
-    const rect = el.getBoundingClientRect();
-    const touch = new Touch({
-      identifier: 1,
-      target: el,
-      clientX: rect.left + rect.width / 2,
-      clientY: rect.top + rect.height / 2,
-    });
-    el.dispatchEvent(
-      new TouchEvent("touchstart", {
-        bubbles: true,
-        cancelable: true,
-        touches: [touch],
-        targetTouches: [touch],
-        changedTouches: [touch],
-      }),
-    );
-  });
-
-  // Wait for the press to actually reveal the group (opacity animates to 1)
-  // before lifting the finger — polling on the outcome rather than a fixed
-  // hold avoids a race where a busy main thread delays the ~450ms timer past a
-  // hard-coded wait, and the touchend then cancels it.
-  await expect(actionGroup).toHaveCSS("opacity", "1");
-  await target.evaluate((el) => {
-    el.dispatchEvent(
-      new TouchEvent("touchend", {
-        bubbles: true,
-        cancelable: true,
-        touches: [],
-        targetTouches: [],
-        changedTouches: [],
-      }),
-    );
-  });
+  await longPress(target, actionGroup);
 
   // The group is revealed and stays put after release; open the picker and
   // react.

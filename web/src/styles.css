@@ -1198,8 +1198,13 @@ html[data-session="in"] [data-session-only="out"] {
      overhangs the panel's edge aren't cut. No `transform` survives the settle
      either — a lingering one would turn the content into the containing block
      for its `position: fixed` descendants. */
+  /* `min-width: 0` too: once settled the content is `overflow: visible`, and
+     a grid item's automatic minimum would then widen the panel to fit its
+     longest unbreakable line (a long username) instead of letting the
+     content truncate or wrap inside it. */
   .collapse-panel > .collapse-panel-content {
     min-height: 0;
+    min-width: 0;
     overflow: hidden;
     transform: translateY(-0.5rem);
     transition: transform var(--motion-collapse) var(--motion-ease-collapse);

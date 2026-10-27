@@ -102,9 +102,10 @@ type MessageBubbleProps = {
   // Called when an edit ends (saved or cancelled), so the composer can take
   // focus back.
   onEditEnd?: () => void;
-  // A narrow thread (a desktop docked chat window, issue #554): the action
-  // group floats over the bubble's top edge as a toolbar instead of sitting
-  // beside it, where — even invisible — it took the width the bubble needs.
+  // A narrow thread (a desktop docked chat window, issue #554, or any thread
+  // below `lg`): the action group floats over the bubble's top edge as a
+  // toolbar instead of sitting beside it, where — even invisible — it took
+  // the width the bubble needs.
   compact?: boolean;
   style?: CSSProperties;
 };
@@ -785,7 +786,10 @@ export function MessageBubble({
         className={cn(
           // On a wide desktop pane the bubble is capped in characters too,
           // so lines stay readable — the pane takes the width, not the text.
-          "flex min-w-0 max-w-[75%] flex-col gap-1 lg:max-w-[min(75%,70ch)]",
+          // `w-fit` gives the row a sane flex basis: left at `auto`, a long
+          // unbroken word's max-content made the bubble soak up nearly all
+          // of the row's shrinking and collapse to a sliver.
+          "flex w-fit min-w-0 max-w-[75%] flex-col gap-1 lg:max-w-[min(75%,70ch)]",
           isOwn ? "items-end" : "items-start",
         )}
       >
@@ -802,7 +806,9 @@ export function MessageBubble({
               <Link
                 to="/users/$id"
                 params={{ id: String(message.senderId) }}
-                className="w-fit text-xs font-semibold text-primary hover:underline"
+                // Breaks a long name: as one unbreakable word it would set
+                // the bubble's width and push it past the thread's edge.
+                className="w-fit max-w-full text-xs font-semibold text-primary wrap-anywhere hover:underline"
               >
                 {senderLabel}
                 {senderHandle && (

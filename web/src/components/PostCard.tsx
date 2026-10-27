@@ -192,7 +192,7 @@ export function PostCard({
           <Link
             to="/users/$id"
             params={{ id: String(authorId) }}
-            className="flex flex-1 items-center gap-3 leading-tight"
+            className="flex min-w-0 flex-1 items-center gap-3 leading-tight"
           >
             <Avatar
               name={authorLabel}
@@ -200,8 +200,10 @@ export function PostCard({
               avatarVariants={authorAvatarVariants}
               className="transition-transform duration-300 ease-smooth group-hover:scale-105"
             />
-            <div className="flex flex-1 flex-col leading-tight">
-              <span className="font-medium">
+            <div className="flex min-w-0 flex-1 flex-col leading-tight">
+              {/* One line, cut with an ellipsis: a long name would otherwise
+                  run under the edit/delete buttons and off the card. */}
+              <span className="truncate font-medium">
                 {authorLabel}
                 {authorHandle && (
                   <span className="ml-1.5 text-sm font-normal text-muted-foreground">
@@ -217,7 +219,7 @@ export function PostCard({
           </Link>
         </ProfileHoverCard>
         {canModify && (
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             <Button asChild size="icon" variant="ghost" aria-label="Edit post">
               <Link to="/posts/$id/edit" params={{ id: String(post.id) }}>
                 <Pencil className="size-4" />
