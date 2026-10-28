@@ -2184,8 +2184,8 @@ export interface operations {
     "users.listUserPosts": {
         parameters: {
             query?: {
-                cursor?: string | null;
-                limit?: string | null;
+                cursor?: string;
+                limit?: string;
             };
             header?: never;
             path: {
@@ -3028,8 +3028,8 @@ export interface operations {
     "posts.listPosts": {
         parameters: {
             query?: {
-                cursor?: string | null;
-                limit?: string | null;
+                cursor?: string;
+                limit?: string;
             };
             header?: never;
             path?: never;
@@ -3244,8 +3244,8 @@ export interface operations {
     "comments.listComments": {
         parameters: {
             query?: {
-                cursor?: string | null;
-                limit?: string | null;
+                cursor?: string;
+                limit?: string;
             };
             header?: never;
             path: {
@@ -3358,8 +3358,8 @@ export interface operations {
     "comments.listReplies": {
         parameters: {
             query?: {
-                cursor?: string | null;
-                limit?: string | null;
+                cursor?: string;
+                limit?: string;
             };
             header?: never;
             path: {
@@ -3781,8 +3781,8 @@ export interface operations {
     "chats.listChats": {
         parameters: {
             query?: {
-                cursor?: string | null;
-                limit?: string | null;
+                cursor?: string;
+                limit?: string;
             };
             header?: never;
             path?: never;
@@ -4546,9 +4546,9 @@ export interface operations {
     "chats.listMessages": {
         parameters: {
             query?: {
-                before?: string | null;
-                after?: string | null;
-                limit?: string | null;
+                before?: string;
+                after?: string;
+                limit?: string;
             };
             header?: never;
             path: {
@@ -5679,7 +5679,7 @@ export interface operations {
         parameters: {
             query: {
                 q: string;
-                limit?: string | null;
+                limit?: string;
             };
             header?: never;
             path?: never;
@@ -5720,8 +5720,8 @@ export interface operations {
         parameters: {
             query: {
                 q: string;
-                cursor?: string | null;
-                limit?: string | null;
+                cursor?: string;
+                limit?: string;
             };
             header?: never;
             path?: never;
@@ -5762,8 +5762,8 @@ export interface operations {
         parameters: {
             query: {
                 q: string;
-                cursor?: string | null;
-                limit?: string | null;
+                cursor?: string;
+                limit?: string;
             };
             header?: never;
             path?: never;
@@ -5804,8 +5804,8 @@ export interface operations {
         parameters: {
             query: {
                 q: string;
-                cursor?: string | null;
-                limit?: string | null;
+                cursor?: string;
+                limit?: string;
             };
             header?: never;
             path?: never;
@@ -5846,8 +5846,8 @@ export interface operations {
         parameters: {
             query: {
                 q: string;
-                cursor?: string | null;
-                limit?: string | null;
+                cursor?: string;
+                limit?: string;
             };
             header?: never;
             path?: never;
@@ -6073,7 +6073,7 @@ export interface operations {
     "admin.getAdminStats": {
         parameters: {
             query?: {
-                days?: string | null;
+                days?: string;
             };
             header?: never;
             path?: never;
@@ -7093,7 +7093,7 @@ export interface operations {
     "games.getLeaderboard": {
         parameters: {
             query?: {
-                period?: components["schemas"]["LeaderboardPeriod"] | null;
+                period?: components["schemas"]["LeaderboardPeriod"];
             };
             header?: never;
             path: {
@@ -7135,8 +7135,8 @@ export interface operations {
     "notifications.listNotifications": {
         parameters: {
             query?: {
-                cursor?: string | null;
-                limit?: string | null;
+                cursor?: string;
+                limit?: string;
             };
             header?: never;
             path?: never;
