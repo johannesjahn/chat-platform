@@ -89,7 +89,7 @@ export function ShortcutsDialog() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center p-4 sm:items-center"
+      className="overlay-viewport z-[60] flex items-end justify-center px-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))] sm:items-center"
       inert={!open}
     >
       <div
@@ -107,7 +107,7 @@ export function ShortcutsDialog() {
         aria-modal="true"
         aria-labelledby="shortcuts-title"
         className={cn(
-          "relative flex max-h-[calc(var(--app-height,100dvh)-2rem)] w-full max-w-2xl flex-col rounded-3xl border border-border bg-card shadow-2xl",
+          "relative flex max-h-full w-full max-w-2xl flex-col rounded-3xl border border-border bg-card shadow-2xl",
           exiting
             ? "motion-safe:animate-pop-close"
             : "motion-safe:animate-dialog-in",

@@ -202,7 +202,7 @@ export function ForwardDialog({
   return (
     <div
       className={cn(
-        "fixed inset-0 z-50 flex justify-center",
+        "overlay-viewport z-50 flex justify-center",
         isDesktop ? "items-center p-4" : "items-stretch",
       )}
       role="dialog"
@@ -224,8 +224,10 @@ export function ForwardDialog({
         className={cn(
           "relative flex w-full flex-col bg-card shadow-2xl",
           isDesktop
-            ? "max-h-[min(36rem,85vh)] max-w-md rounded-3xl border border-border"
-            : "h-[100dvh]",
+            ? "max-h-[min(36rem,100%)] max-w-md rounded-3xl border border-border"
+            : // Full-screen on a phone: the panel itself keeps its header and
+              // footer clear of the status bar and home indicator.
+              "h-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]",
           exiting
             ? "motion-safe:animate-pop-close"
             : "motion-safe:animate-dialog-in",

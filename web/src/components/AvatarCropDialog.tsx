@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/errors";
@@ -191,9 +192,12 @@ export function AvatarCropDialog<T>({
     }
   };
 
-  return (
+  // Portalled to <body>: it's opened from inside the group settings sheet and
+  // the desktop details panel, whose transforms/overflow would otherwise
+  // become the containing block of this fixed overlay and clip it.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="overlay-viewport z-50 flex items-center justify-center px-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))]"
       role="dialog"
       aria-modal="true"
       aria-label="Crop avatar"
@@ -202,7 +206,7 @@ export function AvatarCropDialog<T>({
         className="absolute inset-0 bg-background/70 backdrop-blur-sm motion-safe:animate-backdrop-blur-in"
         onClick={onClose}
       />
-      <div className="relative flex w-full max-w-sm flex-col gap-4 rounded-3xl border border-border bg-card p-5 shadow-2xl motion-safe:animate-dialog-in">
+      <div className="relative flex max-h-full w-full max-w-sm flex-col gap-4 overflow-y-auto rounded-3xl border border-border bg-card p-5 shadow-2xl motion-safe:animate-dialog-in">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Crop your avatar</h2>
           <Button
@@ -298,6 +302,7 @@ export function AvatarCropDialog<T>({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
