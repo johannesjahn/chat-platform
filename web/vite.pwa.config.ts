@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
-import { sharedPwaOptions } from "./vite.pwa-options";
+import { sharedPwaOptions } from "./vite.pwa-options.ts";
 
 const NOOP_ENTRY = "virtual:pwa-noop-entry";
 
