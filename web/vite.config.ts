@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
-import { sharedPwaOptions } from "./vite.pwa-options";
+import { sharedPwaOptions } from "./vite.pwa-options.ts";
 
 export default defineConfig({
   resolve: {
