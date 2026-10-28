@@ -36,3 +36,6 @@ logs
 
 # OS
 .DS_Store
+
+# lighthouse (bun run lighthouse)
+/lighthouse-reports

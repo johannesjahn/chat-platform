@@ -39,9 +39,9 @@ export function GameCard({
         )}
       </div>
       <div className="relative z-20 flex flex-col gap-1.5">
-        <h3 className="text-xl font-bold tracking-tight">
+        <h2 className="text-xl font-bold tracking-tight">
           <span className={cn(playable && "game-text")}>{game.name}</span>
-        </h3>
+        </h2>
         <p className="text-sm font-medium text-foreground/80">{game.tagline}</p>
         <p className="text-sm text-muted-foreground">{game.description}</p>
       </div>

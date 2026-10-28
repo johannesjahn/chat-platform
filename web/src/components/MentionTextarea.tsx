@@ -140,7 +140,9 @@ export function MentionTextarea({
         ref={attachRef}
         value={value}
         className={className}
-        aria-expanded={open}
+        // No `aria-expanded`: it's only allowed on a combobox, and a
+        // <textarea> can't take that role — `aria-controls` points at the
+        // popup while it's open instead.
         aria-controls={open ? listId : undefined}
         aria-autocomplete="list"
         aria-activedescendant={

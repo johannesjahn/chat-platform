@@ -73,7 +73,6 @@ export function AccountMenu({
         aria-controls={open ? panelId : undefined}
         onClick={toggle}
         aria-haspopup="menu"
-        aria-label={`Account menu for ${userLabel(user)}`}
         title={userLabel(user)}
         className={cn(
           "flex w-full items-center justify-center gap-3 rounded-xl p-1.5 text-left transition-colors hover:bg-accent/50 xl:justify-start xl:px-2",
@@ -86,7 +85,12 @@ export function AccountMenu({
           avatarUrl={user.avatarUrl}
           avatarVariants={user.avatarVariants}
         />
-        <span className="hidden min-w-0 flex-1 flex-col leading-tight xl:flex">
+        {/* Named from content rather than `aria-label`: the visible name
+            (shown from xl) has to be part of the accessible one (WCAG 2.5.3,
+            which also counts the avatar's initials), so below xl the same
+            span stays in the name as screen-reader-only text. */}
+        <span className="sr-only">{"Account menu for "}</span>
+        <span className="sr-only min-w-0 flex-1 flex-col leading-tight xl:not-sr-only xl:flex">
           <span className="truncate text-sm font-medium">
             {userLabel(user)}
           </span>

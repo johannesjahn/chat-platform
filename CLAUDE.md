@@ -617,6 +617,13 @@ regenerated from scratch.
   that provokes an error on purpose allows it for itself with
   `allowConsoleErrors(pattern)`. Extra contexts are only watched if they go
   through `injectApiUrl`, which they already must.
+- **Accessibility** — [web/e2e/accessibility.spec.ts](web/e2e/accessibility.spec.ts)
+  scans every main page with axe-core (WCAG 2.x A/AA), in both themes and —
+  being `@layout` — on all three layouts, as part of the e2e suite. A new
+  page belongs in its list. It freezes transitions before scanning, since a
+  theme flip mid-transition reads as a contrast failure. Avatar initials are
+  `aria-hidden` (decorative, like an image avatar's `alt=""`), so a control
+  that's only an avatar needs a name of its own.
 
 ## Code generation
 
@@ -652,7 +659,11 @@ run it (`bun test ./src`) after touching any endpoint signature.
 [.github/workflows/ci.yml](.github/workflows/ci.yml) runs on pushes to `main`
 and all PRs, with parallel jobs including: **lint** (`format:check` + `lint`),
 **typecheck** (backend + web; generates the route tree first), **web-unit**
-(`cd web && bun run test` — see Testing above), **openapi**
+(`cd web && bun run test` — see Testing above), **build-web** (the
+production build, then `check:bundle`: fails once the gzipped JS loaded
+before hydration, all JS, or all CSS outgrows
+[`web/bundle-budget.json`](web/bundle-budget.json) — raise it in the same PR
+when growth is deliberate), **openapi**
 (regenerates `openapi.json` and `web/src/lib/api-types.ts` via `gen:types` and
 fails if that produces a diff, i.e. catches a backend API change whose
 generated spec/types weren't regenerated and committed), **unit**
@@ -664,7 +675,12 @@ thresholds, and uploads the `coverage-report` artifact — see Testing above),
 `--retries=0` and every core busy, to catch timing flakes that pass a single
 run — issue #619; skipped when no spec changed). Under that load tests run
 several times slower, so it raises the per-test budget to 90s
-(`--timeout=90000`): it's after races, not slowness. The Bun version is pinned once via the
+(`--timeout=90000`): it's after races, not slowness. **lighthouse** runs
+[`web/scripts/lighthouse.ts`](web/scripts/lighthouse.ts) (`bun run
+lighthouse`) against the production build and a seeded backend, signed in
+and out, and posts a median-of-3 score table to the job summary: performance
+only warns, accessibility/best practices fail below its `MIN_SCORES`, and it's
+deliberately not part of `ci-ok`. The Bun version is pinned once via the
 workflow-level `BUN_VERSION` env var.
 
 **Path filters** (issue #492): on PRs, a leading `changes` job
