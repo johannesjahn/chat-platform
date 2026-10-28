@@ -85,6 +85,20 @@
       matchPackageNames: ["@playwright/test", "mcr.microsoft.com/playwright"],
       groupName: "Playwright",
     },
+    // The audit engines behind ci.yml's accessibility gate
+    // (web/e2e/accessibility.spec.ts, @axe-core/playwright, which pins
+    // axe-core to one minor) and the `lighthouse` job
+    // (web/scripts/lighthouse.ts). Even a minor release can add or tighten
+    // rules and newly fail the build, so they get their own PR — a new rule
+    // tripping shouldn't hold back every other web minor/patch bump, and its
+    // fix belongs with the bump. Listed after the web minor/patch group so it
+    // wins for these packages. The `lighthouse` job's Playwright container
+    // image is already covered by the "Playwright" group above.
+    {
+      matchManagers: ["bun"],
+      matchPackageNames: ["@axe-core/playwright", "axe-core", "lighthouse"],
+      groupName: "accessibility and Lighthouse audits",
+    },
     // depTypes: ["action"] scopes this to actual `uses: owner/action@...`
     // pins. The github-actions manager also extracts ci.yml's `services:`
     // block images (redis/postgres, depType "service") as its own

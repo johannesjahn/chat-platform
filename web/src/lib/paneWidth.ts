@@ -1,4 +1,10 @@
-import { type KeyboardEvent, type PointerEvent, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type PointerEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 // The chat list pane's bounds, in px, and how far an arrow key moves it.
 const MIN_WIDTH = 260;
@@ -37,6 +43,32 @@ export function useResizablePane(storageKey: string) {
   const [width, setWidth] = useState<number | null>(() => stored(storageKey));
   const paneRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  // What the pane actually renders at, for `aria-valuenow` — a separator
+  // that can be moved must report its position, and until the user resizes
+  // it `width` is null (the responsive default).
+  const [renderedWidth, setRenderedWidth] = useState<number | null>(null);
+
+  // The pane mounts only once the layout goes two-pane, so check on every
+  // render whether the observed element changed.
+  const observedRef = useRef<{
+    pane: HTMLElement;
+    observer: ResizeObserver;
+  } | null>(null);
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (observedRef.current?.pane === pane) return;
+    observedRef.current?.observer.disconnect();
+    observedRef.current = null;
+    if (!pane) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) {
+        setRenderedWidth(Math.round(entry.borderBoxSize[0]!.inlineSize));
+      }
+    });
+    observer.observe(pane);
+    observedRef.current = { pane, observer };
+  });
+  useEffect(() => () => observedRef.current?.observer.disconnect(), []);
 
   const commit = (next: number | null) => {
     setWidth(next);
@@ -49,7 +81,7 @@ export function useResizablePane(storageKey: string) {
     "aria-label": "Resize chat list",
     "aria-valuemin": MIN_WIDTH,
     "aria-valuemax": MAX_WIDTH,
-    "aria-valuenow": width ?? undefined,
+    "aria-valuenow": width ?? renderedWidth ?? MIN_WIDTH,
     tabIndex: 0,
     onPointerDown: (event: PointerEvent<HTMLElement>) => {
       const pane = paneRef.current;

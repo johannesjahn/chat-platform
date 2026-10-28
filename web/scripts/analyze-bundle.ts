@@ -5,42 +5,28 @@
 // byte-by-byte through its sourcemap. Run from `web/` with
 // `bun run analyze`, which builds with sourcemaps first; dependency-free so
 // it doesn't drag a visualizer (and a lockfile change) into the project.
-import { readdirSync } from "node:fs";
-import { gzipSync } from "node:zlib";
+import {
+  ASSETS_DIR as DIR,
+  criticalChunks,
+  entryChunk,
+  kB,
+  sizes,
+} from "./bundle";
 
-const DIR = "dist/client/assets";
 const TOP = Number(process.argv[2] ?? 30);
 
-const kB = (bytes: number) => `${(bytes / 1000).toFixed(1)} kB`;
-
-const entry = readdirSync(DIR).find((f) => /^index-.*\.js$/.test(f));
-if (!entry) throw new Error(`No entry chunk in ${DIR} — build first.`);
-
-// The static import graph, from the entry.
-const critical = new Set<string>();
-const pending = [entry];
-while (pending.length) {
-  const file = pending.pop()!;
-  if (critical.has(file)) continue;
-  critical.add(file);
-  const code = await Bun.file(`${DIR}/${file}`).text();
-  for (const m of code.matchAll(
-    /(?:^|[;}\n])\s*import\s*(?:[^"'()]*?from\s*)?["']\.\/([^"']+)["']/g,
-  )) {
-    pending.push(m[1]!);
-  }
-}
+const entry = entryChunk();
+const critical = await criticalChunks();
 
 console.log("Loaded before hydration:");
 let raw = 0;
 let gzip = 0;
 for (const file of critical) {
-  const bytes = await Bun.file(`${DIR}/${file}`).bytes();
-  const zipped = gzipSync(bytes).length;
-  raw += bytes.length;
-  gzip += zipped;
+  const size = await sizes(file);
+  raw += size.raw;
+  gzip += size.gzip;
   console.log(
-    `  ${file.padEnd(32)} ${kB(bytes.length).padStart(10)} ${kB(zipped).padStart(10)} gzip`,
+    `  ${file.padEnd(32)} ${kB(size.raw).padStart(10)} ${kB(size.gzip).padStart(10)} gzip`,
   );
 }
 console.log(

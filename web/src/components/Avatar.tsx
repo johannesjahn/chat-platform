@@ -121,8 +121,11 @@ export function Avatar({
     );
   }
 
+  // Decorative, like the `alt=""` images above: the name is always next to
+  // it, and read aloud the initials would only garble a label ("U Ulla").
   return (
     <div
+      aria-hidden="true"
       style={style}
       className={cn(
         "flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/30 to-primary/10 font-semibold text-primary ring-1 ring-inset ring-primary/20",

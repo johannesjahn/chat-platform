@@ -194,6 +194,14 @@ jobs:
         run: bun run build
         working-directory: web
 
+      # Byte counts don't vary between runs, so unlike a Lighthouse
+      # performance score this can gate: it fails once the build outgrows
+      # web/bundle-budget.json, and writes the sizes to the job summary.
+      # A deliberate increase raises the budget in the same PR.
+      - name: Check bundle size
+        run: bun run check:bundle
+        working-directory: web
+
   openapi:
     name: OpenAPI spec & generated types
     needs: changes
@@ -696,10 +704,67 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # A Lighthouse report on the production build's main pages, signed in and
+  # out — see web/scripts/lighthouse.ts. Performance only warns (it swings by
+  # several points between runs on a shared runner); accessibility and best
+  # practices fail below the script's MIN_SCORES. Deliberately left out of
+  # `ci-ok`: it's a report to keep an eye on, and the real gates for what it
+  # measures are e2e/accessibility.spec.ts (axe) and build-web's bundle
+  # budget. Scores land in the job summary; full reports in the artifact.
+  lighthouse:
+    name: Lighthouse report
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Same image as the e2e job (and bumped with it by Renovate's
+    # "Playwright" group): the script drives Playwright's Chromium, whose
+    # build must match web/'s pinned @playwright/test.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          web: true
+
+      - name: Build web
+        run: bun run build
+        working-directory: web
+
+      # One step, so the backend (in-memory PGlite, on the build's default
+      # API URL) is still up while Lighthouse runs. WEB_ORIGIN lets the
+      # script's static server on :4173 through CORS.
+      - name: Run Lighthouse
+        shell: bash
+        working-directory: web
+        env:
+          PORT: 3000
+          WEB_ORIGIN: http://localhost:4173
+          JWT_SECRET: ci-lighthouse-test-secret
+        run: |
+          (cd .. && bun run start > backend.log 2>&1 &)
+          bun -e 'for (let i = 0; i < 120; i++) { try { if ((await fetch("http://localhost:3000/docs")).ok) process.exit(0) } catch {} await Bun.sleep(500) } console.error("backend did not start"); process.exit(1)' || { cat ../backend.log; exit 1; }
+          bun run lighthouse
+
+      - name: Upload Lighthouse reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lighthouse-reports
+          path: web/lighthouse-reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
   # One stable check name covering every job above, for a branch ruleset to
   # require: a required check whose job was skipped by a path filter would
   # otherwise never report. Skipped jobs count as passing; a failed or
-  # cancelled one (including `changes` itself) fails this.
+  # cancelled one (including `changes` itself) fails this. `lighthouse` is
+  # the one job deliberately not listed — see the comment on it.
   ci-ok:
     name: CI OK
     runs-on: ubuntu-latest

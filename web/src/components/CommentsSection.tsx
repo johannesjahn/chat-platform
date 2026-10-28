@@ -413,6 +413,11 @@ function CommentItem({
           to="/users/$id"
           params={{ id: String(comment.authorId) }}
           className="mt-0.5 shrink-0"
+          // A mouse shortcut to the name link beside it, which is the one
+          // keyboard and screen-reader users get; the avatar alone has no
+          // text to name a link by.
+          tabIndex={-1}
+          aria-hidden="true"
         >
           <Avatar
             name={authorName}
