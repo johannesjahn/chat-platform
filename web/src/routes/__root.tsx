@@ -124,6 +124,14 @@ export const Route = createRootRoute({
           "width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content",
       },
       { title: "Chat Platform" },
+      // Default summary for search results and link previews (issue #706).
+      // A page with a better one can override it the way it overrides the
+      // title — TanStack dedupes `meta` by name, the deepest match winning.
+      {
+        name: "description",
+        content:
+          "Chat Platform — real-time chats, posts and multiplayer games with friends.",
+      },
       { name: "mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       {

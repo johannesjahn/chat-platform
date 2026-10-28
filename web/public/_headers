@@ -32,3 +32,8 @@
 /logo.*
   ! Cache-Control
   Cache-Control: public, max-age=86400
+
+# Crawl rules: not content-hashed, but rarely change.
+/robots.txt
+  ! Cache-Control
+  Cache-Control: public, max-age=3600

@@ -29,6 +29,9 @@ export const sharedPwaOptions: Partial<VitePWAOptions> = {
   },
   workbox: {
     navigateFallback: "/index.html",
+    // A real file, not an app route: don't answer a navigation to it with
+    // the cached shell (issue #706).
+    navigateFallbackDenylist: [/^\/robots\.txt$/],
     globPatterns: ["**/*.{js,css,html,ico,png,svg,webmanifest}"],
   },
 };

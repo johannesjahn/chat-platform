@@ -1,0 +1,6 @@
+# Nearly every page needs a session, so only the signed-out entry points are
+# worth crawling (issue #706).
+User-agent: *
+Allow: /login
+Allow: /register
+Disallow: /
