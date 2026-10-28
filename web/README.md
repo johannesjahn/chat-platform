@@ -43,6 +43,7 @@ headers:
 | ---------------------------------------------------------------------------------------------------- | ------------------------------------- |
 | `/assets/*`, `/workbox-*.js` (content-hashed)                                                        | `public, max-age=31536000, immutable` |
 | `/favicon*`, `/logo.*`                                                                               | `public, max-age=86400`               |
+| `/robots.txt`                                                                                        | `public, max-age=3600`                |
 | everything else: `index.html` (and so every SPA-fallback deep link), `sw.js`, `manifest.webmanifest` | `no-cache`                            |
 
 Never long-cache `index.html` or `sw.js`. The PWA auto-updates
