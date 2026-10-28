@@ -43,7 +43,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { KeyboardShortcuts } from "@/components/shell/KeyboardShortcuts";
 import { VersionFooter } from "@/components/VersionFooter";
-import { logout } from "../lib/api";
+import { BUILD_API_ORIGIN, logout } from "../lib/api";
 import {
   SESSION_BOOT_SCRIPT,
   useSession,
@@ -136,6 +136,21 @@ export const Route = createRootRoute({
       { rel: "stylesheet", href: appCss },
       { rel: "manifest", href: "/manifest.webmanifest" },
       { rel: "apple-touch-icon", href: "/favicon-192x192.png" },
+      // Open the connection to the API (DNS, TCP, TLS) while the entry chunk
+      // is still downloading, rather than once its first request is sent
+      // (issue #705). `crossOrigin` is required: API requests are CORS
+      // without credentials, so they only reuse an anonymous connection.
+      // `dns-prefetch` is the fallback where preconnect isn't supported.
+      ...(BUILD_API_ORIGIN
+        ? [
+            {
+              rel: "preconnect",
+              href: BUILD_API_ORIGIN,
+              crossOrigin: "anonymous" as const,
+            },
+            { rel: "dns-prefetch", href: BUILD_API_ORIGIN },
+          ]
+        : []),
     ],
   }),
   component: RootComponent,
