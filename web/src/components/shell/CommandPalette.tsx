@@ -70,7 +70,7 @@ export function CommandPalette() {
   if (!mounted) return null;
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh]"
+      className="overlay-viewport z-[60] flex items-start justify-center px-4 pt-[calc(12vh+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))]"
       inert={!open}
     >
       <div
@@ -88,7 +88,7 @@ export function CommandPalette() {
         aria-modal="true"
         aria-label="Search and quick switcher"
         className={cn(
-          "relative flex max-h-[min(36rem,calc(var(--app-height,100dvh)-16vh))] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-2xl",
+          "relative flex max-h-[min(36rem,100%)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-2xl",
           phase === "exiting"
             ? "motion-safe:animate-pop-close"
             : "motion-safe:animate-dialog-in",

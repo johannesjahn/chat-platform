@@ -337,6 +337,26 @@ html[data-session="in"] [data-session-only="out"] {
   }
 }
 
+/* The box a modal overlay (dialog, sheet, palette) pins itself to: the part
+   of the screen that is genuinely visible, rather than `fixed inset-0`.
+
+   On iOS `inset-0` (like `vh`) resolves against the *layout* viewport, which
+   reaches under the translucent status bar of a Home Screen install and
+   under Safari's toolbar, and doesn't shrink for the on-screen keyboard — so
+   a sheet anchored to it ends up partly behind the system blur at the top and
+   bottom, with no way to scroll it back. `--app-height`/`--app-offset-top`
+   are what `visualViewport` reports (see lib/viewport.ts); `100dvh` is the
+   fallback without the API. Position only: the status bar and home indicator
+   are still drawn over this box, so each overlay insets its own content with
+   `env(safe-area-inset-*)` where it touches those edges. */
+@utility overlay-viewport {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--app-offset-top, 0px);
+  height: var(--app-height, 100dvh);
+}
+
 /* Shimmering skeleton placeholder fill. Kept as a plain utility (rather than
    Tailwind's arbitrary-value bracket syntax) since the gradient itself needs
    nested color-mix()/var() calls that aren't friendly to bracket parsing. */

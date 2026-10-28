@@ -168,7 +168,7 @@ function ConfirmDialog({
     <div
       // Above every other overlay (group settings and friends sit at z-50),
       // since a confirm is usually raised from inside one of them.
-      className="fixed inset-0 z-[70] flex items-end justify-center p-4 sm:items-center"
+      className="overlay-viewport z-[70] flex items-end justify-center px-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))] sm:items-center"
       role="alertdialog"
       aria-modal="true"
       aria-labelledby={titleId}

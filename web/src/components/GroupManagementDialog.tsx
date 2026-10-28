@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import {
@@ -92,9 +93,12 @@ export function GroupManagementDialog({
 
   if (!open) return null;
 
-  return (
+  // Portalled to <body>: rendered in place it would sit inside the
+  // conversation's subtree, where an ancestor's transform or stacking context
+  // can clip it or paint the blurred chat header and composer over it.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+      className="overlay-viewport z-50 flex items-end justify-center pt-[env(safe-area-inset-top)] sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Group settings"
@@ -106,14 +110,15 @@ export function GroupManagementDialog({
       {/* The panel springs up out of a blur while the backdrop above ramps
           its own blur on — the two together read as the page receding rather
           than a card being pasted over it. */}
-      <div className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-border bg-card shadow-2xl motion-safe:animate-dialog-in sm:rounded-3xl">
+      <div className="relative flex max-h-[92%] w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-border bg-card shadow-2xl motion-safe:animate-dialog-in sm:rounded-3xl">
         <GroupManagementBody
           chat={chat}
           currentUser={currentUser}
           onClose={onClose}
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -144,7 +149,9 @@ function GroupManagementBody({
         </Button>
       </div>
 
-      <div className="flex flex-col gap-6 overflow-y-auto px-5 py-5">
+      {/* On a phone the sheet runs to the bottom edge, so its last section
+          is kept clear of the home indicator. */}
+      <div className="flex flex-col gap-6 overflow-y-auto px-5 pt-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:pb-5">
         <GroupSettingsSections
           chat={chat}
           currentUser={currentUser}
