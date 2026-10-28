@@ -70,57 +70,89 @@ test(
   },
 );
 
-test(
-  "signed-in pages have no accessibility violations",
-  { tag: "@layout" },
-  async ({ page, request, apiUrl, signUp, createUser }) => {
-    test.setTimeout(120_000);
+type Seeded = {
+  userId: number;
+  postId: number;
+  chatId: number;
+  lobbyId: number;
+};
 
-    const me = await signUp(page);
-    const other = await createUser();
-    const headers = { Authorization: `Bearer ${me.session.accessToken}` };
-    const post = async (path: string, data?: unknown) => {
-      const response = await request.post(`${apiUrl}${path}`, {
-        headers,
-        data,
+// Signed-in pages come in a few groups, one test each, rather than one test
+// for all of them: scanning every page twice is minutes of work under the
+// e2e-stress job's load, more than one test's budget.
+const SIGNED_IN_PAGES: { name: string; paths: (seeded: Seeded) => string[] }[] =
+  [
+    {
+      name: "feed and posts",
+      paths: ({ postId }) => ["/", `/posts/${postId}`, "/posts/new"],
+    },
+    {
+      name: "people and chats",
+      paths: ({ userId, chatId }) => [
+        `/users/${userId}`,
+        "/users",
+        "/chats",
+        `/chats/${chatId}`,
+      ],
+    },
+    {
+      name: "notifications, search and settings",
+      paths: () => ["/notifications", "/search?q=accessibility", "/settings"],
+    },
+    {
+      name: "games",
+      paths: ({ lobbyId }) => [
+        "/games",
+        "/games/typing",
+        `/games/typing/${lobbyId}`,
+      ],
+    },
+  ];
+
+for (const { name, paths } of SIGNED_IN_PAGES) {
+  test(
+    `signed-in pages have no accessibility violations: ${name}`,
+    { tag: "@layout" },
+    async ({ page, request, apiUrl, signUp, createUser }) => {
+      test.setTimeout(90_000);
+
+      const me = await signUp(page);
+      const other = await createUser();
+      const headers = { Authorization: `Bearer ${me.session.accessToken}` };
+      const post = async (path: string, data?: unknown) => {
+        const response = await request.post(`${apiUrl}${path}`, {
+          headers,
+          data,
+        });
+        expect(response.ok()).toBe(true);
+        return (await response.json()) as { id: number };
+      };
+
+      // Enough content that each page renders its real rows, not an empty
+      // state.
+      const { id: postId } = await post("/posts", {
+        contentType: "text",
+        content: "Accessibility check\n\nA post with a comment under it.",
       });
-      expect(response.ok()).toBe(true);
-      return (await response.json()) as { id: number };
-    };
+      await post(`/posts/${postId}/comments`, { content: "A first comment." });
+      const { id: chatId } = await post("/chats/direct", {
+        userId: other.session.user.id,
+      });
+      await post(`/chats/${chatId}/messages`, {
+        contentType: "text",
+        content: "Hello there!",
+      });
+      const { id: lobbyId } = await post("/games/typing/lobbies");
 
-    // Enough content that each page renders its real rows, not an empty state.
-    const { id: postId } = await post("/posts", {
-      contentType: "text",
-      content: "Accessibility check\n\nA post with a comment under it.",
-    });
-    await post(`/posts/${postId}/comments`, { content: "A first comment." });
-    const { id: chatId } = await post("/chats/direct", {
-      userId: other.session.user.id,
-    });
-    await post(`/chats/${chatId}/messages`, {
-      contentType: "text",
-      content: "Hello there!",
-    });
-    const { id: lobbyId } = await post("/games/typing/lobbies");
-
-    const pages = [
-      "/",
-      `/posts/${postId}`,
-      "/posts/new",
-      `/users/${me.session.user.id}`,
-      "/users",
-      "/chats",
-      `/chats/${chatId}`,
-      "/notifications",
-      "/search?q=accessibility",
-      "/settings",
-      "/games",
-      "/games/typing",
-      `/games/typing/${lobbyId}`,
-    ];
-    for (const path of pages) {
-      await page.goto(path);
-      await expectAccessible(page, path);
-    }
-  },
-);
+      for (const path of paths({
+        userId: me.session.user.id,
+        postId,
+        chatId,
+        lobbyId,
+      })) {
+        await page.goto(path);
+        await expectAccessible(page, path);
+      }
+    },
+  );
+}

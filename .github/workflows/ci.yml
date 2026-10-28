@@ -202,6 +202,18 @@ jobs:
         run: bun run check:bundle
         working-directory: web
 
+      # The `lighthouse` job audits this exact build rather than making its
+      # own: inside the Playwright container it runs in, TanStack Start's
+      # SPA prerender can't reach the preview server it starts
+      # (ECONNREFUSED), so `vite build` fails there.
+      - name: Upload web build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-dist
+          path: web/dist/client/
+          if-no-files-found: error
+          retention-days: 1
+
   openapi:
     name: OpenAPI spec & generated types
     needs: changes
@@ -713,8 +725,10 @@ jobs:
   # budget. Scores land in the job summary; full reports in the artifact.
   lighthouse:
     name: Lighthouse report
-    needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.web == 'true'
+    needs: [changes, build-web]
+    # Runs whenever build-web built (every push to main, and PRs touching
+    # web/), since it audits that build.
+    if: ${{ !cancelled() && needs.build-web.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Same image as the e2e job (and bumped with it by Renovate's
@@ -732,9 +746,12 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
           web: true
 
-      - name: Build web
-        run: bun run build
-        working-directory: web
+      # build-web's output — see the comment on its upload step.
+      - name: Download web build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: web/dist/client/
 
       # One step, so the backend (in-memory PGlite, on the build's default
       # API URL) is still up while Lighthouse runs. WEB_ORIGIN lets the
