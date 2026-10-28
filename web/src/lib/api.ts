@@ -11,11 +11,24 @@ import type { components, paths } from "./api-types";
 
 // `__E2E_API_URL__` is injected by Playwright (see `web/e2e/fixtures.ts`) so
 // each e2e test can point the frontend at its own isolated backend instance.
+const BUILD_API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+
 export const API_URL =
   (typeof window !== "undefined" &&
     (window as unknown as { __E2E_API_URL__?: string }).__E2E_API_URL__) ||
-  import.meta.env.VITE_API_URL ||
-  "http://localhost:3000";
+  BUILD_API_URL;
+
+// The API's origin as configured at build time, for the root route's
+// preconnect hint (issue #705). It reads `VITE_API_URL`, not `API_URL`: the
+// hint lands in the prerendered `index.html`, which is built before any
+// runtime e2e override exists. Null if the URL doesn't parse.
+export const BUILD_API_ORIGIN: string | null = (() => {
+  try {
+    return new URL(BUILD_API_URL).origin;
+  } catch {
+    return null;
+  }
+})();
 
 export const fetchClient = createFetchClient<paths>({ baseUrl: API_URL });
 
