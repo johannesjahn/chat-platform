@@ -24,11 +24,11 @@
     "loadtest:ws": "k6 run scripts/loadtest/ws-fanout.js"
   },
   "dependencies": {
-    "@effect/platform-bun": "4.1.0",
+    "@effect/platform-bun": "4.1.1",
     "@electric-sql/pglite": "0.5.13",
     "blurhash": "2.0.5",
     "drizzle-orm": "0.45.4",
-    "effect": "4.1.0",
+    "effect": "4.1.1",
     "sharp": "0.35.5"
   },
   "devDependencies": {
