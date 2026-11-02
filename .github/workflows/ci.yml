@@ -357,7 +357,10 @@ jobs:
     name: Backend tests
     needs: changes
     if: github.event_name == 'push' || needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest: the ffmpeg pin below is a noble
+    # (24.04) package version, and ubuntu-latest moving to 26.04 (resolute)
+    # made it uninstallable. Bump this and FFMPEG_VERSION together.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     # Only RealtimePubSub.integration.test.ts uses Redis — it's the one test
     # that proves cross-instance delivery over real Redis Pub/Sub (see
