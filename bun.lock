@@ -6,7 +6,7 @@
       "name": "chat-platform",
       "dependencies": {
         "@effect/platform-bun": "4.1.2",
-        "@electric-sql/pglite": "0.5.14",
+        "@electric-sql/pglite": "0.5.15",
         "blurhash": "2.0.5",
         "drizzle-orm": "0.45.4",
         "effect": "4.1.2",
@@ -75,7 +75,7 @@
 
     "@effect/platform-node-shared": ["@effect/platform-node-shared@4.1.2", "", { "dependencies": { "@types/ws": "^8.18.2", "ws": "^8.22.1" }, "peerDependencies": { "effect": "^4.1.2" } }, "sha512-wSwl9A/G1hcVvF8nLI+YfB3EyOIDvWS6+lsTZBkmgDnPBL7m8YWZF+1HD+mdEsb52SUGfukip46Q3gRwSdk3QA=="],
 
-    "@electric-sql/pglite": ["@electric-sql/pglite@0.5.14", "", {}, "sha512-aAQe7iArcFB2w1xtx91l3l9trxhMzD6aZf+WnosSHNhwgp70EJz80Igw/bHnW14fUEFYWPBoQ1sGom8Xc0Jttg=="],
+    "@electric-sql/pglite": ["@electric-sql/pglite@0.5.15", "", {}, "sha512-ERZWgaRTxueGV4cvL1tfpAOzFCWTXoUtbCBqnf2FhHDVs/so9eAKaanvrwWF9Dntx7BYsmFQujVQ0/B4S8Mmiw=="],
 
     "@emnapi/runtime": ["@emnapi/runtime@1.11.3", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA=="],
 
