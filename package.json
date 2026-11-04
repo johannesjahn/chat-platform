@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "@effect/platform-bun": "4.1.2",
-    "@electric-sql/pglite": "0.5.14",
+    "@electric-sql/pglite": "0.5.15",
     "blurhash": "2.0.5",
     "drizzle-orm": "0.45.4",
     "effect": "4.1.2",
