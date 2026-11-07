@@ -70,6 +70,8 @@ jobs:
               - bun.lock
               - bunfig.toml
               - tsconfig.json
+              # Holds the ffmpeg version and base image the unit job runs on.
+              - Dockerfile
             web:
               - *ci
               - web/**
@@ -357,11 +359,15 @@ jobs:
     name: Backend tests
     needs: changes
     if: github.event_name == 'push' || needs.changes.outputs.backend == 'true'
-    # Pinned rather than ubuntu-latest: the ffmpeg pin below is a noble
-    # (24.04) package version, and ubuntu-latest moving to 26.04 (resolute)
-    # made it uninstallable. Bump this and FFMPEG_VERSION together.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The Dockerfile's base image, so the tests run on the OS and Bun that
+    # production does, with the same ffmpeg package (see "Install ffmpeg"
+    # below). `env` isn't available here, hence the literal tag; Renovate bumps
+    # it with the Dockerfile's — see the "Bun version" group in
+    # .github/renovate.json5.
+    container:
+      image: oven/bun:1.4.4
     # Only RealtimePubSub.integration.test.ts uses Redis — it's the one test
     # that proves cross-instance delivery over real Redis Pub/Sub (see
     # src/PubSub.ts). Only chats.postgres.integration.test.ts uses Postgres —
@@ -371,8 +377,6 @@ jobs:
     services:
       redis:
         image: redis:8.10.3-alpine
-        ports:
-          - 6379:6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 2s
@@ -384,8 +388,6 @@ jobs:
           POSTGRES_USER: chat_platform
           POSTGRES_PASSWORD: chat_platform
           POSTGRES_DB: chat_platform
-        ports:
-          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U chat_platform"
           --health-interval 2s
@@ -394,35 +396,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Bun and install dependencies
-        uses: ./.github/actions/setup-bun
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-      # The hosted runner image ships third-party apt sources (Google Chrome,
-      # Microsoft) that nothing here installs from — every package below comes
-      # from the Ubuntu archive. When one of those repos serves a stale or
-      # mid-rotation index, `apt-get update` still exits 100 and takes the job
-      # down with it (CI run #822 on main: "Hash Sum mismatch" on
-      # dl.google.com's Packages.gz failed this job and all three e2e shards).
-      # Drop those lists first so an unrelated repo can't break the build; the
-      # globs cover both the .list and deb822 .sources spellings, and `-f`
-      # keeps this a no-op if a future image ships neither.
-      - name: Remove unused third-party apt sources
-        run: sudo rm -fv /etc/apt/sources.list.d/*google* /etc/apt/sources.list.d/*microsoft*
+      # Not the setup-bun action: the image already has the right Bun, and has
+      # neither the `unzip` nor the curl and Python that action would need.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
-      # VideoProcessing.ts (issue #251) shells out to ffmpeg/ffprobe via
-      # Bun.$ — not bundled with Bun or any npm dep, so the runner needs it
-      # installed for attachments.test.ts's video-processing tests to pass.
-      # Pinned to an exact version rather than left floating (this runner is
-      # Ubuntu, a different apt archive from the Dockerfile's Debian trixie
-      # base, hence a different pinned version). Bumped by hand, not by
-      # Renovate — see the Dockerfile's comment on why the repology-based
-      # regex manager for this was dropped (issue #156). Check
-      # https://packages.ubuntu.com/noble/ffmpeg for newer point releases.
+      # VideoProcessing.ts (issue #251) and AudioProcessing.ts (issue #252)
+      # shell out to ffmpeg/ffprobe via Bun.$ — not bundled with Bun or any npm
+      # dep, so the tests need it installed. The version comes from the
+      # Dockerfile, the only place it's pinned.
       - name: Install ffmpeg
-        env:
-          FFMPEG_VERSION: 7:6.1.1-3ubuntu5
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg=${FFMPEG_VERSION}
+        run: |
+          FFMPEG_VERSION="$(sed -n 's/^ARG FFMPEG_VERSION=//p' Dockerfile)"
+          apt-get update
+          apt-get install -y --no-install-recommends "ffmpeg=${FFMPEG_VERSION}"
 
       - name: Run backend tests with coverage
         # bunfig.toml's [test] timeout is a no-op in this Bun version — the
@@ -433,8 +420,8 @@ jobs:
         # uploaded below.
         run: bun run test:coverage
         env:
-          REDIS_URL: redis://localhost:6379
-          TEST_DATABASE_URL: postgres://chat_platform:chat_platform@localhost:5432/chat_platform
+          REDIS_URL: redis://redis:6379
+          TEST_DATABASE_URL: postgres://chat_platform:chat_platform@postgres:5432/chat_platform
 
       - name: Upload coverage report
         if: ${{ !cancelled() }}

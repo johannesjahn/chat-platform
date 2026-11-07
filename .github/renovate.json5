@@ -140,13 +140,14 @@
       dependencyDashboardApproval: true,
     },
 
-    // The Bun version is hand-duplicated in four places (Dockerfile's
-    // `FROM oven/bun:...`, and the separate BUN_VERSION copies in ci.yml,
-    // tag-release.yml and bump-version.yml — see issues #151 and #472)
-    // with nothing keeping them in sync. Group every source of the oven/bun
-    // Docker Hub tag — the Dockerfile (picked up automatically by the
-    // docker manager) and the BUN_VERSION regex manager below — into one PR
-    // so they all move together.
+    // The Bun version is hand-duplicated in five places (Dockerfile's
+    // `FROM oven/bun:...`, the `container:` image of ci.yml's unit job, and
+    // the separate BUN_VERSION copies in ci.yml, tag-release.yml and
+    // bump-version.yml — see issues #151 and #472) with nothing keeping them
+    // in sync. Group every source of the oven/bun Docker Hub tag — the
+    // Dockerfile and the container image (picked up automatically by the
+    // docker and github-actions managers) and the BUN_VERSION regex manager
+    // below — into one PR so they all move together.
     {
       matchDatasources: ["docker"],
       matchPackageNames: ["oven/bun"],
@@ -223,6 +224,24 @@
   ],
 
   customManagers: [
+    // Tracks the Dockerfile's FFMPEG_VERSION, the only copy of the version
+    // (ci.yml's unit job reads it from there). Reads the Debian archive
+    // directly: an earlier manager on the repology datasource was dropped
+    // for its frequent lookup failures (issue #156). The suite must match the
+    // Debian release of the Dockerfile's base image. It can't be combined
+    // with trixie-security, which publishes only Packages.xz where the deb
+    // datasource only reads Packages.gz, so a security fix shows up here once
+    // a point release brings it to trixie.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^Dockerfile$/"],
+      matchStrings: ["ARG FFMPEG_VERSION=(?<currentValue>\\S+)"],
+      depNameTemplate: "ffmpeg",
+      datasourceTemplate: "deb",
+      versioningTemplate: "deb",
+      registryUrlTemplate: "https://deb.debian.org/debian?suite=trixie&components=main&binaryArch=amd64",
+    },
+
     // Tracks BUN_VERSION in every workflow that pins one against the same
     // Docker Hub oven/bun tags the Dockerfile's FROM line tracks (grouped
     // with it above) — none of the npm/github-actions/docker/helm-values

@@ -712,5 +712,9 @@ SHA via the `helpers:pinGitHubActionDigests` preset), Docker (`Dockerfile` +
 Helmfile chart versions (`k8s/observability/helmfile.yaml`), plus custom
 regex managers keeping the hand-duplicated Bun version (`Dockerfile`,
 `ci.yml`, `tag-release.yml`) and helmfile CLI version (`ci.yml`,
-`k8s/observability/README.md`) in sync. There is no `dependabot.yml` —
-Renovate replaced it entirely rather than running alongside it.
+`k8s/observability/README.md`) in sync. The ffmpeg pin lives only in the
+`Dockerfile` (`ARG FFMPEG_VERSION`), bumped through Renovate's `deb` datasource;
+the **unit** job runs in the Dockerfile's base image and reads the pin from
+there, so the tests always run production's ffmpeg. There is no
+`dependabot.yml` — Renovate replaced it entirely rather than running alongside
+it.
