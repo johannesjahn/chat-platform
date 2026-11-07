@@ -37,7 +37,9 @@ type FfprobeStream = { readonly width?: number; readonly height?: number };
 // Decodes the video at `inputPath`, scales it down to the capped resolution,
 // and transcodes it to WebM. Throws if ffmpeg can't decode `inputPath` as a
 // video, regardless of the claimed content type — the caller
-// (AttachmentsHandler.ts) maps that to a 415.
+// (AttachmentsHandler.ts) maps that to a 415. That includes a file with no
+// video stream: ffmpeg transcodes audio-only input without complaint, so only
+// the output shows there was no picture.
 export const processVideo = async (
   inputPath: string,
 ): Promise<ProcessedVideo> => {
@@ -59,13 +61,17 @@ export const processVideo = async (
     const { streams } = JSON.parse(probe) as {
       readonly streams: ReadonlyArray<FfprobeStream>;
     };
+    const video = streams[0];
+    if (!video?.width || !video.height) {
+      throw new Error("Input has no video stream");
+    }
     const data = await Bun.file(outputPath).bytes();
 
     return {
       data,
       contentType: OUTPUT_CONTENT_TYPE,
-      width: streams[0]?.width ?? 0,
-      height: streams[0]?.height ?? 0,
+      width: video.width,
+      height: video.height,
     };
   } finally {
     await Bun.$`rm -f ${outputPath}`.quiet().nothrow();

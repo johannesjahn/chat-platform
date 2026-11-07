@@ -588,6 +588,61 @@ test.each([
   ),
 );
 
+// Real files plain ffmpeg would decode, so unlike the rows above these show the
+// upload path itself applies the checks: the MPEG-TS and FLAC rows get through
+// without the demuxer lists, the audio-only rows without processVideo's check
+// for a video stream.
+test.each([
+  {
+    name: "an MPEG-TS video claiming video/mp4",
+    contentType: "video/mp4",
+    args: [...VIDEO_SOURCE, "-c:v", "mpeg2video"],
+    extension: "ts",
+  },
+  {
+    name: "an MP3 claiming video/mp4",
+    contentType: "video/mp4",
+    args: [...AUDIO_SOURCE, "-c:a", "libmp3lame"],
+    extension: "mp3",
+  },
+  {
+    name: "a FLAC file claiming audio/mpeg",
+    contentType: "audio/mpeg",
+    args: [...AUDIO_SOURCE, "-c:a", "flac"],
+    extension: "flac",
+  },
+  {
+    name: "an audio-only MP4 claiming video/mp4",
+    contentType: "video/mp4",
+    args: [...AUDIO_SOURCE, "-c:a", "aac"],
+    extension: "m4a",
+  },
+  {
+    name: "an audio-only WebM claiming video/webm",
+    contentType: "video/webm",
+    args: [...AUDIO_SOURCE, "-c:a", "libopus"],
+    extension: "webm",
+  },
+])("uploadAttachment rejects $name", ({ contentType, args, extension }) =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-offlist",
+        "pw-testpass",
+      );
+      const data = yield* Effect.promise(() => makeMedia(extension, args));
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: `clip.${extension}`,
+          contentType,
+          data,
+        }),
+      );
+      expect(result.status).toBe(415);
+    }),
+  ),
+);
+
 test("uploadAttachment transcodes audio to Ogg/Opus and shrinks the size", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
