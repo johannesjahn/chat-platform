@@ -325,6 +325,14 @@ the client is `web/src/components/games/reflex/` plus
   display only; the client's mirrored scoring constants must track the
   server's.
 
+## Media input restrictions
+
+Every ffmpeg/ffprobe call in the upload pipeline takes its input from
+[`src/MediaInput.ts`](src/MediaInput.ts) (`videoFileInput`, `AUDIO_PIPE_INPUT`;
+issue #732), which whitelists the protocol and the demuxers, so an upload can't
+reach `hls`, `concat` and the like. Don't write a bare `-i`. A new video or audio
+MIME type in `ALLOWED_ATTACHMENT_MIME_TYPES` needs its demuxer checked there.
+
 ## Forwarding messages
 
 `POST /chats/:id/messages/:messageId/forward` (issue #601) posts a copy of a

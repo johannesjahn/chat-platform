@@ -3,6 +3,8 @@
 // unprocessed — mirrors `ImageProcessing.ts` (issue #248) for video
 // attachments (issue #251).
 
+import { videoFileInput } from "./MediaInput.ts";
+
 // Longest edge a stored video is allowed to keep. `AttachmentPreview.tsx`
 // never renders an attachment taller than `max-h-72` (a few hundred px), so
 // 720p is already far more resolution than the UI displays — same
@@ -35,7 +37,9 @@ type FfprobeStream = { readonly width?: number; readonly height?: number };
 // Decodes the video at `inputPath`, scales it down to the capped resolution,
 // and transcodes it to WebM. Throws if ffmpeg can't decode `inputPath` as a
 // video, regardless of the claimed content type — the caller
-// (AttachmentsHandler.ts) maps that to a 415.
+// (AttachmentsHandler.ts) maps that to a 415. That includes a file with no
+// video stream: ffmpeg transcodes audio-only input without complaint, so only
+// the output shows there was no picture.
 export const processVideo = async (
   inputPath: string,
 ): Promise<ProcessedVideo> => {
@@ -48,22 +52,26 @@ export const processVideo = async (
     // withoutEnlargement: true` in ImageProcessing.ts. `force_divisible_by=2`
     // rounds the result to even dimensions, required by yuv420p's chroma
     // subsampling.
-    await Bun.$`ffmpeg -y -i ${inputPath} -vf ${`scale=w='min(iw,${MAX_VIDEO_DIMENSION_PX})':h='min(ih,${MAX_VIDEO_DIMENSION_PX})':force_original_aspect_ratio=decrease:force_divisible_by=2`} -c:v libvpx-vp9 -crf ${VIDEO_CRF} -b:v ${VIDEO_MAX_BITRATE} -c:a libopus -b:a ${AUDIO_BITRATE} ${outputPath}`.quiet();
+    await Bun.$`ffmpeg -y ${videoFileInput(inputPath)} -vf ${`scale=w='min(iw,${MAX_VIDEO_DIMENSION_PX})':h='min(ih,${MAX_VIDEO_DIMENSION_PX})':force_original_aspect_ratio=decrease:force_divisible_by=2`} -c:v libvpx-vp9 -crf ${VIDEO_CRF} -b:v ${VIDEO_MAX_BITRATE} -c:a libopus -b:a ${AUDIO_BITRATE} ${outputPath}`.quiet();
 
     const probe =
-      await Bun.$`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of json ${outputPath}`
+      await Bun.$`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of json ${videoFileInput(outputPath)}`
         .quiet()
         .text();
     const { streams } = JSON.parse(probe) as {
       readonly streams: ReadonlyArray<FfprobeStream>;
     };
+    const video = streams[0];
+    if (!video?.width || !video.height) {
+      throw new Error("Input has no video stream");
+    }
     const data = await Bun.file(outputPath).bytes();
 
     return {
       data,
       contentType: OUTPUT_CONTENT_TYPE,
-      width: streams[0]?.width ?? 0,
-      height: streams[0]?.height ?? 0,
+      width: video.width,
+      height: video.height,
     };
   } finally {
     await Bun.$`rm -f ${outputPath}`.quiet().nothrow();

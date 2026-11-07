@@ -7,6 +7,8 @@
 // the handful of input codecs `ALLOWED_ATTACHMENT_MIME_TYPES` allows
 // (mp3/ogg/wav) plus Opus encoding in one native dependency.
 
+import { AUDIO_PIPE_INPUT } from "./MediaInput.ts";
+
 // Ogg/Opus: small, broadly supported by browsers for playback, and a single
 // output format regardless of input (mp3/ogg/wav) — same rationale as
 // re-encoding every rescaled image to WebP rather than preserving format.
@@ -73,8 +75,7 @@ const probeChannelCount = async (input: Uint8Array): Promise<number> => {
       "stream=channels",
       "-of",
       "csv=p=0",
-      "-i",
-      "pipe:0",
+      ...AUDIO_PIPE_INPUT,
     ],
     { stdin: input, stdout: "pipe", stderr: "pipe" },
   );
@@ -158,8 +159,7 @@ export const analyzeAudio = async (ogg: Uint8Array): Promise<AudioWaveform> => {
       "-hide_banner",
       "-loglevel",
       "error",
-      "-i",
-      "pipe:0",
+      ...AUDIO_PIPE_INPUT,
       "-vn",
       "-ac",
       "1",
@@ -219,8 +219,7 @@ export const processAudio = async (
       "-hide_banner",
       "-loglevel",
       "error",
-      "-i",
-      "pipe:0",
+      ...AUDIO_PIPE_INPUT,
       // Drops any embedded video/album-art stream (common in mp3 files) —
       // the Ogg muxer below only takes an audio stream — and strips
       // metadata (ID3 tags, etc.) rather than carrying it through.
