@@ -3,6 +3,8 @@
 // unprocessed — mirrors `ImageProcessing.ts` (issue #248) for video
 // attachments (issue #251).
 
+import { videoFileInput } from "./MediaInput.ts";
+
 // Longest edge a stored video is allowed to keep. `AttachmentPreview.tsx`
 // never renders an attachment taller than `max-h-72` (a few hundred px), so
 // 720p is already far more resolution than the UI displays — same
@@ -48,10 +50,10 @@ export const processVideo = async (
     // withoutEnlargement: true` in ImageProcessing.ts. `force_divisible_by=2`
     // rounds the result to even dimensions, required by yuv420p's chroma
     // subsampling.
-    await Bun.$`ffmpeg -y -i ${inputPath} -vf ${`scale=w='min(iw,${MAX_VIDEO_DIMENSION_PX})':h='min(ih,${MAX_VIDEO_DIMENSION_PX})':force_original_aspect_ratio=decrease:force_divisible_by=2`} -c:v libvpx-vp9 -crf ${VIDEO_CRF} -b:v ${VIDEO_MAX_BITRATE} -c:a libopus -b:a ${AUDIO_BITRATE} ${outputPath}`.quiet();
+    await Bun.$`ffmpeg -y ${videoFileInput(inputPath)} -vf ${`scale=w='min(iw,${MAX_VIDEO_DIMENSION_PX})':h='min(ih,${MAX_VIDEO_DIMENSION_PX})':force_original_aspect_ratio=decrease:force_divisible_by=2`} -c:v libvpx-vp9 -crf ${VIDEO_CRF} -b:v ${VIDEO_MAX_BITRATE} -c:a libopus -b:a ${AUDIO_BITRATE} ${outputPath}`.quiet();
 
     const probe =
-      await Bun.$`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of json ${outputPath}`
+      await Bun.$`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of json ${videoFileInput(outputPath)}`
         .quiet()
         .text();
     const { streams } = JSON.parse(probe) as {

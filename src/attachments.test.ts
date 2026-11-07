@@ -397,6 +397,197 @@ test("uploadAttachment rejects a file claiming a video mime type it isn't", () =
     }),
   ));
 
+// A real file of each allowed container, generated from a `lavfi` source. Sticks
+// to encoders the Dockerfile's ffmpeg and a typical local build share (Homebrew's
+// has no libvorbis, hence Opus for the Ogg row).
+const makeMedia = async (
+  extension: string,
+  args: ReadonlyArray<string>,
+): Promise<Uint8Array> => {
+  const path = join(
+    tmpdir(),
+    `attachments-test-${crypto.randomUUID()}.${extension}`,
+  );
+  try {
+    await Bun.$`ffmpeg -y ${args} ${path}`.quiet();
+    return await Bun.file(path).bytes();
+  } finally {
+    await Bun.$`rm -f ${path}`.quiet().nothrow();
+  }
+};
+
+const VIDEO_SOURCE = ["-f", "lavfi", "-i", "color=c=blue:s=64x64:d=1:r=5"];
+const AUDIO_SOURCE = ["-f", "lavfi", "-i", "sine=frequency=440:duration=1"];
+
+// One row per video/audio entry in ALLOWED_ATTACHMENT_MIME_TYPES (issue #732):
+// each has to get through MediaInput.ts's demuxer list, not just decode.
+const ALLOWED_VIDEO_UPLOADS = [
+  {
+    contentType: "video/mp4",
+    args: [...VIDEO_SOURCE, "-pix_fmt", "yuv420p", "-c:v", "libx264"],
+    extension: "mp4",
+  },
+  {
+    contentType: "video/webm",
+    args: [...VIDEO_SOURCE, "-c:v", "libvpx-vp9"],
+    extension: "webm",
+  },
+];
+const ALLOWED_AUDIO_UPLOADS = [
+  {
+    contentType: "audio/mpeg",
+    args: [...AUDIO_SOURCE, "-c:a", "libmp3lame"],
+    extension: "mp3",
+  },
+  {
+    contentType: "audio/ogg",
+    args: [...AUDIO_SOURCE, "-c:a", "libopus"],
+    extension: "ogg",
+  },
+  {
+    contentType: "audio/wav",
+    args: AUDIO_SOURCE,
+    extension: "wav",
+  },
+  // What Chrome/Firefox's MediaRecorder produces for a voice message.
+  {
+    contentType: "audio/webm",
+    args: [...AUDIO_SOURCE, "-c:a", "libopus"],
+    extension: "webm",
+  },
+  // Safari's MediaRecorder: AAC in a fragmented MP4.
+  {
+    contentType: "audio/mp4",
+    args: [
+      ...AUDIO_SOURCE,
+      "-c:a",
+      "aac",
+      "-movflags",
+      "frag_keyframe+empty_moov+default_base_moof",
+    ],
+    extension: "m4a",
+  },
+];
+
+test.each(ALLOWED_VIDEO_UPLOADS)(
+  "uploadAttachment accepts a real $contentType file",
+  ({ contentType, args, extension }) =>
+    run(({ handler }) =>
+      Effect.gen(function* () {
+        const { accessToken } = yield* registerAndLogin(
+          "uploader-allowedvideo",
+          "pw-testpass",
+        );
+        const data = yield* Effect.promise(() => makeMedia(extension, args));
+        const result = yield* Effect.promise(() =>
+          uploadFile(handler, accessToken, {
+            filename: `clip.${extension}`,
+            contentType,
+            data,
+          }),
+        );
+        expect(result.status).toBe(201);
+        // Dimensions come from probing the transcoded WebM, the pipeline's
+        // second stage, which goes through the same restricted input.
+        const attachment = result.body as {
+          mimeType: string;
+          width: number;
+          height: number;
+        };
+        expect(attachment.mimeType).toBe("video/webm");
+        expect(attachment.width).toBe(64);
+        expect(attachment.height).toBe(64);
+      }),
+    ),
+);
+
+test.each(ALLOWED_AUDIO_UPLOADS)(
+  "uploadAttachment accepts a real $contentType file",
+  ({ contentType, args, extension }) =>
+    run(({ handler }) =>
+      Effect.gen(function* () {
+        const { accessToken } = yield* registerAndLogin(
+          "uploader-allowedaudio",
+          "pw-testpass",
+        );
+        const data = yield* Effect.promise(() => makeMedia(extension, args));
+        const result = yield* Effect.promise(() =>
+          uploadFile(handler, accessToken, {
+            filename: `clip.${extension}`,
+            contentType,
+            data,
+          }),
+        );
+        expect(result.status).toBe(201);
+        // A waveform failure is swallowed rather than failing the upload, so
+        // this is what shows analyzeAudio could still read the Ogg output.
+        const attachment = result.body as {
+          mimeType: string;
+          waveform: ReadonlyArray<number> | null;
+        };
+        expect(attachment.mimeType).toBe("audio/ogg");
+        expect(attachment.waveform).not.toBeNull();
+      }),
+    ),
+);
+
+const HLS_PLAYLIST =
+  "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nsegment.ts\n#EXT-X-ENDLIST\n";
+const CONCAT_SCRIPT = "ffconcat version 1.0\nfile 'clip.mp4'\n";
+
+// The files these point at don't exist here, so this pins the response, not the
+// cause: MediaInput.test.ts has the same files with working references, and
+// shows it's the demuxer list that turns them away.
+test.each([
+  {
+    name: "an HLS playlist named as one, claiming video/mp4",
+    filename: "playlist.m3u8",
+    contentType: "video/mp4",
+    content: HLS_PLAYLIST,
+  },
+  {
+    name: "an HLS playlist named as a video",
+    filename: "clip.mp4",
+    contentType: "video/mp4",
+    content: HLS_PLAYLIST,
+  },
+  {
+    name: "a concat script named as a video",
+    filename: "clip.webm",
+    contentType: "video/webm",
+    content: CONCAT_SCRIPT,
+  },
+  {
+    name: "an HLS playlist sent through pipe:0",
+    filename: "playlist.m3u8",
+    contentType: "audio/mpeg",
+    content: HLS_PLAYLIST,
+  },
+  {
+    name: "a concat script sent through pipe:0",
+    filename: "voice.m4a",
+    contentType: "audio/mp4",
+    content: CONCAT_SCRIPT,
+  },
+])("uploadAttachment rejects $name", ({ filename, contentType, content }) =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-playlist",
+        "pw-testpass",
+      );
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename,
+          contentType,
+          data: new TextEncoder().encode(content),
+        }),
+      );
+      expect(result.status).toBe(415);
+    }),
+  ),
+);
+
 test("uploadAttachment transcodes audio to Ogg/Opus and shrinks the size", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
