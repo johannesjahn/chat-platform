@@ -3,7 +3,10 @@
 // unprocessed — mirrors `ImageProcessing.ts` (issue #248) for video
 // attachments (issue #251).
 
-import { videoFileInput } from "./MediaInput.ts";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runFfmpeg, runFfprobe } from "./MediaInput.ts";
 
 // Longest edge a stored video is allowed to keep. `AttachmentPreview.tsx`
 // never renders an attachment taller than `max-h-72` (a few hundred px), so
@@ -43,21 +46,48 @@ type FfprobeStream = { readonly width?: number; readonly height?: number };
 export const processVideo = async (
   inputPath: string,
 ): Promise<ProcessedVideo> => {
-  const outputPath = `${inputPath}-${crypto.randomUUID()}.webm`;
+  // `inputPath` keeps the client's file name, which must not reach ffmpeg: it
+  // can steer format detection, and a long one overflows the file name limit
+  // (issue #734). The copy is cheap next to the transcode, and uploads are capped.
+  const workDir = await mkdtemp(join(tmpdir(), "video-processing-"));
+  const namedInputPath = join(workDir, crypto.randomUUID());
+  const outputPath = join(workDir, `${crypto.randomUUID()}.webm`);
   try {
+    await copyFile(inputPath, namedInputPath);
     // `force_original_aspect_ratio=decrease` fits the source into a
     // min(iw,MAX) x min(ih,MAX) box while preserving aspect ratio — for a
     // source already at or below the cap on both edges that box is just the
     // source size, so it never upscales, mirroring `fit: inside,
     // withoutEnlargement: true` in ImageProcessing.ts. `force_divisible_by=2`
     // rounds the result to even dimensions, required by yuv420p's chroma
-    // subsampling.
-    await Bun.$`ffmpeg -y ${videoFileInput(inputPath)} -vf ${`scale=w='min(iw,${MAX_VIDEO_DIMENSION_PX})':h='min(ih,${MAX_VIDEO_DIMENSION_PX})':force_original_aspect_ratio=decrease:force_divisible_by=2`} -c:v libvpx-vp9 -crf ${VIDEO_CRF} -b:v ${VIDEO_MAX_BITRATE} -c:a libopus -b:a ${AUDIO_BITRATE} ${outputPath}`.quiet();
+    // subsampling. `-sn -dn` drop subtitle and data streams: nothing plays them
+    // back, and selecting subtitles would fail on their off-list decoder.
+    await runFfmpeg({ videoPath: namedInputPath }, [
+      "-sn",
+      "-dn",
+      "-vf",
+      `scale=w='min(iw,${MAX_VIDEO_DIMENSION_PX})':h='min(ih,${MAX_VIDEO_DIMENSION_PX})':force_original_aspect_ratio=decrease:force_divisible_by=2`,
+      "-c:v",
+      "libvpx-vp9",
+      "-crf",
+      String(VIDEO_CRF),
+      "-b:v",
+      VIDEO_MAX_BITRATE,
+      "-c:a",
+      "libopus",
+      "-b:a",
+      AUDIO_BITRATE,
+      outputPath,
+    ]);
 
-    const probe =
-      await Bun.$`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of json ${videoFileInput(outputPath)}`
-        .quiet()
-        .text();
+    const probe = await runFfprobe({ videoPath: outputPath }, [
+      "-select_streams",
+      "v:0",
+      "-show_entries",
+      "stream=width,height",
+      "-of",
+      "json",
+    ]);
     const { streams } = JSON.parse(probe) as {
       readonly streams: ReadonlyArray<FfprobeStream>;
     };
@@ -74,6 +104,6 @@ export const processVideo = async (
       height: video.height,
     };
   } finally {
-    await Bun.$`rm -f ${outputPath}`.quiet().nothrow();
+    await rm(workDir, { recursive: true, force: true });
   }
 };

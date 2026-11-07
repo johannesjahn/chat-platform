@@ -479,8 +479,10 @@ export type Attachment = typeof Attachment.Type;
 // `mimeType: "application/pdf"` and keep rendering fine (see
 // attachmentKind/AttachmentPreview) — only new uploads are blocked.
 //
-// ffmpeg only opens the demuxers listed in MediaInput.ts: adding a video or
-// audio type here means checking its container's demuxer is listed there.
+// ffmpeg only opens the demuxers and decoders listed in MediaInput.ts: adding a
+// video or audio type here means checking its container's demuxer and its usual
+// codecs' decoders are listed there. Deliberately not listed, and rejected by
+// those lists even under an allowed label: FLAC and raw (ADTS) AAC (issue #734).
 export const ALLOWED_ATTACHMENT_MIME_TYPES = [
   "image/jpeg",
   "image/png",
