@@ -1,9 +1,14 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 import { processAudio } from "./AudioProcessing.ts";
-import { AUDIO_PIPE_INPUT, videoFileInput } from "./MediaInput.ts";
+import {
+  AUDIO_PIPE_INPUT,
+  runFfmpeg,
+  runFfprobe,
+  videoFileInput,
+} from "./MediaInput.ts";
 import { processVideo } from "./VideoProcessing.ts";
 
 // Harmless local fixtures only: a playlist and a concat script that each point
@@ -110,4 +115,180 @@ test("the audio input only opens pipes", async () => {
     expect(exitCode).not.toBe(0);
     expect(stderr).toMatch(/Protocol .* not on whitelist/);
   }
+});
+
+test("the decoder lists refuse an off-list codec in an allowed container", async () => {
+  // Plain ffmpeg reads both, so it's the list that turns them away.
+  const mpeg4 = join(dir, "mpeg4.mp4");
+  const flac = join(dir, "flac.mka");
+  const color = "color=c=blue:s=64x64:d=1:r=5";
+  const sine = "sine=frequency=440:duration=1";
+  await Bun.$`ffmpeg -y -f lavfi -i ${color} -c:v mpeg4 ${mpeg4}`.quiet();
+  await Bun.$`ffmpeg -y -f lavfi -i ${sine} -c:a flac ${flac}`.quiet();
+  for (const path of [mpeg4, flac]) {
+    expect((await ffprobe(["-i", path])).exitCode).toBe(0);
+  }
+
+  const video = await ffprobe(videoFileInput(mpeg4));
+  expect(video.exitCode).not.toBe(0);
+  expect(video.stderr).toContain("(mpeg4) not on whitelist");
+
+  const audio = await ffprobe(AUDIO_PIPE_INPUT, await bytesOf(flac));
+  expect(audio.exitCode).not.toBe(0);
+  expect(audio.stderr).toContain("(flac) not on whitelist");
+});
+
+test("the audio decoder list has no video decoders", async () => {
+  const { exitCode, stderr } = await ffprobe(
+    AUDIO_PIPE_INPUT,
+    await bytesOf(join(dir, "clip.mp4")),
+  );
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain("(h264) not on whitelist");
+});
+
+test("the wrappers reject with ffmpeg's reason and resolve to its output", async () => {
+  const clip = join(dir, "clip.mp4");
+  await expect(
+    runFfmpeg({ videoPath: hlsPath }, ["-f", "null", "-"]),
+  ).rejects.toThrow("not on whitelist");
+  expect(
+    await runFfprobe({ videoPath: clip }, [
+      "-show_entries",
+      "stream=codec_name",
+      "-of",
+      "csv=p=0",
+    ]),
+  ).toContain("h264");
+});
+
+// Runs `script` in a new process whose `ffmpeg`/`ffprobe` are scripts that log
+// their arguments, one call per line, and resolves to what they logged: what
+// reaches the real binaries, however the code under test got there. A new process
+// because Bun.spawn doesn't see a PATH changed after startup.
+const logMediaCalls = async (
+  script: string,
+): Promise<ReadonlyArray<string>> => {
+  const shimDir = await mkdtemp(join(dir, "shims-"));
+  const log = join(shimDir, "calls.log");
+  for (const tool of ["ffmpeg", "ffprobe"]) {
+    const shim = join(shimDir, tool);
+    await Bun.write(
+      shim,
+      `#!/bin/sh\necho "${tool} $*" >> "${log}"\nexec "${Bun.which(tool)}" "$@"\n`,
+    );
+    await chmod(shim, 0o755);
+  }
+  const proc = Bun.spawn([process.execPath, "-e", script], {
+    cwd: import.meta.dir,
+    env: {
+      ...process.env,
+      PATH: `${shimDir}${delimiter}${process.env.PATH}`,
+    },
+    stdout: "ignore",
+    stderr: "inherit",
+  });
+  expect(await proc.exited).toBe(0);
+  return (await Bun.file(log).text()).trim().split("\n");
+};
+
+const expectRestricted = (calls: ReadonlyArray<string>, count: number) => {
+  expect(calls).toHaveLength(count);
+  for (const call of calls) {
+    expect(call).toContain("-protocol_whitelist ");
+    expect(call).toContain("-format_whitelist ");
+    expect(call).toContain("-codec_whitelist ");
+  }
+};
+
+test("processVideo restricts every call and never passes on the file's name", async () => {
+  const hostile = join(dir, `hostile-name-${"a".repeat(200)}.m3u8`);
+  await Bun.write(hostile, Bun.file(join(dir, "clip.mp4")));
+
+  const calls = await logMediaCalls(`
+    import { processVideo } from "./VideoProcessing.ts";
+    await processVideo(${JSON.stringify(hostile)});
+  `);
+
+  expectRestricted(calls, 2);
+  for (const call of calls) {
+    expect(call).not.toContain(basename(hostile));
+    expect(call).not.toContain("m3u8");
+    // The temp dir and a UUID, nothing derived from the upload's own path.
+    expect(call).toMatch(
+      /-i \S*video-processing-\w+\/[0-9a-f-]{36}(\.webm)?( |$)/,
+    );
+  }
+});
+
+test("processAudio restricts every call", async () => {
+  const wav = join(dir, "tone.wav");
+  await Bun.$`ffmpeg -y -f lavfi -i ${"sine=frequency=440:duration=1"} ${wav}`.quiet();
+
+  const calls = await logMediaCalls(`
+    import { processAudio } from "./AudioProcessing.ts";
+    await processAudio(await Bun.file(${JSON.stringify(wav)}).bytes());
+  `);
+
+  // The transcode and the waveform pass.
+  expectRestricted(calls, 2);
+});
+
+test.each([
+  { source: 1, stored: 1 },
+  { source: 2, stored: 2 },
+  { source: 6, stored: 2 },
+])(
+  "processAudio stores $source channels as $stored",
+  async ({ source, stored }) => {
+    const wav = join(dir, `channels-${source}.wav`);
+    await Bun.$`ffmpeg -y -f lavfi -i ${"sine=frequency=440:duration=1"} -ac ${source} ${wav}`.quiet();
+
+    const { data } = await processAudio(await bytesOf(wav));
+
+    const proc = Bun.spawn(
+      [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "stream=channels",
+        "-of",
+        "csv=p=0",
+        "-",
+      ],
+      { stdin: data, stdout: "pipe" },
+    );
+    expect((await new Response(proc.stdout).text()).trim()).toBe(
+      String(stored),
+    );
+  },
+);
+
+// A command name in code, not in prose: comments are stripped first.
+const FFMPEG_CALL = /\bff(mpeg|probe)\b/;
+const callsFfmpeg = (source: string): boolean =>
+  source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .some((line) => FFMPEG_CALL.test(line.replace(/\/\/.*$/, "")));
+
+test("the scan below recognizes a direct call in either style", () => {
+  expect(callsFfmpeg('Bun.spawn(["ffmpeg", "-i", path]);')).toBe(true);
+  expect(callsFfmpeg("await Bun.$`ffprobe -i ${path}`.quiet();")).toBe(true);
+  expect(callsFfmpeg("// shells out to `ffmpeg`, see MediaInput.ts")).toBe(
+    false,
+  );
+});
+
+test("nothing outside MediaInput.ts names ffmpeg or ffprobe", async () => {
+  const offenders: string[] = [];
+  const files = new Bun.Glob("**/*.ts").scan({ cwd: import.meta.dir });
+  for await (const file of files) {
+    if (file === "MediaInput.ts" || file.endsWith(".test.ts")) continue;
+    if (callsFfmpeg(await Bun.file(join(import.meta.dir, file)).text())) {
+      offenders.push(file);
+    }
+  }
+  expect(offenders).toEqual([]);
 });

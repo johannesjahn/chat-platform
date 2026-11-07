@@ -1,13 +1,13 @@
 // Uploaded audio attachments are transcoded to a single small,
 // broadly-compatible output format during the upload path
 // (`AttachmentsHandler.ts`), mirroring the pattern `ImageProcessing.ts` uses
-// for images — see issue #252. Shells out to the `ffmpeg`/`ffprobe`
-// binaries (installed in the Docker image — see `Dockerfile`) rather than a
+// for images — see issue #252. Shells out to the `ffmpeg` binary, through
+// `MediaInput.ts` (installed in the Docker image — see `Dockerfile`) rather than a
 // JS/wasm decoder: unlike images there's no equivalent of `sharp` covering
 // the handful of input codecs `ALLOWED_ATTACHMENT_MIME_TYPES` allows
 // (mp3/ogg/wav) plus Opus encoding in one native dependency.
 
-import { AUDIO_PIPE_INPUT } from "./MediaInput.ts";
+import { runFfmpeg } from "./MediaInput.ts";
 
 // Ogg/Opus: small, broadly supported by browsers for playback, and a single
 // output format regardless of input (mp3/ogg/wav) — same rationale as
@@ -27,8 +27,11 @@ const OUTPUT_SAMPLE_RATE_HZ = 48000;
 
 // Mono/stereo is enough for chat/post playback (issue #252) — anything
 // wider (5.1, etc.) gets downmixed rather than rejected, since ffmpeg does
-// this losslessly-enough for voice/music without extra user friction.
-const MAX_OUTPUT_CHANNELS = 2;
+// this losslessly-enough for voice/music without extra user friction. Left to
+// the filter rather than computed from an ffprobe of the source: ffprobe fails
+// on a stream with an off-list decoder even when it isn't selected, which would
+// turn away every MP3 with album art (see MediaInput.ts).
+const OUTPUT_CHANNEL_FILTER = "aformat=channel_layouts=mono|stereo";
 
 // How many amplitude buckets a stored waveform is reduced to. The player
 // draws fewer bars than this on a narrow pill and averages neighbours down
@@ -54,39 +57,6 @@ const WAVEFORM_MIN_LEVEL = 4;
 // which is what makes the drawn row read as the clip's shape instead of a
 // flat line with a few spikes in it.
 const WAVEFORM_CURVE_EXPONENT = 0.65;
-
-const bytesFromStream = async (
-  stream: ReadableStream<Uint8Array>,
-): Promise<Uint8Array> =>
-  new Uint8Array(await new Response(stream).arrayBuffer());
-
-// Reads the source's channel count via ffprobe rather than assuming one —
-// also doubles as upload validation: ffprobe exits non-zero for anything
-// that isn't decodable audio, regardless of the claimed content type.
-const probeChannelCount = async (input: Uint8Array): Promise<number> => {
-  const proc = Bun.spawn(
-    [
-      "ffprobe",
-      "-v",
-      "error",
-      "-select_streams",
-      "a:0",
-      "-show_entries",
-      "stream=channels",
-      "-of",
-      "csv=p=0",
-      ...AUDIO_PIPE_INPUT,
-    ],
-    { stdin: input, stdout: "pipe", stderr: "pipe" },
-  );
-  const stdout = await bytesFromStream(proc.stdout);
-  const exitCode = await proc.exited;
-  const channels = Number.parseInt(new TextDecoder().decode(stdout).trim(), 10);
-  if (exitCode !== 0 || !Number.isFinite(channels) || channels < 1) {
-    throw new Error("Uploaded file is not a valid audio stream");
-  }
-  return channels;
-};
 
 // Reduces raw mono PCM to `bucketCount` levels in 0..100, one per equal
 // slice of the clip. Exported for its own tests — it's the half of the
@@ -153,36 +123,19 @@ export type AudioWaveform = {
 // served over a presigned URL doesn't always hand the browser a usable
 // `duration` on `loadedmetadata`.
 export const analyzeAudio = async (ogg: Uint8Array): Promise<AudioWaveform> => {
-  const proc = Bun.spawn(
-    [
-      "ffmpeg",
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      ...AUDIO_PIPE_INPUT,
-      "-vn",
-      "-ac",
-      "1",
-      "-ar",
-      String(ANALYSIS_SAMPLE_RATE_HZ),
-      "-f",
-      "s16le",
-      "pipe:1",
-    ],
-    { stdin: ogg, stdout: "pipe", stderr: "pipe" },
-  );
-
-  const [pcm, exitCode] = await Promise.all([
-    bytesFromStream(proc.stdout),
-    proc.exited,
+  const pcm = await runFfmpeg({ audio: ogg }, [
+    "-vn",
+    "-ac",
+    "1",
+    "-ar",
+    String(ANALYSIS_SAMPLE_RATE_HZ),
+    "-f",
+    "s16le",
+    "pipe:1",
   ]);
-  if (exitCode !== 0) {
-    throw new Error("Transcoded audio could not be analyzed");
-  }
 
-  // `bytesFromStream` always hands back a view starting at offset 0 of its
-  // own buffer, so this reinterprets the bytes in place rather than copying
-  // them. s16le matches the native byte order of every platform this runs
+  // `runFfmpeg` hands back a view starting at offset 0 of its own buffer, so
+  // this reinterprets the bytes in place rather than copying them. s16le matches the native byte order of every platform this runs
   // on (x86-64/arm64, both little-endian).
   const samples = new Int16Array(pcm.buffer, 0, pcm.byteLength >> 1);
   return {
@@ -210,44 +163,25 @@ export type ProcessedAudio = {
 export const processAudio = async (
   input: Uint8Array,
 ): Promise<ProcessedAudio> => {
-  const sourceChannels = await probeChannelCount(input);
-  const targetChannels = Math.min(sourceChannels, MAX_OUTPUT_CHANNELS);
-
-  const proc = Bun.spawn(
-    [
-      "ffmpeg",
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      ...AUDIO_PIPE_INPUT,
-      // Drops any embedded video/album-art stream (common in mp3 files) —
-      // the Ogg muxer below only takes an audio stream — and strips
-      // metadata (ID3 tags, etc.) rather than carrying it through.
-      "-vn",
-      "-map_metadata",
-      "-1",
-      "-ac",
-      String(targetChannels),
-      "-ar",
-      String(OUTPUT_SAMPLE_RATE_HZ),
-      "-c:a",
-      "libopus",
-      "-b:a",
-      OPUS_BITRATE,
-      "-f",
-      "ogg",
-      "pipe:1",
-    ],
-    { stdin: input, stdout: "pipe", stderr: "pipe" },
-  );
-
-  const [data, exitCode] = await Promise.all([
-    bytesFromStream(proc.stdout),
-    proc.exited,
+  const data = await runFfmpeg({ audio: input }, [
+    // Drops any embedded video/album-art stream (common in mp3 files) —
+    // the Ogg muxer below only takes an audio stream — and strips
+    // metadata (ID3 tags, etc.) rather than carrying it through.
+    "-vn",
+    "-map_metadata",
+    "-1",
+    "-af",
+    OUTPUT_CHANNEL_FILTER,
+    "-ar",
+    String(OUTPUT_SAMPLE_RATE_HZ),
+    "-c:a",
+    "libopus",
+    "-b:a",
+    OPUS_BITRATE,
+    "-f",
+    "ogg",
+    "pipe:1",
   ]);
-  if (exitCode !== 0) {
-    throw new Error("Uploaded file could not be transcoded as audio");
-  }
 
   // The clip is already transcoded and playable at this point, and the
   // waveform is decoration on top of it — so a failure here degrades to

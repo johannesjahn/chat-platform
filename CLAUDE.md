@@ -327,11 +327,24 @@ the client is `web/src/components/games/reflex/` plus
 
 ## Media input restrictions
 
-Every ffmpeg/ffprobe call in the upload pipeline takes its input from
-[`src/MediaInput.ts`](src/MediaInput.ts) (`videoFileInput`, `AUDIO_PIPE_INPUT`;
-issue #732), which whitelists the protocol and the demuxers, so an upload can't
-reach `hls`, `concat` and the like. Don't write a bare `-i`. A new video or audio
-MIME type in `ALLOWED_ATTACHMENT_MIME_TYPES` needs its demuxer checked there.
+Every ffmpeg/ffprobe call in the upload pipeline goes through `runFfmpeg` or
+`runFfprobe` in [`src/MediaInput.ts`](src/MediaInput.ts) (issues #732, #734),
+which whitelist the protocol, demuxers and decoders, so an upload can't reach
+`hls`, `concat` and the like, or any decoder off the list. `MediaInput.test.ts`
+fails on a call anywhere else in `src/`. Load-bearing:
+
+- **ffmpeg never sees the client's file name.** The multipart temp file keeps it,
+  so `processVideo` works on a copy with a server-generated name.
+- **Point ffprobe only at files you wrote.** It fails on any off-list stream, even
+  an unselected one, where ffmpeg only fails on the streams it uses. Probing an
+  upload would reject every MP3 with album art, which is why `processAudio`
+  doesn't.
+- **FLAC and raw AAC stay rejected on purpose:** neither is in
+  `ALLOWED_ATTACHMENT_MIME_TYPES`, so they only arrive mislabelled. The 415 says
+  the format isn't supported rather than calling the file invalid.
+
+A new video or audio MIME type in `ALLOWED_ATTACHMENT_MIME_TYPES` needs its demuxer
+and decoders checked in `MediaInput.ts`.
 
 ## Forwarding messages
 

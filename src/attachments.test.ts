@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq, inArray } from "drizzle-orm";
@@ -432,6 +433,34 @@ const ALLOWED_VIDEO_UPLOADS = [
     args: [...VIDEO_SOURCE, "-c:v", "libvpx-vp9"],
     extension: "webm",
   },
+  // What Chrome's MediaRecorder falls back to.
+  {
+    contentType: "video/webm",
+    args: [...VIDEO_SOURCE, "-c:v", "libvpx"],
+    extension: "webm",
+  },
+  {
+    contentType: "video/webm",
+    args: [...VIDEO_SOURCE, "-c:v", "libsvtav1"],
+    extension: "webm",
+  },
+  // What phones record.
+  {
+    contentType: "video/mp4",
+    args: [
+      ...VIDEO_SOURCE,
+      ...AUDIO_SOURCE,
+      "-pix_fmt",
+      "yuv420p",
+      "-c:v",
+      "libx265",
+      "-tag:v",
+      "hvc1",
+      "-c:a",
+      "aac",
+    ],
+    extension: "mp4",
+  },
 ];
 const ALLOWED_AUDIO_UPLOADS = [
   {
@@ -448,6 +477,13 @@ const ALLOWED_AUDIO_UPLOADS = [
     contentType: "audio/wav",
     args: AUDIO_SOURCE,
     extension: "wav",
+  },
+  // The native encoder, since Homebrew's ffmpeg has no libvorbis. It only takes
+  // stereo and is still marked experimental.
+  {
+    contentType: "audio/ogg",
+    args: [...AUDIO_SOURCE, "-ac", "2", "-c:a", "vorbis", "-strict", "-2"],
+    extension: "oga",
   },
   // What Chrome/Firefox's MediaRecorder produces for a voice message.
   {
@@ -531,6 +567,139 @@ test.each(ALLOWED_AUDIO_UPLOADS)(
     ),
 );
 
+// Streams a real recording carries beside the ones we keep, whose decoders are
+// off-list. These upload only because no pipeline selects them.
+test("uploadAttachment accepts a video with subtitles and a data track", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-subtitles",
+        "pw-testpass",
+      );
+      const data = yield* Effect.promise(async () => {
+        const clip = await makeMedia("mp4", [
+          ...VIDEO_SOURCE,
+          ...AUDIO_SOURCE,
+          "-pix_fmt",
+          "yuv420p",
+          "-c:v",
+          "libx264",
+          "-c:a",
+          "aac",
+        ]);
+        const dir = await mkdtemp(join(tmpdir(), "attachments-test-"));
+        try {
+          await Bun.write(join(dir, "clip.mp4"), clip);
+          await Bun.write(
+            join(dir, "subs.srt"),
+            "1\n00:00:00,000 --> 00:00:01,000\nhello\n",
+          );
+          return await makeMedia("mov", [
+            "-i",
+            join(dir, "clip.mp4"),
+            "-i",
+            join(dir, "subs.srt"),
+            "-map",
+            "0",
+            "-map",
+            "1",
+            "-c",
+            "copy",
+            "-c:s",
+            "mov_text",
+            "-timecode",
+            "00:00:00:00",
+          ]);
+        } finally {
+          await rm(dir, { recursive: true, force: true });
+        }
+      });
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "recording.mov",
+          contentType: "video/mp4",
+          data,
+        }),
+      );
+      expect(result.status).toBe(201);
+    }),
+  ));
+
+test("uploadAttachment accepts an MP3 with album art", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-albumart",
+        "pw-testpass",
+      );
+      const data = yield* Effect.promise(() =>
+        makeMedia("mp3", [
+          ...AUDIO_SOURCE,
+          "-f",
+          "lavfi",
+          "-i",
+          "color=c=red:s=64x64:d=1",
+          "-frames:v",
+          "1",
+          "-c:a",
+          "libmp3lame",
+          "-c:v",
+          "mjpeg",
+          "-disposition:v",
+          "attached_pic",
+        ]),
+      );
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename: "song.mp3",
+          contentType: "audio/mpeg",
+          data,
+        }),
+      );
+      expect(result.status).toBe(201);
+      const attachment = result.body as { waveform: unknown };
+      expect(attachment.waveform).not.toBeNull();
+    }),
+  ));
+
+// The client's file name must not matter (issue #734). Effect's multipart handling
+// cuts a persisted name to its last 128 bytes, which keeps the extension but hides
+// a long name's overflow from this route: MediaInput.test.ts shows that on
+// processVideo itself, and that the name never reaches ffmpeg.
+test.each([
+  { name: "a very long name", filename: `${"a".repeat(240)}.mp4` },
+  { name: "a playlist's extension", filename: "clip.m3u8" },
+  { name: "no extension", filename: "clip" },
+])("uploadAttachment accepts a valid video with $name", ({ filename }) =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const { accessToken } = yield* registerAndLogin(
+        "uploader-filename",
+        "pw-testpass",
+      );
+      const data = yield* Effect.promise(() =>
+        makeMedia("mp4", [
+          ...VIDEO_SOURCE,
+          "-pix_fmt",
+          "yuv420p",
+          "-c:v",
+          "libx264",
+        ]),
+      );
+      const result = yield* Effect.promise(() =>
+        uploadFile(handler, accessToken, {
+          filename,
+          contentType: "video/mp4",
+          data,
+        }),
+      );
+      expect(result.status).toBe(201);
+      // Still shown to readers under the name it was uploaded with.
+      expect((result.body as { filename: string }).filename).toBe(filename);
+    }),
+  ),
+);
+
 const HLS_PLAYLIST =
   "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nsegment.ts\n#EXT-X-ENDLIST\n";
 const CONCAT_SCRIPT = "ffconcat version 1.0\nfile 'clip.mp4'\n";
@@ -589,9 +758,10 @@ test.each([
 );
 
 // Real files plain ffmpeg would decode, so unlike the rows above these show the
-// upload path itself applies the checks: the MPEG-TS and FLAC rows get through
-// without the demuxer lists, the audio-only rows without processVideo's check
-// for a video stream.
+// upload path itself applies the checks: the MPEG-TS, FLAC and raw AAC rows get
+// through without the demuxer lists, the off-list codec rows (allowed containers,
+// so the demuxers pass them) without the decoder lists, the audio-only rows
+// without processVideo's check for a video stream.
 test.each([
   {
     name: "an MPEG-TS video claiming video/mp4",
@@ -610,6 +780,45 @@ test.each([
     contentType: "audio/mpeg",
     args: [...AUDIO_SOURCE, "-c:a", "flac"],
     extension: "flac",
+  },
+  {
+    name: "a raw AAC file claiming audio/mp4",
+    contentType: "audio/mp4",
+    args: [...AUDIO_SOURCE, "-c:a", "aac"],
+    extension: "aac",
+  },
+  {
+    name: "FLAC audio in a WebM claiming audio/webm",
+    contentType: "audio/webm",
+    args: [...AUDIO_SOURCE, "-c:a", "flac"],
+    extension: "mka",
+  },
+  {
+    name: "AC-3 audio in an MP4 claiming audio/mp4",
+    contentType: "audio/mp4",
+    args: [...AUDIO_SOURCE, "-c:a", "ac3"],
+    extension: "m4a",
+  },
+  {
+    name: "MPEG-4 Part 2 video in an MP4 claiming video/mp4",
+    contentType: "video/mp4",
+    args: [...VIDEO_SOURCE, "-c:v", "mpeg4"],
+    extension: "mp4",
+  },
+  {
+    name: "off-list AC-3 audio beside H.264 video claiming video/mp4",
+    contentType: "video/mp4",
+    args: [
+      ...VIDEO_SOURCE,
+      ...AUDIO_SOURCE,
+      "-pix_fmt",
+      "yuv420p",
+      "-c:v",
+      "libx264",
+      "-c:a",
+      "ac3",
+    ],
+    extension: "mp4",
   },
   {
     name: "an audio-only MP4 claiming video/mp4",
@@ -639,6 +848,10 @@ test.each([
         }),
       );
       expect(result.status).toBe(415);
+      // These may be perfectly good files, so the message can't call them invalid.
+      const { message } = result.body as { message: string };
+      expect(message).toContain("isn't supported");
+      expect(message).not.toContain("not a valid");
     }),
   ),
 );

@@ -87,6 +87,14 @@ export const enforceUploadQuota = (
     }
   });
 
+// ffmpeg's failure could be either of these, and a file in an off-list format
+// (FLAC, raw AAC, MPEG-4 Part 2, ...) is perfectly valid, so neither message calls
+// the file invalid. Lists what MediaInput.ts lets through.
+const UNSUPPORTED_VIDEO_MESSAGE =
+  "This video format isn't supported, or the file is damaged. Use MP4 or WebM with H.264, HEVC, VP8, VP9 or AV1 video.";
+const UNSUPPORTED_AUDIO_MESSAGE =
+  "This audio format isn't supported, or the file is damaged. Use MP3, Ogg, WAV, WebM or M4A with AAC, Opus, Vorbis, MP3 or PCM audio.";
+
 export const AttachmentsHandlerLive = HttpApiBuilder.group(
   ChatApi,
   "attachments",
@@ -164,7 +172,7 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
               try: () => processVideo(file.path),
               catch: () =>
                 new UnsupportedAttachmentType({
-                  message: "Uploaded file is not a valid video",
+                  message: UNSUPPORTED_VIDEO_MESSAGE,
                 }),
             }).pipe(withMediaProcessingPermit);
             uploadData = processed.data;
@@ -177,7 +185,7 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
               try: async () => processAudio(await bunFile.bytes()),
               catch: () =>
                 new UnsupportedAttachmentType({
-                  message: "Uploaded file is not a valid audio file",
+                  message: UNSUPPORTED_AUDIO_MESSAGE,
                 }),
             }).pipe(withMediaProcessingPermit);
             uploadData = processed.data;
