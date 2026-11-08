@@ -3,6 +3,7 @@ import {
   Fragment,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -46,6 +47,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { type ToastOptions, useToast } from "@/components/ui/toast";
 import { $api } from "@/lib/api";
+import type { Attachment } from "@/lib/attachments";
 import { useSession } from "@/lib/auth";
 import {
   setChatDetailsOpen,
@@ -54,7 +56,6 @@ import {
   useJumpRequests,
 } from "@/lib/chatDetails";
 import {
-  appendSentMessage,
   chatDetailQueryKey,
   chatDisplayName,
   chatViewTransitionNames,
@@ -64,15 +65,21 @@ import {
   useChatDetail,
   useChatMessages,
   useChatsTwoPane,
+  wasShownBeforeConfirm,
 } from "@/lib/chats";
 import {
   dismissQueuedItem,
   enqueueMessage,
-  makeClientId,
   replayQueue,
   retryQueuedItem,
   useQueuedMessages,
 } from "@/lib/offlineQueue";
+import {
+  dismissOutboxMessage,
+  retryOutboxMessage,
+  sendViaOutbox,
+  useOutboxMessages,
+} from "@/lib/outbox";
 import { useOnlineStatus } from "@/lib/online";
 import { usePageVisible } from "@/lib/pageVisibility";
 import { useIsDesktop } from "@/lib/media";
@@ -356,7 +363,6 @@ export function ChatConversation({
     otherParticipant,
   );
 
-  const sendMessage = $api.useMutation("post", "/chats/{id}/messages");
   const markRead = $api.useMutation("post", "/chats/{id}/read");
   const updateMessage = $api.useMutation(
     "put",
@@ -458,7 +464,38 @@ export function ChatConversation({
   }
 
   const messages = messagesData?.messages ?? [];
-  const pendingMessages = useQueuedMessages(chatId);
+  // Messages the server hasn't confirmed yet: queued offline, and live sends
+  // still on their way (or rejected). Either can already be in `messages` —
+  // the realtime refetch for a send can beat its own POST response, and a
+  // replayed queue item can arrive the same way — so anything whose
+  // `clientId` the loaded messages already carry is hidden rather than shown
+  // twice.
+  const queuedMessages = useQueuedMessages(chatId);
+  const outboxMessages = useOutboxMessages(chatId);
+  const loadedMessages = messagesData?.messages;
+  const confirmedClientIds = useMemo(
+    () =>
+      new Set(
+        (loadedMessages ?? []).flatMap((m) =>
+          m.clientId != null ? [m.clientId] : [],
+        ),
+      ),
+    [loadedMessages],
+  );
+  const pendingMessages = useMemo(
+    () =>
+      [
+        ...queuedMessages.map((item) => ({
+          ...item,
+          source: "queue" as const,
+        })),
+        ...outboxMessages.map((item) => ({
+          ...item,
+          source: "outbox" as const,
+        })),
+      ].filter((item) => !confirmedClientIds.has(item.clientId)),
+    [queuedMessages, outboxMessages, confirmedClientIds],
+  );
 
   const myUserId = session?.user.id;
   // The conversation's own markup (and with it `scrollRef`/`contentRef`) only
@@ -513,12 +550,16 @@ export function ChatConversation({
     return () => observer.disconnect();
   }, [chatReady]);
 
-  // A message just queued offline appends below the loaded history the same
-  // way a real new message would — scroll down to reveal it.
+  // A message just sent (or queued offline) appends below the loaded history
+  // the same way a real new message would — scroll down to reveal it, even
+  // when the user had scrolled up: they just sent it. Keyed on the newest
+  // one, so a pending bubble going away (its real message taking over)
+  // doesn't count as a new send.
+  const newestPendingClientId = pendingMessages.at(-1)?.clientId;
   useEffect(() => {
-    if (pendingMessages.length === 0) return;
+    if (newestPendingClientId === undefined) return;
     scrollToBottom("smooth");
-  }, [pendingMessages.length]);
+  }, [newestPendingClientId]);
 
   // A newly-arrived message means its sender is done typing — clear their
   // indicator immediately instead of leaving it up until the TTL in
@@ -884,50 +925,41 @@ export function ChatConversation({
   const canManage =
     myRole === "owner" || myRole === "admin" || session.user.role === "admin";
 
-  async function handleSend(values: {
+  function handleSend(values: {
     contentType: "text" | "image_url" | "attachment";
     content: string;
     attachmentId?: number;
+    attachment?: Attachment;
     parentMessageId?: number;
   }) {
     // Offline: queue instead of attempting the request at all — it would
     // just fail (see lib/offlineQueue.ts, replayed once back online). An
     // attachment message can't be queued this way (ChatComposer only lets
     // one through while online, since it needs an already-completed
-    // upload), so it always falls through to the live request below.
+    // upload), so it always goes out live below.
     if (values.contentType !== "attachment" && !onlineManager.isOnline()) {
-      enqueueMessage(chatId, values);
+      enqueueMessage(chatId, {
+        contentType: values.contentType,
+        content: values.content,
+        parentMessageId: values.parentMessageId,
+      });
       return;
     }
-    // Sent with the request and reused if it gets queued below, so a send
-    // the server stored but whose response was lost (e.g. a reload mid-flight)
-    // isn't stored a second time when the queue replays it.
-    const clientId = makeClientId();
-    try {
-      const message = await sendMessage.mutateAsync({
-        params: { path: { id: String(chatId) } },
-        body: { ...values, clientId },
-      });
-      // Show it immediately from the mutation's own response instead of
-      // waiting on a refetch. The server also pushes a `chat_updated` WS event
-      // to every participant (including the sender) for this same send, which
-      // invalidates the messages/detail/list queries and reconciles anything
-      // this optimistic write can't know locally (e.g. read receipts) — so no
-      // manual refetch/invalidate is needed here on top of that.
-      appendSentMessage(queryClient, chatId, message);
-    } catch (err) {
-      // A network-level failure (as opposed to a rejected request — a
-      // validation error, a 403 — which leaves connectivity untouched) means
-      // we just discovered we're offline mid-send. Queue it rather than
-      // surfacing the failure, same as the already-offline case above — but
-      // not for an attachment message (see the comment above; the queue
-      // can't replay one without re-uploading the file).
-      if (values.contentType !== "attachment" && !onlineManager.isOnline()) {
-        enqueueMessage(chatId, values, clientId);
-        return;
-      }
-      throw err;
-    }
+    // Shown straight away as a "sending" bubble and sent in the background
+    // (lib/outbox.ts). The server also pushes a `chat_updated` event to every
+    // participant, the sender included, which reconciles what the response
+    // can't carry (e.g. read receipts).
+    sendViaOutbox(chatId, {
+      ...values,
+      replyPreview:
+        replyingTo && replyingTo.id === values.parentMessageId
+          ? {
+              senderName: replyingTo.senderName,
+              contentType: replyingTo.contentType,
+              content: replyingTo.content,
+            }
+          : undefined,
+    });
   }
 
   async function handleEditMessage(messageId: number, content: string) {
@@ -1039,6 +1071,7 @@ export function ChatConversation({
                         }
                         onEditEnd={focusComposer}
                         compact={docked || !isDesktop}
+                        animateIn={!wasShownBeforeConfirm(message)}
                         senderLabel={
                           chat.type === "group" && sender
                             ? userLabel(sender)
@@ -1075,12 +1108,30 @@ export function ChatConversation({
             pendingMessages.map((item) => (
               <PendingMessageBubble
                 key={item.clientId}
-                item={item}
+                status={item.status}
+                contentType={item.contentType}
+                content={item.content}
+                attachment={
+                  item.source === "outbox" ? item.attachment : undefined
+                }
+                replyPreview={
+                  item.source === "outbox" ? item.replyPreview : undefined
+                }
+                createdAt={item.createdAt}
+                error={item.error}
                 onRetry={() => {
-                  retryQueuedItem(item.clientId);
-                  void replayQueue(queryClient);
+                  if (item.source === "outbox") {
+                    retryOutboxMessage(item.clientId);
+                  } else {
+                    retryQueuedItem(item.clientId);
+                    void replayQueue(queryClient);
+                  }
                 }}
-                onDismiss={() => dismissQueuedItem(item.clientId)}
+                onDismiss={() =>
+                  item.source === "outbox"
+                    ? dismissOutboxMessage(item.clientId)
+                    : dismissQueuedItem(item.clientId)
+                }
               />
             ))}
 

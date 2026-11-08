@@ -503,6 +503,40 @@ test("createMessage is idempotent per clientId (issue #567)", () =>
     }),
   ));
 
+test("a message's clientId is echoed back to its sender only", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const sent = yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: { contentType: "text", content: "hi", clientId: "key-1" },
+      });
+      expect(sent.clientId).toBe("key-1");
+      const keyless = yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: { contentType: "text", content: "no key" },
+      });
+      expect(keyless.clientId).toBeUndefined();
+
+      const forAlice = yield* alice.client.chats.listMessages({
+        params: { id: chat.id },
+        query: {},
+      });
+      expect(forAlice.messages.find((m) => m.id === sent.id)?.clientId).toBe(
+        "key-1",
+      );
+      const forBob = yield* bob.client.chats.listMessages({
+        params: { id: chat.id },
+        query: {},
+      });
+      expect(forBob.messages.every((m) => m.clientId === undefined)).toBe(true);
+    }),
+  ));
+
 test("createMessage rejects content over the max length", () =>
   run(
     Effect.gen(function* () {

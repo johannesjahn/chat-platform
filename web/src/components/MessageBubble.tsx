@@ -39,6 +39,7 @@ import {
   chatStarredQueryKey,
   MAX_MESSAGE_CONTENT_LENGTH,
   MESSAGE_COLLAPSE_THRESHOLD,
+  parentPreviewText,
   patchCachedMessage,
   type ChatMessage,
 } from "@/lib/chats";
@@ -107,20 +108,12 @@ type MessageBubbleProps = {
   // toolbar instead of sitting beside it, where — even invisible — it took
   // the width the bubble needs.
   compact?: boolean;
+  // Off for a message that was already on screen as a "sending" or queued
+  // bubble (see `wasShownBeforeConfirm` in lib/chats.ts): it's taking over
+  // from that bubble, not arriving.
+  animateIn?: boolean;
   style?: CSSProperties;
 };
-
-// One-line label for what a quoted parent message holds — its text (trimmed to
-// a single line by the CSS below), or a stand-in for non-text content so a
-// reply's quote reads "Photo"/"Attachment" rather than a raw URL/filename.
-function parentPreviewText(parent: {
-  contentType: "text" | "image_url" | "attachment";
-  content: string;
-}): string {
-  if (parent.contentType === "image_url") return "📷 Photo";
-  if (parent.contentType === "attachment") return "📎 Attachment";
-  return parent.content;
-}
 
 export function MessageBubble({
   message,
@@ -140,6 +133,7 @@ export function MessageBubble({
   editRequestKey,
   onEditEnd,
   compact = false,
+  animateIn = true,
   style,
 }: MessageBubbleProps) {
   const queryClient = useQueryClient();
@@ -668,7 +662,8 @@ export function MessageBubble({
       className={cn(
         // `relative isolate` gives the jump highlight below something to
         // position against and a stacking context to sit at the back of.
-        "group relative isolate flex w-full items-center gap-1.5 motion-safe:animate-bubble-in stagger-in",
+        "group relative isolate flex w-full items-center gap-1.5",
+        animateIn && "motion-safe:animate-bubble-in stagger-in",
         // The origin pins the scale to the corner the bubble's tail is on, so
         // the row unfolds from that side instead of shrinking toward its own
         // centre and drifting sideways on the way in.

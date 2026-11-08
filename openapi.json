@@ -10158,6 +10158,16 @@
                 "type": "null"
               }
             ]
+          },
+          "clientId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

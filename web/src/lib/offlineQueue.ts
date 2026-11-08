@@ -7,6 +7,7 @@ import {
   appendSentMessage,
   chatDetailQueryKey,
   chatsListQueryKey,
+  markShownBeforeConfirm,
 } from "./chats";
 import type { MessageContentType } from "./chats";
 import { errorMessage } from "./errors";
@@ -155,6 +156,7 @@ export function enqueueMessage(
   // the same key to be recognised as a repeat rather than a new message.
   clientId: string = makeClientId(),
 ): void {
+  markShownBeforeConfirm(clientId);
   writeQueue([
     ...readQueue(),
     {
