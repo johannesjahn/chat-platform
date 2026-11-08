@@ -325,3 +325,36 @@ test("a post queued offline by one user isn't sent under a different user who lo
   await expect(page.getByTestId("pending-post")).toHaveCount(0);
   await expect(page.getByText("A's offline post")).toBeVisible();
 });
+
+test("a lazy shell chunk cut off by going offline loads once back online instead of hitting the error boundary (issue #738)", async ({
+  page,
+  context,
+  signUp,
+}) => {
+  // Hold the dock's first module request until the context is offline, then
+  // fail it the way a dropped connection does — the race a cold dev server
+  // used to lose in the test above. Any later request (the retry) goes
+  // through.
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let held = false;
+  await page.route("**/src/components/shell/ChatDock.tsx*", async (route) => {
+    if (held) return route.fallback();
+    held = true;
+    await released;
+    await route.abort("internetdisconnected");
+  });
+
+  await signUp(page);
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+
+  await context.setOffline(true);
+  release();
+  await expect(page.getByRole("status")).toContainText("You're offline");
+  await expect(page.getByRole("region", { name: "Messaging" })).toHaveCount(0);
+
+  await context.setOffline(false);
+  await expect(page.getByRole("region", { name: "Messaging" })).toBeVisible();
+  // The page around it was never replaced by the error boundary.
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+});
