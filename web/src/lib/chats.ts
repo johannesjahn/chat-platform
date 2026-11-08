@@ -378,6 +378,40 @@ export function patchCachedMessage(
   );
 }
 
+// One-line label for what a quoted parent message holds — its text (trimmed
+// to a single line by the bubble's CSS), or a stand-in for non-text content
+// so a reply's quote reads "Photo"/"Attachment" rather than a raw
+// URL/filename.
+export function parentPreviewText(parent: {
+  contentType: MessageContentType;
+  content: string;
+}): string {
+  if (parent.contentType === "image_url") return "📷 Photo";
+  if (parent.contentType === "attachment") return "📎 Attachment";
+  return parent.content;
+}
+
+// Idempotency keys (`ChatMessage.clientId`) of messages this tab already
+// showed as a local bubble before the server confirmed them — a live send
+// (lib/outbox.ts) or an offline-queued one (lib/offlineQueue.ts). When the
+// real message replaces that bubble it must not play its entrance animation
+// a second time: to the user it's the same message, not a new arrival. Kept
+// to the newest few hundred, which is far more than are ever on screen.
+const shownBeforeConfirm = new Set<string>();
+const SHOWN_BEFORE_CONFIRM_LIMIT = 500;
+
+export function markShownBeforeConfirm(clientId: string): void {
+  shownBeforeConfirm.add(clientId);
+  if (shownBeforeConfirm.size > SHOWN_BEFORE_CONFIRM_LIMIT) {
+    const oldest = shownBeforeConfirm.values().next().value;
+    if (oldest !== undefined) shownBeforeConfirm.delete(oldest);
+  }
+}
+
+export function wasShownBeforeConfirm(message: ChatMessage): boolean {
+  return message.clientId != null && shownBeforeConfirm.has(message.clientId);
+}
+
 // Appends a just-sent message straight into the cached page instead of
 // waiting for the `chat_updated` WS round trip (server -> pubsub -> socket
 // -> invalidate -> refetch) to bring it back — the POST response already

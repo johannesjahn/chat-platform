@@ -10,7 +10,6 @@ import {
 } from "react";
 import {
   ImageIcon,
-  Loader2,
   Mic,
   Paperclip,
   Reply,
@@ -93,12 +92,17 @@ export type ChatComposerHandle = {
 type ChatComposerProps = {
   ref?: Ref<ChatComposerHandle>;
   chatId: number;
+  // Fire-and-forget: the conversation shows the message straight away and
+  // sends it in the background (lib/outbox.ts), so the composer clears and
+  // takes the next message without waiting on the request.
   onSend: (values: {
     contentType: MessageContentType;
     content: string;
     attachmentId?: number;
+    // The uploaded file itself, so the "sending" bubble can preview it.
+    attachment?: Attachment;
     parentMessageId?: number;
-  }) => Promise<void>;
+  }) => void;
   // The message being replied to, or null when composing a normal message.
   replyingTo?: ReplyTarget | null;
   onCancelReply?: () => void;
@@ -158,7 +162,6 @@ export function ChatComposer({
   // Bumped per handed-in file, remounting the upload field so a new file
   // replaces the old one outright instead of racing its upload.
   const [pickedFileKey, setPickedFileKey] = useState(0);
-  const [pending, setPending] = useState(false);
   // Set for the length of the send button's one-shot "plane takes off"
   // animation and cleared by its own `animationend` — a class that never
   // leaves the element can't be replayed on the next send.
@@ -246,8 +249,8 @@ export function ChatComposer({
   // attachment message can't be queued the same way (it needs a completed
   // upload, which needs a live connection), so it requires being online.
   const canSend = usesAttachment(contentType)
-    ? attachment !== null && !pending && isOnline
-    : trimmed.length > 0 && !overLimit && !invalidImageUrl && !pending;
+    ? attachment !== null && isOnline
+    : trimmed.length > 0 && !overLimit && !invalidImageUrl;
 
   // With nothing typed there's nothing to send, so the trailing button is a
   // microphone instead — the arrangement every chat app has settled on, and
@@ -257,7 +260,6 @@ export function ChatComposer({
   const showMic =
     contentType === "text" &&
     trimmed.length === 0 &&
-    !pending &&
     isOnline &&
     canRecordVoice();
 
@@ -293,7 +295,7 @@ export function ChatComposer({
   // the message field), a voice clip isn't: a recording is never thrown away
   // by a stray drop.
   function attachFile(file: File) {
-    if (pending || contentType === "voice") return;
+    if (contentType === "voice") return;
     if (contentType === "image_url") {
       setContent(textDraftRef.current);
       textDraftRef.current = "";
@@ -327,44 +329,38 @@ export function ChatComposer({
     attachFile(file);
   }
 
-  async function submit() {
+  function submit() {
     if (!canSend) return;
-    // Arm the send button's take-off. The plane is swapped for a spinner
-    // while the request is in flight, so this plays the moment the button
-    // comes back — which is exactly when there's a sent message to celebrate,
-    // and is immediate for a send that never had to wait (a queued one).
+    // Arm the send button's take-off — it plays right away, as the message
+    // drops into the thread.
     setFlying(true);
-    setPending(true);
-    try {
-      // A reply quotes the message the parent passed as `replyingTo` — thread
-      // its id through as `parentMessageId` so the send records the link.
-      const parentMessageId = replyingTo?.id;
-      await onSend(
-        usesAttachment(contentType)
-          ? {
-              contentType: "attachment",
-              content: attachment!.filename,
-              attachmentId: attachment!.id,
-              parentMessageId,
-            }
-          : { contentType, content: trimmed, parentMessageId },
-      );
-      setContent("");
-      textDraftRef.current = "";
-      setAttachment(null);
-      setPickedFile(null);
-      setContentType("text");
-      lastTypingSentAtRef.current = 0;
-      onCancelReply?.();
-    } finally {
-      setPending(false);
-    }
+    // A reply quotes the message the parent passed as `replyingTo` — thread
+    // its id through as `parentMessageId` so the send records the link.
+    const parentMessageId = replyingTo?.id;
+    onSend(
+      usesAttachment(contentType)
+        ? {
+            contentType: "attachment",
+            content: attachment!.filename,
+            attachmentId: attachment!.id,
+            attachment: attachment!,
+            parentMessageId,
+          }
+        : { contentType, content: trimmed, parentMessageId },
+    );
+    setContent("");
+    textDraftRef.current = "";
+    setAttachment(null);
+    setPickedFile(null);
+    setContentType("text");
+    lastTypingSentAtRef.current = 0;
+    onCancelReply?.();
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void submit();
+      submit();
     } else if (event.key === "Escape" && replyingTo) {
       event.preventDefault();
       onCancelReply?.();
@@ -425,7 +421,6 @@ export function ChatComposer({
       )}
       <div className="flex items-end gap-1.5">
         <ComposerAttachMenu
-          disabled={pending}
           active={contentType !== "text"}
           activeLabel={cancelLabelFor(contentType)}
           onCancel={resetToText}
@@ -508,7 +503,7 @@ export function ChatComposer({
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  void submit();
+                  submit();
                 }
                 if (e.key === "Escape") resetToText();
               }}
@@ -528,7 +523,6 @@ export function ChatComposer({
             // to send as an attachment, so the composer goes back to text
             // rather than sitting on an empty drop zone.
             onClear={resetToText}
-            disabled={pending}
             // The rounder corners the rest of the row now has — the field's
             // own `rounded-lg` would read as a different surface sitting in
             // the same row as the message pill.
@@ -543,7 +537,6 @@ export function ChatComposer({
             onUploaded={setAttachment}
             onClear={resetToText}
             onCancel={resetToText}
-            disabled={pending}
             className="min-w-0 flex-1 rounded-2xl"
           />
         )}
@@ -570,7 +563,7 @@ export function ChatComposer({
             type="button"
             size="icon"
             disabled={!canSend}
-            onClick={() => void submit()}
+            onClick={submit}
             aria-label={
               isOnline ? "Send message" : "Send message (will be queued)"
             }
@@ -585,21 +578,17 @@ export function ChatComposer({
               key="send"
               className="inline-flex motion-safe:animate-pop-open"
             >
-              {pending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <SendHorizontal
-                  // The plane flies up and out on send, and the next one drops
-                  // in from the lower left (see `animate-send-off`). `flying`
-                  // is cleared on `animationEnd` so every later send replays
-                  // it.
-                  onAnimationEnd={() => setFlying(false)}
-                  className={cn(
-                    "size-4 transition-transform duration-300 ease-spring group-hover/send:translate-x-0.5 group-hover/send:-translate-y-0.25 group-hover/send:scale-105",
-                    flying && "motion-safe:animate-send-off",
-                  )}
-                />
-              )}
+              <SendHorizontal
+                // The plane flies up and out on send, and the next one drops
+                // in from the lower left (see `animate-send-off`). `flying`
+                // is cleared on `animationEnd` so every later send replays
+                // it.
+                onAnimationEnd={() => setFlying(false)}
+                className={cn(
+                  "size-4 transition-transform duration-300 ease-spring group-hover/send:translate-x-0.5 group-hover/send:-translate-y-0.25 group-hover/send:scale-105",
+                  flying && "motion-safe:animate-send-off",
+                )}
+              />
             </span>
           </Button>
         )}

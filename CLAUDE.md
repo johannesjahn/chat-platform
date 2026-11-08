@@ -377,6 +377,28 @@ message into up to `MAX_FORWARD_TARGETS` chats — `forwardMessage` in
   the global per-IP budget (`chargeGlobalRequests`) — a forward to N chats is
   N sends.
 
+## Optimistic message sends
+
+A chat message shows up in the thread the moment it's sent and the composer
+clears straight away — it never waits on the POST. The composer's `onSend` is
+fire-and-forget into the outbox ([`web/src/lib/outbox.ts`](web/src/lib/outbox.ts),
+state machine in [`outboxStore.ts`](web/src/lib/outboxStore.ts)), which shows a
+"sending" `PendingMessageBubble` and sends in the background. Load-bearing:
+
+- **One request at a time per chat.** Bubbles appear at once, but sends go out
+  in order, so two can't race and swap ids on the server.
+- **Matched by `clientId`, both ways.** `Message.clientId` (only ever echoed to
+  the message's own sender) is how the thread hides a pending bubble whose
+  real message the realtime refetch already brought in — the server publishes
+  `chat_updated` before it answers the POST, so that race is real. A confirmed
+  message that was shown as a bubble first (`wasShownBeforeConfirm`) skips its
+  entrance animation.
+- **Separate from the offline queue, and handing off to it.** The outbox is
+  in-memory (it outlives the conversation view, not a reload); a send that
+  gets no response while offline moves to `lib/offlineQueue.ts` under the same
+  `clientId`. A server rejection, or no response while still online, stays as
+  a "failed" bubble with Retry (same `clientId`) and Discard.
+
 ## Disclosure motion
 
 Anything that expands or collapses in place goes through one primitive so the

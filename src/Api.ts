@@ -951,6 +951,13 @@ export const Message = Schema.Struct({
   // Set when this message is a forward (issue #601), null otherwise — see
   // `ForwardedFrom` above.
   forwardedFrom: Schema.NullOr(ForwardedFrom),
+  // The idempotency key the message was sent with (`CreateMessageBody.
+  // clientId`) — only ever present for the viewer's *own* messages, never
+  // anyone else's. It's how the sender's client matches a message arriving
+  // through a refetch to the optimistic "sending" bubble it's still showing
+  // for it, whichever of the POST response and the realtime refetch lands
+  // first.
+  clientId: Schema.optional(Schema.String),
 }).annotate({ identifier: "Message" });
 export type Message = typeof Message.Type;
 

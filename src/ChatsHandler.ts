@@ -123,6 +123,9 @@ const toApiMessage = (
   // — which is never pinned or starred yet — needn't pass them.
   pinned = false,
   starred = false,
+  // Who the response is for: the row's `clientId` is only echoed back to its
+  // own sender (see `Message.clientId`).
+  viewerId?: number,
 ): Message => ({
   id: row.id,
   chatId: row.chatId,
@@ -146,6 +149,11 @@ const toApiMessage = (
           senderName: row.forwardedFromSenderName,
         }
       : null,
+  ...(viewerId !== undefined &&
+  row.senderId === viewerId &&
+  row.clientId !== null
+    ? { clientId: row.clientId }
+    : {}),
 });
 
 // Resolves the lightweight `parentMessage` preview (issue #217) for a batch of
@@ -367,6 +375,7 @@ const buildMessageResponse = (
       parentMessage,
       pinnedOverride ?? pinStar.pinned,
       starredOverride ?? pinStar.starred,
+      userId,
     );
   });
 
@@ -415,6 +424,7 @@ const hydrateMessages = (
           : null,
         pinStar?.pinned ?? false,
         pinStar?.starred ?? false,
+        userId,
       );
     });
   });
@@ -669,6 +679,7 @@ const getLastMessagesForChats = (
             : null,
           pinStar?.pinned ?? false,
           pinStar?.starred ?? false,
+          userId,
         ),
       );
     }
@@ -2190,6 +2201,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                   : null,
                 pinStar?.pinned ?? false,
                 pinStar?.starred ?? false,
+                currentUser.id,
               );
             }),
             limit,
@@ -2299,7 +2311,16 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           );
 
           yield* publishNewMessage(db, connections, id, currentUser.id);
-          return toApiMessage(row, [], attachment, NO_REACTIONS, parentMessage);
+          return toApiMessage(
+            row,
+            [],
+            attachment,
+            NO_REACTIONS,
+            parentMessage,
+            false,
+            false,
+            currentUser.id,
+          );
         }),
       )
       .handle("forwardMessage", ({ params: { id, messageId }, payload }) =>
@@ -2538,7 +2559,16 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               );
               return delivered(
                 targetId,
-                toApiMessage(row, [], attachment, NO_REACTIONS, null),
+                toApiMessage(
+                  row,
+                  [],
+                  attachment,
+                  NO_REACTIONS,
+                  null,
+                  false,
+                  false,
+                  currentUser.id,
+                ),
               );
             });
 
@@ -2842,6 +2872,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             parentMessage,
             pinStar.pinned,
             pinStar.starred,
+            currentUser.id,
           );
         }),
       )

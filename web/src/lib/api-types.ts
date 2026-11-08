@@ -1708,6 +1708,7 @@ export interface components {
             pinned: boolean;
             starred: boolean;
             forwardedFrom: components["schemas"]["ForwardedFrom"] | null;
+            clientId?: string | null;
         };
         ForwardedFrom: {
             senderId: number | null;
