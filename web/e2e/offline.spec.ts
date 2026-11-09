@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { logOut, persistedQueryCache } from "./helpers";
 
@@ -324,4 +325,110 @@ test("a post queued offline by one user isn't sent under a different user who lo
 
   await expect(page.getByTestId("pending-post")).toHaveCount(0);
   await expect(page.getByText("A's offline post")).toBeVisible();
+});
+
+// Holds the first request for one of the app's own modules until
+// `cutOff()`, then fails it the way a dropped connection does. Later
+// requests for it (the retries) go through, or with `failRetries` keep
+// failing — what Safari does, since it keeps a failed import for the rest
+// of the page's life. `held` resolves once the first request has arrived,
+// so a test can go offline knowing it's the one in flight.
+async function holdModule(
+  page: Page,
+  path: string,
+  { failRetries = false }: { failRetries?: boolean } = {},
+) {
+  const pattern = `**/${path}*`;
+  let arrived!: () => void;
+  const held = new Promise<void>((resolve) => (arrived = resolve));
+  let cutOff!: () => void;
+  const released = new Promise<void>((resolve) => (cutOff = resolve));
+  let first = true;
+  await page.route(pattern, async (route) => {
+    if (!first) {
+      return failRetries ? route.abort("failed") : route.fallback();
+    }
+    first = false;
+    arrived();
+    await released;
+    await route.abort("internetdisconnected");
+  });
+  return { held, cutOff };
+}
+
+test("a lazy shell chunk cut off by going offline loads once back online instead of hitting the error boundary (issue #738)", async ({
+  page,
+  context,
+  signUp,
+}) => {
+  const dock = await holdModule(page, "src/components/shell/ChatDock.tsx");
+  await signUp(page);
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+  await dock.held;
+
+  await context.setOffline(true);
+  dock.cutOff();
+  await expect(page.getByRole("status")).toContainText("You're offline");
+  await expect(page.getByRole("region", { name: "Messaging" })).toHaveCount(0);
+
+  await context.setOffline(false);
+  await expect(page.getByRole("region", { name: "Messaging" })).toBeVisible();
+  // The page around it was never replaced by the error boundary.
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("the desktop sidebar's links stay available while its chunk is cut off offline (issue #738)", async ({
+  page,
+  context,
+  signUp,
+}) => {
+  const sidebar = await holdModule(
+    page,
+    "src/components/shell/DesktopSidebar.tsx",
+  );
+  await signUp(page);
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+  await sidebar.held;
+
+  await context.setOffline(true);
+  sidebar.cutOff();
+  const nav = page.getByRole("navigation", { name: "Main" });
+  await expect(nav.getByRole("link", { name: "Chats" })).toBeVisible();
+  // The stand-in, not the real sidebar (which has the search button).
+  await expect(nav.getByRole("button", { name: "Search" })).toHaveCount(0);
+
+  await context.setOffline(false);
+  await expect(nav.getByRole("button", { name: "Search" })).toBeVisible();
+});
+
+test("a lazy shell chunk that keeps failing after reconnecting offers a reload instead of hitting the error boundary (issue #738)", async ({
+  page,
+  context,
+  signUp,
+  allowConsoleErrors,
+}) => {
+  allowConsoleErrors(/Couldn't load ChatDock/);
+  const dock = await holdModule(page, "src/components/shell/ChatDock.tsx", {
+    failRetries: true,
+  });
+  await signUp(page);
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+  await dock.held;
+
+  await context.setOffline(true);
+  dock.cutOff();
+  await expect(page.getByRole("status")).toContainText("You're offline");
+  await context.setOffline(false);
+
+  const notice = page.getByRole("alert");
+  await expect(notice).toContainText("Part of the app didn't finish loading");
+  await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Messaging" })).toHaveCount(0);
+
+  // The reload brings it back.
+  await page.unroute("**/src/components/shell/ChatDock.tsx*");
+  await notice.getByRole("button", { name: "Reload" }).click();
+  await expect(page.getByRole("region", { name: "Messaging" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
