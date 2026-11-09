@@ -12,6 +12,7 @@ import {
   Bell,
   Gamepad2,
   Gauge,
+  House,
   LogOut,
   Menu,
   MessagesSquare,
@@ -30,6 +31,7 @@ import {
   useState,
 } from "react";
 import { BrandLogo } from "@/components/BrandLogo";
+import { ChunkLoadNotice } from "@/components/ChunkLoadNotice";
 import { NavIcon } from "@/components/NavIcon";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
@@ -42,6 +44,7 @@ import { SessionPlaceholder } from "@/components/SessionPlaceholder";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { KeyboardShortcuts } from "@/components/shell/KeyboardShortcuts";
+import { sidebarItemClassName } from "@/components/shell/sidebarItem";
 import { VersionFooter } from "@/components/VersionFooter";
 import { BUILD_API_ORIGIN, logout } from "../lib/api";
 import {
@@ -56,6 +59,7 @@ import { DESKTOP_MEDIA_QUERY, useIsDesktop } from "../lib/media";
 import { useChatsList, useTotalUnreadCount } from "../lib/chats";
 import { useUnreadNotificationCount } from "../lib/notifications";
 import { OfflineQueueSync } from "../lib/offlineQueue";
+import { useOnlineStatus } from "../lib/online";
 import { persistOptions, queryClient } from "../lib/query";
 import { useRealtimeSocket } from "../lib/realtimeSocket";
 import { useRedirectHere } from "../lib/redirect";
@@ -63,6 +67,7 @@ import { type ShellOverlay, useOverlayOpen } from "../lib/shell";
 import { useTabBadge } from "../lib/tabBadge";
 import { THEME_BOOT_SCRIPT } from "../lib/theme";
 import { userLabel } from "../lib/users";
+import { cn } from "../lib/utils";
 import { useAppHeight } from "../lib/viewport";
 import appCss from "../styles.css?url";
 
@@ -74,6 +79,7 @@ import appCss from "../styles.css?url";
 const DesktopSidebar = lazyNamed(
   () => import("@/components/shell/DesktopSidebar"),
   "DesktopSidebar",
+  { fallback: SidebarFallback },
 );
 const ChatDock = lazyNamed(
   () => import("@/components/shell/ChatDock"),
@@ -192,6 +198,7 @@ function RootComponent() {
             <Suspense fallback={null}>
               <PwaUpdatePrompt />
             </Suspense>
+            <ChunkLoadNotice />
             <LazyOverlay overlay="palette" component={CommandPalette} />
             <LazyOverlay overlay="shortcuts" component={ShortcutsDialog} />
             <KeyboardShortcuts />
@@ -312,7 +319,7 @@ function AppNavigation() {
     : undefined;
 
   return isDesktop ? (
-    <Suspense fallback={<SidebarSpace />}>
+    <Suspense fallback={<SidebarFallback loading />}>
       <DesktopSidebar
         session={session}
         unreadChats={unreadCount}
@@ -330,6 +337,42 @@ function AppNavigation() {
       />
       <SidebarSpace />
     </>
+  );
+}
+
+// Stands in for the desktop sidebar while its chunk can't be had — the
+// connection dropped before it arrived, or it failed for good (issue #738)
+// — so a desktop window is never left without navigation: the main links
+// on the same rail. While it's merely loading online, it's just the empty
+// space the sidebar is about to fill, so a cold load doesn't flash a second
+// rail first.
+function SidebarFallback({ loading = false }: { loading?: boolean }) {
+  const isOnline = useOnlineStatus();
+  if (loading && isOnline) return <SidebarSpace />;
+  const links = [
+    { to: "/", icon: House, label: "Feed", exact: true },
+    { to: "/chats", icon: MessagesSquare, label: "Chats", exact: false },
+    { to: "/users", icon: Users, label: "Users", exact: false },
+    { to: "/games", icon: Gamepad2, label: "Games", exact: false },
+  ] as const;
+  return (
+    <nav
+      aria-label="Main"
+      className="sticky top-0 z-30 hidden h-[var(--app-height,100dvh)] w-[4.75rem] shrink-0 flex-col gap-1 border-r border-border bg-card/70 px-3 pb-3 pt-4 backdrop-blur lg:flex xl:w-64"
+    >
+      {links.map(({ to, icon, label, exact }) => (
+        <Link
+          key={to}
+          to={to}
+          activeOptions={{ exact }}
+          title={label}
+          className={cn(sidebarItemClassName, "group/nav-icon")}
+        >
+          <NavIcon icon={icon} className="size-5" />
+          <span className="sr-only xl:not-sr-only">{label}</span>
+        </Link>
+      ))}
+    </nav>
   );
 }
 

@@ -33,7 +33,9 @@ export function reportConnectivity(isOnline: boolean): void {
   onlineManager.setOnline(isOnline);
 }
 
-if (typeof navigator !== "undefined") {
+// Only where there's a real value to seed from: Bun's `navigator` (unit
+// tests) has no `onLine`, and seeding `undefined` would pause every query.
+if (typeof navigator !== "undefined" && typeof navigator.onLine === "boolean") {
   onlineManager.setOnline(navigator.onLine);
 }
 
@@ -54,4 +56,17 @@ export function useOnlineStatus(): boolean {
     getSnapshot,
     getServerSnapshot,
   );
+}
+
+// Resolves as soon as the app considers itself online — straight away if it
+// already does.
+export function whenOnline(): Promise<void> {
+  return new Promise((resolve) => {
+    if (onlineManager.isOnline()) return resolve();
+    const unsubscribe = onlineManager.subscribe((online) => {
+      if (!online) return;
+      unsubscribe();
+      resolve();
+    });
+  });
 }
