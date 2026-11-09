@@ -12,8 +12,8 @@ test("an unknown URL shows the 404 page with a way back to the feed", async ({
   // The build (like the deploy) answers with the SPA shell instead, which
   // is prerendered at `/`: its brand link is marked as the current page,
   // and hydrating it here doesn't match. React recovers by rendering on the
-  // client, so the page is right; the mismatch itself is a known bug, not
-  // what this test is about.
+  // client, so the page is right; the mismatch itself is a known bug
+  // (issue #743), not what this test is about.
   allowConsoleErrors(/Minified React error #418\b/);
   await page.goto("/does-not-exist");
   const main = page.getByRole("main");
