@@ -23,7 +23,7 @@ function countApiGets(page: Page, apiUrl: string) {
 
 // Loads `path` with nothing cached and waits until the app is up and quiet:
 // `ready` is on screen and the realtime socket has connected. A fixed sleep
-// isn't enough under a loaded dev server — the app may not even have mounted
+// isn't enough on a loaded runner — the app may not even have mounted
 // yet, and the socket's first-connect refetch would land among the requests
 // counted.
 async function openSettled(page: Page, path: string, ready: Locator) {

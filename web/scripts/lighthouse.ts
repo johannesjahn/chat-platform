@@ -24,6 +24,7 @@ import path from "node:path";
 import { chromium } from "@playwright/test";
 import lighthouse from "lighthouse";
 import { computeMedianRun } from "lighthouse/core/lib/median-run.js";
+import { serveBuild } from "./staticServer";
 
 const API_URL = process.env.LIGHTHOUSE_API_URL ?? "http://localhost:3000";
 const APP_PORT = 4173;
@@ -31,7 +32,6 @@ const APP_URL = `http://localhost:${APP_PORT}`;
 const DEBUG_PORT = 9222;
 const RUNS = Number(process.env.LIGHTHOUSE_RUNS ?? 3);
 const OUT_DIR = "lighthouse-reports";
-const DIST = "dist/client";
 
 const CATEGORIES = [
   "performance",
@@ -54,38 +54,8 @@ const WARN_SCORES: Partial<Record<Category, number>> = {
 // Must match STORAGE_KEY in src/lib/auth.ts.
 const SESSION_STORAGE_KEY = "chat-platform-session";
 
-// --- A static server for the build, standing in for the Cloudflare deploy:
-// the SPA fallback wrangler.jsonc configures ("not_found_handling":
-// "single-page-application") and compressed text responses, which an
-// uncompressed local server would otherwise make look several times slower.
-const COMPRESSIBLE = /\.(html|js|css|json|svg|webmanifest|txt)$/;
-const ROOT = path.resolve(DIST);
-
-async function serveStatic(request: Request): Promise<Response> {
-  const { pathname } = new URL(request.url);
-  const resolved = path.resolve(ROOT, `.${decodeURIComponent(pathname)}`);
-  let file = Bun.file(resolved);
-  let name = resolved;
-  if (
-    pathname === "/" ||
-    !resolved.startsWith(ROOT + path.sep) ||
-    !(await file.exists())
-  ) {
-    name = path.join(ROOT, "index.html");
-    file = Bun.file(name);
-  }
-  const headers = new Headers({ "content-type": file.type });
-  if (
-    COMPRESSIBLE.test(name) &&
-    request.headers.get("accept-encoding")?.includes("gzip")
-  ) {
-    headers.set("content-encoding", "gzip");
-    return new Response(Bun.gzipSync(await file.bytes()), { headers });
-  }
-  return new Response(file, { headers });
-}
-
-const server = Bun.serve({ port: APP_PORT, fetch: serveStatic });
+// --- The build, served as the Cloudflare deploy serves it (compressed).
+const server = serveBuild({ port: APP_PORT, gzip: true });
 
 // --- Seed a user with enough content that each page renders real rows.
 async function api<T>(

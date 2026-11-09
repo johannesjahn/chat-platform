@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { logOut, persistedQueryCache } from "./helpers";
+import { E2E_TARGET } from "./target";
 
 test("losing connectivity mid-session keeps already-loaded messages on screen and shows an offline banner, and persists the cache to localStorage for a later reload", async ({
   browser,
@@ -50,9 +51,9 @@ test("losing connectivity mid-session keeps already-loaded messages on screen an
   // The sync persister throttles writes (default 1s, see query.ts) but
   // isn't network-dependent, so it still flushes while offline. This
   // directly confirms the chat data made it into the persisted snapshot
-  // that a later reload (impossible to drive in this offline dev-server
-  // e2e setup, since there's no service worker to serve the app shell
-  // without a network — see vite.pwa-options.ts) would rehydrate from.
+  // that a later reload would rehydrate from. The reload itself needs the
+  // service worker to serve the app shell, which this file blocks (see
+  // playwright.config.ts) — pwa.spec.ts drives it.
   await expect
     .poll(() => persistedQueryCache(pageA))
     .toContain("Message loaded before going offline");
@@ -66,10 +67,10 @@ test("visiting a chat with no cached data during a connectivity failure shows an
   apiUrl,
   signUp,
 }) => {
-  // `context.setOffline` blocks the dev server's own asset requests too (no
-  // service worker in this dev-server e2e setup to serve the app shell —
-  // see the reload test above), so a real full-page `goto` while offline
-  // can't be driven here at all. Aborting just the one API request instead
+  // `context.setOffline` blocks the app's own asset requests too (the
+  // service worker that would serve the shell is blocked here — see the
+  // reload test above), so a real full-page `goto` while offline can't be
+  // driven here. Aborting just the one API request instead
   // reproduces the same network-level failure (a rejected `fetch()`, not a
   // decoded HTTP error) that a genuinely offline, never-cached visit hits.
   await signUp(page);
@@ -253,10 +254,10 @@ test("queues a post created while offline and publishes it automatically once ba
   // Reach /posts/new via a client-side `Link` click, not `page.goto` — a
   // `goto` is a real browser navigation that discards this page's JS module
   // cache, so the "/" route's lazily-loaded chunk (needed below to navigate
-  // back to it) would have to be fetched fresh over the network. This e2e
-  // setup's dev server has no service worker to serve that while offline
-  // (see the other tests in this file), so the chunk must already be
-  // resident from this same page load instead.
+  // back to it) would have to be fetched fresh over the network. With the
+  // service worker blocked (see the other tests in this file) nothing can
+  // serve that while offline, so the chunk must already be resident from
+  // this same page load instead.
   await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
   await page.getByRole("link", { name: "New post" }).click();
   await expect(page).toHaveURL("/posts/new");
@@ -327,6 +328,14 @@ test("a post queued offline by one user isn't sent under a different user who lo
   await expect(page.getByText("A's offline post")).toBeVisible();
 });
 
+// The URL pattern for a lazily loaded shell component's module: the source
+// file itself under `vite dev`, its content-hashed chunk in the build.
+function shellChunk(name: string): string {
+  return E2E_TARGET === "build"
+    ? `**/assets/${name}-*.js*`
+    : `**/src/components/shell/${name}.tsx*`;
+}
+
 // Holds the first request for one of the app's own modules until
 // `cutOff()`, then fails it the way a dropped connection does. Later
 // requests for it (the retries) go through, or with `failRetries` keep
@@ -335,10 +344,9 @@ test("a post queued offline by one user isn't sent under a different user who lo
 // so a test can go offline knowing it's the one in flight.
 async function holdModule(
   page: Page,
-  path: string,
+  pattern: string,
   { failRetries = false }: { failRetries?: boolean } = {},
 ) {
-  const pattern = `**/${path}*`;
   let arrived!: () => void;
   const held = new Promise<void>((resolve) => (arrived = resolve));
   let cutOff!: () => void;
@@ -361,7 +369,7 @@ test("a lazy shell chunk cut off by going offline loads once back online instead
   context,
   signUp,
 }) => {
-  const dock = await holdModule(page, "src/components/shell/ChatDock.tsx");
+  const dock = await holdModule(page, shellChunk("ChatDock"));
   await signUp(page);
   await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
   await dock.held;
@@ -383,10 +391,7 @@ test("the desktop sidebar's links stay available while its chunk is cut off offl
   context,
   signUp,
 }) => {
-  const sidebar = await holdModule(
-    page,
-    "src/components/shell/DesktopSidebar.tsx",
-  );
+  const sidebar = await holdModule(page, shellChunk("DesktopSidebar"));
   await signUp(page);
   await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
   await sidebar.held;
@@ -409,7 +414,7 @@ test("a lazy shell chunk that keeps failing after reconnecting offers a reload i
   allowConsoleErrors,
 }) => {
   allowConsoleErrors(/Couldn't load ChatDock/);
-  const dock = await holdModule(page, "src/components/shell/ChatDock.tsx", {
+  const dock = await holdModule(page, shellChunk("ChatDock"), {
     failRetries: true,
   });
   await signUp(page);
@@ -427,7 +432,7 @@ test("a lazy shell chunk that keeps failing after reconnecting offers a reload i
   await expect(page.getByRole("region", { name: "Messaging" })).toHaveCount(0);
 
   // The reload brings it back.
-  await page.unroute("**/src/components/shell/ChatDock.tsx*");
+  await page.unroute(shellChunk("ChatDock"));
   await notice.getByRole("button", { name: "Reload" }).click();
   await expect(page.getByRole("region", { name: "Messaging" })).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);

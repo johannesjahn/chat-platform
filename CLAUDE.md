@@ -651,8 +651,18 @@ regenerated from scratch.
   tsconfig only loads `vite/client` types. CI runs it as the `web-unit` job.
 - **E2E** — `cd web && bun run test:e2e` (Playwright, Chromium). The Playwright
   `webServer` config boots the _real_ backend (`bun run start`, cwd `..`, with a
-  test `JWT_SECRET`) and the Vite dev server, then drives the browser against
-  them. Configured in [web/playwright.config.ts](web/playwright.config.ts).
+  test `JWT_SECRET`) and a frontend, then drives the browser against them.
+  Configured in [web/playwright.config.ts](web/playwright.config.ts). The
+  frontend is the Vite dev server by default (reused if one is running), or
+  the production build in `web/dist/client` with `E2E_TARGET=build` (`bun run
+build` first; served by `web/scripts/serve-build.ts` the way the static
+  deploy serves it, SPA fallback included). CI runs the build (issue #740) —
+  so a spec must not depend on dev-only URLs like `/src/…` (see `shellChunk`
+  in `offline.spec.ts`) or on dev-only behaviour. The build's service worker
+  is **blocked** in every spec (`serviceWorkers: "block"`), since it would hide
+  requests from `page.route` and serve offline what a spec means to fail; a
+  PWA spec opts in with `test.use({ serviceWorkers: "allow" })` and skips
+  itself off the build — see [web/e2e/pwa.spec.ts](web/e2e/pwa.spec.ts).
   A test fails if any of its pages logs a `console.error` or an uncaught
   error/rejection (issue #618, the `consoleErrors` fixture in
   [web/e2e/fixtures.ts](web/e2e/fixtures.ts)). Fix what it reports; expected
@@ -713,7 +723,14 @@ generated spec/types weren't regenerated and committed), **unit**
 (`bun run test:coverage`, which includes `src/openapi.test.ts` validating the
 spec against the `ChatApi` definition, enforces `bunfig.toml`'s coverage
 thresholds, and uploads the `coverage-report` artifact — see Testing above),
-**e2e** (Playwright), and **e2e-stress** (PRs only: re-runs just the
+**e2e** (Playwright, against build-web's uploaded build — see Testing
+above; the build can't be made inside the Playwright container, where
+TanStack Start's prerender can't reach its preview server, so build-web also
+runs for backend-only PRs), **e2e-dev** (only `accessibility.spec.ts`, on the
+Vite dev server: React's development-only `console.error`s — duplicate keys,
+invalid DOM nesting — don't exist in the production build, and that spec
+renders every main page on every layout), and **e2e-stress** (PRs only,
+against the build: re-runs just the
 `web/e2e/**/*.spec.ts` files the PR adds or edits with `--repeat-each=5`,
 `--retries=0` and every core busy, to catch timing flakes that pass a single
 run — issue #619; skipped when no spec changed). Under that load tests run

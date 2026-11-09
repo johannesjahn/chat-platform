@@ -50,11 +50,19 @@ test(
 
     // The ring is a box-shadow in the full `--ring` color (it used to be at
     // half opacity), spread past a 2px gap. Polled: it transitions in.
-    const ring = await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue("--ring"),
-    );
+    // `--ring` is read back through a computed color, not as the raw custom
+    // property: the production build's CSS minifier rewrites its text (to
+    // `oklch(37.3% .064 258)`), while a computed style is always normalized.
+    const ring = await page.evaluate(() => {
+      const probe = document.createElement("div");
+      probe.style.color = "var(--ring)";
+      document.body.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
     await expect
       .poll(() => chats.evaluate((el) => getComputedStyle(el).boxShadow))
-      .toContain(`${ring.trim()} 0px 0px 0px 4px`);
+      .toContain(`${ring} 0px 0px 0px 4px`);
   },
 );

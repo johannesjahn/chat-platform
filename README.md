@@ -88,6 +88,15 @@ bunx playwright install --with-deps chromium
 bun run test:e2e
 ```
 
+CI runs the suite against the production build instead, which is also the
+only way to run the PWA specs (`e2e/pwa.spec.ts`) — to do the same locally:
+
+```sh
+cd web
+bun run build
+E2E_TARGET=build bun run test:e2e
+```
+
 On CI, failed runs retry twice and capture traces (`trace: "on-first-retry"`).
 
 ## Code generation
