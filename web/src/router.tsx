@@ -39,8 +39,10 @@ export function getRouter() {
     // them off under `prefers-reduced-motion`. Browsers without the API
     // simply swap the route as before; nothing here is load-bearing.
     defaultViewTransition: true,
-    // Unknown URLs and render/loader errors land on styled screens inside the
+    // Not-founds and render/loader errors land on styled screens inside the
     // app shell instead of TanStack's bare "Not Found" text (issue #496).
+    // URLs no route matches render the same page through the `/$` splat
+    // route instead (issue #743, see routes/$.tsx).
     defaultNotFoundComponent: NotFoundPage,
     defaultErrorComponent: RouteErrorPage,
   });
