@@ -53,7 +53,7 @@ function formatConsoleMessage(message: ConsoleMessage): string {
 // resource: the server responded with a status of 404 …"). From the API
 // that's the app's own business — a 401 on a bad login, a 404 on a deleted
 // post, a 400 a test fulfils on purpose — and the app surfaces it itself.
-// The same message for one of the dev server's own assets is a real bug.
+// The same message for one of the app's own assets is a real bug.
 function isApiResponseError(message: ConsoleMessage, apiUrl: string): boolean {
   return (
     message

@@ -31,8 +31,8 @@ const FREEZE_MOTION = `*, *::before, *::after {
 async function expectAccessible(page: Page, name: string): Promise<void> {
   await test.step(`axe: ${name}`, async () => {
     // Every page has an <h1> (issue #498); wait for it so the scan sees the
-    // page, not its loading state. Generous, since this is also the wait for
-    // the dev server's first compile of each route.
+    // page, not its loading state. Generous, since under `vite dev` this is
+    // also the wait for the first compile of each route.
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({
       timeout: 30_000,
     });

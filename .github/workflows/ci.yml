@@ -174,7 +174,9 @@ jobs:
   build-web:
     name: Web production build
     needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.web == 'true'
+    # Backend changes too, not just web/: the e2e jobs run against this
+    # build, and they run on either.
+    if: github.event_name == 'push' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -204,10 +206,10 @@ jobs:
         run: bun run check:bundle
         working-directory: web
 
-      # The `lighthouse` job audits this exact build rather than making its
-      # own: inside the Playwright container it runs in, TanStack Start's
-      # SPA prerender can't reach the preview server it starts
-      # (ECONNREFUSED), so `vite build` fails there.
+      # The `e2e`, `e2e-stress` and `lighthouse` jobs test this exact build
+      # rather than making their own: inside the Playwright container they
+      # run in, TanStack Start's SPA prerender can't reach the preview server
+      # it starts (ECONNREFUSED), so `vite build` fails there.
       - name: Upload web build
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -588,10 +590,16 @@ jobs:
           S3_SECRET_ACCESS_KEY: ci-docker-build-test-secret
           GARAGE_RPC_SECRET: "0000000000000000000000000000000000000000000000000000000000000000"
 
+  # Runs against the production build (`E2E_TARGET=build`, issue #740) —
+  # what users actually get: prebuilt chunks with modulepreload, minified,
+  # production React, and the service worker (blocked except in
+  # pwa.spec.ts — see playwright.config.ts). Unlike the dev server, it has no
+  # compile-on-first-request window for specs that go offline or count
+  # requests to race. The dev server's own checks run in `e2e-dev`.
   e2e:
     name: E2E tests (shard ${{ matrix.shard }}/${{ strategy.job-total }})
-    needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.web == 'true'
+    needs: [changes, build-web]
+    if: ${{ !cancelled() && needs.build-web.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Playwright's own image ships Chromium and every system library it
@@ -620,13 +628,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The e2e webServer boots the backend (`bun run start`, cwd `..`) and the
-      # web dev server, so both workspaces need their dependencies installed.
+      # Each test boots its own backend (`bun run start`, cwd `..`), and
+      # Playwright runs from web/, so both workspaces need their dependencies.
       - name: Set up Bun and install dependencies
         uses: ./.github/actions/setup-bun
         with:
           bun-version: ${{ env.BUN_VERSION }}
           web: true
+
+      # build-web's output — see the comment on its upload step.
+      - name: Download web build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: web/dist/client/
 
       # Each test boots its own backend process (see web/e2e/backend.ts), so
       # running everything on one runner means all shards' backends and
@@ -635,6 +650,8 @@ jobs:
       - name: Run Playwright tests
         run: bun run test:e2e --shard=${{ matrix.shard }}/${{ strategy.job-total }}
         working-directory: web
+        env:
+          E2E_TARGET: build
 
       - name: Upload Playwright traces
         if: ${{ !cancelled() }}
@@ -653,8 +670,10 @@ jobs:
   # skipped entirely (no runner at all) when a PR touches none.
   e2e-stress:
     name: E2E stress (changed specs)
-    needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.e2e_specs == 'true'
+    needs: [changes, build-web]
+    # Against the same production build as `e2e`, so it hunts the races
+    # that job can actually hit.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.e2e_specs == 'true' && needs.build-web.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # Same image as the e2e job — see the comment there.
@@ -669,6 +688,12 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
           web: true
+
+      - name: Download web build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: web/dist/client/
 
       # The changed paths are repo-relative; Playwright runs from web/, so
       # strip the prefix. They're passed through the environment and read as
@@ -687,6 +712,7 @@ jobs:
         env:
           SPECS: ${{ needs.changes.outputs.e2e_specs_files }}
           REPEAT_EACH: 5
+          E2E_TARGET: build
         # Inside a job `container`, a `run` step defaults to `sh`, which has
         # neither `mapfile` nor process substitution.
         shell: bash
@@ -706,6 +732,46 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # What only the Vite dev server checks (issue #740): with `e2e` on the
+  # production build, React's development-only `console.error`s — duplicate
+  # keys, invalid DOM nesting, hydration mismatches — would go unseen, and the
+  # `consoleErrors` fixture fails a test on exactly those. accessibility.spec.ts
+  # renders every main page, in both themes and all three layouts, so running
+  # it on the dev server (the default `E2E_TARGET`) is a cheap sweep for them;
+  # everything else runs once, against the build. It also keeps the local
+  # default from rotting unnoticed.
+  e2e-dev:
+    name: E2E dev-server checks
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Same image as the e2e job — see the comment there.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          web: true
+
+      - name: Run Playwright tests on the dev server
+        run: bun run test:e2e e2e/accessibility.spec.ts
+        working-directory: web
+
+      - name: Upload Playwright traces
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-traces-dev
+          path: web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # A Lighthouse report on the production build's main pages, signed in and
   # out — see web/scripts/lighthouse.ts. Performance only warns (it swings by
   # several points between runs on a shared runner); accessibility and best
@@ -716,9 +782,10 @@ jobs:
   lighthouse:
     name: Lighthouse report
     needs: [changes, build-web]
-    # Runs whenever build-web built (every push to main, and PRs touching
-    # web/), since it audits that build.
-    if: ${{ !cancelled() && needs.build-web.result == 'success' }}
+    # Audits build-web's build, on every push to main and PRs touching web/
+    # (build-web also builds for backend-only PRs, for e2e; a backend change
+    # can't move these scores).
+    if: ${{ !cancelled() && needs.build-web.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.web == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Same image as the e2e job (and bumped with it by Renovate's
@@ -793,6 +860,7 @@ jobs:
       - docker
       - e2e
       - e2e-stress
+      - e2e-dev
     steps:
       - name: Fail if any job failed or was cancelled
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
