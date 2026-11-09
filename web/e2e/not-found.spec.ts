@@ -2,19 +2,12 @@ import { expect, test } from "./fixtures";
 
 // Issue #496: unknown URLs used to show TanStack's bare "Not Found" text.
 
+// Issue #743: on the build, this URL gets the SPA shell prerendered at `/`,
+// and it used to fail hydration (React #418) — the fixture's console check
+// is what keeps that fixed.
 test("an unknown URL shows the 404 page with a way back to the feed", async ({
   page,
-  allowConsoleErrors,
 }) => {
-  // The dev server answers the document request itself with a 404, which
-  // Chromium logs — that's the status this page is meant to have.
-  allowConsoleErrors("the server responded with a status of 404");
-  // The build (like the deploy) answers with the SPA shell instead, which
-  // is prerendered at `/`: its brand link is marked as the current page,
-  // and hydrating it here doesn't match. React recovers by rendering on the
-  // client, so the page is right; the mismatch itself is a known bug
-  // (issue #743), not what this test is about.
-  allowConsoleErrors(/Minified React error #418\b/);
   await page.goto("/does-not-exist");
   const main = page.getByRole("main");
   await expect(main.getByText("Page not found")).toBeVisible();
