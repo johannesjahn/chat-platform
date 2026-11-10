@@ -707,6 +707,16 @@ does this, but `src/openapi.test.ts` still asserts that every endpoint
 declaring `params`/`query`/`headers` produces matching OpenAPI parameters —
 run it (`bun test ./src`) after touching any endpoint signature.
 
+### Guard: length bounds in the spec match the enforced ones
+
+effect's `Schema.isMinLength(n)` documents a string as `minLength:
+Math.ceil(n / 2)` (JSON Schema counts code points, `string.length` UTF-16
+units), which halved every documented floor (issue #761). In `src/Api.ts`
+use the local `isMinLength` wrapper instead, which documents the enforced
+bound; `src/openapi.test.ts` fails on a direct `Schema.isMinLength(` call and
+checks the spec's `minLength`/`maxLength` against the `MIN_*`/`MAX_*`
+constants.
+
 ## CI
 
 [.github/workflows/ci.yml](.github/workflows/ci.yml) runs on pushes to `main`

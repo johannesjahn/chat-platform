@@ -11478,7 +11478,7 @@
           },
           "newPassword": {
             "type": "string",
-            "minLength": 4,
+            "minLength": 8,
             "maxLength": 128
           }
         },
@@ -11590,7 +11590,7 @@
           "username": {
             "type": "string",
             "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "minLength": 2,
+            "minLength": 3,
             "maxLength": 32,
             "allOf": [
               {
@@ -11600,7 +11600,7 @@
           },
           "password": {
             "type": "string",
-            "minLength": 4,
+            "minLength": 8,
             "maxLength": 128
           }
         },
