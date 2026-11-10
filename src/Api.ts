@@ -1978,7 +1978,9 @@ const ChatsGroup = HttpApiGroup.make("chats")
     HttpApiEndpoint.post("createGroupChat", "/chats/group", {
       payload: CreateGroupChatBody,
       success: Chat.pipe(HttpApiSchema.status(201)),
-      error: [NotFound, InvalidChatRequest],
+      // Forbidden: a requested participant is on either side of a block
+      // with the caller (issue #757).
+      error: [NotFound, Forbidden, InvalidChatRequest],
     }).middleware(Authentication),
   )
   .add(
@@ -2021,7 +2023,9 @@ const ChatsGroup = HttpApiGroup.make("chats")
     }).middleware(Authentication),
   )
   .add(
-    // Adds participants to a group chat — the owner or an admin.
+    // Adds participants to a group chat — the owner or an admin. Also 403
+    // when a requested user is on either side of a block with the caller
+    // (issue #757).
     HttpApiEndpoint.post("addParticipants", "/chats/:id/participants", {
       params: ChatIdPath,
       payload: AddParticipantsBody,
@@ -2305,11 +2309,12 @@ const ChatsGroup = HttpApiGroup.make("chats")
     // Redeems an invite code, adding the current user to its chat as a
     // "member" — any authenticated user (not just existing participants).
     // Idempotent for someone already in the chat: returns the chat as-is
-    // rather than erroring.
+    // rather than erroring. 403 when the caller and the invite's creator
+    // are on either side of a block (issue #757).
     HttpApiEndpoint.post("joinChatViaInvite", "/chats/invites/:code/join", {
       params: InviteCodePath,
       success: Chat,
-      error: [NotFound, InvalidChatRequest],
+      error: [NotFound, Forbidden, InvalidChatRequest],
     }).middleware(Authentication),
   );
 

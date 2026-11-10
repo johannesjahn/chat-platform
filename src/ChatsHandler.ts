@@ -52,7 +52,11 @@ import { enforceUploadQuota } from "./AttachmentsHandler.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
 import { avatarStorageKey, generateAvatarToken } from "./avatars.ts";
-import { directBlockExists, recipientsMutingSender } from "./blocks.ts";
+import {
+  blockedPeersAmong,
+  directBlockExists,
+  recipientsMutingSender,
+} from "./blocks.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { chargeGlobalRequests } from "./GlobalRateLimit.ts";
 import { processAvatar } from "./ImageProcessing.ts";
@@ -891,6 +895,28 @@ const directChatBlocked = (
     ).pipe(Effect.orDie);
   });
 
+// Fails with 403 if any of `otherIds` is on either side of a *block* with
+// `actorId` (issue #757). Group messages aren't gated by blocks (see
+// `directChatBlocked`), so without this a group — which may hold just the
+// two of them — would get around the DM block. Used by `createGroupChat`
+// and `addParticipants` (the actor vs. everyone they're adding) and
+// `joinChatViaInvite` (the joiner vs. the invite's creator). The whole
+// request is rejected rather than the blocked users silently skipped, so
+// the caller never gets a group that isn't what they asked for — and, like
+// the DM 403, the message doesn't say who blocked whom.
+const requireNoBlockWith = (
+  db: DrizzleDb,
+  actorId: number,
+  otherIds: ReadonlyArray<number>,
+  message: string,
+): Effect.Effect<void, Forbidden> =>
+  Effect.gen(function* () {
+    const blocked = yield* Effect.tryPromise(() =>
+      blockedPeersAmong(db, actorId, otherIds),
+    ).pipe(Effect.orDie);
+    if (blocked.size > 0) return yield* Effect.fail(new Forbidden({ message }));
+  });
+
 // Inserts a message and bumps its chat's `updatedAt` (which `listChats`
 // sorts by) and `version` as one atomic statement via a writable CTE, rather
 // than two separate un-transacted round trips — Postgres always runs a
@@ -1465,6 +1491,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 message: `User${missing.length > 1 ? "s" : ""} ${missing.join(", ")} not found`,
               }),
             );
+          yield* requireNoBlockWith(
+            db,
+            currentUser.id,
+            [...uniqueIds],
+            "You can't add someone to a group because of a block",
+          );
 
           const now = new Date();
           const created = yield* Effect.tryPromise(() =>
@@ -1751,6 +1783,14 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 message: `User${missing.length > 1 ? "s" : ""} ${missing.join(", ")} not found`,
               }),
             );
+          // Checked against everyone requested, including anyone already in
+          // the group — re-adding them would be a no-op either way.
+          yield* requireNoBlockWith(
+            db,
+            currentUser.id,
+            requestedIds,
+            "You can't add someone to a group because of a block",
+          );
 
           // Recomputing who's already a participant and enforcing the group
           // cap has to happen in the same `serializable` transaction as the
@@ -3319,6 +3359,14 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           );
           if (alreadyIn)
             return yield* buildChat(db, storage, chatRow, currentUser.id);
+          // An invite is its creator asking you in — not honoured across a
+          // block, either way round (issue #757).
+          yield* requireNoBlockWith(
+            db,
+            currentUser.id,
+            [invite.createdBy],
+            "You can't join this chat because of a block",
+          );
 
           // Participant cap, `useCount` bump, and the join itself all run
           // inside one `serializable` transaction, same reasoning as
