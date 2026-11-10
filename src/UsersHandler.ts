@@ -67,24 +67,34 @@ import {
 } from "./db/schema.ts";
 
 // Sensible defaults for auth-endpoint rate limiting (see issue #25). Login is
-// capped per source IP (every attempt counts) and per targeted account — but
-// the account buckets effectively count only *failed* attempts (issue #480):
-// every attempt consumes them up front, so concurrent guesses can't race past
-// the limit (issue #543), and a successful login then clears the account+IP
-// bucket and refunds its own unit on the account-wide one, so signing in on
-// several devices never locks the owner out. The tight account bucket is also keyed by IP, so an attacker
-// hammering wrong passwords for someone's username only locks *themselves*
-// out of that account; the looser account-wide ceiling still bounds how many
-// guesses a distributed attacker (many IPs) gets per window.
-const LOGIN_MAX_ATTEMPTS_PER_IP = 20;
+// capped per source IP and per targeted account, but every one of those
+// buckets effectively counts only *failed* attempts (issues #480, #767): each
+// attempt consumes them up front, so concurrent guesses can't race past the
+// limit (issue #543), and a successful login then hands its unit back. That
+// matters most for the IP bucket — everyone behind one public address (a
+// school, an office, a carrier's CGNAT, a VPN) shares it, so counting
+// successes there turned a busy network's 21st sign-in into a 429. On
+// success the account+IP bucket is cleared outright, while the IP and
+// account-wide buckets are only refunded one unit: wiping them would erase
+// an attacker's tally whenever someone signs in. The tight account bucket is
+// also keyed by IP, so an attacker hammering wrong passwords for someone's
+// username only locks *themselves* out of that account; the looser
+// account-wide ceiling still bounds how many guesses a distributed attacker
+// (many IPs) gets per window, and the per-IP ceiling bounds one address
+// spraying guesses across many usernames.
+const LOGIN_MAX_FAILURES_PER_IP = 50;
 const LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP = 5;
 const LOGIN_MAX_FAILURES_PER_ACCOUNT = 50;
 const LOGIN_WINDOW_SECONDS = 15 * 60;
 
 // Registration has no natural "account" bucket (that's what's being
-// created), so it's capped per IP only.
-const REGISTER_MAX_ATTEMPTS_PER_IP = 5;
+// created), so it's capped per IP only — by an hourly ceiling roomy enough
+// for a class or team onboarding together behind one address (issue #767),
+// plus a short burst limit so a script can't create accounts back to back.
+const REGISTER_MAX_ATTEMPTS_PER_IP = 50;
 const REGISTER_WINDOW_SECONDS = 60 * 60;
+const REGISTER_BURST_MAX_ATTEMPTS_PER_IP = 10;
+const REGISTER_BURST_WINDOW_SECONDS = 60;
 
 // Refreshing is routine/automatic (a client does it roughly once per access
 // token lifetime), so its limit is looser than login's — it exists mainly as
@@ -655,6 +665,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           const ip = yield* clientIp;
           yield* enforceRateLimit(
             limiter,
+            `register:ip-burst:${ip}`,
+            REGISTER_BURST_MAX_ATTEMPTS_PER_IP,
+            REGISTER_BURST_WINDOW_SECONDS,
+          );
+          yield* enforceRateLimit(
+            limiter,
             `register:ip:${ip}`,
             REGISTER_MAX_ATTEMPTS_PER_IP,
             REGISTER_WINDOW_SECONDS,
@@ -717,19 +733,21 @@ export const UsersHandlerLive = HttpApiBuilder.group(
       .handle("login", ({ payload }) =>
         Effect.gen(function* () {
           const ip = yield* clientIp;
+          const ipKey = `login:ip:${ip}`;
           yield* enforceRateLimit(
             limiter,
-            `login:ip:${ip}`,
-            LOGIN_MAX_ATTEMPTS_PER_IP,
+            ipKey,
+            LOGIN_MAX_FAILURES_PER_IP,
             LOGIN_WINDOW_SECONDS,
           );
           const account = payload.username.toLowerCase();
           const accountIpKey = `login:account-ip:${account}:${ip}`;
           const accountKey = `login:account:${account}`;
-          // Both account buckets are consumed atomically *before* the
-          // (slow, async) password check — a check-then-consume would let
-          // concurrent guesses all pass the check before any of them counted
-          // (issue #543). A success hands its unit back below.
+          // The IP bucket above and both account buckets are consumed
+          // atomically *before* the (slow, async) password check — a
+          // check-then-consume would let concurrent guesses all pass the
+          // check before any of them counted (issue #543). A success hands
+          // its units back below.
           yield* enforceRateLimit(
             limiter,
             accountIpKey,
@@ -770,11 +788,12 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           }
 
           // Success: forgive this IP's failures against the account, but
-          // only refund this one attempt on the account-wide bucket — wiping
-          // it would erase a distributed attacker's tally whenever the owner
-          // signs in.
+          // only refund this one attempt on the IP and account-wide buckets —
+          // wiping them would erase an attacker's tally whenever someone
+          // signs in (from their network, or to the targeted account).
           yield* limiter.reset(accountIpKey);
           yield* limiter.refund(accountKey);
+          yield* limiter.refund(ipKey);
 
           const publicUser = toPublicUser(user);
           const tokenUser = {

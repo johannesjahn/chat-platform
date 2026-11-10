@@ -53,19 +53,20 @@ The backend's auth rate limiters (`src/UsersHandler.ts`) are tuned for real
 traffic, not a load generator running from a single source IP, and they
 directly constrain how these scripts are written:
 
-- **`/users/register` allows only 5 attempts per source IP per hour.** Both
+- **`/users/register` allows 10 attempts per source IP per minute and 50
+  per hour.** Both
   scripts' `setup()` uses `loginOrRegister` (`lib/api.js`), which registers a
   fixed, deterministic set of accounts (`loadtest-http-0`, `loadtest-ws-0`,
   …) once and logs the same accounts back in on every later run — so only
   the _first_ run against a given backend spends any of that budget. Raising
   `USERS`/`WS_PARTICIPANTS` (see below) raises how many accounts a first run
-  needs to register; keep it at or under 5 unless you've already seeded more
+  needs to register; keep it at or under 10 unless you've already seeded more
   accounts in an earlier run, or are running against a target where you've
   deliberately loosened this limit. Both also need at least 2 accounts —
   `createGroupChat` requires at least one participant besides the creator —
   and refuse to start below that.
-- **`/users/login` allows 20 attempts per IP / 5 per account per 15
-  minutes.** Only hit once per user in `setup()`, so this isn't a practical
+- **`/users/login` allows 50 failed attempts per IP / 5 per account per
+  15 minutes** (successful logins don't count). Only hit once per user in `setup()`, so this isn't a practical
   constraint at the default participant counts.
 - **Engagement writes (reactions/comments/replies) are capped at 120 per user
   per minute** (`src/EngagementHandler.ts`), and the global per-IP limiter

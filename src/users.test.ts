@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, setSystemTime, test } from "bun:test";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { Duration, Effect, Layer, Metric } from "effect";
@@ -734,10 +734,11 @@ test('register is rate-limited per IP, incrementing rate_limit_rejections_total{
     Effect.gen(function* () {
       const c = yield* makeClient;
       const before = yield* rateLimitRejectionCount("register");
-      // REGISTER_MAX_ATTEMPTS_PER_IP = 5 (UsersHandler.ts). Every call in
-      // this in-process test harness resolves to the same "unknown" IP (no
-      // real socket/remoteAddress), so they all land in one bucket.
-      for (let i = 0; i < 5; i++) {
+      // REGISTER_BURST_MAX_ATTEMPTS_PER_IP = 10 per minute (UsersHandler.ts).
+      // Every call in this in-process test harness resolves to the same
+      // "unknown" IP (no real socket/remoteAddress), so they all land in one
+      // bucket.
+      for (let i = 0; i < 10; i++) {
         yield* c.users.register({
           payload: { username: `ratelimited-${i}`, password: "pw-testpass" },
         });
@@ -1431,38 +1432,56 @@ test("changePassword is rate-limited per account after repeated wrong attempts",
     }),
   ));
 
-test("register is rate-limited per IP after repeated attempts", () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      // REGISTER_MAX_ATTEMPTS_PER_IP is 5 (UsersHandler.ts) — the test
-      // harness has no real socket, so every call in this test shares one
-      // "unknown" IP bucket regardless of username.
-      for (let i = 0; i < 5; i++) {
-        yield* c.users.register({
-          payload: { username: `reguser${i}`, password: "pw-register" },
-        });
-      }
-      const result = yield* c.users
-        .register({
-          payload: { username: "reguser5", password: "pw-register" },
-        })
-        .pipe(Effect.flip);
-      const left = result as {
-        _tag: string;
-        retryAfterSeconds: number;
-      };
-      expect(left._tag).toBe("TooManyRequests");
-      expect(left.retryAfterSeconds).toBeGreaterThan(0);
-    }),
-  ));
+test("register allows a shared network's worth of sign-ups per hour, but caps both bursts and the hourly total per IP", async () => {
+  // Issue #767: a class onboarding together behind one address used to hit
+  // REGISTER_MAX_ATTEMPTS_PER_IP (then 5/hour). Now 50/hour is allowed, at
+  // most REGISTER_BURST_MAX_ATTEMPTS_PER_IP (10) per minute. The harness has
+  // no real socket, so every call shares one "unknown" IP bucket; the
+  // in-memory limiter reads Date.now(), so the clock is stepped past each
+  // burst window.
+  let now = Date.now();
+  setSystemTime(new Date(now));
+  try {
+    await run(
+      Effect.gen(function* () {
+        const c = yield* makeClient;
+        const register = (username: string) =>
+          c.users.register({ payload: { username, password: "pw-register" } });
+        const expectLimited = (username: string) =>
+          Effect.gen(function* () {
+            const left = (yield* register(username).pipe(Effect.flip)) as {
+              _tag: string;
+              retryAfterSeconds: number;
+            };
+            expect(left._tag).toBe("TooManyRequests");
+            expect(left.retryAfterSeconds).toBeGreaterThan(0);
+          });
+
+        for (let burst = 0; burst < 5; burst++) {
+          for (let i = 0; i < 10; i++) {
+            yield* register(`reguser${burst}x${i}`);
+          }
+          // An 11th sign-up within the same minute is a burst too many.
+          yield* expectLimited(`regburst${burst}`);
+          now += 61_000;
+          setSystemTime(new Date(now));
+        }
+        // 50 accounts in five minutes: the hourly ceiling is spent, even
+        // though the burst window has rolled over.
+        yield* expectLimited("reguser-over-hourly");
+      }),
+    );
+  } finally {
+    setSystemTime();
+  }
+});
 
 test("login is rate-limited per account after repeated attempts, independent of whether the account exists", () =>
   run(
     Effect.gen(function* () {
       const c = yield* makeClient;
       // LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP is 5, well below the per-IP cap
-      // of 20, so this trips the per-account bucket first. The username need not
+      // of 50, so this trips the per-account bucket first. The username need not
       // belong to a real account — the bucket is keyed on the submitted
       // username regardless, so a nonexistent account can't be used to
       // bypass the limit.
@@ -1491,8 +1510,7 @@ test("successful logins don't count toward the per-account login limit", () =>
       yield* c.users.register({
         payload: { username: "multidevice", password: "pw-multi" },
       });
-      // Well past the 5-failure account bucket (but under the per-IP cap of
-      // 20): someone signing in on several devices must never be locked out.
+      // Well past the 5-failure account bucket: someone signing in on several devices must never be locked out.
       for (let i = 0; i < 10; i++) {
         const session = yield* c.users.login({
           payload: { username: "multidevice", password: "pw-multi" },
@@ -1526,6 +1544,50 @@ test("a successful login clears the account's earlier failed attempts", () =>
     }),
   ));
 
+test("successful logins don't count toward the per-IP login limit, but failures still do", () =>
+  run(
+    Effect.gen(function* () {
+      const c = yield* makeClient;
+      const db = yield* Db;
+      // Issue #767: everyone behind one public address (a school, an
+      // office, CGNAT) shares the per-IP bucket. The harness resolves every
+      // call to the same "unknown" IP, so 50 people signing in to their own
+      // accounts here is exactly that, well past the old cap of 20
+      // attempts. Accounts are inserted directly (sharing one hash) rather
+      // than registered, which would trip register's own per-IP limits.
+      const passwordHash = yield* Effect.promise(() =>
+        Bun.password.hash("pw-shared-net", { algorithm: "argon2id" }),
+      );
+      const accounts = Array.from({ length: 50 }, (_, i) => `campus${i}`);
+      yield* Effect.tryPromise(() =>
+        db
+          .insert(users)
+          .values(accounts.map((username) => ({ username, passwordHash }))),
+      ).pipe(Effect.orDie);
+      for (const username of accounts) {
+        const session = yield* c.users.login({
+          payload: { username, password: "pw-shared-net" },
+        });
+        expect(session.user.username).toBe(username);
+      }
+
+      // Failures still count: LOGIN_MAX_FAILURES_PER_IP is 50. Each guess
+      // targets a different account, so the per-account buckets never trip
+      // and only the IP bucket can stop this spray.
+      for (const username of accounts) {
+        const attempt = yield* c.users
+          .login({ payload: { username, password: "wrong" } })
+          .pipe(Effect.flip);
+        expect(attempt._tag).toBe("InvalidCredentials");
+      }
+      const left = (yield* c.users
+        .login({ payload: { username: "campus-extra", password: "wrong" } })
+        .pipe(Effect.flip)) as { _tag: string; retryAfterSeconds: number };
+      expect(left._tag).toBe("TooManyRequests");
+      expect(left.retryAfterSeconds).toBeGreaterThan(0);
+    }),
+  ));
+
 test("concurrent wrong-password logins can't race past the per-account limit", () =>
   run(
     Effect.gen(function* () {
@@ -1536,7 +1598,7 @@ test("concurrent wrong-password logins can't race past the per-account limit", (
       // Issue #543: the account buckets used to be checked up front but only
       // consumed after the (slow) password check, so every concurrent guess
       // passed the check and reached verification. Under the per-IP cap of
-      // 20, LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP (5) must still hold.
+      // 50, LOGIN_MAX_FAILURES_PER_ACCOUNT_AND_IP (5) must still hold.
       const results = yield* Effect.all(
         Array.from({ length: 15 }, () =>
           c.users
