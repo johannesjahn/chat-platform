@@ -9,6 +9,7 @@ import {
 import { Avatar } from "@/components/Avatar";
 import { Textarea } from "@/components/ui/textarea";
 import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
+import { isImeComposing } from "@/lib/ime";
 import {
   type ActiveMention,
   activeMentionAt,
@@ -161,6 +162,13 @@ export function MentionTextarea({
           onBlur?.(e);
         }}
         onKeyDown={(e) => {
+          // Keys mid-IME-composition (Enter/Tab confirming the text, …)
+          // never drive the picker (issue #759). They're still passed on;
+          // the caller's own handler ignores them the same way.
+          if (isImeComposing(e)) {
+            onKeyDown?.(e);
+            return;
+          }
           if (open && e.key === "Escape") {
             e.preventDefault();
             setDismissedQuery(query);

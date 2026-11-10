@@ -18,6 +18,7 @@ import {
 } from "@/lib/attachments";
 import { useCreatePost } from "@/lib/createPost";
 import { errorMessage } from "@/lib/errors";
+import { isImeComposing } from "@/lib/ime";
 import { useOnlineStatus } from "@/lib/online";
 import { MAX_POST_CONTENT_LENGTH } from "@/lib/posts";
 import { userAvatarName } from "@/lib/users";
@@ -157,6 +158,7 @@ export function InlineComposer({ session }: { session: Session }) {
           onFocus={() => setOpen(true)}
           onPaste={onPaste}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
               void submit();
