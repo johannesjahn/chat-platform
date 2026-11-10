@@ -2,6 +2,7 @@ import { HttpApiBuilder } from "effect/http-api";
 import {
   and,
   count,
+  countDistinct,
   desc,
   eq,
   gt,
@@ -742,6 +743,51 @@ const getUnreadCountsForChats = (
         Effect.map((rows) => new Map(rows.map((r) => [r.chatId, r.total]))),
       );
 
+// The caller's unread total over every chat they're in (issue #756), for
+// `GET /chats/unread-count` — the same watermark join as
+// `getUnreadCountsForChats`, just not narrowed to one page's chats, so a
+// chat that's dropped off the first page of the list still counts.
+const getUnreadTotal = (
+  db: DrizzleDb,
+  userId: number,
+): Effect.Effect<{ count: number; chats: number }> =>
+  Effect.tryPromise(() =>
+    db
+      .select({ count: count(), chats: countDistinct(messages.chatId) })
+      .from(chatParticipants)
+      .innerJoin(
+        messages,
+        and(
+          eq(messages.chatId, chatParticipants.chatId),
+          gt(
+            messages.id,
+            sql`coalesce(${chatParticipants.lastReadMessageId}, 0)`,
+          ),
+        ),
+      )
+      .where(
+        and(eq(chatParticipants.userId, userId), ne(messages.senderId, userId)),
+      ),
+  ).pipe(
+    Effect.orDie,
+    Effect.map((rows) => ({
+      count: rows[0]?.count ?? 0,
+      chats: rows[0]?.chats ?? 0,
+    })),
+  );
+
+// `listChats`'s `unread=true` filter (issue #756): the caller's own
+// participant row (joined into that query) has a message past its watermark
+// from someone else — the same rule `getUnreadCountsForChats` counts by.
+// Spelled out with an alias for the reason in `getLastMessagesForChats`.
+const hasUnreadFor = (userId: number) =>
+  sql<boolean>`EXISTS (
+    SELECT 1 FROM ${messages} AS unread
+    WHERE unread.chat_id = ${chatParticipants}.chat_id
+      AND unread.id > coalesce(${chatParticipants}.last_read_message_id, 0)
+      AND unread.sender_id <> ${userId}
+  )`;
+
 // Site-wide admins can edit/delete any message; everyone else only their
 // own — mirrors PostsHandler's `canModify`. Editing stays this strict even
 // after issue #220 (only deletion was extended to chat owners/admins below).
@@ -1292,15 +1338,20 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 ),
               )
               .where(
-                after
-                  ? or(
-                      lt(chats.updatedAt, after.updatedAt),
-                      and(
-                        eq(chats.updatedAt, after.updatedAt),
-                        lt(chats.id, after.id),
-                      ),
-                    )
-                  : undefined,
+                and(
+                  after
+                    ? or(
+                        lt(chats.updatedAt, after.updatedAt),
+                        and(
+                          eq(chats.updatedAt, after.updatedAt),
+                          lt(chats.id, after.id),
+                        ),
+                      )
+                    : undefined,
+                  urlParams.unread === "true"
+                    ? hasUnreadFor(currentUser.id)
+                    : undefined,
+                ),
               )
               .orderBy(desc(chats.updatedAt), desc(chats.id))
               .limit(limit + 1),
@@ -1336,6 +1387,12 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             limit,
             nextCursor,
           };
+        }),
+      )
+      .handle("getUnreadChatCount", () =>
+        Effect.gen(function* () {
+          const currentUser = yield* CurrentUser;
+          return yield* getUnreadTotal(db, currentUser.id);
         }),
       )
       .handle("getChat", ({ params: { id } }) =>

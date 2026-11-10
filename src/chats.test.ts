@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { Effect, Metric } from "effect";
 import {
   ChatApi,
+  DEFAULT_CHATS_LIMIT,
   MAX_GROUP_PARTICIPANTS,
   MAX_INVITES_PER_CHAT,
 } from "./Api.ts";
@@ -2962,5 +2963,176 @@ test("createChatInvite doesn't count revoked/expired invites toward the per-chat
         payload: {},
       });
       expect(afterRevoke.chatId).toBe(chat.id);
+    }),
+  ));
+
+// Issue #756: a DM with unread messages pushed off the first page of the
+// chat list by `DEFAULT_CHATS_LIMIT` newer chats that alice has read.
+const buryUnreadDirectChat = Effect.gen(function* () {
+  const alice = yield* registerAndLogin("alice", "pw-testpass");
+  const bob = yield* registerAndLogin("bob", "pw-testpass");
+  const dm = yield* bob.client.chats.createDirectChat({
+    payload: { userId: alice.user.id },
+  });
+  for (const content of ["one", "two", "three"]) {
+    yield* bob.client.chats.createMessage({
+      params: { id: dm.id },
+      payload: { contentType: "text", content },
+    });
+  }
+  for (let i = 0; i < DEFAULT_CHATS_LIMIT; i++) {
+    const group = yield* bob.client.chats.createGroupChat({
+      payload: { title: `Group ${i}`, participantIds: [alice.user.id] },
+    });
+    const message = yield* bob.client.chats.createMessage({
+      params: { id: group.id },
+      payload: { contentType: "text", content: `hello ${i}` },
+    });
+    yield* alice.client.chats.markRead({
+      params: { id: group.id },
+      payload: { messageId: message.id },
+    });
+  }
+  return { alice, bob, dm };
+});
+
+test("getUnreadChatCount counts unread chats beyond the first page of the list", () =>
+  run(
+    Effect.gen(function* () {
+      const { alice, bob, dm } = yield* buryUnreadDirectChat;
+
+      // The precondition the bug needs: page 1 alone sums to nothing.
+      const firstPage = yield* alice.client.chats.listChats({ query: {} });
+      expect(firstPage.chats.some((c) => c.id === dm.id)).toBe(false);
+      expect(firstPage.chats.every((c) => c.unreadCount === 0)).toBe(true);
+
+      expect(yield* alice.client.chats.getUnreadChatCount()).toEqual({
+        count: 3,
+        chats: 1,
+      });
+      // Your own messages are never unread to you.
+      expect(yield* bob.client.chats.getUnreadChatCount()).toEqual({
+        count: 0,
+        chats: 0,
+      });
+
+      // Reading part of it lowers the total; reading all of it clears it.
+      const dmPage = yield* alice.client.chats.listMessages({
+        params: { id: dm.id },
+        query: {},
+      });
+      const [first, , last] = dmPage.messages;
+      yield* alice.client.chats.markRead({
+        params: { id: dm.id },
+        payload: { messageId: first!.id },
+      });
+      expect(yield* alice.client.chats.getUnreadChatCount()).toEqual({
+        count: 2,
+        chats: 1,
+      });
+      yield* alice.client.chats.markRead({
+        params: { id: dm.id },
+        payload: { messageId: last!.id },
+      });
+      expect(yield* alice.client.chats.getUnreadChatCount()).toEqual({
+        count: 0,
+        chats: 0,
+      });
+    }),
+  ));
+
+test("getUnreadChatCount sums across chats and only counts chats you're in", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const withAlice = yield* bob.client.chats.createDirectChat({
+        payload: { userId: alice.user.id },
+      });
+      const group = yield* carol.client.chats.createGroupChat({
+        payload: {
+          title: "Trio",
+          participantIds: [alice.user.id, bob.user.id],
+        },
+      });
+      const withoutAlice = yield* bob.client.chats.createDirectChat({
+        payload: { userId: carol.user.id },
+      });
+      const sends = [
+        [bob.client, withAlice.id],
+        [carol.client, group.id],
+        [bob.client, group.id],
+        [carol.client, withoutAlice.id],
+      ] as const;
+      for (const [client, id] of sends) {
+        yield* client.chats.createMessage({
+          params: { id },
+          payload: { contentType: "text", content: "hi" },
+        });
+      }
+
+      expect(yield* alice.client.chats.getUnreadChatCount()).toEqual({
+        count: 3,
+        chats: 2,
+      });
+    }),
+  ));
+
+test("listChats with unread=true returns only unread chats, including ones past the first page", () =>
+  run(
+    Effect.gen(function* () {
+      const { alice, dm } = yield* buryUnreadDirectChat;
+
+      const unread = yield* alice.client.chats.listChats({
+        query: { unread: "true" },
+      });
+      expect(unread.chats.map((c) => c.id)).toEqual([dm.id]);
+      expect(unread.chats[0]!.unreadCount).toBe(3);
+      expect(unread.nextCursor).toBeNull();
+
+      // `unread=false` is the full list, same as omitting it.
+      const all = yield* alice.client.chats.listChats({
+        query: { unread: "false" },
+      });
+      expect(all.chats).toHaveLength(DEFAULT_CHATS_LIMIT);
+      expect(all.nextCursor).not.toBeNull();
+    }),
+  ));
+
+test("listChats with unread=true pages with the same cursor as the full list", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const unreadIds: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const group = yield* bob.client.chats.createGroupChat({
+          payload: { title: `Group ${i}`, participantIds: [alice.user.id] },
+        });
+        const message = yield* bob.client.chats.createMessage({
+          params: { id: group.id },
+          payload: { contentType: "text", content: `hello ${i}` },
+        });
+        // Every other chat is read, so the unread ones are interleaved.
+        if (i % 2 === 0) unreadIds.unshift(group.id);
+        else
+          yield* alice.client.chats.markRead({
+            params: { id: group.id },
+            payload: { messageId: message.id },
+          });
+      }
+
+      const first = yield* alice.client.chats.listChats({
+        query: { unread: "true", limit: 2 },
+      });
+      expect(first.nextCursor).not.toBeNull();
+      const second = yield* alice.client.chats.listChats({
+        query: { unread: "true", limit: 2, cursor: first.nextCursor! },
+      });
+      expect(second.nextCursor).toBeNull();
+      expect([...first.chats, ...second.chats].map((c) => c.id)).toEqual(
+        unreadIds,
+      );
     }),
   ));

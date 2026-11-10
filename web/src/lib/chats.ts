@@ -50,6 +50,20 @@ const MESSAGES_MAX_LIMIT = 100;
 type MessagesPageResponse = components["schemas"]["MessagesPage"];
 
 export const chatsListQueryKey = ["chats", "list"] as const;
+// The Unread filter's server-side list and the unread total behind the
+// badges (issue #756). Both extend `chatsListQueryKey` on purpose: every
+// place that refreshes the chat list — the `chat_updated`/`chat_deleted`
+// realtime events, markRead, sends, joins, leaves — invalidates that key,
+// and invalidation matches by prefix, so they're refreshed by exactly the
+// same events with nothing extra to keep in sync.
+export const unreadChatsListQueryKey = [
+  ...chatsListQueryKey,
+  "unread",
+] as const;
+export const chatsUnreadCountQueryKey = [
+  ...chatsListQueryKey,
+  "unread-count",
+] as const;
 export const chatDetailQueryKey = (chatId: number) =>
   ["chats", chatId, "detail"] as const;
 export const chatMessagesQueryKey = (chatId: number) =>
@@ -89,18 +103,35 @@ export function useChatsTwoPane(): boolean {
 //
 // The options are shared with the chats layout's loader (see
 // routes/chats/route.tsx).
-export function useChatsList(enabled: boolean) {
-  return useInfiniteQuery({ ...chatsListQueryOptions(), enabled });
+//
+// `unreadOnly` is the Unread filter (issue #756): the server's
+// `unread=true` list, its own cache entry, paged the same way — so an
+// unread chat that's far down the full list shows up without scrolling to it.
+export function useChatsList(
+  enabled: boolean,
+  { unreadOnly = false }: { unreadOnly?: boolean } = {},
+) {
+  return useInfiniteQuery({
+    ...chatsListQueryOptions({ unreadOnly }),
+    enabled,
+  });
 }
 
-export function chatsListQueryOptions() {
+export function chatsListQueryOptions({
+  unreadOnly = false,
+}: { unreadOnly?: boolean } = {}) {
   return infiniteQueryOptions({
-    queryKey: chatsListQueryKey,
+    queryKey: unreadOnly ? unreadChatsListQueryKey : chatsListQueryKey,
     refetchOnMount: refetchUnlessWarmed,
     initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam, signal }) => {
       const { data, error } = await fetchClient.GET("/chats", {
-        params: { query: pageParam ? { cursor: pageParam } : {} },
+        params: {
+          query: {
+            ...(pageParam ? { cursor: pageParam } : {}),
+            ...(unreadOnly ? { unread: "true" as const } : {}),
+          },
+        },
         signal,
       });
       if (error) throw error;
@@ -189,14 +220,42 @@ export function formatDaySeparator(
   });
 }
 
-// Only sums whichever pages have been fetched so far — for a user with more
-// chats than fit in one page who hasn't opened `/chats` (and so never called
-// `fetchNextPage`), this undercounts against chats past the first page,
-// trading exactness for not re-introducing the unbounded fetch this
-// pagination exists to avoid (issue #49).
+export function chatsUnreadCountQueryOptions() {
+  return queryOptions({
+    queryKey: chatsUnreadCountQueryKey,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await fetchClient.GET("/chats/unread-count", {
+        signal,
+      });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+/**
+ * The viewer's unread messages over every chat they're in — the Chats nav
+ * badge, the phone header badge, the dock and the tab title. Counted by the
+ * server (`GET /chats/unread-count`, issue #756), not summed over the loaded
+ * pages of the chat list, which only ever hold the newest chats: an unread
+ * chat that has dropped off the first page still counts.
+ */
 export function useTotalUnreadCount(enabled: boolean): number {
-  const { data } = useChatsList(enabled);
-  return (data?.pages ?? []).reduce(
+  const { data } = useQuery({ ...chatsUnreadCountQueryOptions(), enabled });
+  return data?.count ?? 0;
+}
+
+/**
+ * The unread messages in whichever chat-list pages are loaded. Not the
+ * total (that's `useTotalUnreadCount`) — only for code that pairs a count
+ * with the loaded chats themselves, like the browser notification that
+ * names the chat a new message just arrived in, which must move with the
+ * same response as the list it reads from.
+ */
+export function loadedUnreadCount(
+  pages: ReadonlyArray<{ readonly chats: ReadonlyArray<Chat> }>,
+): number {
+  return pages.reduce(
     (sum, page) =>
       sum + page.chats.reduce((pageSum, chat) => pageSum + chat.unreadCount, 0),
     0,

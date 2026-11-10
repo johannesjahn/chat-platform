@@ -16,8 +16,11 @@ import { errorMessage } from "@/lib/errors";
 import { useOnlineStatus } from "@/lib/online";
 import { cn } from "@/lib/utils";
 
-// The desktop pane's quick filters (issue #554). Applied to the chats loaded
-// so far — scrolling the pane keeps paging more in underneath any of them.
+// The desktop pane's quick filters (issue #554). "Unread" is a server-side
+// list (`GET /chats?unread=true`, issue #756), so an older unread chat shows
+// up without paging through every read one ahead of it; the name and
+// "Groups" filters apply to the chats loaded so far — scrolling the pane
+// keeps paging more in underneath any of them.
 export type ChatListFilter = {
   query: string;
   show: "all" | "unread" | "groups";
@@ -82,6 +85,7 @@ export function ChatList({
   scrollRoot?: RefObject<HTMLElement | null>;
 }) {
   const isOnline = useOnlineStatus();
+  const unreadOnly = filter?.show === "unread";
   const {
     data,
     isLoading,
@@ -89,7 +93,7 @@ export function ChatList({
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useChatsList(true);
+  } = useChatsList(true, { unreadOnly });
   const chats = data?.pages.flatMap((page) => page.chats) ?? [];
   const { ordered, freeze, release } = useFrozenOrder(chats);
   const pane = variant === "pane";
@@ -143,7 +147,8 @@ export function ChatList({
         device yet.
       </p>
     );
-  } else if (chats.length === 0) {
+  } else if (chats.length === 0 && !unreadOnly) {
+    // An empty Unread list isn't "no conversations" — it's handled below.
     body = (
       <EmptyState
         icon={MessagesSquare}
@@ -167,7 +172,9 @@ export function ChatList({
   } else if (shown.length === 0) {
     body = (
       <p className="px-2 py-6 text-center text-sm text-muted-foreground">
-        No chats match.
+        {unreadOnly && filter?.query.trim() === ""
+          ? "You're all caught up."
+          : "No chats match."}
       </p>
     );
   } else {

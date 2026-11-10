@@ -1682,6 +1682,11 @@ export const MAX_CHATS_LIMIT = 100;
 //
 // Left un-`identifier`-annotated for the same reason as `PostsPageQuery`
 // above (see CLAUDE.md) — it's inlined into query parameters.
+//
+// `unread=true` (issue #756) narrows the list to chats with something unread
+// for the caller — the chat list's Unread filter — on the server, so an
+// older unread chat shows up without paging through every read chat ahead
+// of it. Same sort and cursor as the full list.
 export const ChatsPageQuery = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
@@ -1689,7 +1694,19 @@ export const ChatsPageQuery = Schema.Struct({
       Schema.isBetween({ minimum: 1, maximum: MAX_CHATS_LIMIT }),
     ),
   ),
+  unread: Schema.optional(Schema.Literals(["true", "false"])),
 });
+
+// The caller's unread total across every chat they're in (issue #756) —
+// what the Chats badge and the tab title show. Summed on the server because
+// the client only ever has some pages of the chat list loaded.
+export const UnreadChatCount = Schema.Struct({
+  // Unread messages over every chat: what each chat's `unreadCount` would
+  // add up to with the whole list loaded.
+  count: Schema.Finite,
+  // How many chats have at least one unread message.
+  chats: Schema.Finite,
+}).annotate({ identifier: "UnreadChatCount" });
 
 export const ChatsPage = Schema.Struct({
   chats: Schema.Array(Chat),
@@ -1956,6 +1973,15 @@ const ChatsGroup = HttpApiGroup.make("chats")
       query: ChatsPageQuery,
       success: ChatsPage,
       error: InvalidChatRequest,
+    }).middleware(Authentication),
+  )
+  .add(
+    // The Chats badge and tab title (issue #756) — like
+    // `/notifications/unread-count`, cheap enough to fetch on every page
+    // load. Registered ahead of `/chats/:id` for the same reason as
+    // `/users/by-username` vs `/users/:id`.
+    HttpApiEndpoint.get("getUnreadChatCount", "/chats/unread-count", {
+      success: UnreadChatCount,
     }).middleware(Authentication),
   )
   .add(

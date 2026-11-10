@@ -56,7 +56,11 @@ import { useBrowserNotifications } from "../lib/browserNotifications";
 import { useDockUser } from "../lib/chatDock";
 import { lazyNamed, type PreloadableComponent, whenIdle } from "../lib/lazy";
 import { DESKTOP_MEDIA_QUERY, useIsDesktop } from "../lib/media";
-import { useChatsList, useTotalUnreadCount } from "../lib/chats";
+import {
+  loadedUnreadCount,
+  useChatsList,
+  useTotalUnreadCount,
+} from "../lib/chats";
 import { useUnreadNotificationCount } from "../lib/notifications";
 import { OfflineQueueSync } from "../lib/offlineQueue";
 import { useOnlineStatus } from "../lib/online";
@@ -304,7 +308,10 @@ function AppNavigation() {
   useBrowserNotifications({
     currentUserId: session?.user.id,
     chats: chatsData?.pages.flatMap((page) => page.chats) ?? [],
-    unreadChats: unreadCount,
+    // The loaded pages' count, not the server total: it names the chat
+    // from `chats`, so it has to move in step with that same response. A new
+    // message always bumps its chat onto the first page anyway.
+    unreadChats: loadedUnreadCount(chatsData?.pages ?? []),
     unreadNotifications,
   });
 
