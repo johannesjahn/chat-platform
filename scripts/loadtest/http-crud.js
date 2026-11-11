@@ -16,7 +16,7 @@ import {
 } from "./lib/api.js";
 
 // Kept small by default so setup() stays well inside /users/register's
-// 5-per-IP-per-hour budget on a fresh backend (see lib/api.js). Raise VUS
+// per-IP budget (10/minute, 50/hour) on a fresh backend (see lib/api.js). Raise VUS
 // independently of USERS to add concurrency without registering more
 // accounts — VUs just share the pool round-robin.
 const USER_COUNT = Number(__ENV.USERS || 5);
