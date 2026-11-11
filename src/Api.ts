@@ -16,6 +16,34 @@ import {
   REFLEX_ROUNDS,
 } from "./games/reflex.ts";
 
+// Drop-in for `Schema.isMinLength` whose JSON Schema states the bound the
+// server actually enforces (issue #761). effect 4.x's own `isMinLength`
+// emits `minLength: Math.ceil(n / 2)` for strings: JSON Schema counts code
+// points while `string.length` counts UTF-16 code units, and one code point
+// can be two units, so effect halves the bound to stay a "safe" (never
+// stricter) approximation. That turned every documented floor into half of
+// itself (password 8 → 4, username 3 → 2). We'd rather the spec — Swagger at
+// /docs, openapi.json and the generated client — advertise the real rule; it
+// only differs from the check for strings full of astral characters (emoji),
+// which every field it guards either forbids (usernames are ASCII by
+// pattern) or never meets in practice. Arrays already get an exact
+// `minItems`, and `Schema.isMaxLength` is already exact (a string never has
+// more code points than code units), so this is the only length check that
+// needs it. `src/openapi.test.ts` holds Api.ts to it.
+const isMinLength = (minLength: number) =>
+  Schema.isMinLength(minLength, {
+    toJsonSchema: ({ type }) =>
+      type === "string"
+        ? minLength <= 1
+          ? { minLength }
+          : [{ minLength }, true]
+        : type === "array"
+          ? { minItems: minLength }
+          : type === undefined
+            ? [{ minLength, minItems: minLength }, true]
+            : [{}, true],
+  });
+
 // "admin" can edit/delete any post; "user" can only edit/delete their own.
 // Registration always creates a "user" — admins are promoted out-of-band.
 export const UserRole = Schema.Literals(["user", "admin"]).annotate({
@@ -159,7 +187,7 @@ export const USERNAME_PATTERN_MESSAGE =
   'Username may only contain letters (A-Z), digits, "_", "." and "-", and must not end in "." or "-"';
 
 const NewUsername = Username.check(
-  Schema.isMinLength(MIN_USERNAME_LENGTH),
+  isMinLength(MIN_USERNAME_LENGTH),
   Schema.isPattern(USERNAME_PATTERN, { message: USERNAME_PATTERN_MESSAGE }),
 );
 
@@ -197,7 +225,7 @@ const Password = Schema.NonEmptyString.check(
 // change) — `Password` alone remains the decode schema for login and
 // `currentPassword`, so accounts created before this floor existed can still
 // authenticate with their existing (possibly shorter) password.
-const NewPassword = Password.check(Schema.isMinLength(MIN_PASSWORD_LENGTH));
+const NewPassword = Password.check(isMinLength(MIN_PASSWORD_LENGTH));
 
 export const RegisterBody = Schema.Struct({
   username: NewUsername,
@@ -1002,7 +1030,7 @@ export const CreateGroupChatBody = Schema.Struct({
   // The creator is added automatically — this is everyone *else*, hence one
   // short of the overall cap.
   participantIds: Schema.Array(Schema.Finite).check(
-    Schema.isMinLength(1),
+    isMinLength(1),
     Schema.isMaxLength(MAX_GROUP_PARTICIPANTS - 1),
   ),
 }).annotate({ identifier: "CreateGroupChatBody" });
@@ -1016,7 +1044,7 @@ export const AddParticipantsBody = Schema.Struct({
   // single request can never legitimately add more than that minus the
   // existing creator — mirrors CreateGroupChatBody's cap.
   participantIds: Schema.Array(Schema.Finite).check(
-    Schema.isMinLength(1),
+    isMinLength(1),
     Schema.isMaxLength(MAX_GROUP_PARTICIPANTS - 1),
   ),
 }).annotate({ identifier: "AddParticipantsBody" });
@@ -1110,7 +1138,7 @@ export const ForwardMessageBody = Schema.Struct({
   // Chats to post a copy into. Duplicates are collapsed server-side; the
   // source chat itself is allowed (it's just a re-post).
   targetChatIds: Schema.Array(Schema.Int).check(
-    Schema.isMinLength(1),
+    isMinLength(1),
     Schema.isMaxLength(MAX_FORWARD_TARGETS),
   ),
   // Idempotency key for the whole forward (see `CreateMessageBody.clientId`).
@@ -1781,7 +1809,7 @@ export const MAX_SEARCH_ALL_LIMIT = 10;
 // parameters.
 export const SearchQuery = Schema.Struct({
   q: Schema.Trim.check(
-    Schema.isMinLength(MIN_SEARCH_QUERY_LENGTH),
+    isMinLength(MIN_SEARCH_QUERY_LENGTH),
     Schema.isMaxLength(MAX_SEARCH_QUERY_LENGTH),
   ),
   cursor: Schema.optional(Schema.String),
@@ -1797,7 +1825,7 @@ export const SearchQuery = Schema.Struct({
 // `limit` applies per section rather than to a single list.
 export const SearchAllQuery = Schema.Struct({
   q: Schema.Trim.check(
-    Schema.isMinLength(MIN_SEARCH_QUERY_LENGTH),
+    isMinLength(MIN_SEARCH_QUERY_LENGTH),
     Schema.isMaxLength(MAX_SEARCH_QUERY_LENGTH),
   ),
   limit: Schema.optional(
@@ -2661,7 +2689,7 @@ export const DrawingStroke = Schema.Struct({
       Schema.isInt(),
       Schema.isBetween({ minimum: 0, maximum: DRAWING_WIDTH }),
     ),
-  ).check(Schema.isMinLength(2), Schema.isMaxLength(MAX_DRAWING_POINTS * 2)),
+  ).check(isMinLength(2), Schema.isMaxLength(MAX_DRAWING_POINTS * 2)),
 }).annotate({ identifier: "DrawingStroke" });
 export type DrawingStroke = typeof DrawingStroke.Type;
 
@@ -2922,7 +2950,7 @@ export const GameChat = Schema.Struct({
 
 export const GameChatBody = Schema.Struct({
   text: Schema.Trim.check(
-    Schema.isMinLength(1),
+    isMinLength(1),
     Schema.isMaxLength(MAX_GAME_CHAT_LENGTH),
   ),
 }).annotate({ identifier: "GameChatBody" });
@@ -3018,7 +3046,7 @@ export const GameInviteBody = Schema.Struct({
 export const DrawingSettingsBody = Schema.Struct({
   // Pack slugs (see `listDrawingPacks`); unknown ones are rejected.
   packs: Schema.Array(Schema.String.check(Schema.isMaxLength(40))).check(
-    Schema.isMinLength(1),
+    isMinLength(1),
     Schema.isMaxLength(20),
   ),
   rounds: Schema.Finite.check(
@@ -3035,10 +3063,7 @@ export const SubmitDrawingBody = Schema.Struct({
 }).annotate({ identifier: "SubmitDrawingBody" });
 
 export const SubmitBluffBody = Schema.Struct({
-  text: Schema.Trim.check(
-    Schema.isMinLength(1),
-    Schema.isMaxLength(MAX_BLUFF_LENGTH),
-  ),
+  text: Schema.Trim.check(isMinLength(1), Schema.isMaxLength(MAX_BLUFF_LENGTH)),
 }).annotate({ identifier: "SubmitBluffBody" });
 
 export const SubmitVoteBody = Schema.Struct({
