@@ -95,6 +95,13 @@ test("navigating animates only the page, and re-clicking where you are does noth
   // of page; the sidebar is captured on its own so it stays still, and a
   // navigation that keeps the pathname runs no view transition at all.
   await signUp(page);
+  // The app's own first load of the feed also commits through a view
+  // transition, and its route loader can hold that commit a moment past
+  // `page.goto` — counted below, it read as a second transition. The
+  // heading renders in that commit, so once it's up the load is done.
+  await expect(
+    page.getByRole("heading", { name: "Feed", level: 1 }),
+  ).toBeVisible();
 
   const transitionName = (selector: string) =>
     page
