@@ -339,7 +339,9 @@ function UserProfilePage() {
             )}
           </Card>
 
-          <div className="flex flex-col items-center gap-6">
+          {/* Same width as the PostCards, so the heading lines up with them
+              where the column is wider than max-w-xl (issue #766). */}
+          <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-6">
             <h2 className="w-full text-lg font-semibold tracking-tight">
               {isSelf ? "Your posts" : "Recent posts"}
             </h2>
