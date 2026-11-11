@@ -6,6 +6,9 @@ import {
   chatsListQueryOptions,
   chatsUnreadCountQueryKey,
   chatsUnreadCountQueryOptions,
+  lastMessagePreview,
+  lastMessageSender,
+  lastMessageText,
   loadedUnreadCount,
   unreadChatsListQueryKey,
   type Chat,
@@ -51,4 +54,59 @@ test("loadedUnreadCount sums the unread counts of the loaded pages", () => {
   expect(
     loadedUnreadCount([{ chats: [chat(2), chat(0)] }, { chats: [chat(1)] }]),
   ).toBe(3);
+});
+
+// Issue #768: every chat list previews the last message with its sender —
+// "You" for your own, the sender's name in a group, none in a direct chat.
+const participant = (userId: number, username: string, displayName = null) =>
+  ({ userId, username, displayName }) as Chat["participants"][number];
+const withLast = (
+  type: Chat["type"],
+  last: Partial<NonNullable<Chat["lastMessage"]>> | null,
+) =>
+  ({
+    type,
+    participants: [
+      participant(1, "me"),
+      participant(2, "bob"),
+      { ...participant(3, "carol"), displayName: "Carol" },
+    ],
+    lastMessage: last && { contentType: "text", content: "hi", ...last },
+  }) as Chat;
+
+test("the preview names your own last message as yours", () => {
+  expect(lastMessagePreview(withLast("direct", { senderId: 1 }), 1)).toBe(
+    "You: hi",
+  );
+  expect(lastMessagePreview(withLast("group", { senderId: 1 }), 1)).toBe(
+    "You: hi",
+  );
+});
+
+test("a group preview names its sender; a direct one doesn't", () => {
+  expect(lastMessagePreview(withLast("direct", { senderId: 2 }), 1)).toBe("hi");
+  expect(lastMessagePreview(withLast("group", { senderId: 2 }), 1)).toBe(
+    "@bob: hi",
+  );
+  expect(lastMessagePreview(withLast("group", { senderId: 3 }), 1)).toBe(
+    "Carol: hi",
+  );
+  // A sender who has since left the group isn't a participant any more.
+  expect(lastMessagePreview(withLast("group", { senderId: 9 }), 1)).toBe("hi");
+});
+
+test("non-text and missing last messages preview as a stand-in", () => {
+  expect(lastMessagePreview(withLast("direct", null), 1)).toBe(
+    "No messages yet",
+  );
+  expect(lastMessageSender(withLast("direct", null), 1)).toBeUndefined();
+  expect(
+    lastMessagePreview(
+      withLast("group", { senderId: 2, contentType: "image_url" }),
+      1,
+    ),
+  ).toBe("@bob: Photo");
+  expect(
+    lastMessageText(withLast("direct", { contentType: "attachment" })),
+  ).toBe("Attachment");
 });

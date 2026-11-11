@@ -25,6 +25,7 @@ import {
 import {
   chatDisplayName,
   formatChatTimestamp,
+  lastMessagePreview,
   useChatDetail,
   useChatsList,
   useTotalUnreadCount,
@@ -232,13 +233,7 @@ function DockChatRow({
                 : "text-muted-foreground",
             )}
           >
-            {!last
-              ? "No messages yet"
-              : last.contentType === "text"
-                ? last.content
-                : last.contentType === "image_url"
-                  ? "Photo"
-                  : "Attachment"}
+            {lastMessagePreview(chat, currentUserId)}
           </span>
           {chat.unreadCount > 0 && (
             <span className="flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
