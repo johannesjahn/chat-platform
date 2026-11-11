@@ -29,6 +29,7 @@ import {
 } from "@/lib/attachments";
 import { isImeComposing } from "@/lib/ime";
 import { isAllowedImageUrl } from "@/lib/imageHosts";
+import { useIsCoarsePointer } from "@/lib/media";
 import { useOnlineStatus } from "@/lib/online";
 import { cn } from "@/lib/utils";
 import { canRecordVoice } from "@/lib/voice";
@@ -170,6 +171,11 @@ export function ChatComposer({
   const lastTypingSentAtRef = useRef(0);
   const sendTyping = $api.useMutation("post", "/chats/{id}/typing");
   const isOnline = useOnlineStatus();
+  // On a touch device the on-screen keyboard has no Shift+Enter, so a return
+  // that sent would leave no way to write a second line (issue #760): there
+  // Enter is a newline, like in every mobile chat app, and the send button
+  // sends. Ctrl/⌘+Enter still sends, for a tablet with a keyboard attached.
+  const enterInsertsNewline = useIsCoarsePointer();
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const urlInputRef = useRef<HTMLInputElement | null>(null);
@@ -363,6 +369,7 @@ export function ChatComposer({
     // IME's, not ours (issue #759).
     if (isImeComposing(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
+      if (enterInsertsNewline && !event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       submit();
     } else if (event.key === "Escape" && replyingTo) {
@@ -481,8 +488,19 @@ export function ChatComposer({
               // preserves exactly what a screen reader announced before (a
               // placeholder names an otherwise-unlabelled field), and `title`
               // surfaces it on hover where the keys actually exist.
-              aria-label="Write a message (Enter to send, Shift+Enter for a new line)"
-              title="Enter to send, Shift+Enter for a new line"
+              // On a touch device it describes what return does there instead
+              // (issue #760), and the keyboard's return key reads accordingly.
+              aria-label={
+                enterInsertsNewline
+                  ? "Write a message (Enter for a new line)"
+                  : "Write a message (Enter to send, Shift+Enter for a new line)"
+              }
+              title={
+                enterInsertsNewline
+                  ? undefined
+                  : "Enter to send, Shift+Enter for a new line"
+              }
+              enterKeyHint={enterInsertsNewline ? "enter" : "send"}
               rows={1}
               aria-invalid={overLimit}
               // `flex-1` moves to the wrapper the mention popup is positioned

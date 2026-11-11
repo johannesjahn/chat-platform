@@ -27,7 +27,7 @@ test(
       "textarea",
       "Hey there, this is a message from the e2e suite",
     );
-    await pageA.keyboard.press("Enter");
+    await pageA.getByRole("button", { name: "Send message" }).click();
     await expect(
       pageA
         .getByRole("main")
@@ -230,7 +230,7 @@ test(
     await expect(pageA).toHaveURL(/\/chats\/\d+/);
 
     await pageA.fill("textarea", "First message of the day");
-    await pageA.keyboard.press("Enter");
+    await pageA.getByRole("button", { name: "Send message" }).click();
     await expect(
       pageA.getByRole("main").getByText("First message of the day"),
     ).toBeVisible();
@@ -243,7 +243,7 @@ test(
 
     // Sending another message the same day doesn't add a second separator.
     await pageA.fill("textarea", "Second message, same day");
-    await pageA.keyboard.press("Enter");
+    await pageA.getByRole("button", { name: "Send message" }).click();
     await expect(
       pageA.getByRole("main").getByText("Second message, same day"),
     ).toBeVisible();
@@ -276,7 +276,7 @@ test(
 
     const longContent = "Lorem ipsum dolor sit amet. ".repeat(20);
     await pageA.fill("textarea", longContent);
-    await pageA.keyboard.press("Enter");
+    await pageA.getByRole("button", { name: "Send message" }).click();
 
     const showMore = pageA.getByRole("button", { name: "Show more" });
     await expect(showMore).toBeVisible();
