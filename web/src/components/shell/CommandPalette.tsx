@@ -28,6 +28,7 @@ import { Avatar } from "@/components/Avatar";
 import { SearchHighlight } from "@/components/SearchHighlight";
 import { useSession } from "@/lib/auth";
 import { chatDisplayName, useChatsList, type Chat } from "@/lib/chats";
+import { isImeComposing } from "@/lib/ime";
 import { useTransitionState } from "@/lib/motion";
 import { MIN_SEARCH_QUERY_LENGTH, useSearchAll } from "@/lib/search";
 import { closeOverlay, getPaletteMode, useOverlayOpen } from "@/lib/shell";
@@ -277,6 +278,8 @@ function PaletteBody() {
   }, [activeIndex]);
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    // Enter confirming an IME composition mustn't open a result (#759).
+    if (isImeComposing(event)) return;
     if (event.key === "Escape") {
       event.preventDefault();
       close();

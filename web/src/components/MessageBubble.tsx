@@ -44,6 +44,7 @@ import {
   type ChatMessage,
 } from "@/lib/chats";
 import { errorMessage } from "@/lib/errors";
+import { isImeComposing } from "@/lib/ime";
 import { useExpandableText } from "@/lib/motion";
 import { formatAbsoluteTime } from "@/lib/time";
 import type { ReactionEmoji } from "@/lib/reactions";
@@ -826,6 +827,7 @@ export function MessageBubble({
                 value={draft}
                 onValueChange={setDraft}
                 onKeyDown={(e) => {
+                  if (isImeComposing(e)) return;
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     void handleSave();

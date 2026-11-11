@@ -27,6 +27,7 @@ import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
   type Attachment,
 } from "@/lib/attachments";
+import { isImeComposing } from "@/lib/ime";
 import { isAllowedImageUrl } from "@/lib/imageHosts";
 import { useOnlineStatus } from "@/lib/online";
 import { cn } from "@/lib/utils";
@@ -358,6 +359,9 @@ export function ChatComposer({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // Mid-composition keys (Enter confirming an IME's text, …) are the
+    // IME's, not ours (issue #759).
+    if (isImeComposing(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -501,6 +505,7 @@ export function ChatComposer({
               value={content}
               onChange={(e) => setContent(e.target.value)}
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
                 if (e.key === "Enter") {
                   e.preventDefault();
                   submit();
