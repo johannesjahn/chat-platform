@@ -20,6 +20,9 @@ mock.module("./auth", () => ({
     cleared++;
   },
   subscribeSession: () => () => {},
+  // Not used here, but module mocks are shared by every file in a run, and
+  // chats.test.ts imports chats.ts, which needs it.
+  useSession: () => session,
 }));
 mock.module("./online", () => ({ reportConnectivity: () => {} }));
 

@@ -372,6 +372,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chats/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["chats.getUnreadChatCount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chats/{id}": {
         parameters: {
             query?: never;
@@ -1824,6 +1840,10 @@ export interface components {
         };
         CreateDirectChatBody: {
             userId: number;
+        };
+        UnreadChatCount: {
+            count: number;
+            chats: number;
         };
         ChatsPage: {
             chats: components["schemas"]["Chat"][];
@@ -3784,6 +3804,7 @@ export interface operations {
             query?: {
                 cursor?: string;
                 limit?: string;
+                unread?: "true" | "false";
             };
             header?: never;
             path?: never;
@@ -3807,6 +3828,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
+                };
+            };
+        };
+    };
+    "chats.getUnreadChatCount": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UnreadChatCount */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnreadChatCount"];
+                };
+            };
+            /** @description HttpApiDecodeError */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
                 };
             };
             /** @description Unauthorized */

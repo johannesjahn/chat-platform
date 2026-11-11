@@ -2505,6 +2505,18 @@
               "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
             },
             "required": false
+          },
+          {
+            "name": "unread",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false
           }
         ],
         "security": [
@@ -2536,6 +2548,52 @@
                       "$ref": "#/components/schemas/HttpApiDecodeErrorEncoded"
                     }
                   ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedEncoded"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chats/unread-count": {
+      "get": {
+        "tags": [
+          "chats"
+        ],
+        "operationId": "chats.getUnreadChatCount",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "UnreadChatCount",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadChatCount"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HttpApiDecodeError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeErrorEncoded"
                 }
               }
             }
@@ -10808,6 +10866,22 @@
         },
         "required": [
           "userId"
+        ],
+        "additionalProperties": false
+      },
+      "UnreadChatCount": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "chats": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "count",
+          "chats"
         ],
         "additionalProperties": false
       },
