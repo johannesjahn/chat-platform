@@ -50,6 +50,44 @@ export const directBlockExists = async (
   return rows.length > 0;
 };
 
+// Of `otherIds`, the subset with a *block* (not a mute) in either direction
+// with `userId` — the batch form of `directBlockExists`. Gates putting
+// someone into a group chat with someone else (issue #757): see
+// `requireNoBlockWith` in ChatsHandler.ts. Returns an empty set for an empty
+// `otherIds`.
+export const blockedPeersAmong = async (
+  db: DrizzleDb,
+  userId: number,
+  otherIds: ReadonlyArray<number>,
+): Promise<Set<number>> => {
+  if (otherIds.length === 0) return new Set();
+  const others = [...otherIds];
+  const rows = await db
+    .select({
+      blockerId: userBlocks.blockerId,
+      blockedId: userBlocks.blockedId,
+    })
+    .from(userBlocks)
+    .where(
+      and(
+        eq(userBlocks.type, "block"),
+        or(
+          and(
+            eq(userBlocks.blockerId, userId),
+            inArray(userBlocks.blockedId, others),
+          ),
+          and(
+            eq(userBlocks.blockedId, userId),
+            inArray(userBlocks.blockerId, others),
+          ),
+        ),
+      ),
+    );
+  return new Set(
+    rows.map((r) => (r.blockerId === userId ? r.blockedId : r.blockerId)),
+  );
+};
+
 // Of `recipientIds`, the subset that has blocked or muted `senderId` — i.e.
 // the participants whose realtime chat notification for a message from
 // `senderId` should be suppressed (issue #219: "mute their chat

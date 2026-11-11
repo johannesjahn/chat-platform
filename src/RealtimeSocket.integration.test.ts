@@ -477,3 +477,88 @@ test("starting a chat, adding someone, or joining via invite tells the new conta
 
   for (const s of sockets) s.socket.close();
 }, 15_000);
+
+// Issue #757: a group can't be a way around a block — the blocked user can't
+// seat the blocker in one, and when a third party puts them in the same
+// group anyway, neither is introduced to the other's presence.
+test("a block keeps two users out of each other's groups and presence", async () => {
+  const stamp = Date.now();
+  const alice = await registerAndLogin(`block_alice_${stamp}`);
+  const bob = await registerAndLogin(`block_bob_${stamp}`);
+  const carol = await registerAndLogin(`block_carol_${stamp}`);
+
+  const sockets = await Promise.all(
+    [alice, bob, carol].map((user) => connect(user.accessToken)),
+  );
+  await Promise.all(sockets.map((s) => s.ready));
+  await Promise.all(
+    sockets.map((s) =>
+      waitFor(() => s.messages.some((m) => m.type === "presence_snapshot")),
+    ),
+  );
+  const [aliceSocket, bobSocket, carolSocket] = sockets as [
+    (typeof sockets)[number],
+    (typeof sockets)[number],
+    (typeof sockets)[number],
+  ];
+  const sawOnline = (
+    socket: (typeof sockets)[number],
+    userId: number,
+  ): boolean =>
+    socket.messages.some(
+      (m) => m.type === "presence" && m.userId === userId && m.online === true,
+    );
+  const send = (
+    method: string,
+    path: string,
+    accessToken: string,
+    body: unknown,
+  ) =>
+    fetch(`${apiUrl}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+  const blocked = await send(
+    "PUT",
+    `/users/${bob.id}/block`,
+    alice.accessToken,
+    { type: "block" },
+  );
+  expect(blocked.status).toBe(200);
+
+  const sneaky = await send("POST", "/chats/group", bob.accessToken, {
+    title: "sneaky",
+    participantIds: [alice.id],
+  });
+  expect(sneaky.status).toBe(403);
+
+  // Carol has no block with either, so she can still have both in a group.
+  const groupResponse = await send("POST", "/chats/group", carol.accessToken, {
+    title: "shared",
+    participantIds: [alice.id],
+  });
+  const group = (await groupResponse.json()) as { id: number };
+  const added = await send(
+    "POST",
+    `/chats/${group.id}/participants`,
+    carol.accessToken,
+    { participantIds: [bob.id] },
+  );
+  expect(added.status).toBe(200);
+
+  // Bob and carol are introduced; alice and bob never are, though the
+  // introduction for bob went out in the same pass.
+  await waitFor(
+    () => sawOnline(bobSocket, carol.id) && sawOnline(carolSocket, bob.id),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(sawOnline(bobSocket, alice.id)).toBe(false);
+  expect(sawOnline(aliceSocket, bob.id)).toBe(false);
+
+  for (const s of sockets) s.socket.close();
+}, 15_000);

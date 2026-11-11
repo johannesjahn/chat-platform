@@ -384,3 +384,138 @@ test("createMessage succeeds in a group chat where a participant muted the sende
       expect(sent.content).toBe("hello group");
     }),
   ));
+
+// Issue #757: a group used to be a way around the DM block — the blocked
+// user could put the blocker in a "group" of two and message them there.
+test("createGroupChat is rejected when a participant is on either side of a block with the creator", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", PW);
+      const bob = yield* registerAndLogin("bob", PW);
+      const carol = yield* registerAndLogin("carol", PW);
+
+      // Alice blocks bob: bob can't put alice in a group…
+      yield* alice.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "block" },
+      });
+      const bobCreate = yield* bob.client.chats
+        .createGroupChat({
+          payload: {
+            title: "sneaky",
+            participantIds: [carol.user.id, alice.user.id],
+          },
+        })
+        .pipe(Effect.flip);
+      expect(bobCreate._tag).toBe("Forbidden");
+
+      // …and, symmetric like DMs, alice can't put bob in one either.
+      const aliceCreate = yield* alice.client.chats
+        .createGroupChat({
+          payload: { title: "nope", participantIds: [bob.user.id] },
+        })
+        .pipe(Effect.flip);
+      expect(aliceCreate._tag).toBe("Forbidden");
+
+      // Nothing was created along the way.
+      const bobChats = yield* bob.client.chats.listChats({ query: {} });
+      expect(bobChats.chats).toEqual([]);
+
+      // A mute doesn't gate groups, and unblocking lifts the gate.
+      yield* carol.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "mute" },
+      });
+      yield* alice.client.users.removeBlock({ params: { id: bob.user.id } });
+      const ok = yield* bob.client.chats.createGroupChat({
+        payload: {
+          title: "fine now",
+          participantIds: [carol.user.id, alice.user.id],
+        },
+      });
+      expect(ok.participants.length).toBe(3);
+    }),
+  ));
+
+test("addParticipants is rejected when a requested user is on either side of a block with the caller", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", PW);
+      const bob = yield* registerAndLogin("bob", PW);
+      const carol = yield* registerAndLogin("carol", PW);
+      const dave = yield* registerAndLogin("dave", PW);
+
+      const chat = yield* bob.client.chats.createGroupChat({
+        payload: { title: "group", participantIds: [carol.user.id] },
+      });
+      yield* alice.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "block" },
+      });
+
+      // The whole request fails — dave isn't added on his own either.
+      const added = yield* bob.client.chats
+        .addParticipants({
+          params: { id: chat.id },
+          payload: { participantIds: [dave.user.id, alice.user.id] },
+        })
+        .pipe(Effect.flip);
+      expect(added._tag).toBe("Forbidden");
+      const after = yield* bob.client.chats.getChat({
+        params: { id: chat.id },
+      });
+      expect(after.participants.map((p) => p.userId).sort()).toEqual(
+        [bob.user.id, carol.user.id].sort(),
+      );
+
+      // The other way round: bob blocks dave, so bob can't add dave.
+      yield* bob.client.users.setBlock({
+        params: { id: dave.user.id },
+        payload: { type: "block" },
+      });
+      const addDave = yield* bob.client.chats
+        .addParticipants({
+          params: { id: chat.id },
+          payload: { participantIds: [dave.user.id] },
+        })
+        .pipe(Effect.flip);
+      expect(addDave._tag).toBe("Forbidden");
+    }),
+  ));
+
+test("joinChatViaInvite is rejected when the joiner and the invite's creator are on either side of a block", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", PW);
+      const bob = yield* registerAndLogin("bob", PW);
+      const carol = yield* registerAndLogin("carol", PW);
+
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "group", participantIds: [carol.user.id] },
+      });
+      const invite = yield* alice.client.chats.createChatInvite({
+        params: { id: chat.id },
+        payload: {},
+      });
+      yield* alice.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "block" },
+      });
+
+      const joined = yield* bob.client.chats
+        .joinChatViaInvite({ params: { code: invite.code } })
+        .pipe(Effect.flip);
+      expect(joined._tag).toBe("Forbidden");
+      // A rejected join doesn't use up the invite.
+      const invites = yield* alice.client.chats.listChatInvites({
+        params: { id: chat.id },
+      });
+      expect(invites.find((i) => i.id === invite.id)?.useCount).toBe(0);
+
+      yield* alice.client.users.removeBlock({ params: { id: bob.user.id } });
+      const ok = yield* bob.client.chats.joinChatViaInvite({
+        params: { code: invite.code },
+      });
+      expect(ok.id).toBe(chat.id);
+    }),
+  ));
