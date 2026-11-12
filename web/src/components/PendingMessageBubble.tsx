@@ -24,12 +24,30 @@ type PendingMessageBubbleProps = {
   contentType: MessageContentType;
   content: string;
   attachment?: Attachment;
+  // Text sent alongside the attachment (issue #765), shown under it.
+  caption?: string;
   replyPreview?: OutboxReplyPreview;
   createdAt: number;
   error?: string;
   onRetry: () => void;
   onDismiss: () => void;
 };
+
+function PendingText({ text, failed }: { text: string; failed: boolean }) {
+  return (
+    <p
+      className={cn(
+        "whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed",
+        text.length > MESSAGE_COLLAPSE_THRESHOLD && "line-clamp-4",
+      )}
+    >
+      <MentionText
+        text={text}
+        className={failed ? undefined : "text-primary-foreground underline"}
+      />
+    </p>
+  );
+}
 
 // Renders a message the server hasn't confirmed yet. Deliberately not a
 // `MessageBubble`: that component expects a real, server-assigned
@@ -41,6 +59,7 @@ export function PendingMessageBubble({
   contentType,
   content,
   attachment,
+  caption,
   replyPreview,
   createdAt,
   error,
@@ -118,33 +137,29 @@ export function PendingMessageBubble({
               loading="lazy"
               className="max-h-72 w-72 max-w-full rounded-lg bg-muted object-cover"
             />
-          ) : contentType === "attachment" && attachment ? (
-            <AttachmentPreview
-              attachment={attachment}
-              className={
-                ["image", "video", "audio"].includes(
-                  attachmentKind(attachment.mimeType),
-                )
-                  ? "w-72 max-w-full"
-                  : undefined
-              }
-            />
           ) : (
-            // Clamped like a long `MessageBubble` text, so the real message
-            // doesn't snap shorter when it takes over.
-            <p
-              className={cn(
-                "whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed",
-                content.length > MESSAGE_COLLAPSE_THRESHOLD && "line-clamp-4",
+            <>
+              {contentType === "attachment" && attachment && (
+                <AttachmentPreview
+                  attachment={attachment}
+                  className={
+                    ["image", "video", "audio"].includes(
+                      attachmentKind(attachment.mimeType),
+                    )
+                      ? "w-72 max-w-full"
+                      : undefined
+                  }
+                />
               )}
-            >
-              <MentionText
-                text={content}
-                className={
-                  failed ? undefined : "text-primary-foreground underline"
-                }
-              />
-            </p>
+              {(contentType !== "attachment" || caption) && (
+                // Clamped like a long `MessageBubble` text, so the real
+                // message doesn't snap shorter when it takes over.
+                <PendingText
+                  text={contentType === "attachment" ? caption! : content}
+                  failed={failed}
+                />
+              )}
+            </>
           )}
 
           <div

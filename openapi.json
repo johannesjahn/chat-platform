@@ -10233,6 +10233,16 @@
               }
             ]
           },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "parentMessage": {
             "anyOf": [
               {
@@ -10295,6 +10305,7 @@
           "contentType",
           "content",
           "attachment",
+          "caption",
           "parentMessage",
           "createdAt",
           "updatedAt",
@@ -10367,6 +10378,16 @@
           "content": {
             "type": "string"
           },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "forwarded": {
             "type": "boolean"
           }
@@ -10377,6 +10398,7 @@
           "senderName",
           "contentType",
           "content",
+          "caption",
           "forwarded"
         ],
         "additionalProperties": false
@@ -10555,6 +10577,22 @@
                 "type": "null"
               }
             ]
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -10692,6 +10730,19 @@
             "anyOf": [
               {
                 "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+                "minLength": 1,
+                "maxLength": 4000
               },
               {
                 "type": "null"
@@ -11169,6 +11220,16 @@
               }
             ]
           },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "createdAt": {
             "type": "number"
           },
@@ -11192,6 +11253,7 @@
           "contentType",
           "content",
           "attachment",
+          "caption",
           "createdAt",
           "updatedAt",
           "reactions",
@@ -11228,6 +11290,22 @@
                 "type": "null"
               }
             ]
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+                "minLength": 1,
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -11252,6 +11330,19 @@
             "anyOf": [
               {
                 "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
+                "minLength": 1,
+                "maxLength": 10000
               },
               {
                 "type": "null"

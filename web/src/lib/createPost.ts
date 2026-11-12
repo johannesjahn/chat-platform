@@ -9,6 +9,8 @@ export type NewPost = {
   contentType: PostContentType;
   content: string;
   attachmentId?: number;
+  // Text posted alongside an attachment (issue #765).
+  caption?: string | null;
 };
 
 /**
@@ -24,6 +26,7 @@ export function useCreatePost() {
     contentType,
     content,
     attachmentId,
+    caption,
   }: NewPost) {
     // Idempotency key (issue #657), shared by the live attempt and any queued
     // replay of it: if the connection drops after the server stored the post
@@ -45,7 +48,13 @@ export function useCreatePost() {
     let createdId: number | null = null;
     try {
       const post = await createPost.mutateAsync({
-        body: { contentType, content, attachmentId, clientId },
+        body: {
+          contentType,
+          content,
+          attachmentId,
+          caption: caption ?? undefined,
+          clientId,
+        },
       });
       createdId = post.id;
       addCreatedPost(queryClient, post);

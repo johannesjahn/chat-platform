@@ -28,6 +28,7 @@ const post = (id: number, authorId = 1): Post => ({
   contentType: "text",
   content: `post ${id}`,
   attachment: null,
+  caption: null,
   createdAt: id,
   updatedAt: id,
   reactions: [],

@@ -38,6 +38,14 @@ import { comments, type DbPost, posts } from "./db/schema.ts";
 
 const NO_REACTIONS: ReactionSummary[] = [];
 
+// A post's caption (issue #765) only counts on an "attachment" post: an edit
+// by a replica that predates captions can turn a captioned attachment into a
+// text post without clearing the column, and that leftover never shows.
+const captionOf = (row: {
+  readonly contentType: string;
+  readonly caption: string | null;
+}): string | null => (row.contentType === "attachment" ? row.caption : null);
+
 // `author` is the post's embedded byline (issue #750), resolved by the caller
 // in one batch per response — see authors.ts.
 export const toApiPost = (
@@ -53,6 +61,7 @@ export const toApiPost = (
   contentType: row.contentType,
   content: row.content,
   attachment,
+  caption: captionOf(row),
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
   reactions: [...reactions],
@@ -114,10 +123,16 @@ const canModify = (
   post: { readonly authorId: number },
 ): boolean => currentUser.role === "admin" || post.authorId === currentUser.id;
 
-// Whether a post's `content` is prose that can carry `@mentions` — only a
-// "text" post's is rendered as text (with mentions linked, see PostCard.tsx);
-// an "image_url"/"attachment" post's content is never shown as prose.
-const mentionsApply = (contentType: string): boolean => contentType === "text";
+// The part of a post that's prose and so can carry `@mentions`: a "text"
+// post's content, or an "attachment" post's caption (issue #765) — both are
+// rendered as text, with mentions linked (see PostCard.tsx). An "image_url"
+// post's content and an attachment's filename are never shown as prose.
+const mentionText = (row: {
+  readonly contentType: string;
+  readonly content: string;
+  readonly caption: string | null;
+}): string | undefined =>
+  row.contentType === "text" ? row.content : (captionOf(row) ?? undefined);
 
 // Keyset cursor for `listPosts` over its `id desc` sort — see
 // `PostsPageQuery` in Api.ts for why this is a cursor rather than an offset.
@@ -371,6 +386,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 contentType: payload.contentType,
                 content: payload.content,
                 attachmentId: payload.attachmentId ?? null,
+                caption: payload.caption ?? null,
                 clientId: payload.clientId ?? null,
                 createdAt: now,
                 updatedAt: now,
@@ -405,12 +421,13 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             postId: row.id,
             change: "created",
           });
-          if (mentionsApply(row.contentType)) {
+          const mentions = mentionText(row);
+          if (mentions !== undefined) {
             yield* notifyMentions(
               { db, connections },
               {
                 actorId: currentUser.id,
-                content: row.content,
+                content: mentions,
                 postId: row.id,
               },
             );
@@ -448,6 +465,14 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 contentType: payload.contentType,
                 content: payload.content,
                 attachmentId: payload.attachmentId ?? null,
+                // Omitted keeps the current caption (see `UpdatePostBody`);
+                // only an attachment carries one.
+                caption:
+                  payload.contentType !== "attachment"
+                    ? null
+                    : payload.caption === undefined
+                      ? captionOf(existing)
+                      : payload.caption,
                 updatedAt: new Date(),
               })
               .where(eq(posts.id, id))
@@ -475,15 +500,14 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             change: "updated",
           });
           // Only names this edit added are pinged (see notifyMentions).
-          if (mentionsApply(row.contentType)) {
+          const mentions = mentionText(row);
+          if (mentions !== undefined) {
             yield* notifyMentions(
               { db, connections },
               {
                 actorId: row.authorId,
-                content: row.content,
-                previousContent: mentionsApply(existing.contentType)
-                  ? existing.content
-                  : undefined,
+                content: mentions,
+                previousContent: mentionText(existing),
                 postId: row.id,
               },
             );

@@ -36,6 +36,7 @@ const outbox = createOutbox({
         ...(entry.attachmentId !== undefined
           ? { attachmentId: entry.attachmentId }
           : {}),
+        ...(entry.caption !== undefined ? { caption: entry.caption } : {}),
         ...(entry.parentMessageId !== undefined
           ? { parentMessageId: entry.parentMessageId }
           : {}),
@@ -82,6 +83,7 @@ export type OutboxSend = Pick<
   | "content"
   | "attachmentId"
   | "attachment"
+  | "caption"
   | "parentMessageId"
   | "replyPreview"
 >;

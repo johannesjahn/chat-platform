@@ -1716,6 +1716,7 @@ export interface components {
             contentType: components["schemas"]["MessageContentType"];
             content: string;
             attachment: components["schemas"]["Attachment"] | null;
+            caption: string | null;
             parentMessage: components["schemas"]["ParentMessagePreview"] | null;
             createdAt: number;
             updatedAt: number;
@@ -1741,6 +1742,7 @@ export interface components {
             senderName: string;
             contentType: components["schemas"]["MessageContentType"];
             content: string;
+            caption: string | null;
             forwarded: boolean;
         };
         /** @enum {string} */
@@ -1775,6 +1777,7 @@ export interface components {
             contentType: components["schemas"]["MessageContentType"];
             content: string;
             attachmentId?: number | null;
+            caption?: string | null;
         };
         MarkReadBody: {
             messageId: number;
@@ -1800,6 +1803,7 @@ export interface components {
             contentType: components["schemas"]["MessageContentType"];
             content: string;
             attachmentId?: number | null;
+            caption?: string | null;
             parentMessageId?: number | null;
             clientId?: string | null;
         };
@@ -1892,6 +1896,7 @@ export interface components {
             contentType: components["schemas"]["PostContentType"];
             content: string;
             attachment: components["schemas"]["Attachment"] | null;
+            caption: string | null;
             createdAt: number;
             updatedAt: number;
             reactions: components["schemas"]["ReactionSummary"][];
@@ -1903,11 +1908,13 @@ export interface components {
             contentType: components["schemas"]["PostContentType"];
             content: string;
             attachmentId?: number | null;
+            caption?: string | null;
         };
         CreatePostBody: {
             contentType: components["schemas"]["PostContentType"];
             content: string;
             attachmentId?: number | null;
+            caption?: string | null;
             clientId?: string | null;
         };
         InvalidPostsRequestEncoded: {

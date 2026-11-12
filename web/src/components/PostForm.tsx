@@ -59,10 +59,14 @@ type PostFormProps = {
   initialContentType?: PostContentType;
   initialContent?: string;
   initialAttachment?: Attachment | null;
+  initialCaption?: string | null;
   onSubmit: (values: {
     contentType: PostContentType;
     content: string;
     attachmentId?: number;
+    // An attachment's caption (issue #765): null when it has none, so an
+    // edit can clear one; never set for the other post kinds.
+    caption?: string | null;
   }) => Promise<void>;
   footer?: ReactNode;
   // Lets `onSubmit` be attempted while offline instead of being blocked —
@@ -81,6 +85,7 @@ export function PostForm({
   initialContentType = "text",
   initialContent = "",
   initialAttachment = null,
+  initialCaption = null,
   onSubmit,
   footer,
   allowOfflineQueue = false,
@@ -99,6 +104,7 @@ export function PostForm({
   const [attachment, setAttachment] = useState<Attachment | null>(
     initialAttachment,
   );
+  const [caption, setCaption] = useState(initialCaption ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const isOnline = useOnlineStatus();
@@ -106,6 +112,8 @@ export function PostForm({
   const content = contentType === "image_url" ? imageUrl : textContent;
   const trimmed = content.trim();
   const overLimit = trimmed.length > MAX_POST_CONTENT_LENGTH;
+  const trimmedCaption = caption.trim();
+  const captionOverLimit = trimmedCaption.length > MAX_POST_CONTENT_LENGTH;
   const invalidImageUrl =
     contentType === "image_url" &&
     trimmed.length > 0 &&
@@ -115,7 +123,7 @@ export function PostForm({
   // needs a live connection — so it always requires being online.
   const canSubmit =
     contentType === "attachment"
-      ? attachment !== null && !pending && isOnline
+      ? attachment !== null && !captionOverLimit && !pending && isOnline
       : trimmed.length > 0 &&
         !overLimit &&
         !invalidImageUrl &&
@@ -151,6 +159,7 @@ export function PostForm({
                         contentType,
                         content: attachment!.filename,
                         attachmentId: attachment!.id,
+                        caption: trimmedCaption !== "" ? trimmedCaption : null,
                       }
                     : { contentType, content: trimmed },
                 );
@@ -211,6 +220,28 @@ export function PostForm({
                     You&apos;re offline — file attachments need a live
                     connection to upload and send.
                   </p>
+                )}
+                <Label htmlFor="caption" className="mt-2">
+                  Caption (optional)
+                </Label>
+                <MentionTextarea
+                  id="caption"
+                  value={caption}
+                  onValueChange={setCaption}
+                  placeholder="Say something about it…"
+                  rows={3}
+                  aria-invalid={captionOverLimit}
+                />
+                {trimmedCaption.length > MAX_POST_CONTENT_LENGTH * 0.8 && (
+                  <span
+                    className={
+                      captionOverLimit
+                        ? "self-end text-xs text-destructive"
+                        : "self-end text-xs text-muted-foreground"
+                    }
+                  >
+                    {trimmedCaption.length}/{MAX_POST_CONTENT_LENGTH}
+                  </span>
                 )}
               </div>
             ) : (

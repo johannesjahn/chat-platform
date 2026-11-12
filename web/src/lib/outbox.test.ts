@@ -17,6 +17,7 @@ function serverMessage(entry: OutboxMessage, id: number): ChatMessage {
     contentType: entry.contentType,
     content: entry.content,
     attachment: null,
+    caption: null,
     parentMessage: null,
     createdAt: entry.createdAt,
     updatedAt: entry.createdAt,

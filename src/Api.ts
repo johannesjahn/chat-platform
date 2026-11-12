@@ -665,6 +665,20 @@ const requireAttachmentId = (body: {
   return undefined;
 };
 
+// Cross-field check shared by post/message create+update bodies: a `caption`
+// (issue #765) is the text sent alongside an attachment, so it may only be set
+// when `contentType` is "attachment". (On update, `null` — "clear it" — is
+// always fine.)
+const requireCaptionOnlyWithAttachment = (body: {
+  readonly contentType: string;
+  readonly caption?: string | null | undefined;
+}): string | undefined =>
+  body.contentType !== "attachment" &&
+  body.caption !== undefined &&
+  body.caption !== null
+    ? `caption may only be set when contentType is "attachment"`
+    : undefined;
+
 export const Post = Schema.Struct({
   id: Schema.Finite,
   authorId: Schema.Finite,
@@ -674,6 +688,12 @@ export const Post = Schema.Struct({
   content: Schema.String,
   // Set only when contentType is "attachment" — see `Attachment` above.
   attachment: Schema.NullOr(Attachment),
+  // The text posted alongside an attachment (issue #765), rendered like a
+  // text post's content (mentions and links). Null for every other content
+  // type and for an attachment posted without one. Additive: for an
+  // "attachment" post `content` still holds the filename, as it always has,
+  // so a client that predates this field renders the post exactly as before.
+  caption: Schema.NullOr(Schema.String),
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
   // Engagement computed on read (see EngagementHandler.ts / PostsHandler.ts)
@@ -696,6 +716,10 @@ export const CreatePostBody = Schema.Struct({
   // Id of a previously-uploaded attachment (`POST /attachments`) owned by
   // the caller — required exactly when contentType is "attachment".
   attachmentId: Schema.optional(Schema.Finite),
+  // Text to post alongside the attachment (issue #765) — only allowed when
+  // contentType is "attachment" (`content` is still its filename). Omit it
+  // for an attachment without a caption.
+  caption: Schema.optional(PostContent),
   // Idempotency key (issue #657, mirroring `CreateMessageBody.clientId`): a
   // client-generated id, reused when a create is retried. If this author
   // already stored a post with the same key, that post is returned instead of
@@ -705,6 +729,7 @@ export const CreatePostBody = Schema.Struct({
   .check(
     Schema.makeFilter(requireAllowedImageUrl),
     Schema.makeFilter(requireAttachmentId),
+    Schema.makeFilter(requireCaptionOnlyWithAttachment),
   )
   .annotate({ identifier: "CreatePostBody" });
 
@@ -712,10 +737,16 @@ export const UpdatePostBody = Schema.Struct({
   contentType: PostContentType,
   content: PostContent,
   attachmentId: Schema.optional(Schema.Finite),
+  // The attachment's caption (issue #765): a string sets it, `null` clears
+  // it, and omitting it keeps the current one — so an edit from a client that
+  // predates captions never wipes one. An edit to any other content type
+  // drops it.
+  caption: Schema.optional(Schema.NullOr(PostContent)),
 })
   .check(
     Schema.makeFilter(requireAllowedImageUrl),
     Schema.makeFilter(requireAttachmentId),
+    Schema.makeFilter(requireCaptionOnlyWithAttachment),
   )
   .annotate({ identifier: "UpdatePostBody" });
 
@@ -943,6 +974,10 @@ export const ParentMessagePreview = Schema.Struct({
   senderName: Schema.String,
   contentType: MessageContentType,
   content: Schema.String,
+  // The quoted message's caption (issue #765), truncated like `content` —
+  // null unless it's a captioned attachment, so a quote can show the
+  // caption rather than only "Attachment".
+  caption: Schema.NullOr(Schema.String),
   // Whether the quoted message is itself a forward (issue #601), so the
   // quote can carry the same "Forwarded" marker as the bubble it points at.
   forwarded: Schema.Boolean,
@@ -974,6 +1009,8 @@ export const Message = Schema.Struct({
   content: Schema.String,
   // Set only when contentType is "attachment" — see `Attachment` above.
   attachment: Schema.NullOr(Attachment),
+  // Text sent alongside an attachment (issue #765) — see `Post.caption`.
+  caption: Schema.NullOr(Schema.String),
   // The message this one is a reply to (issue #217), as a lightweight preview
   // — null for a normal (non-reply) message, or when the quoted message has
   // since been deleted (the FK is `set null`, see db/schema.ts).
@@ -1121,6 +1158,9 @@ export const CreateMessageBody = Schema.Struct({
   // Id of a previously-uploaded attachment (`POST /attachments`) owned by
   // the caller — required exactly when contentType is "attachment".
   attachmentId: Schema.optional(Schema.Finite),
+  // Text sent alongside the attachment (issue #765) — see
+  // `CreatePostBody.caption`.
+  caption: Schema.optional(MessageContent),
   // Id of the message this one replies to (issue #217). Omitted for a normal
   // message. Validated server-side to reference a message in this same chat —
   // a parent from another chat (or a nonexistent one) 404s (see
@@ -1134,6 +1174,7 @@ export const CreateMessageBody = Schema.Struct({
   .check(
     Schema.makeFilter(requireAllowedImageUrl),
     Schema.makeFilter(requireAttachmentId),
+    Schema.makeFilter(requireCaptionOnlyWithAttachment),
   )
   .annotate({ identifier: "CreateMessageBody" });
 
@@ -1141,10 +1182,13 @@ export const UpdateMessageBody = Schema.Struct({
   contentType: MessageContentType,
   content: MessageContent,
   attachmentId: Schema.optional(Schema.Finite),
+  // Same set/clear/keep semantics as `UpdatePostBody.caption`.
+  caption: Schema.optional(Schema.NullOr(MessageContent)),
 })
   .check(
     Schema.makeFilter(requireAllowedImageUrl),
     Schema.makeFilter(requireAttachmentId),
+    Schema.makeFilter(requireCaptionOnlyWithAttachment),
   )
   .annotate({ identifier: "UpdateMessageBody" });
 

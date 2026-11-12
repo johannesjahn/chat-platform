@@ -209,6 +209,15 @@ export const posts = pgTable(
     attachmentId: integer("attachment_id").references(() => attachments.id, {
       onDelete: "set null",
     }),
+    // Text shown alongside an attachment (issue #765, migration 0037) — only
+    // meaningful when contentType is "attachment", null otherwise or when the
+    // post has no caption. A column of its own rather than a reuse of
+    // `content`, which keeps holding the filename for attachment rows: rows
+    // written before this (and by old replicas mid-rollout) only ever have the
+    // filename there, so reading `content` as a caption would print every old
+    // attachment's filename as its text, and an old replica reading a new row
+    // would show the caption where it expects a filename.
+    caption: text("caption"),
     // Client-generated idempotency key (issue #657, like
     // `messages.clientId`): a retried create carrying the same key from the
     // same author returns the stored post instead of inserting another. Null
@@ -403,6 +412,9 @@ export const messages = pgTable(
     attachmentId: integer("attachment_id").references(() => attachments.id, {
       onDelete: "set null",
     }),
+    // Mirrors `posts.caption` (issue #765) — text sent alongside an
+    // attachment; `content` keeps the filename.
+    caption: text("caption"),
     // Threaded/quoted replies (issue #217) — null for a normal message, set to
     // the id of the message this one is replying to. Validated at create time
     // (see ChatsHandler.ts) to reference a message in the *same* chat. The

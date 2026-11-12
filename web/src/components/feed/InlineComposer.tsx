@@ -28,8 +28,9 @@ import { cn } from "@/lib/utils";
  * The feed's inline composer (issue #554), desktop only: a one-line "What's
  * on your mind?" at the top of the feed that expands in place on focus, so
  * posting doesn't mean leaving for `/posts/new`. Text with an optional file
- * — picked, pasted from the clipboard, or dropped anywhere on the composer.
- * Image-link posts stay on the full form.
+ * — picked, pasted from the clipboard, or dropped anywhere on the composer —
+ * where the text becomes the file's caption (issue #765). Image-link posts
+ * stay on the full form.
  */
 export function InlineComposer({ session }: { session: Session }) {
   const createPost = useCreatePost();
@@ -50,9 +51,10 @@ export function InlineComposer({ session }: { session: Session }) {
   const hasFile = file !== null || attachment !== null;
   const overLimit = trimmed.length > MAX_POST_CONTENT_LENGTH;
   // A file post needs its upload finished (and so a connection); a text
-  // post can be queued offline.
+  // post can be queued offline. Either way the text must fit — with a file
+  // it's the caption.
   const canPost = hasFile
-    ? attachment !== null && isOnline && !pending
+    ? attachment !== null && isOnline && !overLimit && !pending
     : trimmed.length > 0 && !overLimit && !pending;
 
   // Collapses again when focus and the pointer leave an untouched composer.
@@ -90,14 +92,15 @@ export function InlineComposer({ session }: { session: Session }) {
     setPending(true);
     setError(null);
     try {
-      // A file post's text isn't sent — posts are one kind each (text, an
-      // image link, or a file), so with a file attached it's the file.
+      // With a file attached, the text is posted as its caption (issue
+      // #765) — `content` stays the filename, as for every attachment.
       await createPost(
         attachment
           ? {
               contentType: "attachment",
               content: attachment.filename,
               attachmentId: attachment.id,
+              ...(trimmed !== "" ? { caption: trimmed } : {}),
             }
           : { contentType: "text", content: trimmed },
       );
@@ -167,7 +170,7 @@ export function InlineComposer({ session }: { session: Session }) {
               setOpen(false);
             }
           }}
-          placeholder="What's on your mind?"
+          placeholder={hasFile ? "Add a caption…" : "What's on your mind?"}
           aria-label="Write a post"
           rows={open ? 3 : 1}
           aria-invalid={overLimit}
@@ -177,12 +180,6 @@ export function InlineComposer({ session }: { session: Session }) {
       </div>
       <Collapse open={open}>
         <div className="flex flex-col gap-3 pt-3">
-          {hasFile && trimmed !== "" && (
-            <p className="text-xs text-muted-foreground">
-              A post is one thing — with a file attached, the file is what gets
-              posted. Remove it to post your text instead.
-            </p>
-          )}
           {hasFile && (
             <AttachmentUploadField
               key={fileKey}

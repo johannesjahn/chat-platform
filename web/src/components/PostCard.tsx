@@ -31,7 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { $api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { useExpandableText } from "@/lib/motion";
-import { patchCachedPost } from "@/lib/posts";
+import { patchCachedPost, postText } from "@/lib/posts";
 import type { ReactionEmoji } from "@/lib/reactions";
 import { authorLabelOf } from "@/lib/users";
 import { cn } from "@/lib/utils";
@@ -115,10 +115,14 @@ export function PostCard({
   // (issue #503). Only surface it once there are several chips to sum up.
   const showReactionTotal =
     post.reactions.filter((r) => r.count > 0).length > 1;
-  const isLongText =
-    !fullText &&
-    post.contentType === "text" &&
-    post.content.length > COLLAPSE_THRESHOLD;
+  // A text post's content or an attachment's caption (issue #765). An
+  // attachment whose file is gone still shows its filename, as it always has.
+  const text =
+    postText(post) ??
+    (post.contentType === "attachment" && !post.attachment
+      ? post.content
+      : null);
+  const isLongText = !fullText && (text?.length ?? 0) > COLLAPSE_THRESHOLD;
   const {
     ref: textRef,
     expanded,
@@ -257,34 +261,39 @@ export function PostCard({
               className="aspect-4/5 w-full bg-muted object-cover"
             />
           </button>
-        ) : post.contentType === "attachment" && post.attachment ? (
-          <div className="px-6 pt-2 pb-4">
-            <AttachmentPreview attachment={post.attachment} />
-          </div>
         ) : (
           <div className="px-6 pt-2 pb-4">
-            {/* Grows to the full text and shrinks back instead of snapping —
-                see `useExpandableText`. */}
-            <p
-              ref={textRef}
-              className={cn(
-                "whitespace-pre-wrap break-words text-base leading-relaxed",
-                clamped && "line-clamp-6",
-              )}
-            >
-              <MentionText text={post.content} />
-            </p>
-            {isLongText && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mt-2 h-8 gap-1.5 px-3 text-xs text-primary hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-smooth"
-                aria-expanded={expanded}
-                onClick={toggleExpanded}
-              >
-                <DisclosureChevron open={expanded} />
-                {expanded ? "Show less" : "Show more"}
-              </Button>
+            {text !== null && (
+              <>
+                {/* Grows to the full text and shrinks back instead of
+                    snapping — see `useExpandableText`. */}
+                <p
+                  ref={textRef}
+                  className={cn(
+                    "whitespace-pre-wrap break-words text-base leading-relaxed",
+                    clamped && "line-clamp-6",
+                  )}
+                >
+                  <MentionText text={text} />
+                </p>
+                {isLongText && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2 h-8 gap-1.5 px-3 text-xs text-primary hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-smooth"
+                    aria-expanded={expanded}
+                    onClick={toggleExpanded}
+                  >
+                    <DisclosureChevron open={expanded} />
+                    {expanded ? "Show less" : "Show more"}
+                  </Button>
+                )}
+              </>
+            )}
+            {post.contentType === "attachment" && post.attachment && (
+              <div className={cn(text !== null && "mt-3")}>
+                <AttachmentPreview attachment={post.attachment} />
+              </div>
             )}
           </div>
         )}

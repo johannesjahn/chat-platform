@@ -10,6 +10,7 @@ import {
   lastMessageSender,
   lastMessageText,
   loadedUnreadCount,
+  parentPreviewText,
   unreadChatsListQueryKey,
   type Chat,
 } from "./chats";
@@ -109,4 +110,28 @@ test("non-text and missing last messages preview as a stand-in", () => {
   expect(
     lastMessageText(withLast("direct", { contentType: "attachment" })),
   ).toBe("Attachment");
+});
+
+test("a captioned attachment previews as its caption (issue #765)", () => {
+  expect(
+    lastMessagePreview(
+      withLast("group", {
+        senderId: 2,
+        contentType: "attachment",
+        content: "bread.png",
+        caption: "Look what I baked",
+      }),
+      1,
+    ),
+  ).toBe("@bob: Look what I baked");
+  expect(
+    parentPreviewText({
+      contentType: "attachment",
+      content: "bread.png",
+      caption: "Look what I baked",
+    }),
+  ).toBe("📎 Look what I baked");
+  expect(
+    parentPreviewText({ contentType: "attachment", content: "bread.png" }),
+  ).toBe("📎 Attachment");
 });
