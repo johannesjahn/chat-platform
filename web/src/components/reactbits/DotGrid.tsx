@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { gsap } from "gsap";
 
 import { cn } from "@/lib/utils";
 
 // Interactive dot field adapted from reactbits' DotGrid. Dots light up near the
 // pointer and get pushed outward on click, then spring back into place. The
 // upstream component relies on GSAP's paid InertiaPlugin for the throw-back; we
-// keep the same look using the free gsap core with an elastic ease instead.
+// keep the same look with a quick ease-out push and an elastic spring back,
+// tweened here in the draw loop rather than through GSAP (issue #754: GSAP
+// was most of the login page's 30 kB gzip chunk, for just these two eases).
 //
 // Frames are only drawn when something changed — the pointer moved, a click's
 // shock wave is still springing back, or the grid was rebuilt — rather than in
@@ -26,13 +27,65 @@ export type DotGridProps = {
   style?: React.CSSProperties;
 };
 
+// A click's push-out from where the dot was (`fromX/Y`) to `pushX/Y`, then
+// the spring back to rest, timed from `start` (a `performance.now()`).
+type Shock = {
+  start: number;
+  fromX: number;
+  fromY: number;
+  pushX: number;
+  pushY: number;
+};
+
 type Dot = {
   cx: number;
   cy: number;
   xOffset: number;
   yOffset: number;
-  _inertiaApplied: boolean;
+  shock: Shock | null;
 };
+
+const PUSH_DURATION_MS = 180;
+
+// GSAP's `power2.out`.
+const easeOutQuad = (p: number) => 1 - (1 - p) * (1 - p);
+
+// GSAP's `elastic.out(1, 0.5)`: 0 at the start, overshooting 1 with a
+// decaying wobble, settled at 1.
+const ELASTIC_PERIOD = 0.5;
+const ELASTIC_PHASE = (ELASTIC_PERIOD / (2 * Math.PI)) * Math.asin(1);
+function easeOutElastic(p: number): number {
+  if (p <= 0) return 0;
+  if (p >= 1) return 1;
+  return (
+    2 ** (-10 * p) *
+      Math.sin(((p - ELASTIC_PHASE) * (2 * Math.PI)) / ELASTIC_PERIOD) +
+    1
+  );
+}
+
+// Moves a dot along its shock at `now`, clearing it once it's back at rest.
+function advanceShock(dot: Dot, now: number, returnMs: number) {
+  const shock = dot.shock;
+  if (!shock) return;
+  const elapsed = now - shock.start;
+  if (elapsed < PUSH_DURATION_MS) {
+    const t = easeOutQuad(Math.max(0, elapsed) / PUSH_DURATION_MS);
+    dot.xOffset = shock.fromX + (shock.pushX - shock.fromX) * t;
+    dot.yOffset = shock.fromY + (shock.pushY - shock.fromY) * t;
+    return;
+  }
+  const p = (elapsed - PUSH_DURATION_MS) / returnMs;
+  if (p >= 1) {
+    dot.xOffset = 0;
+    dot.yOffset = 0;
+    dot.shock = null;
+    return;
+  }
+  const back = 1 - easeOutElastic(p);
+  dot.xOffset = shock.pushX * back;
+  dot.yOffset = shock.pushY * back;
+}
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const m = hex.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
@@ -111,7 +164,7 @@ export function DotGrid({
           cy: startY + y * cell,
           xOffset: 0,
           yOffset: 0,
-          _inertiaApplied: false,
+          shock: null,
         });
       }
     }
@@ -132,14 +185,17 @@ export function DotGrid({
     if (!canvas || !ctx) return;
 
     const proxSq = proximity * proximity;
+    const returnMs = returnDuration * 1000;
 
     drawRef.current = () => {
       const { width, height } = canvas;
       const dpr = window.devicePixelRatio || 1;
       ctx.clearRect(0, 0, width / dpr, height / dpr);
       const { x: px, y: py } = pointerRef.current;
+      const now = performance.now();
 
       for (const dot of dotsRef.current) {
+        advanceShock(dot, now, returnMs);
         const ox = dot.cx + dot.xOffset;
         const oy = dot.cy + dot.yOffset;
         const dx = ox - px;
@@ -168,7 +224,7 @@ export function DotGrid({
       cancelAnimationFrame(frameRef.current);
       frameRef.current = 0;
     };
-  }, [activeRgb, baseRgb, dotSize, proximity, requestDraw]);
+  }, [activeRgb, baseRgb, dotSize, proximity, requestDraw, returnDuration]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -191,10 +247,11 @@ export function DotGrid({
       if (!rect) return;
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
+      const now = performance.now();
       // Keep drawing through the push-out and the spring back.
       animateUntilRef.current = Math.max(
         animateUntilRef.current,
-        performance.now() + (0.18 + returnDuration) * 1000 + 100,
+        now + PUSH_DURATION_MS + returnDuration * 1000 + 100,
       );
       requestDraw();
       for (const dot of dotsRef.current) {
@@ -205,21 +262,14 @@ export function DotGrid({
         const falloff = 1 - dist / shockRadius;
         const push = falloff * shockStrength * 12;
         const angle = Math.atan2(dy, dx);
-        gsap.killTweensOf(dot);
-        gsap.to(dot, {
-          xOffset: Math.cos(angle) * push,
-          yOffset: Math.sin(angle) * push,
-          duration: 0.18,
-          ease: "power2.out",
-          onComplete: () => {
-            gsap.to(dot, {
-              xOffset: 0,
-              yOffset: 0,
-              duration: returnDuration,
-              ease: "elastic.out(1, 0.5)",
-            });
-          },
-        });
+        // A new click takes over from wherever the dot is mid-spring.
+        dot.shock = {
+          start: now,
+          fromX: dot.xOffset,
+          fromY: dot.yOffset,
+          pushX: Math.cos(angle) * push,
+          pushY: Math.sin(angle) * push,
+        };
       }
     };
 
