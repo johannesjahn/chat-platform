@@ -112,6 +112,7 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
                 createdAt: notifications.createdAt,
                 postContentType: posts.contentType,
                 postContent: posts.content,
+                postCaption: posts.caption,
                 commentContent: comments.content,
                 actor: {
                   id: actors.id,
@@ -159,7 +160,11 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
                   ? row.commentContent
                   : row.postContentType === "text"
                     ? row.postContent
-                    : null,
+                    : // An attachment post's excerpt is its caption (issue
+                      // #765), never its filename.
+                      row.postContentType === "attachment"
+                      ? row.postCaption
+                      : null,
               ),
               read: row.readAt !== null,
               createdAt: row.createdAt.getTime(),

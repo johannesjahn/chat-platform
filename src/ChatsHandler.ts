@@ -117,6 +117,14 @@ const toApiChatInvite = (row: DbChatInvite): ChatInvite => ({
 
 const NO_REACTIONS: ReactionSummary[] = [];
 
+// A message's caption (issue #765) only counts on an "attachment" message —
+// an edit by a replica that predates captions can change the type without
+// clearing the column, and that leftover never shows.
+const messageCaption = (row: {
+  readonly contentType: string;
+  readonly caption: string | null;
+}): string | null => (row.contentType === "attachment" ? row.caption : null);
+
 const toApiMessage = (
   row: DbMessage,
   readByUserIds: ReadonlyArray<number>,
@@ -138,6 +146,7 @@ const toApiMessage = (
   contentType: row.contentType,
   content: row.content,
   attachment,
+  caption: messageCaption(row),
   parentMessage,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
@@ -183,6 +192,7 @@ const resolveParentPreviews = (
           senderId: messages.senderId,
           contentType: messages.contentType,
           content: messages.content,
+          caption: messages.caption,
           forwardedFromSenderName: messages.forwardedFromSenderName,
           displayName: users.displayName,
           username: users.username,
@@ -204,6 +214,8 @@ const resolveParentPreviews = (
         // Only a one-line snippet is ever shown in a quote — truncate rather
         // than shipping the parent's full body on every reply.
         content: row.content.slice(0, PARENT_MESSAGE_PREVIEW_LENGTH),
+        caption:
+          messageCaption(row)?.slice(0, PARENT_MESSAGE_PREVIEW_LENGTH) ?? null,
         forwarded: row.forwardedFromSenderName !== null,
       });
     }
@@ -2384,6 +2396,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               contentType: payload.contentType,
               content: payload.content,
               attachmentId: payload.attachmentId ?? null,
+              caption: payload.caption ?? null,
               parentMessageId: payload.parentMessageId ?? null,
               clientId: payload.clientId ?? null,
               createdAt: now,
@@ -2601,6 +2614,8 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 senderId: currentUser.id,
                 contentType: source.contentType,
                 content: source.content,
+                // The caption travels with its attachment (issue #765).
+                caption: messageCaption(source),
                 parentMessageId: null,
                 clientId,
                 ...forwardedFrom,
@@ -2948,6 +2963,14 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 contentType: payload.contentType,
                 content: payload.content,
                 attachmentId: payload.attachmentId ?? null,
+                // Omitted keeps the current caption (see `UpdateMessageBody`);
+                // only an attachment carries one.
+                caption:
+                  payload.contentType !== "attachment"
+                    ? null
+                    : payload.caption === undefined
+                      ? messageCaption(existing)
+                      : payload.caption,
                 updatedAt: new Date(),
               })
               .where(eq(messages.id, messageId))

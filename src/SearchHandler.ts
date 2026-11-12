@@ -5,6 +5,7 @@ import {
   eq,
   ilike,
   inArray,
+  isNotNull,
   lt,
   notInArray,
   or,
@@ -138,6 +139,45 @@ const matchingIds = (
 const postsVector = sql`"posts"."search_vector"`;
 const commentsVector = sql`"comments"."search_vector"`;
 const messagesVector = sql`"messages"."search_vector"`;
+
+// Captions (issue #765) have no generated column: they're matched through
+// expression indexes (migration 0037), so this expression must stay exactly
+// the one indexed there.
+const captionVector = (caption: PgColumn): SQL =>
+  sql`to_tsvector(${CONFIG}, ${caption})`;
+
+// Every branch that can match a post or message: the text branches over a
+// "text" row's `content`, and the caption branches over an "attachment" row's
+// `caption` — whose `content` is just the filename, never searched. Each
+// branch carries its own content-type restriction, matching the partial
+// indexes behind it (migrations 0023 and 0037), so each stays its own
+// index-served union arm (see `matchingIds`).
+const contentBranches = (
+  table: { contentType: PgColumn; content: PgColumn; caption: PgColumn },
+  vector: SQL,
+  q: string,
+): SQL[] => [
+  ...matchBranches(vector, table.content, q).map(
+    (branch) => sql`(${and(eq(table.contentType, "text"), branch)})`,
+  ),
+  ...matchBranches(captionVector(table.caption), table.caption, q).map(
+    (branch) =>
+      sql`(${and(
+        eq(table.contentType, "attachment"),
+        isNotNull(table.caption),
+        branch,
+      )})`,
+  ),
+];
+
+// What a post/message search result's snippet is cut from: a text row's
+// content, or an attachment's caption.
+const searchableText = (row: {
+  contentType: string;
+  content: string;
+  caption: string | null;
+}): string =>
+  row.contentType === "attachment" ? (row.caption ?? "") : row.content;
 
 // The `users` columns every joined-in author/sender selects, folded into the
 // API's `User` shape by `toSearchUser`. Mirrors `publicUserColumns` in
@@ -347,7 +387,9 @@ const searchPostsPage = (
     db
       .select({
         id: posts.id,
+        contentType: posts.contentType,
         content: posts.content,
+        caption: posts.caption,
         createdAt: posts.createdAt,
         ...userColumns,
       })
@@ -356,13 +398,12 @@ const searchPostsPage = (
       .where(
         matchingIds(
           posts.id,
-          matchBranches(postsVector, posts.content, q),
+          contentBranches(posts, postsVector, q),
           (branch) =>
             sql`select ${posts.id} from ${posts} where ${and(
-              // Matches the partial trigram index's predicate (migration 0023)
-              // and mirrors what the generated tsvector already implies: an
-              // image URL or attachment caption isn't searchable content.
-              eq(posts.contentType, "text"),
+              // Carries its own content-type restriction (see
+              // `contentBranches`): an image URL or an attachment's filename
+              // isn't searchable content.
               branch,
               after !== null ? lt(posts.id, after) : undefined,
               excludeAuthors(posts.authorId, hidden),
@@ -381,7 +422,7 @@ const searchPostsPage = (
           id: row.id,
           author: toSearchUser(row),
           createdAt: row.createdAt.getTime(),
-          snippet: buildSnippet(row.content, q),
+          snippet: buildSnippet(searchableText(row), q),
         })),
         limit,
         nextCursor: hasMore && last ? encodeSearchCursor(last.id) : null,
@@ -544,7 +585,9 @@ const searchMessagesPage = (
         .select({
           id: messages.id,
           chatId: messages.chatId,
+          contentType: messages.contentType,
           content: messages.content,
+          caption: messages.caption,
           createdAt: messages.createdAt,
           ...userColumns,
         })
@@ -553,14 +596,13 @@ const searchMessagesPage = (
         .where(
           matchingIds(
             messages.id,
-            matchBranches(messagesVector, messages.content, q),
+            contentBranches(messages, messagesVector, q),
             (branch) => sql`select ${messages.id} from ${messages}
               inner join ${chatParticipants} on ${and(
                 eq(chatParticipants.chatId, messages.chatId),
                 eq(chatParticipants.userId, viewerId),
               )}
               where ${and(
-                eq(messages.contentType, "text"),
                 branch,
                 after !== null ? lt(messages.id, after) : undefined,
               )} order by ${messages.id} desc limit ${limit + 1}`,
@@ -583,7 +625,7 @@ const searchMessagesPage = (
         chatId: row.chatId,
         sender: toSearchUser(row),
         createdAt: row.createdAt.getTime(),
-        snippet: buildSnippet(row.content, q),
+        snippet: buildSnippet(searchableText(row), q),
       })),
       chats: searchChats,
       limit,
