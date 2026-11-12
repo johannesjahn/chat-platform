@@ -1,6 +1,5 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, Suspense, useEffect, useState } from "react";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { DotGrid } from "@/components/reactbits/DotGrid";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,6 +12,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { errorMessage } from "@/lib/errors";
+import { lazyNamed, whenIdle } from "@/lib/lazy";
+import { useMediaQuery } from "@/lib/media";
 import { useTheme } from "@/lib/theme";
 
 type AuthFormProps = {
@@ -40,6 +41,40 @@ type AuthFormProps = {
   // token class, so every new account can be mentioned. Register only.
   usernamePattern?: RegExp;
 };
+
+// The dot field is decoration, so it stays off the sign-in page's critical
+// path (issue #754): its chunk is only fetched once the browser is idle
+// after the form has painted and hydrated, and never at all under
+// `prefers-reduced-motion`, since a field that lights up and recoils under
+// the pointer is all motion.
+const DotGrid = lazyNamed(
+  () => import("@/components/reactbits/DotGrid"),
+  "DotGrid",
+);
+
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function AuthBackground({ theme }: { theme: "light" | "dark" }) {
+  const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
+  const [idle, setIdle] = useState(false);
+  useEffect(() => whenIdle(() => setIdle(true)), []);
+  if (reducedMotion || !idle) return null;
+  return (
+    <Suspense fallback={null}>
+      {/* reactbits dot field — interactive background for the auth screens. */}
+      <DotGrid
+        // Fades in rather than popping in, since it arrives after the card.
+        className="opacity-70 mask-[radial-gradient(ellipse_at_center,black,transparent_75%)] animate-in fade-in-0 duration-700"
+        // Dots a step off the page background either way: the dark theme's
+        // slate reads as smudges on the light one.
+        baseColor={theme === "dark" ? "#24304a" : "#d5d7e8"}
+        activeColor={theme === "dark" ? "#ffc100" : "#ba2f08"}
+        proximity={130}
+        shockRadius={240}
+      />
+    </Suspense>
+  );
+}
 
 export function AuthForm({
   mode,
@@ -77,16 +112,7 @@ export function AuthForm({
 
   return (
     <main className="relative flex min-h-[calc(100vh-57px)] items-center justify-center overflow-hidden px-4 py-16">
-      {/* reactbits dot field — interactive background for the auth screens. */}
-      <DotGrid
-        className="opacity-70 mask-[radial-gradient(ellipse_at_center,black,transparent_75%)]"
-        // Dots a step off the page background either way: the dark theme's
-        // slate reads as smudges on the light one.
-        baseColor={theme === "dark" ? "#24304a" : "#d5d7e8"}
-        activeColor={theme === "dark" ? "#ffc100" : "#ba2f08"}
-        proximity={130}
-        shockRadius={240}
-      />
+      <AuthBackground theme={theme} />
 
       <Card className="relative w-full max-w-sm border-border/60 bg-card/80 shadow-xl backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-4 motion-safe:duration-500">
         <CardHeader>
