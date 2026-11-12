@@ -4,6 +4,7 @@ import {
   type FeedData,
   type UserPostsData,
   feedHasPost,
+  insertFeedPost,
   mergeNewestFeedPage,
   prependUserPost,
   removeFeedPost,
@@ -52,6 +53,20 @@ export async function syncChangedPost(
   }
   if (change === "updated") return;
   await pullNewPost(queryClient, postId);
+}
+
+// Writes this client's own just-created post (the `POST /posts` response)
+// into the feed and its author's profile feed, wherever they're cached — in
+// place of refetching them (issue #753). Its realtime echo is then dropped
+// (see ownWrites.ts), so a create costs the write and nothing else.
+export function addCreatedPost(queryClient: QueryClient, post: Post): void {
+  queryClient.setQueryData<FeedData>(postsFeedQueryKey, (data) =>
+    data ? insertFeedPost(data, post) : data,
+  );
+  queryClient.setQueryData<UserPostsData>(
+    userPostsQueryKey(post.authorId),
+    (data) => (data ? prependUserPost(data, post) : data),
+  );
 }
 
 // Refetches one post and patches it in wherever it's cached — also what a

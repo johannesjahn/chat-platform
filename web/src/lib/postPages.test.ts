@@ -6,6 +6,7 @@ import {
   type UserPostsData,
   feedHasPost,
   firstPageOnly,
+  insertFeedPost,
   mergeNewestFeedPage,
   prependUserPost,
   removeFeedPost,
@@ -97,6 +98,36 @@ describe("removeFeedPost", () => {
   test("returns the cache itself when the post isn't there", () => {
     const data = feed();
     expect(removeFeedPost(data, 99)).toBe(data);
+  });
+});
+
+describe("insertFeedPost", () => {
+  test("puts a just-created post on the front of page one", () => {
+    expect(ids(insertFeedPost(feed(), post(11)))).toEqual([
+      [11, 10, 9, 8, 7, 6],
+      [5, 4, 3],
+      [2, 1],
+    ]);
+  });
+
+  test("slots it below newer posts that landed first", () => {
+    const data: FeedData = {
+      pages: [page([12, 10, 9], "c9")],
+      pageParams: [null],
+    };
+    expect(ids(insertFeedPost(data, post(11)))).toEqual([[12, 11, 10, 9]]);
+  });
+
+  test("leaves the cache alone when the post is already there or belongs on a later page", () => {
+    const data = feed();
+    expect(insertFeedPost(data, post(9))).toBe(data);
+    const top: FeedData = { pages: [page([10, 9], "c9")], pageParams: [null] };
+    expect(insertFeedPost(top, post(3))).toBe(top);
+  });
+
+  test("starts an empty feed", () => {
+    const empty: FeedData = { pages: [page([], null)], pageParams: [null] };
+    expect(ids(insertFeedPost(empty, post(1)))).toEqual([[1]]);
   });
 });
 
