@@ -5,6 +5,7 @@ import {
   type FeedData,
   type UserPostsData,
   feedHasPost,
+  firstPageOnly,
   mergeNewestFeedPage,
   prependUserPost,
   removeFeedPost,
@@ -129,5 +130,19 @@ describe("profile feeds", () => {
     expect(feedHasPost(profile(), 2)).toBe(true);
     expect(feedHasPost(profile(), 3)).toBe(false);
     expect(feedHasPost(undefined, 2)).toBe(false);
+  });
+});
+
+describe("firstPageOnly", () => {
+  test("keeps the first page and its param, so paging resumes from its cursor", () => {
+    const trimmed = firstPageOnly(feed());
+    expect(ids(trimmed)).toEqual([[10, 9, 8, 7, 6]]);
+    expect(trimmed.pageParams).toEqual([null]);
+    expect(trimmed.pages[0]!.nextCursor).toBe("c6");
+  });
+
+  test("returns a single-page feed unchanged", () => {
+    const data: FeedData = { pages: [page([2, 1], null)], pageParams: [null] };
+    expect(firstPageOnly(data)).toBe(data);
   });
 });

@@ -10,6 +10,8 @@ type Post = components["schemas"]["Post"];
 type PostsPage = components["schemas"]["PostsPage"];
 type UserPostsPage = components["schemas"]["UserPostsPage"];
 
+export const postsFeedQueryKey = ["posts", "feed"] as const;
+
 export type FeedData = InfiniteData<PostsPage, string | null>;
 export type UserPostsData = InfiniteData<UserPostsPage, string | null>;
 
@@ -113,5 +115,21 @@ export function prependUserPost(
     pages: [{ ...first, posts: [post, ...first.posts] }, ...rest].map(
       (page) => ({ ...page, totalCount: page.totalCount + 1 }),
     ),
+  };
+}
+
+// The persisted snapshot keeps only the feed's first page (issue #751). Pages
+// are big enough now that a deeply scrolled feed would weigh on
+// localStorage's budget, and a restored feed only needs to fill the first
+// screen — every further page is a scroll away. The first page's own
+// `nextCursor` still points just past its last post, so paging resumes from
+// there.
+export function firstPageOnly<TPage, TParam>(
+  data: InfiniteData<TPage, TParam>,
+): InfiniteData<TPage, TParam> {
+  if (data.pages.length <= 1) return data;
+  return {
+    pages: data.pages.slice(0, 1),
+    pageParams: data.pageParams.slice(0, 1),
   };
 }

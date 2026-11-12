@@ -2,7 +2,7 @@ import { expect, test } from "./fixtures";
 import { makeSolidPng } from "./helpers";
 
 test(
-  "creating a post shows it in the feed, and infinite scroll loads more posts in batches of 5 then 3",
+  "creating a post shows it in the feed, and infinite scroll loads more posts in batches of 10 then 20",
   { tag: "@layout" },
   async ({ page, request, apiUrl, signUp }) => {
     await signUp(page);
@@ -15,23 +15,25 @@ test(
     await expect(page).toHaveURL("/");
     await expect(page.getByText("My first post from the UI")).toBeVisible();
 
-    // Seed 7 more posts directly against the API — 8 total is enough to
-    // exercise two infinite-scroll batches (5 up front, 3 more on scroll).
+    // Seed 14 more posts directly against the API — 15 total is enough to
+    // exercise two infinite-scroll batches (10 up front, the other 5 on
+    // scroll).
     //
     // Each seeded post is deliberately tall (several short lines, still well
     // under PostCard's 500-char collapse threshold so it renders in full).
     // The feed's IntersectionObserver eagerly prefetches the next batch while
     // the sentinel is within 400px of the viewport (see web/src/routes/
-    // index.tsx), so if the first 5 cards didn't overflow the viewport the
+    // index.tsx), so if the first 10 cards didn't overflow the viewport the
     // sentinel would be visible on load and batch 2 would auto-load before we
-    // could observe the 5-post state — making `toHaveCount(5)` racily flaky.
+    // could observe the 10-post state — making `toHaveCount(10)` racily
+    // flaky.
     // Tall cards push the sentinel out of the prefetch zone, so the second
     // batch only loads on the explicit scroll below, which is the whole point
     // of this test.
     const session = await page.evaluate(() =>
       JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
     );
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 14; i++) {
       const content = Array.from(
         { length: 8 },
         (_, line) => `Seeded post ${i} line ${line}`,
@@ -46,13 +48,13 @@ test(
     await page.reload();
 
     const articles = page.getByRole("article");
-    await expect(articles).toHaveCount(5);
+    await expect(articles).toHaveCount(10);
 
     // Scroll to the bottom to trigger the next infinite-scroll batch.
     await page.getByTestId("feed-sentinel").scrollIntoViewIfNeeded();
-    await expect(articles).toHaveCount(8);
+    await expect(articles).toHaveCount(15);
 
-    // All 8 posts are loaded — no more batches left to fetch.
+    // All 15 posts are loaded — no more batches left to fetch.
     await expect(page.getByText("You're all caught up.")).toBeVisible();
   },
 );
@@ -427,8 +429,8 @@ test("someone else's post, edit and delete reach a deeply scrolled feed without 
     postIds.push(((await response.json()) as { id: number }).id);
   }
 
-  // Scroll the viewer's feed until all 20 are loaded — 5 + 5 pages of 3, so
-  // a feed-wide refetch would send 6 requests. Kept to 20 (not the issue's
+  // Scroll the viewer's feed until all 20 are loaded — a page of 10 and one
+  // of 20, so a feed-wide refetch would send 2 requests. Kept to 20 (not the issue's
   // 40) because each page loads one scroll at a time, which under CI's
   // e2e-stress load takes long enough to blow the budget.
   await signUp(page);

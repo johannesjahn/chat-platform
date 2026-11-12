@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
 import type { PersistQueryClientOptions } from "@tanstack/react-query-persist-client";
 import { getSession, subscribeSession } from "./auth";
+import { type FeedData, firstPageOnly, postsFeedQueryKey } from "./postPages";
 import { stableAttachmentStructuralSharing } from "./stableAttachmentUrls";
 
 // How long a persisted cache entry may sit in storage before the persister
@@ -59,8 +60,16 @@ function isPersistedQueryKey(queryKey: readonly unknown[]): boolean {
   return PERSISTED_QUERY_KEY_PREFIXES.includes(queryKey[0] as string);
 }
 
+function isPostsFeedQueryKey(queryKey: readonly unknown[]): boolean {
+  return (
+    queryKey.length === postsFeedQueryKey.length &&
+    postsFeedQueryKey.every((part, i) => queryKey[i] === part)
+  );
+}
+
 // localStorage (via the sync persister) rather than IndexedDB: chat/post
-// pages are capped (see MESSAGES_MAX_LIMIT, INITIAL_POSTS_LIMIT) so the
+// pages are capped (see MESSAGES_MAX_LIMIT, INITIAL_POSTS_LIMIT) and the
+// post feed is persisted as its first page only (`firstPageOnly`), so the
 // persisted payload stays well within localStorage's ~5MB budget, and the
 // sync persister needs no extra IndexedDB wrapper dependency.
 //
@@ -128,6 +137,25 @@ export const persistOptions: PersistQueryClientOptions = {
   persister: createSyncStoragePersister({
     storage: typeof window !== "undefined" ? userScopedStorage : undefined,
     key: PERSIST_KEY_PREFIX,
+    serialize: (client) =>
+      JSON.stringify({
+        ...client,
+        clientState: {
+          ...client.clientState,
+          queries: client.clientState.queries.map((query) =>
+            isPostsFeedQueryKey(query.queryKey) &&
+            query.state.data !== undefined
+              ? {
+                  ...query,
+                  state: {
+                    ...query.state,
+                    data: firstPageOnly(query.state.data as FeedData),
+                  },
+                }
+              : query,
+          ),
+        },
+      }),
   }),
   maxAge: PERSIST_MAX_AGE_MS,
   // Bumped when a persisted payload's shape changes, so a snapshot saved by
