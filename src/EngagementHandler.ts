@@ -21,7 +21,7 @@ import {
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { loadAuthor, loadAuthors } from "./authors.ts";
-import { blockedOrMutedUserIds } from "./blocks.ts";
+import { blockedOrMutedUserIds, blockedPeersAmong } from "./blocks.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import {
@@ -163,6 +163,31 @@ const decodeCommentsCursor = (cursor: string): number | null => {
   return Number.isInteger(id) ? id : null;
 };
 
+// Fails with 403 if any of `authorIds` is on either side of a *block* with
+// `actorId` (issue #784): a blocked user can't comment on, reply to or react
+// to the blocker's posts and comments — and the blocker can't do it to them
+// either, the same symmetry as the DM gate. Like the DM 403, the message
+// doesn't say who blocked whom. Mutes don't count (`blockedPeersAmong` only
+// reads `block` rows), and content from before the block stays — it's only
+// hidden from the blocker (issue #661). Removing your own reaction is never
+// gated: it only takes something away.
+const requireNoBlockWith = (
+  db: DrizzleDb,
+  actorId: number,
+  authorIds: ReadonlyArray<number>,
+  message: string,
+): Effect.Effect<void, Forbidden> =>
+  Effect.gen(function* () {
+    const blocked = yield* Effect.tryPromise(() =>
+      blockedPeersAmong(
+        db,
+        actorId,
+        authorIds.filter((id) => id !== actorId),
+      ),
+    ).pipe(Effect.orDie);
+    if (blocked.size > 0) return yield* Effect.fail(new Forbidden({ message }));
+  });
+
 const getPostOr404 = (db: DrizzleDb, id: number) =>
   Effect.gen(function* () {
     const rows = yield* Effect.tryPromise(() =>
@@ -292,6 +317,12 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
           const post = yield* getPostOr404(db, id);
+          yield* requireNoBlockWith(
+            db,
+            currentUser.id,
+            [post.authorId],
+            "You can't react to this post because of a block",
+          );
           // Idempotent: the (userId, postId, emoji) unique constraint turns a
           // repeat reaction with the same emoji into a no-op rather than a
           // duplicate row or an error. `.returning()` lets us tell an actual
@@ -390,6 +421,12 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
           const post = yield* getPostOr404(db, id);
+          yield* requireNoBlockWith(
+            db,
+            currentUser.id,
+            [post.authorId],
+            "You can't comment on this post because of a block",
+          );
           const now = new Date();
           const rows = yield* Effect.tryPromise(() =>
             db
@@ -484,6 +521,15 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
                 message: "Cannot reply to a reply",
               }),
             );
+          // A reply lands under both the comment and the post, so a block
+          // with either author stops it.
+          const post = yield* getPostOr404(db, parent.postId);
+          yield* requireNoBlockWith(
+            db,
+            currentUser.id,
+            [parent.authorId, post.authorId],
+            "You can't reply to this comment because of a block",
+          );
           const now = new Date();
           const rows = yield* Effect.tryPromise(() =>
             db
@@ -534,6 +580,12 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
           const comment = yield* getCommentOr404(db, id);
+          yield* requireNoBlockWith(
+            db,
+            currentUser.id,
+            [comment.authorId],
+            "You can't react to this comment because of a block",
+          );
           const inserted = yield* Effect.tryPromise(() =>
             db
               .insert(likes)

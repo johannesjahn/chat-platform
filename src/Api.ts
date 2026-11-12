@@ -1591,7 +1591,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       params: IdParam,
       payload: ReactionBody,
       success: ReactionState,
-      error: [NotFound, TooManyRequests],
+      error: [NotFound, Forbidden, TooManyRequests],
     }).middleware(Authentication),
   )
   .add(
@@ -1621,7 +1621,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       params: IdParam,
       payload: CreateCommentBody,
       success: Comment.pipe(HttpApiSchema.status(201)),
-      error: [NotFound, TooManyRequests],
+      error: [NotFound, Forbidden, TooManyRequests],
     }).middleware(Authentication),
   )
   .add(
@@ -1650,7 +1650,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       params: IdParam,
       payload: CreateCommentBody,
       success: Comment.pipe(HttpApiSchema.status(201)),
-      error: [NotFound, InvalidCommentRequest, TooManyRequests],
+      error: [NotFound, Forbidden, InvalidCommentRequest, TooManyRequests],
     }).middleware(Authentication),
   )
   .add(
@@ -1661,7 +1661,7 @@ const CommentsGroup = HttpApiGroup.make("comments")
       params: IdParam,
       payload: ReactionBody,
       success: ReactionState,
-      error: [NotFound, TooManyRequests],
+      error: [NotFound, Forbidden, TooManyRequests],
     }).middleware(Authentication),
   )
   .add(
