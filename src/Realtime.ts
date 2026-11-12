@@ -14,11 +14,43 @@ import { PubSub } from "./PubSub.ts";
 // for a chat detect deterministically whether it missed an event in between
 // (issue #55) — e.g. a gap wider than one, or a redelivery of a version it's
 // already applied — rather than only being able to refetch blindly.
+//
+// `change`, when present, says what happened (issue #749), so a client can
+// act on just that instead of refetching the chat list, the chat and its
+// message window on every event — see `ChatChange`. It's optional and
+// additive on purpose: a client that predates it ignores the extra fields
+// and refetches everything, as it always did, and an event without it (any
+// change not listed in `ChatChange`) still means "refetch everything".
 export type ChatEvent = {
   readonly type: "chat_updated";
   readonly chatId: number;
   readonly version: number;
-};
+} & ({ readonly change?: undefined } | ChatChange);
+
+// - "message_created": a new message (sent or forwarded) landed. Carries
+//   who sent it, so a client showing the conversation can fetch just the
+//   new message and leave the chat list and chat to its own mark-read.
+// - "read": `userId` moved their read watermark from `fromMessageId`
+//   (exclusive) to `lastReadMessageId`. That's everything a read receipt
+//   changes — every message from someone else in that range gains `userId`
+//   in its `readByUserIds` — so the other participants patch it in place
+//   with no request at all, and only the reader's own other tabs (whose
+//   unread counts moved) refetch. Still sent to every participant rather
+//   than only the senders it concerns: one publish either way, and a
+//   participant left out would see a version gap on the next event and
+//   have to refetch everything.
+export type ChatChange =
+  | {
+      readonly change: "message_created";
+      readonly messageId: number;
+      readonly senderId: number;
+    }
+  | {
+      readonly change: "read";
+      readonly userId: number;
+      readonly fromMessageId: number;
+      readonly lastReadMessageId: number;
+    };
 
 // Pushed to every user who had access to a chat the moment it's deleted
 // (see `deleteChat`/`leaveChat` in ChatsHandler.ts) — a dedicated event

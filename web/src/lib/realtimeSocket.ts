@@ -2,11 +2,8 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { API_URL, fetchClient } from "./api";
 import { useSession } from "./auth";
-import {
-  classifyChatVersion,
-  forgetChatVersion,
-  recordChatVersion,
-} from "./chatVersions";
+import { forgetChatVersion } from "./chatVersions";
+import { applyChatUpdated, type ChatUpdatedEvent } from "./chatSync";
 import {
   chatDetailQueryKey,
   chatMessagesQueryKey,
@@ -42,7 +39,7 @@ import { setUserStatus } from "./status";
 import { noteTyping } from "./typing";
 
 type RealtimeSocketEvent =
-  | { type: "chat_updated"; chatId: number; version: number }
+  | ChatUpdatedEvent
   | { type: "chat_deleted"; chatId: number }
   | {
       type: "post_changed";
@@ -146,6 +143,7 @@ export function useRealtimeSocket(enabled: boolean): void {
 
   useEffect(() => {
     if (meId === undefined) return;
+    const myId = meId;
 
     let socket: WebSocket | null = null;
     let pingTimer: ReturnType<typeof setInterval> | undefined;
@@ -225,39 +223,14 @@ export function useRealtimeSocket(enabled: boolean): void {
           return;
         }
         switch (parsed.type) {
-          case "chat_updated": {
-            // `version` (see Chat.version, src/db/schema.ts) lets this be
-            // deterministic instead of blindly refetching on every push
-            // (issue #55): a "stale" classification means this event is a
-            // redelivery of something already applied (e.g. after a
-            // Redis/WS reconnect resends what was in flight) and there's
-            // nothing new to fetch; "gap" means at least one update was
-            // missed in between and is logged so it's visible, but the
-            // recovery is the same full refetch either way — there's no
-            // "fetch only the delta" endpoint yet (that's the follow-on
-            // sub-task this one exists to unblock).
-            const classification = classifyChatVersion(
-              parsed.chatId,
-              parsed.version,
-            );
-            if (classification === "stale") break;
-            if (classification === "gap") {
-              console.warn(
-                `Realtime: missed update(s) for chat ${parsed.chatId} (jumped to version ${parsed.version})`,
-              );
-            }
-            recordChatVersion(parsed.chatId, parsed.version);
-            void queryClient.invalidateQueries({
-              queryKey: chatsListQueryKey,
-            });
-            void queryClient.invalidateQueries({
-              queryKey: chatDetailQueryKey(parsed.chatId),
-            });
-            void queryClient.invalidateQueries({
-              queryKey: chatMessagesQueryKey(parsed.chatId),
-            });
+          case "chat_updated":
+            // Does only what the event's `change` needs — a read receipt is
+            // patched in, a new message in an open conversation fetches
+            // just that message — and refetches everything for anything
+            // else or after a missed version (issues #55, #749; see
+            // lib/chatSync.ts).
+            applyChatUpdated(queryClient, parsed, myId);
             break;
-          }
           case "chat_deleted": {
             // Unlike `chat_updated`, always actioned regardless of any
             // tracked version — there's no surviving row to compare against

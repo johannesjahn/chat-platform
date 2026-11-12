@@ -2,12 +2,8 @@ import { onlineManager } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
 import { fetchClient } from "./api";
 import { getSession, useSession } from "./auth";
-import {
-  appendSentMessage,
-  chatDetailQueryKey,
-  chatsListQueryKey,
-  markShownBeforeConfirm,
-} from "./chats";
+import { appendSentMessage, markShownBeforeConfirm } from "./chats";
+import { applyNewestMessage } from "./chatSync";
 import { enqueueMessage, makeClientId } from "./offlineQueue";
 import { createOutbox, type OutboxMessage } from "./outboxStore";
 import { queryClient } from "./query";
@@ -53,10 +49,9 @@ const outbox = createOutbox({
     // been hiding this bubble since (it matches on `clientId`) and the append
     // is a no-op.
     appendSentMessage(queryClient, entry.chatId, message);
-    void queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
-    void queryClient.invalidateQueries({
-      queryKey: chatDetailQueryKey(entry.chatId),
-    });
+    // The chat list's and the chat's preview is this very message, so it's
+    // written in rather than refetched (issue #749).
+    applyNewestMessage(queryClient, entry.chatId, message);
   },
 
   // Gone offline: a text/photo-link message moves to the offline queue,
