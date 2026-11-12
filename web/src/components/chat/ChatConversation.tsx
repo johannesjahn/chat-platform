@@ -24,6 +24,7 @@ import {
   type ChatComposerHandle,
   type ReplyTarget,
 } from "@/components/ChatComposer";
+import { MessageRequestBar } from "@/components/chat/MessageRequestBar";
 import {
   ForwardDialog,
   type ForwardOutcome,
@@ -1248,7 +1249,10 @@ export function ChatConversation({
         )}
     </>
   );
-  const composer = (
+  // A message request (issue #785) is read-only until it's accepted.
+  const composer = chat?.messageRequest ? (
+    <MessageRequestBar chat={chat} />
+  ) : (
     <ChatComposer
       ref={composerRef}
       chatId={chatId}

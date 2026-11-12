@@ -13,6 +13,13 @@ export const unreadChatsListQueryKey = [
   ...chatsListQueryKey,
   "unread",
 ] as const;
+// Message requests (issue #785): `GET /chats?requests=true`, the chats the
+// main list leaves out until they're accepted. Under `chatsListQueryKey` for
+// the same reason as the two keys around it.
+export const chatRequestsListQueryKey = [
+  ...chatsListQueryKey,
+  "requests",
+] as const;
 export const chatsUnreadCountQueryKey = [
   ...chatsListQueryKey,
   "unread-count",

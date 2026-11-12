@@ -1197,6 +1197,8 @@ test("rejoining a group keeps its history read, and only later messages count as
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
+      // Strangers' groups start as message requests (issue #785).
+      yield* bob.client.chats.acceptChatRequest({ params: { id: chat.id } });
       let last = 0;
       for (let i = 0; i < 5; i++)
         last = (yield* alice.client.chats.createMessage({
@@ -1216,6 +1218,8 @@ test("rejoining a group keeps its history read, and only later messages count as
         params: { id: chat.id },
         payload: { participantIds: [bob.user.id] },
       });
+      // No other chat with Alice now, so it's a request again.
+      yield* bob.client.chats.acceptChatRequest({ params: { id: chat.id } });
       const rejoined = yield* bob.client.chats.getChat({
         params: { id: chat.id },
       });
@@ -1241,6 +1245,7 @@ test("joining a group with history, by invite or by being added, starts with not
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
+      yield* bob.client.chats.acceptChatRequest({ params: { id: chat.id } });
       for (let i = 0; i < 3; i++)
         yield* alice.client.chats.createMessage({
           params: { id: chat.id },
@@ -1264,6 +1269,7 @@ test("joining a group with history, by invite or by being added, starts with not
         payload: { participantIds: [carol.user.id] },
       });
       expect(added.participants.map((p) => p.userId)).toContain(carol.user.id);
+      yield* carol.client.chats.acceptChatRequest({ params: { id: chat.id } });
       const carolView = yield* carol.client.chats.getChat({
         params: { id: chat.id },
       });
@@ -3056,6 +3062,7 @@ test("getUnreadChatCount sums across chats and only counts chats you're in", () 
           participantIds: [alice.user.id, bob.user.id],
         },
       });
+      yield* alice.client.chats.acceptChatRequest({ params: { id: group.id } });
       const withoutAlice = yield* bob.client.chats.createDirectChat({
         payload: { userId: carol.user.id },
       });
@@ -3105,6 +3112,10 @@ test("listChats with unread=true pages with the same cursor as the full list", (
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const bob = yield* registerAndLogin("bob", "pw-testpass");
+      // Already talking, so Bob's groups aren't message requests (#785).
+      yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
       const unreadIds: number[] = [];
       for (let i = 0; i < 5; i++) {
         const group = yield* bob.client.chats.createGroupChat({

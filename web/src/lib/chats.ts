@@ -13,6 +13,7 @@ import { useSession } from "./auth";
 import {
   chatsListQueryKey,
   unreadChatsListQueryKey,
+  chatRequestsListQueryKey,
   chatsUnreadCountQueryKey,
   chatDetailQueryKey,
   chatMessagesQueryKey,
@@ -99,6 +100,7 @@ type MessagesPageResponse = components["schemas"]["MessagesPage"];
 export {
   chatsListQueryKey,
   unreadChatsListQueryKey,
+  chatRequestsListQueryKey,
   chatsUnreadCountQueryKey,
   chatDetailQueryKey,
   chatMessagesQueryKey,
@@ -136,21 +138,31 @@ export function useChatsTwoPane(): boolean {
 // `unreadOnly` is the Unread filter (issue #756): the server's
 // `unread=true` list, its own cache entry, paged the same way — so an
 // unread chat that's far down the full list shows up without scrolling to it.
+//
+// `requestsOnly` is the message requests list (issue #785) instead.
 export function useChatsList(
   enabled: boolean,
-  { unreadOnly = false }: { unreadOnly?: boolean } = {},
+  {
+    unreadOnly = false,
+    requestsOnly = false,
+  }: { unreadOnly?: boolean; requestsOnly?: boolean } = {},
 ) {
   return useInfiniteQuery({
-    ...chatsListQueryOptions({ unreadOnly }),
+    ...chatsListQueryOptions({ unreadOnly, requestsOnly }),
     enabled,
   });
 }
 
 export function chatsListQueryOptions({
   unreadOnly = false,
-}: { unreadOnly?: boolean } = {}) {
+  requestsOnly = false,
+}: { unreadOnly?: boolean; requestsOnly?: boolean } = {}) {
   return infiniteQueryOptions({
-    queryKey: unreadOnly ? unreadChatsListQueryKey : chatsListQueryKey,
+    queryKey: requestsOnly
+      ? chatRequestsListQueryKey
+      : unreadOnly
+        ? unreadChatsListQueryKey
+        : chatsListQueryKey,
     refetchOnMount: refetchUnlessWarmed,
     initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam, signal }) => {
@@ -159,6 +171,7 @@ export function chatsListQueryOptions({
           query: {
             ...(pageParam ? { cursor: pageParam } : {}),
             ...(unreadOnly ? { unread: "true" as const } : {}),
+            ...(requestsOnly ? { requests: "true" as const } : {}),
           },
         },
         signal,

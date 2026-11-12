@@ -6,7 +6,14 @@ import {
   useState,
 } from "react";
 import { Link } from "@tanstack/react-router";
-import { Link2, Loader2, MessagesSquare, PlusCircle } from "lucide-react";
+import {
+  ChevronRight,
+  Inbox,
+  Link2,
+  Loader2,
+  MessagesSquare,
+  PlusCircle,
+} from "lucide-react";
 import { ChatListItem, ChatListItemSkeleton } from "@/components/ChatListItem";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -62,6 +69,39 @@ function useFrozenOrder(chats: Chat[]) {
 }
 
 /**
+ * The way into the viewer's message requests (issue #785) — groups put
+ * together by people they have no chat with, which the list itself leaves
+ * out until they're accepted. Only there while there are some, and quiet
+ * on purpose: a count, never an unread badge.
+ */
+function MessageRequestsEntry({ pane }: { pane: boolean }) {
+  const { data } = useChatsList(true, { requestsOnly: true });
+  const count =
+    data?.pages.reduce((sum, page) => sum + page.chats.length, 0) ?? 0;
+  if (!data || count === 0) return null;
+  const more = data.pages[data.pages.length - 1]?.nextCursor != null;
+  return (
+    <Link
+      to="/chats/requests"
+      className={cn(
+        "flex w-full items-center gap-3 text-sm transition-colors hover:bg-muted/60",
+        pane
+          ? "rounded-xl px-3 py-2.5"
+          : "rounded-lg border border-border bg-background/40 px-3 py-3",
+      )}
+    >
+      <Inbox className="size-4 shrink-0 text-muted-foreground" />
+      <span className="font-medium">Message requests</span>
+      <span className="ml-auto text-muted-foreground">
+        {count}
+        {more ? "+" : ""}
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+    </Link>
+  );
+}
+
+/**
  * The list of the viewer's chats — loading, error, offline and empty states
  * included, paging more in as it's scrolled — shared by the phone/tablet
  * `/chats` page and the desktop two-pane layout's left pane (issue #554).
@@ -75,6 +115,7 @@ export function ChatList({
   activeChatId,
   filter,
   scrollRoot,
+  requests = false,
 }: {
   session: Session;
   variant?: "page" | "pane";
@@ -83,9 +124,11 @@ export function ChatList({
   // The scrolling element the sentinel is observed against (the pane); the
   // page variant scrolls the window.
   scrollRoot?: RefObject<HTMLElement | null>;
+  // The message requests list (issue #785) instead of the chats.
+  requests?: boolean;
 }) {
   const isOnline = useOnlineStatus();
-  const unreadOnly = filter?.show === "unread";
+  const unreadOnly = !requests && filter?.show === "unread";
   const {
     data,
     isLoading,
@@ -93,7 +136,7 @@ export function ChatList({
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useChatsList(true, { unreadOnly });
+  } = useChatsList(true, { unreadOnly, requestsOnly: requests });
   const chats = data?.pages.flatMap((page) => page.chats) ?? [];
   const { ordered, freeze, release } = useFrozenOrder(chats);
   const pane = variant === "pane";
@@ -146,6 +189,14 @@ export function ChatList({
         You&apos;re offline, and your chats haven&apos;t been loaded on this
         device yet.
       </p>
+    );
+  } else if (chats.length === 0 && requests) {
+    body = (
+      <EmptyState
+        icon={Inbox}
+        title="No message requests"
+        description="When someone you haven't chatted with adds you to a group, it waits here until you accept it."
+      />
     );
   } else if (chats.length === 0 && !unreadOnly) {
     // An empty Unread list isn't "no conversations" — it's handled below.
@@ -202,6 +253,7 @@ export function ChatList({
 
   return (
     <>
+      {!requests && <MessageRequestsEntry pane={pane} />}
       {body}
       <div
         ref={sentinelRef}

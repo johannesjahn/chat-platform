@@ -47,6 +47,10 @@ export const PresenceAudienceLive = Layer.effect(
             and(
               eq(chatParticipants.userId, userId),
               ne(others.userId, userId),
+              // A pending message request (issue #785) introduces nobody,
+              // either way round, until it's accepted.
+              eq(chatParticipants.requestPending, false),
+              eq(others.requestPending, false),
               notExists(
                 db
                   .select({ one: sql`1` })

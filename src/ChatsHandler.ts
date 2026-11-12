@@ -40,6 +40,7 @@ import {
   type ForwardTargetResult,
   isAllowedImageUrl,
   type Message,
+  type MessageRequest,
   type ParentMessagePreview,
   type ReactionSummary,
 } from "./Api.ts";
@@ -750,6 +751,8 @@ const getUnreadCountsForChats = (
             and(
               inArray(chatParticipants.chatId, chatIds),
               eq(chatParticipants.userId, userId),
+              // A message request never shows as unread (issue #785).
+              eq(chatParticipants.requestPending, false),
               ne(messages.senderId, userId),
             ),
           )
@@ -782,7 +785,12 @@ const getUnreadTotal = (
         ),
       )
       .where(
-        and(eq(chatParticipants.userId, userId), ne(messages.senderId, userId)),
+        and(
+          eq(chatParticipants.userId, userId),
+          // Message requests stay out of the badge (issue #785).
+          eq(chatParticipants.requestPending, false),
+          ne(messages.senderId, userId),
+        ),
       ),
   ).pipe(
     Effect.orDie,
@@ -895,6 +903,76 @@ const getChatOr404 = (
       );
     return row;
   });
+
+// Message requests (issue #785). A participant added to a group by someone
+// they share no chat with — one they're in for real, not another pending
+// request, or a spammer's second group would vouch for their first — lands
+// in the "request" state (`chat_participants.request_pending`). Returns the
+// subset of `userIds` that applies to when `actorId` adds them; invite-link
+// joins never ask, since joining through a link is the joiner's own doing.
+const peer = alias(chatParticipants, "peer");
+const strangersTo = (
+  db: DrizzleDb,
+  actorId: number,
+  userIds: ReadonlyArray<number>,
+): Effect.Effect<Set<number>> =>
+  userIds.length === 0
+    ? Effect.succeed(new Set())
+    : Effect.tryPromise(() =>
+        db
+          .selectDistinct({ userId: chatParticipants.userId })
+          .from(chatParticipants)
+          .innerJoin(
+            peer,
+            and(
+              eq(peer.chatId, chatParticipants.chatId),
+              eq(peer.userId, actorId),
+            ),
+          )
+          .where(
+            and(
+              inArray(chatParticipants.userId, [...userIds]),
+              eq(chatParticipants.requestPending, false),
+            ),
+          ),
+      ).pipe(
+        Effect.orDie,
+        Effect.map((rows) => {
+          const known = new Set(rows.map((row) => row.userId));
+          return new Set(userIds.filter((id) => !known.has(id)));
+        }),
+      );
+
+const toMessageRequest = (row: {
+  readonly requestPending: boolean;
+  readonly addedBy: number | null;
+}): MessageRequest | null =>
+  row.requestPending ? { addedBy: row.addedBy } : null;
+
+// The viewer's pending request for `chatId`, if it is one for them.
+const isMessageRequestFor = (
+  db: DrizzleDb,
+  chatId: number,
+  userId: number,
+): Effect.Effect<MessageRequest | null> =>
+  Effect.tryPromise(() =>
+    db
+      .select({
+        requestPending: chatParticipants.requestPending,
+        addedBy: chatParticipants.addedBy,
+      })
+      .from(chatParticipants)
+      .where(
+        and(
+          eq(chatParticipants.chatId, chatId),
+          eq(chatParticipants.userId, userId),
+        ),
+      )
+      .limit(1),
+  ).pipe(
+    Effect.orDie,
+    Effect.map((rows) => (rows[0] ? toMessageRequest(rows[0]) : null)),
+  );
 
 const requireParticipant = (db: DrizzleDb, chatId: number, userId: number) =>
   Effect.gen(function* () {
@@ -1177,6 +1255,7 @@ const departParticipant = (
           .select({
             userId: chatParticipants.userId,
             joinedAt: chatParticipants.joinedAt,
+            requestPending: chatParticipants.requestPending,
           })
           .from(chatParticipants)
           .where(eq(chatParticipants.chatId, chatRow.id));
@@ -1187,8 +1266,11 @@ const departParticipant = (
         }
 
         if (chatRow.createdBy === departingUserId) {
+          // Someone who hasn't accepted the group yet (issue #785) only
+          // inherits it if nobody else is left.
           const newOwner = [...remaining].sort(
             (a, b) =>
+              Number(a.requestPending) - Number(b.requestPending) ||
               a.joinedAt.getTime() - b.joinedAt.getTime() ||
               a.userId - b.userId,
           )[0]!;
@@ -1247,6 +1329,11 @@ const buildChat = (
       currentUserId,
     );
     const unreadCount = yield* getUnreadCount(db, row.id, currentUserId);
+    const messageRequest = yield* isMessageRequestFor(
+      db,
+      row.id,
+      currentUserId,
+    );
     return {
       id: row.id,
       type: row.type,
@@ -1259,6 +1346,7 @@ const buildChat = (
       lastMessage,
       unreadCount,
       avatarVariants: toAvatarVariants(row),
+      messageRequest,
     };
   });
 
@@ -1346,6 +1434,8 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 avatarSmallKey: chats.avatarSmallKey,
                 avatarMediumKey: chats.avatarMediumKey,
                 avatarLargeKey: chats.avatarLargeKey,
+                requestPending: chatParticipants.requestPending,
+                addedBy: chatParticipants.addedBy,
               })
               .from(chats)
               .innerJoin(
@@ -1357,6 +1447,11 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               )
               .where(
                 and(
+                  // Message requests (issue #785) are their own list.
+                  eq(
+                    chatParticipants.requestPending,
+                    urlParams.requests === "true",
+                  ),
                   after
                     ? or(
                         lt(chats.updatedAt, after.updatedAt),
@@ -1401,6 +1496,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
               lastMessage: lastMessageByChat.get(row.id) ?? null,
               unreadCount: unreadByChat.get(row.id) ?? 0,
               avatarVariants: toAvatarVariants(row),
+              messageRequest: toMessageRequest(row),
             })),
             limit,
             nextCursor,
@@ -1573,6 +1669,9 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             "You can't add someone to a group because of a block",
           );
 
+          const strangers = yield* strangersTo(db, currentUser.id, [
+            ...uniqueIds,
+          ]);
           const now = new Date();
           const created = yield* Effect.tryPromise(() =>
             db
@@ -1600,6 +1699,8 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                   userId === currentUser.id
                     ? ("owner" as const)
                     : ("member" as const),
+                requestPending: strangers.has(userId),
+                addedBy: userId === currentUser.id ? null : currentUser.id,
               })),
             ),
           ).pipe(Effect.orDie);
@@ -1866,6 +1967,11 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             requestedIds,
             "You can't add someone to a group because of a block",
           );
+          const strangers = yield* strangersTo(
+            db,
+            currentUser.id,
+            requestedIds,
+          );
 
           // Recomputing who's already a participant and enforcing the group
           // cap has to happen in the same `serializable` transaction as the
@@ -1899,6 +2005,8 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                     userId,
                     joinedAt: now,
                     lastReadMessageId: newestMessageIdIn(id),
+                    requestPending: strangers.has(userId),
+                    addedBy: currentUser.id,
                   })),
                 )
                 .onConflictDoNothing();
@@ -1989,6 +2097,45 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             result.chat,
             currentUser.id,
             result.participants,
+          );
+        }),
+      )
+      .handle("acceptChatRequest", ({ params: { id } }) =>
+        Effect.gen(function* () {
+          const currentUser = yield* CurrentUser;
+          const row = yield* getChatOr404(db, id);
+          yield* requireParticipant(db, id, currentUser.id);
+          const accepted = yield* Effect.tryPromise(() =>
+            db
+              .update(chatParticipants)
+              .set({ requestPending: false })
+              .where(
+                and(
+                  eq(chatParticipants.chatId, id),
+                  eq(chatParticipants.userId, currentUser.id),
+                  eq(chatParticipants.requestPending, true),
+                ),
+              )
+              .returning({ id: chatParticipants.id }),
+          ).pipe(Effect.orDie);
+          if (accepted.length === 0)
+            return yield* buildChat(db, storage, row, currentUser.id);
+
+          const version = yield* bumpChatVersion(db, id);
+          const participants = yield* getParticipants(db, id);
+          const participantIds = participants.map((p) => p.userId);
+          yield* notifyChatUpdated(connections, id, version, participantIds);
+          // Presence was held back while the request was pending.
+          yield* connections.introduceContacts(
+            [currentUser.id],
+            participantIds,
+          );
+          return yield* buildChat(
+            db,
+            storage,
+            { ...row, version },
+            currentUser.id,
+            participants,
           );
         }),
       )

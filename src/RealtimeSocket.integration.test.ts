@@ -453,6 +453,12 @@ test("starting a chat, adding someone, or joining via invite tells the new conta
   await post(`/chats/${group.id}/participants`, alice.accessToken, {
     participantIds: [carol.id],
   });
+  // Carol shares no chat with Alice, so it's a message request (issue
+  // #785): nobody is introduced until she accepts it.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(sawOnline(carolSocket, alice.id)).toBe(false);
+  expect(sawOnline(aliceSocket, carol.id)).toBe(false);
+  await post(`/chats/${group.id}/accept`, carol.accessToken, {});
   await waitFor(
     () =>
       sawOnline(carolSocket, alice.id) &&
@@ -550,6 +556,10 @@ test("a block keeps two users out of each other's groups and presence", async ()
     { participantIds: [bob.id] },
   );
   expect(added.status).toBe(200);
+  // Both accept Carol's message request (issue #785), so only the block
+  // stands between them.
+  for (const user of [alice, bob])
+    await send("POST", `/chats/${group.id}/accept`, user.accessToken, {});
 
   // Bob and carol are introduced; alice and bob never are, though the
   // introduction for bob went out in the same pass.
