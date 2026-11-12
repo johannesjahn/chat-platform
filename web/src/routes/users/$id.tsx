@@ -27,7 +27,6 @@ import { queryClient } from "@/lib/query";
 import { warmed, warmRoute } from "@/lib/routeLoader";
 import { useUserStatus } from "@/lib/status";
 import { staticTitle, usePageTitle } from "@/lib/title";
-import { userLabel } from "@/lib/users";
 
 export const Route = createFileRoute("/users/$id")({
   head: () => staticTitle("Profile"),
@@ -375,10 +374,7 @@ function UserProfilePage() {
                   <li key={post.id} className="flex w-full justify-center">
                     <PostCard
                       post={post}
-                      authorId={user.id}
-                      authorLabel={userLabel(user)}
-                      authorAvatarUrl={user.avatarUrl}
-                      authorAvatarVariants={user.avatarVariants}
+                      showHandle={false}
                       canModify={
                         session.user.id === post.authorId ||
                         session.user.role === "admin"

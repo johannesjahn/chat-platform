@@ -13,6 +13,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { Effect, Metric } from "effect";
 import {
   type Attachment,
+  type AuthorSummary,
   ChatApi,
   DEFAULT_POSTS_LIMIT,
   Forbidden,
@@ -26,6 +27,7 @@ import {
 } from "./attachments.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
+import { loadAuthor, loadAuthors } from "./authors.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
@@ -36,14 +38,18 @@ import { comments, type DbPost, posts } from "./db/schema.ts";
 
 const NO_REACTIONS: ReactionSummary[] = [];
 
+// `author` is the post's embedded byline (issue #750), resolved by the caller
+// in one batch per response — see authors.ts.
 export const toApiPost = (
   row: typeof posts.$inferSelect,
+  author: AuthorSummary,
   reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
   attachment: Attachment | null = null,
   commentCount = 0,
 ) => ({
   id: row.id,
   authorId: row.authorId,
+  author,
   contentType: row.contentType,
   content: row.content,
   attachment,
@@ -140,6 +146,30 @@ const getPostOr404 = (db: DrizzleDb, id: number) =>
     return row;
   });
 
+// A post whose author vanished mid-request is being cascade-deleted with
+// them, so it reads as gone (see authors.ts).
+const loadPostAuthor = (db: DrizzleDb, row: DbPost) =>
+  loadAuthor(
+    db,
+    row.authorId,
+    () => new NotFound({ message: `Post ${row.id} not found` }),
+  );
+
+// Every post in `rows` paired with its embedded author, fetched in a single
+// batch; a row whose author is already gone is dropped (see authors.ts).
+export const withAuthors = (db: DrizzleDb, rows: ReadonlyArray<DbPost>) =>
+  loadAuthors(
+    db,
+    rows.map((r) => r.authorId),
+  ).pipe(
+    Effect.map((authors) =>
+      rows.flatMap((row) => {
+        const author = authors.get(row.authorId);
+        return author ? [{ row, author }] : [];
+      }),
+    ),
+  );
+
 // The full API view of a stored post as `viewerId` sees it — its reactions,
 // comment count (hiding authors the viewer blocked/muted) and attachment.
 const buildPostResponse = (
@@ -149,6 +179,7 @@ const buildPostResponse = (
   viewerId: number,
 ) =>
   Effect.gen(function* () {
+    const author = yield* loadPostAuthor(db, row);
     const reactions = yield* Effect.tryPromise(() =>
       postReactionInfo(db, [row.id], viewerId),
     ).pipe(Effect.orDie);
@@ -164,6 +195,7 @@ const buildPostResponse = (
     ]);
     return toApiPost(
       row,
+      author,
       reactions.get(row.id),
       row.attachmentId !== null
         ? (attachments.get(row.attachmentId) ?? null)
@@ -248,10 +280,12 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               .limit(limit + 1),
           ).pipe(Effect.orDie);
           const hasMore = fetched.length > limit;
-          const rows = fetched.slice(0, limit);
-          const lastRow = rows[rows.length - 1];
+          const page = fetched.slice(0, limit);
+          const lastRow = page[page.length - 1];
           const nextCursor =
             hasMore && lastRow ? encodePostsCursor(lastRow.id) : null;
+          const authored = yield* withAuthors(db, page);
+          const rows = authored.map((a) => a.row);
           const reactionInfo = yield* Effect.tryPromise(() =>
             postReactionInfo(
               db,
@@ -272,9 +306,10 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             rows.map((r) => r.attachmentId),
           );
           return {
-            posts: rows.map((r) =>
+            posts: authored.map(({ row: r, author }) =>
               toApiPost(
                 r,
+                author,
                 reactionInfo.get(r.id),
                 r.attachmentId !== null
                   ? (attachments.get(r.attachmentId) ?? null)
@@ -380,7 +415,8 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               },
             );
           }
-          return toApiPost(row, NO_REACTIONS, attachment);
+          const author = yield* loadPostAuthor(db, row);
+          return toApiPost(row, author, NO_REACTIONS, attachment);
         }),
       )
       .handle("updatePost", ({ params: { id }, payload }) =>
@@ -452,8 +488,10 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               },
             );
           }
+          const author = yield* loadPostAuthor(db, row);
           return toApiPost(
             row,
+            author,
             reactions.get(row.id),
             attachment,
             commentCounts.get(row.id) ?? 0,

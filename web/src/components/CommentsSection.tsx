@@ -38,12 +38,7 @@ import {
   type ReactionEmoji,
   type ReactionSummary,
 } from "@/lib/reactions";
-import {
-  useUserSummariesById,
-  userAvatarName,
-  userHandle,
-  userLabel,
-} from "@/lib/users";
+import { authorLabelOf } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 // A small controlled composer used both for new comments/replies and for
@@ -352,13 +347,13 @@ function CommentItem({
 }) {
   const session = useSession();
   const queryClient = useQueryClient();
-  const authorById = useUserSummariesById([comment.authorId], true);
-  const author = authorById.get(comment.authorId);
-  const authorName = author
-    ? userAvatarName(author)
-    : `user #${comment.authorId}`;
-  const authorLabel = author ? userLabel(author) : `user #${comment.authorId}`;
-  const authorHandle = author ? userHandle(author) : undefined;
+  // The embedded author (issue #750) — no `GET /users/:id` per comment.
+  const author = comment.author;
+  const {
+    label: authorLabel,
+    handle: authorHandle,
+    avatarName: authorName,
+  } = authorLabelOf(author, comment.authorId);
   const canModify =
     !!session &&
     (session.user.id === comment.authorId || session.user.role === "admin");

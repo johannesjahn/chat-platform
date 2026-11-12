@@ -43,3 +43,21 @@ export const avatarStorageKey = (token: string): string =>
 // `avatars/<token>`.
 export const avatarUrlForToken = (token: string): string =>
   `/${avatarStorageKey(token)}`;
+
+// Folds the three stored avatar tokens into the API's `avatarVariants` shape,
+// turning each into the long-cache proxy URL that serves it (see
+// avatarUrlForToken / AvatarRoute.ts). Shared by every handler that returns a
+// user's avatar — UsersHandler.ts (re-exported from there for ChatsHandler.ts
+// and SearchHandler.ts) and authors.ts.
+export const toAvatarVariants = (row: {
+  avatarSmallKey: string | null;
+  avatarMediumKey: string | null;
+  avatarLargeKey: string | null;
+}) =>
+  row.avatarSmallKey && row.avatarMediumKey && row.avatarLargeKey
+    ? {
+        small: avatarUrlForToken(row.avatarSmallKey),
+        medium: avatarUrlForToken(row.avatarMediumKey),
+        large: avatarUrlForToken(row.avatarLargeKey),
+      }
+    : null;
