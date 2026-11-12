@@ -519,3 +519,274 @@ test("joinChatViaInvite is rejected when the joiner and the invite's creator are
       expect(ok.id).toBe(chat.id);
     }),
   ));
+
+// Issue #784: a block stops commenting on, replying to and reacting to the
+// other side's posts and comments, in both directions, with a 403 that
+// doesn't say who blocked whom. Content from before the block stays.
+const BLOCK_MESSAGE_PATTERN = /because of a block$/;
+
+test("createComment is rejected on a post when either party has blocked the other", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", PW);
+      const bob = yield* registerAndLogin("bob", PW);
+
+      const alicePost = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "alice post" },
+      });
+      const bobPost = yield* bob.client.posts.createPost({
+        payload: { contentType: "text", content: "bob post" },
+      });
+      const before = yield* bob.client.comments.createComment({
+        params: { id: alicePost.id },
+        payload: { content: "before the block" },
+      });
+
+      yield* alice.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "block" },
+      });
+
+      const blocked = yield* bob.client.comments
+        .createComment({
+          params: { id: alicePost.id },
+          payload: { content: "after the block" },
+        })
+        .pipe(Effect.flip);
+      expect(blocked._tag).toBe("Forbidden");
+      if (blocked._tag === "Forbidden") {
+        expect(blocked.message).toMatch(BLOCK_MESSAGE_PATTERN);
+        expect(blocked.message).not.toContain("alice");
+        expect(blocked.message).not.toContain("bob");
+      }
+
+      // The blocker can't comment on the blocked user's post either.
+      const reverse = yield* alice.client.comments
+        .createComment({
+          params: { id: bobPost.id },
+          payload: { content: "alice on bob" },
+        })
+        .pipe(Effect.flip);
+      expect(reverse._tag).toBe("Forbidden");
+
+      // The pre-block comment stays (visible to everyone but alice).
+      const carol = yield* registerAndLogin("carol", PW);
+      const seen = yield* carol.client.comments.listComments({
+        params: { id: alicePost.id },
+        query: {},
+      });
+      expect(seen.comments.map((c) => c.id)).toEqual([before.id]);
+
+      // Lifting the block lets bob comment again.
+      yield* alice.client.users.removeBlock({ params: { id: bob.user.id } });
+      const ok = yield* bob.client.comments.createComment({
+        params: { id: alicePost.id },
+        payload: { content: "after unblock" },
+      });
+      expect(ok.content).toBe("after unblock");
+    }),
+  ));
+
+test("createReply is rejected on a block with either the comment's or the post's author", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", PW);
+      const bob = yield* registerAndLogin("bob", PW);
+      const carol = yield* registerAndLogin("carol", PW);
+
+      // Alice's post, with a comment by alice and one by carol.
+      const post = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "alice post" },
+      });
+      const aliceComment = yield* alice.client.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "alice comment" },
+      });
+      const carolComment = yield* carol.client.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "carol comment" },
+      });
+      // Carol's post, with a comment by alice.
+      const carolPost = yield* carol.client.posts.createPost({
+        payload: { contentType: "text", content: "carol post" },
+      });
+      const aliceOnCarol = yield* alice.client.comments.createComment({
+        params: { id: carolPost.id },
+        payload: { content: "alice on carol" },
+      });
+
+      yield* alice.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "block" },
+      });
+
+      const reply = (id: number) =>
+        bob.client.comments
+          .createReply({ params: { id }, payload: { content: "bob reply" } })
+          .pipe(Effect.flip);
+
+      // Both authors are the blocker.
+      expect((yield* reply(aliceComment.id))._tag).toBe("Forbidden");
+      // Only the post's author is the blocker.
+      expect((yield* reply(carolComment.id))._tag).toBe("Forbidden");
+      // Only the comment's author is the blocker.
+      expect((yield* reply(aliceOnCarol.id))._tag).toBe("Forbidden");
+
+      // Nothing to do with alice: allowed.
+      const carolOwn = yield* carol.client.comments.createComment({
+        params: { id: carolPost.id },
+        payload: { content: "carol on own post" },
+      });
+      const ok = yield* bob.client.comments.createReply({
+        params: { id: carolOwn.id },
+        payload: { content: "bob reply to carol" },
+      });
+      expect(ok.parentCommentId).toBe(carolOwn.id);
+    }),
+  ));
+
+test("addPostReaction is rejected when either party has blocked the other", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", PW);
+      const bob = yield* registerAndLogin("bob", PW);
+
+      const alicePost = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "alice post" },
+      });
+      const bobPost = yield* bob.client.posts.createPost({
+        payload: { contentType: "text", content: "bob post" },
+      });
+      yield* bob.client.comments.addPostReaction({
+        params: { id: alicePost.id },
+        payload: { emoji: "👍" },
+      });
+
+      yield* alice.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "block" },
+      });
+
+      const blocked = yield* bob.client.comments
+        .addPostReaction({
+          params: { id: alicePost.id },
+          payload: { emoji: "❤️" },
+        })
+        .pipe(Effect.flip);
+      expect(blocked._tag).toBe("Forbidden");
+      const reverse = yield* alice.client.comments
+        .addPostReaction({
+          params: { id: bobPost.id },
+          payload: { emoji: "❤️" },
+        })
+        .pipe(Effect.flip);
+      expect(reverse._tag).toBe("Forbidden");
+
+      // The pre-block reaction stays, and bob can still take it back.
+      const post = yield* alice.client.posts.getPost({
+        params: { id: alicePost.id },
+      });
+      expect(post.reactions.map((r) => r.emoji)).toEqual(["👍"]);
+      const removed = yield* bob.client.comments.removePostReaction({
+        params: { id: alicePost.id },
+        payload: { emoji: "👍" },
+      });
+      expect(removed.reactions).toEqual([]);
+    }),
+  ));
+
+test("addCommentReaction is rejected when either party has blocked the other", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", PW);
+      const bob = yield* registerAndLogin("bob", PW);
+      const carol = yield* registerAndLogin("carol", PW);
+
+      const carolPost = yield* carol.client.posts.createPost({
+        payload: { contentType: "text", content: "carol post" },
+      });
+      const aliceComment = yield* alice.client.comments.createComment({
+        params: { id: carolPost.id },
+        payload: { content: "alice comment" },
+      });
+      const bobComment = yield* bob.client.comments.createComment({
+        params: { id: carolPost.id },
+        payload: { content: "bob comment" },
+      });
+
+      yield* alice.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "block" },
+      });
+
+      const blocked = yield* bob.client.comments
+        .addCommentReaction({
+          params: { id: aliceComment.id },
+          payload: { emoji: "👍" },
+        })
+        .pipe(Effect.flip);
+      expect(blocked._tag).toBe("Forbidden");
+      const reverse = yield* alice.client.comments
+        .addCommentReaction({
+          params: { id: bobComment.id },
+          payload: { emoji: "👍" },
+        })
+        .pipe(Effect.flip);
+      expect(reverse._tag).toBe("Forbidden");
+
+      // A comment by someone else on the same post is fine.
+      const carolComment = yield* carol.client.comments.createComment({
+        params: { id: carolPost.id },
+        payload: { content: "carol comment" },
+      });
+      const ok = yield* bob.client.comments.addCommentReaction({
+        params: { id: carolComment.id },
+        payload: { emoji: "👍" },
+      });
+      expect(ok.reactions.map((r) => r.emoji)).toEqual(["👍"]);
+    }),
+  ));
+
+test("a mute does not stop commenting, replying or reacting", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", PW);
+      const bob = yield* registerAndLogin("bob", PW);
+
+      const post = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "alice post" },
+      });
+      const aliceComment = yield* alice.client.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "alice comment" },
+      });
+      yield* alice.client.users.setBlock({
+        params: { id: bob.user.id },
+        payload: { type: "mute" },
+      });
+
+      const comment = yield* bob.client.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "bob comment" },
+      });
+      expect(comment.content).toBe("bob comment");
+      const reply = yield* bob.client.comments.createReply({
+        params: { id: aliceComment.id },
+        payload: { content: "bob reply" },
+      });
+      expect(reply.parentCommentId).toBe(aliceComment.id);
+      yield* bob.client.comments.addPostReaction({
+        params: { id: post.id },
+        payload: { emoji: "👍" },
+      });
+      yield* bob.client.comments.addCommentReaction({
+        params: { id: aliceComment.id },
+        payload: { emoji: "👍" },
+      });
+      // Alice muting bob doesn't stop her engaging with him either.
+      yield* alice.client.comments.addCommentReaction({
+        params: { id: comment.id },
+        payload: { emoji: "👍" },
+      });
+    }),
+  ));
