@@ -6,6 +6,7 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
+import { postsFeedQueryKey } from "./postPages";
 import { refetchUnlessWarmed } from "./routeLoader";
 
 export type Post = components["schemas"]["Post"];
@@ -17,12 +18,19 @@ type UserPostsPage = components["schemas"]["UserPostsPage"];
 // kept in sync here so the form can show a live counter/limit client-side.
 export const MAX_POST_CONTENT_LENGTH = 10_000;
 
-// Feed batch sizes: a fuller first screen, then smaller batches as the user
-// scrolls, for the infinite-scroll feed on `/posts`.
-export const INITIAL_POSTS_LIMIT = 5;
-export const LOAD_MORE_POSTS_LIMIT = 3;
+// Feed batch sizes for the infinite-scroll feed and profile post lists. The
+// first page fills a tall (1440×900) viewport with headroom; later pages are
+// bigger still, so a fast flick on a phone — where one post can be taller
+// than the screen — doesn't outrun the sentinel, and 30 posts take two
+// requests rather than ten (issue #751). Only the first page is persisted
+// (`firstPageOnly`, applied in query.ts), so their size doesn't grow the
+// offline snapshot.
+export const INITIAL_POSTS_LIMIT = 10;
+export const LOAD_MORE_POSTS_LIMIT = 20;
 
-export const postsFeedQueryKey = ["posts", "feed"] as const;
+// Defined in postPages.ts so query.ts can match it without importing this
+// module (which imports query.ts through routeLoader.ts).
+export { postsFeedQueryKey };
 
 // Prefix of the query key `$api.useQuery("get", "/posts/{id}", ...)`
 // generates (openapi-react-query keys queries as `[method, path, init]`).
