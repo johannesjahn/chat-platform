@@ -16,7 +16,7 @@ import { useSession } from "@/lib/auth";
 import { errorMessage, isNotFoundError } from "@/lib/errors";
 import { postsFeedQueryKey } from "@/lib/posts";
 import { refetchUnlessWarmed } from "@/lib/routeLoader";
-import { useUserSummariesById, userHandle, userLabel } from "@/lib/users";
+import { userLabel } from "@/lib/users";
 import { usePageTitle, titleExcerpt } from "@/lib/title";
 
 // A post's full view — the whole text, its reactions and its comment thread
@@ -54,12 +54,7 @@ export function PostDetail({
     { enabled: !!session, refetchOnMount: refetchUnlessWarmed },
   );
 
-  const authorById = useUserSummariesById(
-    post ? [post.authorId] : [],
-    !!session,
-  );
-  const author = post ? authorById.get(post.authorId) : undefined;
-  const authorName = author ? userLabel(author) : undefined;
+  const authorName = post?.author ? userLabel(post.author) : undefined;
   // Text posts are titled by their opening words; an image/attachment post
   // (or one whose text is empty) by who posted it.
   const excerpt =
@@ -135,13 +130,6 @@ export function PostDetail({
           <div className="flex w-full justify-center">
             <PostCard
               post={post}
-              authorId={post.authorId}
-              authorLabel={
-                author ? userLabel(author) : `user #${post.authorId}`
-              }
-              authorHandle={author ? userHandle(author) : undefined}
-              authorAvatarUrl={author?.avatarUrl}
-              authorAvatarVariants={author?.avatarVariants}
               canModify={
                 session.user.id === post.authorId ||
                 session.user.role === "admin"

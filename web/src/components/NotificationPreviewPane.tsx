@@ -28,12 +28,7 @@ import {
   notificationTarget,
   type Notification,
 } from "@/lib/notifications";
-import {
-  useUserSummariesById,
-  userAvatarName,
-  userHandle,
-  userLabel,
-} from "@/lib/users";
+import { userAvatarName, userLabel } from "@/lib/users";
 
 // The `xl` preview of a notification on `/notifications` (issue #564): what
 // it points at, beside the inbox, so triaging several doesn't mean leaving
@@ -149,8 +144,6 @@ function PostPreview({
   } = $api.useQuery("get", "/posts/{id}", {
     params: { path: { id: String(postId) } },
   });
-  const authorById = useUserSummariesById(post ? [post.authorId] : [], true);
-  const author = post ? authorById.get(post.authorId) : undefined;
 
   return (
     <div className="flex flex-col gap-4 p-3">
@@ -168,11 +161,6 @@ function PostPreview({
         <>
           <PostCard
             post={post}
-            authorId={post.authorId}
-            authorLabel={author ? userLabel(author) : `user #${post.authorId}`}
-            authorHandle={author ? userHandle(author) : undefined}
-            authorAvatarUrl={author?.avatarUrl}
-            authorAvatarVariants={author?.avatarVariants}
             // Editing and deleting stay on the post's own page.
             canModify={false}
             onDelete={() => {}}

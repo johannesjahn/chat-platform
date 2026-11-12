@@ -11,7 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { AttachmentPreview } from "@/components/AttachmentPreview";
-import { Avatar, type AvatarVariants } from "@/components/Avatar";
+import { Avatar } from "@/components/Avatar";
 import { ProfileHoverCard } from "@/components/ProfileHoverCard";
 import { Lightbox } from "@/components/Lightbox";
 import { MentionText } from "@/components/MentionText";
@@ -33,18 +33,18 @@ import { errorMessage } from "@/lib/errors";
 import { useExpandableText } from "@/lib/motion";
 import { patchCachedPost } from "@/lib/posts";
 import type { ReactionEmoji } from "@/lib/reactions";
+import { authorLabelOf } from "@/lib/users";
 import { cn } from "@/lib/utils";
 import type { Post } from "@/lib/posts";
 
 type PostCardProps = {
+  // Its byline comes from the embedded `post.author` (issue #750) — no
+  // per-author lookup.
   post: Post;
-  authorId: number;
-  authorLabel: string;
-  // The author's `@username`, shown after `authorLabel` when that's a
-  // display name (see `userHandle` in lib/users.ts).
-  authorHandle?: string;
-  authorAvatarUrl?: string | null;
-  authorAvatarVariants?: AvatarVariants | null;
+  // Whether to show the author's `@username` after a display name (see
+  // `userHandle` in lib/users.ts). Off on the author's own profile, whose
+  // header already shows it.
+  showHandle?: boolean;
   canModify: boolean;
   onDelete: () => void;
   isDeleting: boolean;
@@ -93,11 +93,7 @@ const COLLAPSE_THRESHOLD = 500;
 
 export function PostCard({
   post,
-  authorId,
-  authorLabel,
-  authorHandle,
-  authorAvatarUrl,
-  authorAvatarVariants,
+  showHandle = true,
   canModify,
   onDelete,
   isDeleting,
@@ -106,6 +102,9 @@ export function PostCard({
   style,
 }: PostCardProps) {
   const wasEdited = post.updatedAt !== post.createdAt;
+  const { authorId } = post;
+  const { label: authorLabel, handle } = authorLabelOf(post.author, authorId);
+  const authorHandle = showHandle ? handle : undefined;
   // Compact engagement counts surfaced on the card so an active post reads as
   // active without expanding it (issue #306). Both animate via `CountUp` when
   // they change in real time (comment/reaction realtime events patch the
@@ -196,8 +195,8 @@ export function PostCard({
           >
             <Avatar
               name={authorLabel}
-              avatarUrl={authorAvatarUrl}
-              avatarVariants={authorAvatarVariants}
+              avatarUrl={post.author?.avatarUrl}
+              avatarVariants={post.author?.avatarVariants}
               className="transition-transform duration-300 ease-smooth group-hover:scale-105"
             />
             <div className="flex min-w-0 flex-1 flex-col leading-tight">

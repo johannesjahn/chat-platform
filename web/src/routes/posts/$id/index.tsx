@@ -13,12 +13,12 @@ import { postCommentsQueryOptions } from "@/lib/comments";
 import { queryClient } from "@/lib/query";
 import { warmed, warmRoute } from "@/lib/routeLoader";
 import { staticTitle } from "@/lib/title";
-import { userSummaryQueryOptions } from "@/lib/users";
 
 export const Route = createFileRoute("/posts/$id/")({
   head: () => staticTitle("Post"),
-  // The post, its author's name and the first page of comments, with the
-  // same options `PostDetail` and `CommentsSection` read them with.
+  // The post and the first page of comments (both embed their authors —
+  // issue #750), with the same options `PostDetail` and `CommentsSection`
+  // read them with.
   loader: ({ params }) =>
     warmRoute(() => {
       const post = $api.queryOptions("get", "/posts/{id}", {
@@ -26,12 +26,7 @@ export const Route = createFileRoute("/posts/$id/")({
       });
       const comments = postCommentsQueryOptions(Number(params.id));
       return [
-        warmed(post.queryKey, queryClient.ensureQueryData(post)).then(
-          (data) => {
-            const author = userSummaryQueryOptions(data.authorId);
-            return warmed(author.queryKey, queryClient.ensureQueryData(author));
-          },
-        ),
+        warmed(post.queryKey, queryClient.ensureQueryData(post)),
         warmed(
           comments.queryKey,
           queryClient.ensureInfiniteQueryData(comments),

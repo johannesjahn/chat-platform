@@ -38,12 +38,6 @@ import {
 } from "@/lib/posts";
 import { queryClient } from "@/lib/query";
 import { warmed, warmRoute } from "@/lib/routeLoader";
-import {
-  useUserSummariesById,
-  userHandle,
-  userLabel,
-  userSummaryQueryOptions,
-} from "@/lib/users";
 import { staticTitle } from "@/lib/title";
 
 type FeedSearch = {
@@ -58,28 +52,12 @@ export const Route = createFileRoute("/")({
     return Number.isInteger(post) && post > 0 ? { post } : {};
   },
   head: () => staticTitle("Feed"),
-  // The feed's first page, then the authors its cards are labelled with.
+  // The feed's first page. Each post embeds its author (issue #750), so
+  // there's no second, per-author round of requests to chain after it.
   loader: () =>
     warmRoute(() => {
       const feed = postsFeedQueryOptions();
-      return [
-        warmed(feed.queryKey, queryClient.ensureInfiniteQueryData(feed)).then(
-          (data) => {
-            const authorIds = new Set(
-              data.pages.flatMap((page) => page.posts.map((p) => p.authorId)),
-            );
-            return Promise.all(
-              [...authorIds].map((id) => {
-                const author = userSummaryQueryOptions(id);
-                return warmed(
-                  author.queryKey,
-                  queryClient.ensureQueryData(author),
-                );
-              }),
-            );
-          },
-        ),
-      ];
+      return [warmed(feed.queryKey, queryClient.ensureInfiniteQueryData(feed))];
     }),
   component: PostsFeedPage,
 });
@@ -123,21 +101,6 @@ function PostsFeedPage() {
 
   const posts = data?.pages.flatMap((page) => page.posts) ?? [];
   const pendingPosts = usePendingPosts();
-
-  // Resolves `authorId` -> a display label on each card, one request per
-  // distinct author currently loaded (see `useUserSummariesById`).
-  const authorById = useUserSummariesById(
-    posts.map((post) => post.authorId),
-    !!session,
-  );
-  const authorLabelFor = (authorId: number) => {
-    const author = authorById.get(authorId);
-    return author ? userLabel(author) : `user #${authorId}`;
-  };
-  const handleFor = (authorId: number) => {
-    const author = authorById.get(authorId);
-    return author ? userHandle(author) : undefined;
-  };
 
   const deletePost = $api.useMutation("delete", "/posts/{id}");
   const confirm = useConfirm();
@@ -272,13 +235,6 @@ function PostsFeedPage() {
               <li key={post.id} className="flex w-full justify-center">
                 <PostCard
                   post={post}
-                  authorId={post.authorId}
-                  authorLabel={authorLabelFor(post.authorId)}
-                  authorHandle={handleFor(post.authorId)}
-                  authorAvatarUrl={authorById.get(post.authorId)?.avatarUrl}
-                  authorAvatarVariants={
-                    authorById.get(post.authorId)?.avatarVariants
-                  }
                   canModify={
                     session.user.id === post.authorId ||
                     session.user.role === "admin"

@@ -48,12 +48,30 @@ export function userAvatarName(user: NamedUser): string {
   return user.displayName || user.username;
 }
 
+// The byline of a post or comment, from the author it embeds (issue #750).
+// `author` is only ever missing on a payload from a backend replica that
+// predates the field, mid-rollout — that row falls back to its author id
+// rather than failing to render.
+export function authorLabelOf(
+  author: NamedUser | undefined,
+  authorId: number,
+): { label: string; handle: string | undefined; avatarName: string } {
+  if (!author) {
+    const fallback = `user #${authorId}`;
+    return { label: fallback, handle: undefined, avatarName: fallback };
+  }
+  return {
+    label: userLabel(author),
+    handle: userHandle(author),
+    avatarName: userAvatarName(author),
+  };
+}
+
 // Resolves a set of user ids to { username, displayName } via individual
-// `GET /users/:id` requests (parallel, each independently cached) — used to
-// label content by its author (e.g. a post's `authorId`) now that the
-// unpaginated user list is gone (see issue #48) and a
-// `$api.useQuery("get", "/users")` fetch of everyone just to resolve a
-// handful of ids isn't an option anymore.
+// `GET /users/:id` requests (parallel, each independently cached). Posts and
+// comments don't need it — they embed their author (issue #750); it's for
+// the few places that only have an id, like a game's departed players (see
+// lib/games/cast.ts).
 export function useUserSummariesById(
   ids: readonly number[],
   enabled: boolean,
@@ -80,8 +98,7 @@ export function useUserSummariesById(
 }
 
 // One `GET /users/{id}`, keyed like `$api.useQuery("get", "/users/{id}", ...)`
-// so the two share a cache entry. Route loaders warm the authors a page is
-// about to label with it (see routes/index.tsx).
+// so the two share a cache entry.
 export function userSummaryQueryOptions(id: number) {
   return queryOptions({
     queryKey: [

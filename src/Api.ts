@@ -602,6 +602,21 @@ const PostContent = Schema.Trimmed.check(Schema.isNonEmpty()).check(
 const IMAGE_URL_FILTER_MESSAGE =
   "content must be an https:// URL from an allowed image-hosting domain";
 
+// Who wrote a post or comment, embedded in `Post.author`/`Comment.author`
+// (issue #750) so a feed or a thread can label every row without a
+// `GET /users/:id` per author. Just what a byline renders — name, handle and
+// avatar, the same fields as on `User` — not the role, status or bio (the
+// profile hover card still fetches the full profile on demand). Resolved in
+// one batched lookup per response (see authors.ts), never per row.
+export const AuthorSummary = Schema.Struct({
+  id: Schema.Finite,
+  username: Schema.String,
+  displayName: Schema.NullOr(Schema.String),
+  avatarUrl: Schema.NullOr(Schema.String),
+  avatarVariants: Schema.NullOr(AvatarVariants),
+}).annotate({ identifier: "AuthorSummary" });
+export type AuthorSummary = typeof AuthorSummary.Type;
+
 // Cross-field check shared by post/message create+update bodies: only
 // applies when `contentType` is "image_url" — text content is unaffected.
 const requireAllowedImageUrl = (body: {
@@ -653,6 +668,8 @@ const requireAttachmentId = (body: {
 export const Post = Schema.Struct({
   id: Schema.Finite,
   authorId: Schema.Finite,
+  // Additive (issue #750): `authorId` stays, and always equals `author.id`.
+  author: AuthorSummary,
   contentType: PostContentType,
   content: Schema.String,
   // Set only when contentType is "attachment" — see `Attachment` above.
@@ -779,6 +796,8 @@ export const Comment = Schema.Struct({
   postId: Schema.Finite,
   parentCommentId: Schema.NullOr(Schema.Finite),
   authorId: Schema.Finite,
+  // Same embedded byline as `Post.author` (issue #750).
+  author: AuthorSummary,
   content: Schema.String,
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,

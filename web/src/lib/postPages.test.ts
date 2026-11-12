@@ -16,6 +16,13 @@ type Post = components["schemas"]["Post"];
 const post = (id: number, authorId = 1): Post => ({
   id,
   authorId,
+  author: {
+    id: authorId,
+    username: `user${authorId}`,
+    displayName: null,
+    avatarUrl: null,
+    avatarVariants: null,
+  },
   contentType: "text",
   content: `post ${id}`,
   attachment: null,

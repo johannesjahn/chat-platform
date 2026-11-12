@@ -38,8 +38,8 @@ import { CurrentUser, TokenVersionCache } from "./Auth.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
 import {
   avatarStorageKey,
-  avatarUrlForToken,
   generateAvatarToken,
+  toAvatarVariants,
 } from "./avatars.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { processAvatar } from "./ImageProcessing.ts";
@@ -51,6 +51,7 @@ import {
   encodePostsCursor,
   postCommentCounts,
   toApiPost,
+  withAuthors,
 } from "./PostsHandler.ts";
 import { PubSub } from "./PubSub.ts";
 import { postReactionInfo } from "./reactions.ts";
@@ -185,23 +186,10 @@ type UserRow = {
   statusExpiresAt: Date | null;
 };
 
-// Folds the three stored avatar tokens into the API's `avatarVariants` shape,
-// turning each into the long-cache proxy URL that serves it (see
-// avatarUrlForToken / AvatarRoute.ts). Shared with ChatsHandler.ts and
-// SearchHandler.ts, which need the same fold for a chat participant's avatar
-// columns (see ChatParticipant in Api.ts).
-export const toAvatarVariants = (row: {
-  avatarSmallKey: string | null;
-  avatarMediumKey: string | null;
-  avatarLargeKey: string | null;
-}) =>
-  row.avatarSmallKey && row.avatarMediumKey && row.avatarLargeKey
-    ? {
-        small: avatarUrlForToken(row.avatarSmallKey),
-        medium: avatarUrlForToken(row.avatarMediumKey),
-        large: avatarUrlForToken(row.avatarLargeKey),
-      }
-    : null;
+// `toAvatarVariants` lives in avatars.ts (so authors.ts can use it without
+// importing this module, which imports PostsHandler.ts); re-exported for the
+// handlers that already import it from here.
+export { toAvatarVariants };
 
 // Best-effort removal of an old avatar's variant objects once the row has
 // stopped pointing at them (a re-upload, a clear via updateProfile, or account
@@ -612,10 +600,14 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               .limit(limit + 1),
           ).pipe(Effect.orDie);
           const hasMore = fetched.length > limit;
-          const rows = fetched.slice(0, limit);
-          const lastRow = rows[rows.length - 1];
+          const page = fetched.slice(0, limit);
+          const lastRow = page[page.length - 1];
           const nextCursor =
             hasMore && lastRow ? encodePostsCursor(lastRow.id) : null;
+          // Every row has the same author here, but going through the shared
+          // batch keeps one code path for `Post.author` (issue #750).
+          const authored = yield* withAuthors(db, page);
+          const rows = authored.map((a) => a.row);
 
           const reactionInfo = yield* Effect.tryPromise(() =>
             postReactionInfo(
@@ -644,9 +636,10 @@ export const UsersHandlerLive = HttpApiBuilder.group(
           ).pipe(Effect.orDie);
 
           return {
-            posts: rows.map((r) =>
+            posts: authored.map(({ row: r, author }) =>
               toApiPost(
                 r,
+                author,
                 reactionInfo.get(r.id),
                 r.attachmentId !== null
                   ? (attachments.get(r.attachmentId) ?? null)

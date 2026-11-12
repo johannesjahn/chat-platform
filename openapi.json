@@ -10937,6 +10937,9 @@
           "authorId": {
             "type": "number"
           },
+          "author": {
+            "$ref": "#/components/schemas/AuthorSummary"
+          },
           "content": {
             "type": "string"
           },
@@ -10961,11 +10964,61 @@
           "postId",
           "parentCommentId",
           "authorId",
+          "author",
           "content",
           "createdAt",
           "updatedAt",
           "reactions",
           "replyCount"
+        ],
+        "additionalProperties": false
+      },
+      "AuthorSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarVariants": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvatarVariants"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "displayName",
+          "avatarUrl",
+          "avatarVariants"
         ],
         "additionalProperties": false
       },
@@ -11057,6 +11110,9 @@
           "authorId": {
             "type": "number"
           },
+          "author": {
+            "$ref": "#/components/schemas/AuthorSummary"
+          },
           "contentType": {
             "$ref": "#/components/schemas/PostContentType"
           },
@@ -11092,6 +11148,7 @@
         "required": [
           "id",
           "authorId",
+          "author",
           "contentType",
           "content",
           "attachment",

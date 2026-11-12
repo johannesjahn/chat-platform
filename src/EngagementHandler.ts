@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm";
 import { Effect, Metric } from "effect";
 import {
+  type AuthorSummary,
   ChatApi,
   DEFAULT_COMMENTS_LIMIT,
   Forbidden,
@@ -19,6 +20,7 @@ import {
   TooManyRequests,
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
+import { loadAuthor, loadAuthors } from "./authors.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
@@ -85,8 +87,10 @@ const enforceEngagementLimit = (
 const recordContentCreated = (type: "comment" | "reaction") =>
   Metric.update(Metric.withAttributes(contentCreatedTotal, { type: type }), 1);
 
+// `author` is the embedded byline (issue #750) — see authors.ts.
 const toApiComment = (
   row: typeof comments.$inferSelect,
+  author: AuthorSummary,
   reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
   replyCount = 0,
 ) => ({
@@ -94,6 +98,7 @@ const toApiComment = (
   postId: row.postId,
   parentCommentId: row.parentCommentId,
   authorId: row.authorId,
+  author,
   content: row.content,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
@@ -130,6 +135,15 @@ const commentReplyCounts = async (
   }
   return result;
 };
+
+// A comment whose author vanished mid-request is being cascade-deleted with
+// them, so it reads as gone (see authors.ts).
+const loadCommentAuthor = (db: DrizzleDb, row: typeof comments.$inferSelect) =>
+  loadAuthor(
+    db,
+    row.authorId,
+    () => new NotFound({ message: `Comment ${row.id} not found` }),
+  );
 
 // Author or admin — the same ownership rule posts use (see PostsHandler.ts).
 const canModify = (
@@ -223,10 +237,18 @@ const listThread = (
         .limit(limit + 1),
     ).pipe(Effect.orDie);
     const hasMore = fetched.length > limit;
-    const rows = fetched.slice(0, limit);
-    const lastRow = rows[rows.length - 1];
+    const page = fetched.slice(0, limit);
+    const lastRow = page[page.length - 1];
     const nextCursor =
       hasMore && lastRow ? encodeCommentsCursor(lastRow.id) : null;
+
+    // Every author on the page in one batch (issue #750); a row whose author
+    // is already gone is dropped (see authors.ts).
+    const authors = yield* loadAuthors(
+      db,
+      page.map((r) => r.authorId),
+    );
+    const rows = page.filter((r) => authors.has(r.authorId));
 
     const reactionInfo = yield* Effect.tryPromise(() =>
       commentReactionInfo(
@@ -245,7 +267,12 @@ const listThread = (
 
     return {
       comments: rows.map((r) =>
-        toApiComment(r, reactionInfo.get(r.id), replyCounts.get(r.id) ?? 0),
+        toApiComment(
+          r,
+          authors.get(r.authorId)!,
+          reactionInfo.get(r.id),
+          replyCounts.get(r.id) ?? 0,
+        ),
       ),
       limit,
       nextCursor,
@@ -407,7 +434,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               exclude: [post.authorId],
             },
           );
-          return toApiComment(row);
+          return toApiComment(row, yield* loadCommentAuthor(db, row));
         }),
       )
       .handle("listReplies", ({ params: { id }, query: urlParams }) =>
@@ -435,7 +462,12 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               await blockedOrMutedUserIds(db, currentUser.id),
             ),
           ).pipe(Effect.orDie);
-          return toApiComment(row, reactions, replyCounts.get(row.id) ?? 0);
+          return toApiComment(
+            row,
+            yield* loadCommentAuthor(db, row),
+            reactions,
+            replyCounts.get(row.id) ?? 0,
+          );
         }),
       )
       .handle("createReply", ({ params: { id }, payload }) =>
@@ -494,7 +526,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               exclude: [parent.authorId],
             },
           );
-          return toApiComment(row);
+          return toApiComment(row, yield* loadCommentAuthor(db, row));
         }),
       )
       .handle("addCommentReaction", ({ params: { id }, payload }) =>
@@ -629,7 +661,12 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               await blockedOrMutedUserIds(db, currentUser.id),
             ),
           ).pipe(Effect.orDie);
-          return toApiComment(row, reactions, replyCounts.get(row.id) ?? 0);
+          return toApiComment(
+            row,
+            yield* loadCommentAuthor(db, row),
+            reactions,
+            replyCounts.get(row.id) ?? 0,
+          );
         }),
       )
       .handle("deleteComment", ({ params: { id } }) =>

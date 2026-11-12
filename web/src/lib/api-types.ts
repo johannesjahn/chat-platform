@@ -1855,11 +1855,19 @@ export interface components {
             postId: number;
             parentCommentId: number | null;
             authorId: number;
+            author: components["schemas"]["AuthorSummary"];
             content: string;
             createdAt: number;
             updatedAt: number;
             reactions: components["schemas"]["ReactionSummary"][];
             replyCount: number;
+        };
+        AuthorSummary: {
+            id: number;
+            username: string;
+            displayName: string | null;
+            avatarUrl: string | null;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
         };
         UpdateCommentBody: {
             content: string;
@@ -1880,6 +1888,7 @@ export interface components {
         Post: {
             id: number;
             authorId: number;
+            author: components["schemas"]["AuthorSummary"];
             contentType: components["schemas"]["PostContentType"];
             content: string;
             attachment: components["schemas"]["Attachment"] | null;
