@@ -19,9 +19,10 @@ export function formatRelativeTime(
 ): string {
   const diff = now - ms;
 
-  // Guard against clock skew where a server timestamp is slightly ahead of the
-  // client — treat a small future delta as "just now" rather than "-1s".
-  if (diff < 30_000) return "just now";
+  // Anything under a minute — including a small future delta from clock skew
+  // where a server timestamp is slightly ahead of the client — reads "just
+  // now", so the label never shows "0m" or "-1s".
+  if (diff < MINUTE) return "just now";
   if (diff < HOUR) return `${Math.floor(diff / MINUTE)}m`;
   if (diff < DAY) return `${Math.floor(diff / HOUR)}h`;
   if (diff < WEEK) return `${Math.floor(diff / DAY)}d`;
