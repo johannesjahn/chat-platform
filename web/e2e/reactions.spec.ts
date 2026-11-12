@@ -87,7 +87,7 @@ test(
     await expect(pageA).toHaveURL(/\/chats\/\d+/);
 
     await pageA.fill("textarea", "React to this chat message");
-    await pageA.keyboard.press("Enter");
+    await pageA.getByRole("button", { name: "Send message" }).click();
     const bubble = pageA
       .locator("[data-message-id]")
       .filter({ hasText: "React to this chat message" });
@@ -151,7 +151,7 @@ test("long-pressing a chat message on touch opens the reaction picker (issue #30
   await expect(pageA).toHaveURL(/\/chats\/\d+/);
 
   await pageA.fill("textarea", "Long-press to react on mobile");
-  await pageA.keyboard.press("Enter");
+  await pageA.getByRole("button", { name: "Send message" }).click();
   const bubble = pageA
     .locator("[data-message-id]")
     .filter({ hasText: "Long-press to react on mobile" });
@@ -207,7 +207,7 @@ test(
     const chatId = pageA.url().split("/").pop();
 
     await pageA.fill("textarea", "Hello from A in the group");
-    await pageA.keyboard.press("Enter");
+    await pageA.getByRole("button", { name: "Send message" }).click();
     await expect(
       pageA.getByRole("main").getByText("Hello from A in the group"),
     ).toBeVisible();

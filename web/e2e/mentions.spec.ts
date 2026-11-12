@@ -86,14 +86,15 @@ test(
     const suggestion = pageA.getByRole("option", { name: `@${usernameB}` });
     await expect(suggestion).toBeVisible();
 
-    // Enter is "send" in this composer — while the suggestion list is open it
-    // has to complete the mention instead, leaving the draft in place.
+    // Enter sends (or, on a phone, breaks the line) in this composer — while
+    // the suggestion list is open it has to complete the mention instead,
+    // leaving the draft in place.
     await pageA.keyboard.press("Enter");
     await expect(composer).toHaveValue(`ping @${usernameB} `);
 
-    // A second Enter, with the list closed, sends as usual — and the mention
-    // arrives as a profile link for the recipient too.
-    await pageA.keyboard.press("Enter");
+    // Sending (the button, since on a phone Enter is a newline — issue
+    // #760) delivers the mention as a profile link for the recipient too.
+    await pageA.getByRole("button", { name: "Send message" }).click();
     await expect(
       pageA.getByRole("main").getByText(`ping @${usernameB}`),
     ).toBeVisible();

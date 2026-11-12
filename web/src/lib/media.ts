@@ -28,3 +28,12 @@ export function useMediaQuery(query: string): boolean {
 export function useIsDesktop(): boolean {
   return useMediaQuery(DESKTOP_MEDIA_QUERY);
 }
+
+// Devices whose primary pointer is a finger — phones and tablets, where the
+// on-screen keyboard has no Shift+Enter. The chat composer's Enter inserts a
+// newline there and sending is the send button's job (issue #760).
+export const COARSE_POINTER_MEDIA_QUERY = "(pointer: coarse)";
+
+export function useIsCoarsePointer(): boolean {
+  return useMediaQuery(COARSE_POINTER_MEDIA_QUERY);
+}
