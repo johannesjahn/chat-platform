@@ -10,6 +10,15 @@ import type { QueryClient } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
 import { useSession } from "./auth";
+import {
+  chatsListQueryKey,
+  unreadChatsListQueryKey,
+  chatsUnreadCountQueryKey,
+  chatDetailQueryKey,
+  chatMessagesQueryKey,
+  chatPinnedQueryKey,
+  chatStarredQueryKey,
+} from "./chatQueryKeys";
 import { recordChatVersion } from "./chatVersions";
 import { useIsDesktop } from "./media";
 import { isFreshlyWarmed, refetchUnlessWarmed, warmed } from "./routeLoader";
@@ -83,33 +92,17 @@ const MESSAGES_MAX_LIMIT = 100;
 
 type MessagesPageResponse = components["schemas"]["MessagesPage"];
 
-export const chatsListQueryKey = ["chats", "list"] as const;
-// The Unread filter's server-side list and the unread total behind the
-// badges (issue #756). Both extend `chatsListQueryKey` on purpose: every
-// place that refreshes the chat list — the `chat_updated`/`chat_deleted`
-// realtime events, markRead, sends, joins, leaves — invalidates that key,
-// and invalidation matches by prefix, so they're refreshed by exactly the
-// same events with nothing extra to keep in sync.
-export const unreadChatsListQueryKey = [
-  ...chatsListQueryKey,
-  "unread",
-] as const;
-export const chatsUnreadCountQueryKey = [
-  ...chatsListQueryKey,
-  "unread-count",
-] as const;
-export const chatDetailQueryKey = (chatId: number) =>
-  ["chats", chatId, "detail"] as const;
-export const chatMessagesQueryKey = (chatId: number) =>
-  ["chats", chatId, "messages"] as const;
-// The chat-wide pinned list and the current user's private starred list
-// (issue #223) are their own queries, kept separate from the paginated
-// message window: a message can be pinned/starred while sitting outside the
-// currently-loaded window, so the panels can't just be derived from it.
-export const chatPinnedQueryKey = (chatId: number) =>
-  ["chats", chatId, "pinned"] as const;
-export const chatStarredQueryKey = (chatId: number) =>
-  ["chats", chatId, "starred"] as const;
+// The query keys live in chatQueryKeys.ts (see there); most code reaches
+// them through here.
+export {
+  chatsListQueryKey,
+  unreadChatsListQueryKey,
+  chatsUnreadCountQueryKey,
+  chatDetailQueryKey,
+  chatMessagesQueryKey,
+  chatPinnedQueryKey,
+  chatStarredQueryKey,
+};
 
 /**
  * Whether `/chats/*` is showing the desktop two-pane messenger (issue #554):
@@ -389,7 +382,7 @@ async function fetchMessagesPage(
   return data;
 }
 
-type ChatMessagesPage = {
+export type ChatMessagesPage = {
   messages: ChatMessage[];
   hasEarlier: boolean;
   // The cursors bounding `messages`, so a mount that adopts a window it

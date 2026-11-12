@@ -71,7 +71,7 @@ import {
   starredMessageIdsInChat,
 } from "./pinsStars.ts";
 import { RateLimiter } from "./RateLimiter.ts";
-import { RealtimeConnections } from "./Realtime.ts";
+import { type ChatChange, RealtimeConnections } from "./Realtime.ts";
 import { serializableTransaction } from "./serializableTransaction.ts";
 import {
   deleteAvatarObjects,
@@ -330,17 +330,21 @@ const getChatVersion = (db: DrizzleDb, chatId: number): Effect.Effect<number> =>
 // building its own response (see `buildChat`), so this avoids a second
 // `getParticipants` round-trip per mutation. `version` is whatever the
 // caller determined the chat's post-mutation version to be (see
-// `bumpChatVersion`/`getChatVersion`).
+// `bumpChatVersion`/`getChatVersion`). `change` says what happened, for the
+// changes a client can act on narrowly (see `ChatChange` in Realtime.ts);
+// without it the event means "refetch everything".
 const notifyChatUpdated = (
   connections: RealtimeConnections["Service"],
   chatId: number,
   version: number,
   participantUserIds: ReadonlyArray<number>,
+  change?: ChatChange,
 ): Effect.Effect<void> =>
   connections.notifyUsers(participantUserIds, {
     type: "chat_updated",
     chatId,
     version,
+    ...change,
   });
 
 // Hydrates a single already-fetched message row into a full `Message`
@@ -1028,6 +1032,7 @@ const publishNewMessage = (
   connections: RealtimeConnections["Service"],
   chatId: number,
   senderId: number,
+  messageId: number,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
     const version = yield* getChatVersion(db, chatId);
@@ -1041,6 +1046,7 @@ const publishNewMessage = (
       chatId,
       version,
       recipientIds.filter((userId) => !muting.has(userId)),
+      { change: "message_created", messageId, senderId },
     );
   });
 
@@ -2407,7 +2413,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             1,
           );
 
-          yield* publishNewMessage(db, connections, id, currentUser.id);
+          yield* publishNewMessage(db, connections, id, currentUser.id, row.id);
           return toApiMessage(
             row,
             [],
@@ -2653,6 +2659,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 connections,
                 targetId,
                 currentUser.id,
+                row.id,
               );
               return delivered(
                 targetId,
@@ -2883,11 +2890,22 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           let version = chatRow.version;
           if (newlyRead > 0) {
             version = yield* bumpChatVersion(db, id);
+            // A receipt the other participants patch in place, not a bare
+            // "something changed" that sent every one of them off to
+            // refetch the chat list, the chat and its message window: N
+            // readers doing that to N viewers made each group message cost
+            // O(N²) requests (issue #749).
             yield* notifyChatUpdated(
               connections,
               id,
               version,
               participants.map((p) => p.userId),
+              {
+                change: "read",
+                userId: currentUser.id,
+                fromMessageId: advanced[0]?.previous ?? 0,
+                lastReadMessageId: payload.messageId,
+              },
             );
           }
           return yield* buildChat(
