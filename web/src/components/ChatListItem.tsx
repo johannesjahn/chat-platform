@@ -9,19 +9,14 @@ import {
   chatDisplayName,
   chatViewTransitionNames,
   formatChatTimestamp,
+  lastMessageSender,
+  lastMessageText,
   type Chat,
 } from "@/lib/chats";
 import { useIsOnline } from "@/lib/presence";
 import { useUserStatus } from "@/lib/status";
 import { userAvatarName } from "@/lib/users";
 import { cn } from "@/lib/utils";
-
-function messagePreview(chat: Chat): string {
-  if (!chat.lastMessage) return "No messages yet";
-  return chat.lastMessage.contentType === "image_url"
-    ? "Photo"
-    : chat.lastMessage.content;
-}
 
 export function ChatListItemSkeleton() {
   return (
@@ -65,7 +60,7 @@ export function ChatListItem({
     : chatViewTransitionNames(chat.id);
   const hasUnread = chat.unreadCount > 0;
   const lastMessage = chat.lastMessage;
-  const isOwnLastMessage = lastMessage?.senderId === currentUserId;
+  const sender = lastMessageSender(chat, currentUserId);
   const otherParticipant =
     chat.type === "direct"
       ? chat.participants.find((p) => p.userId !== currentUserId)
@@ -173,7 +168,9 @@ export function ChatListItem({
                 : "text-muted-foreground",
             )}
           >
-            {isOwnLastMessage && <span className="shrink-0">You:</span>}
+            {sender && (
+              <span className="max-w-[40%] shrink-0 truncate">{sender}:</span>
+            )}
             {lastMessage?.forwardedFrom && (
               <Forward
                 className="size-3.5 shrink-0"
@@ -184,7 +181,7 @@ export function ChatListItem({
             {lastMessage?.contentType === "image_url" && (
               <ImageIcon className="size-3.5 shrink-0" />
             )}
-            <span className="truncate">{messagePreview(chat)}</span>
+            <span className="truncate">{lastMessageText(chat)}</span>
           </span>
           {hasUnread && (
             <span

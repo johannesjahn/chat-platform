@@ -30,6 +30,40 @@ export function messagePreview(message: ChatMessage): string {
   return message.content;
 }
 
+// Who sent a chat's last message, as its previews label it (issue #768):
+// "You" for your own, the sender's name in a group, and nothing in a direct
+// chat (the other person is the chat's name already) or once the sender has
+// left the group. Shared by the chat list, the feed rail and the dock so the
+// same chat previews the same way everywhere.
+export function lastMessageSender(
+  chat: Chat,
+  currentUserId: number,
+): string | undefined {
+  const last = chat.lastMessage;
+  if (!last) return undefined;
+  if (last.senderId === currentUserId) return "You";
+  if (chat.type !== "group") return undefined;
+  const sender = chat.participants.find((p) => p.userId === last.senderId);
+  return sender ? userLabel(sender) : undefined;
+}
+
+// The body of a chat's last-message preview, without the sender.
+export function lastMessageText(chat: Chat): string {
+  const last = chat.lastMessage;
+  if (!last) return "No messages yet";
+  if (last.contentType === "image_url") return "Photo";
+  if (last.contentType === "attachment") return "Attachment";
+  return last.content;
+}
+
+// The whole one-line preview, "Sender: text", for lists that render it as
+// plain text.
+export function lastMessagePreview(chat: Chat, currentUserId: number): string {
+  const sender = lastMessageSender(chat, currentUserId);
+  const text = lastMessageText(chat);
+  return sender ? `${sender}: ${text}` : text;
+}
+
 // Kept in sync with the server-side caps (`MAX_MESSAGE_CONTENT_LENGTH`,
 // `MAX_GROUP_PARTICIPANTS` in src/Api.ts) so the UI can show live
 // counters/limits without a round-trip.

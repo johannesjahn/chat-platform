@@ -8,7 +8,12 @@ import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { Button } from "@/components/ui/button";
 import type { Session } from "@/lib/api";
 import { openDockedChat } from "@/lib/chatDock";
-import { chatDisplayName, useChatsList, type Chat } from "@/lib/chats";
+import {
+  chatDisplayName,
+  lastMessagePreview,
+  useChatsList,
+  type Chat,
+} from "@/lib/chats";
 import { useGameLobbies } from "@/lib/games/lobby";
 import { GAMES, gameThemeStyle, type GameId } from "@/lib/games/registry";
 import { useOnlineUserIds } from "@/lib/presence";
@@ -192,7 +197,6 @@ function RecentChat({
   chat: Chat;
   currentUserId: number;
 }) {
-  const last = chat.lastMessage;
   return (
     <button
       type="button"
@@ -210,13 +214,7 @@ function RecentChat({
           {chatDisplayName(chat, currentUserId)}
         </span>
         <span className="truncate text-xs text-muted-foreground">
-          {!last
-            ? "No messages yet"
-            : last.contentType === "text"
-              ? last.content
-              : last.contentType === "image_url"
-                ? "Photo"
-                : "Attachment"}
+          {lastMessagePreview(chat, currentUserId)}
         </span>
       </span>
       {chat.unreadCount > 0 && (
