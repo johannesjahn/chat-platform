@@ -12,6 +12,7 @@ import {
   loadedUnreadCount,
   parentPreviewText,
   unreadChatsListQueryKey,
+  chatRequestsListQueryKey,
   type Chat,
 } from "./chats";
 
@@ -29,6 +30,9 @@ test("the unread total and the Unread list are their own cache entries", () => {
   expect([...chatsListQueryOptions({ unreadOnly: true }).queryKey]).toEqual([
     ...unreadChatsListQueryKey,
   ]);
+  expect([...chatsListQueryOptions({ requestsOnly: true }).queryKey]).toEqual([
+    ...chatRequestsListQueryKey,
+  ]);
   expect([...unreadChatsListQueryKey]).not.toEqual([...chatsListQueryKey]);
 });
 
@@ -36,6 +40,7 @@ test("invalidating the chat list also invalidates the unread total and the Unrea
   const client = new QueryClient();
   client.setQueryData(chatsListQueryKey, { pages: [], pageParams: [] });
   client.setQueryData(unreadChatsListQueryKey, { pages: [], pageParams: [] });
+  client.setQueryData(chatRequestsListQueryKey, { pages: [], pageParams: [] });
   client.setQueryData(chatsUnreadCountQueryKey, { count: 3, chats: 1 });
 
   await client.invalidateQueries({ queryKey: chatsListQueryKey });
@@ -43,6 +48,7 @@ test("invalidating the chat list also invalidates the unread total and the Unrea
   for (const queryKey of [
     chatsListQueryKey,
     unreadChatsListQueryKey,
+    chatRequestsListQueryKey,
     chatsUnreadCountQueryKey,
   ]) {
     expect(client.getQueryState(queryKey)?.isInvalidated).toBe(true);

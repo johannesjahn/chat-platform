@@ -6,6 +6,7 @@ import type { Chat, ChatMessage, ChatMessagesPage } from "./chats";
 import {
   chatDetailQueryKey,
   chatMessagesQueryKey,
+  chatRequestsListQueryKey,
   chatsListQueryKey,
   chatsUnreadCountQueryKey,
 } from "./chatQueryKeys";
@@ -257,6 +258,44 @@ test("a mark-read response is written into the chat, the list and the unread tot
     ME,
   );
   expect(invalidated(client, chatId)).toEqual(nothing);
+});
+
+test("reading a message request updates it in the requests list, never the main one", () => {
+  const chatId = nextChatId++;
+  const other = chatOf(nextChatId++, { updatedAt: 5000 });
+  const client = seed(chatId, [other]);
+  // A pending request isn't in the main list; it's in the requests list.
+  client.setQueryData<InfiniteData<ChatsPage>>(chatsListQueryKey, {
+    pages: [{ chats: [other], limit: 20, nextCursor: null }],
+    pageParams: [undefined],
+  });
+  const pending = { addedBy: BOB } as Chat["messageRequest"];
+  client.setQueryData<InfiniteData<ChatsPage>>(chatRequestsListQueryKey, {
+    pages: [
+      {
+        chats: [chatOf(chatId, { messageRequest: pending })],
+        limit: 20,
+        nextCursor: null,
+      },
+    ],
+    pageParams: [undefined],
+  });
+  const read = chatOf(chatId, {
+    version: 5,
+    messageRequest: pending,
+    lastMessage: message(9, chatId, BOB),
+    updatedAt: 9000,
+  });
+
+  applyMarkedRead(client, read);
+
+  const main = client.getQueryData<InfiniteData<ChatsPage>>(chatsListQueryKey)!;
+  expect(main.pages[0]!.chats.map((c) => c.id)).toEqual([other.id]);
+  const requests = client.getQueryData<InfiniteData<ChatsPage>>(
+    chatRequestsListQueryKey,
+  )!;
+  expect(requests.pages[0]!.chats).toEqual([read]);
+  expect(client.getQueryState(chatsListQueryKey)?.isInvalidated).toBe(false);
 });
 
 test("our own newest message becomes the preview without a refetch", () => {

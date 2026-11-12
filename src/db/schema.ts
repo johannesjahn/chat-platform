@@ -1,6 +1,7 @@
 import {
   type AnyPgColumn,
   bigint,
+  boolean,
   check,
   doublePrecision,
   index,
@@ -379,6 +380,21 @@ export const chatParticipants = pgTable(
     // Back-filled from `message_reads` by migration 0035, which stays
     // written alongside it until a contract migration drops it.
     lastReadMessageId: integer("last_read_message_id"),
+    // Message requests (issue #785): true while this participant was put in
+    // a group by someone they shared no (accepted) chat with, until they
+    // accept. A pending row is kept out of the participant's chat list and
+    // unread counts, and out of presence in both directions — see
+    // `isMessageRequestFor` in ChatsHandler.ts. A database default (not an
+    // app-side one) for the same rollout reason as `users.created_at`: old
+    // replicas insert participants without the column, and those must read
+    // as accepted, which is how every row predating the migration reads.
+    requestPending: boolean("request_pending").notNull().default(false),
+    // Who added this participant — null for a creator, an invite-link join,
+    // a direct chat, every row predating migration 0037, or once the adder's
+    // account is gone. Lets a declined request offer to block the adder.
+    addedBy: integer("added_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
   },
   (table) => [
     unique().on(table.chatId, table.userId),

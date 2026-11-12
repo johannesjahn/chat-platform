@@ -970,57 +970,64 @@ const seedMessages = (chatId: number, senderId: number, total: number) =>
 const medianMs = (samples: number[]) =>
   [...samples].sort((a, b) => a - b)[Math.floor(samples.length / 2)]!;
 
-test("listChats doesn't slow down with already-read history, and markRead copes with a 50k-message chat (issues #659, #648)", () =>
-  run(
-    Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const chat = yield* alice.client.chats.createDirectChat({
-        payload: { userId: bob.user.id },
-      });
-
-      const timeListChats = Effect.gen(function* () {
-        // Warm up, then take the median, so one GC pause can't fail the test.
-        yield* alice.client.chats.listChats({ query: {} });
-        const samples: number[] = [];
-        for (let i = 0; i < 7; i++) {
-          const startedAt = performance.now();
-          yield* alice.client.chats.listChats({ query: {} });
-          samples.push(performance.now() - startedAt);
-        }
-        return medianMs(samples);
-      });
-
-      const sendAndRead = (content: string) =>
-        Effect.gen(function* () {
-          const message = yield* bob.client.chats.createMessage({
-            params: { id: chat.id },
-            payload: { contentType: "text", content },
-          });
-          return yield* alice.client.chats.markRead({
-            params: { id: chat.id },
-            payload: { messageId: message.id },
-          });
+test(
+  "listChats doesn't slow down with already-read history, and markRead copes with a 50k-message chat (issues #659, #648)",
+  () =>
+    run(
+      Effect.gen(function* () {
+        const alice = yield* registerAndLogin("alice", "pw-testpass");
+        const bob = yield* registerAndLogin("bob", "pw-testpass");
+        const chat = yield* alice.client.chats.createDirectChat({
+          payload: { userId: bob.user.id },
         });
 
-      // The baseline already has a (read) last message, so both timings pay
-      // for hydrating one — the only difference is the history behind it.
-      yield* sendAndRead("the first one");
-      const baseline = yield* timeListChats;
+        const timeListChats = Effect.gen(function* () {
+          // Warm up, then take the median, so one GC pause can't fail the test.
+          yield* alice.client.chats.listChats({ query: {} });
+          const samples: number[] = [];
+          for (let i = 0; i < 7; i++) {
+            const startedAt = performance.now();
+            yield* alice.client.chats.listChats({ query: {} });
+            samples.push(performance.now() - startedAt);
+          }
+          return medianMs(samples);
+        });
 
-      yield* seedMessages(chat.id, bob.user.id, 50_000);
-      // Past the ~21.8k messages that used to blow the bind-parameter limit.
-      const read = yield* sendAndRead("the newest one");
-      expect(read.unreadCount).toBe(0);
-      expect(read.lastMessage?.readByUserIds).toEqual([alice.user.id]);
+        const sendAndRead = (content: string) =>
+          Effect.gen(function* () {
+            const message = yield* bob.client.chats.createMessage({
+              params: { id: chat.id },
+              payload: { contentType: "text", content },
+            });
+            return yield* alice.client.chats.markRead({
+              params: { id: chat.id },
+              payload: { messageId: message.id },
+            });
+          });
 
-      const withHistory = yield* timeListChats;
-      // Within ~2× of the baseline; the couple of ms of slack only absorbs
-      // timer noise at these ms scales — anti-joining the whole history
-      // again costs tens of ms.
-      expect(withHistory).toBeLessThan(Math.max(2 * baseline, baseline + 2));
-    }),
-  ));
+        // The baseline already has a (read) last message, so both timings pay
+        // for hydrating one — the only difference is the history behind it.
+        yield* sendAndRead("the first one");
+        const baseline = yield* timeListChats;
+
+        yield* seedMessages(chat.id, bob.user.id, 50_000);
+        // Past the ~21.8k messages that used to blow the bind-parameter limit.
+        const read = yield* sendAndRead("the newest one");
+        expect(read.unreadCount).toBe(0);
+        expect(read.lastMessage?.readByUserIds).toEqual([alice.user.id]);
+
+        const withHistory = yield* timeListChats;
+        // Within ~2× of the baseline; the couple of ms of slack only absorbs
+        // timer noise at these ms scales — anti-joining the whole history
+        // again costs tens of ms.
+        expect(withHistory).toBeLessThan(Math.max(2 * baseline, baseline + 2));
+      }),
+    ),
+  // Seeding and reading a 50k-message chat is heavy work by design; under
+  // CI's parallel, coverage-instrumented run it can pass the suite-wide 15s
+  // on CPU alone. What it guards is the timing ratio checked above, not this.
+  60_000,
+);
 
 test("markRead only moves the read watermark forward, and a repeat with nothing new is a no-op", () =>
   run(
@@ -1197,6 +1204,8 @@ test("rejoining a group keeps its history read, and only later messages count as
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
+      // Strangers' groups start as message requests (issue #785).
+      yield* bob.client.chats.acceptChatRequest({ params: { id: chat.id } });
       let last = 0;
       for (let i = 0; i < 5; i++)
         last = (yield* alice.client.chats.createMessage({
@@ -1216,6 +1225,8 @@ test("rejoining a group keeps its history read, and only later messages count as
         params: { id: chat.id },
         payload: { participantIds: [bob.user.id] },
       });
+      // No other chat with Alice now, so it's a request again.
+      yield* bob.client.chats.acceptChatRequest({ params: { id: chat.id } });
       const rejoined = yield* bob.client.chats.getChat({
         params: { id: chat.id },
       });
@@ -1241,6 +1252,7 @@ test("joining a group with history, by invite or by being added, starts with not
       const chat = yield* alice.client.chats.createGroupChat({
         payload: { title: "Group", participantIds: [bob.user.id] },
       });
+      yield* bob.client.chats.acceptChatRequest({ params: { id: chat.id } });
       for (let i = 0; i < 3; i++)
         yield* alice.client.chats.createMessage({
           params: { id: chat.id },
@@ -1264,6 +1276,7 @@ test("joining a group with history, by invite or by being added, starts with not
         payload: { participantIds: [carol.user.id] },
       });
       expect(added.participants.map((p) => p.userId)).toContain(carol.user.id);
+      yield* carol.client.chats.acceptChatRequest({ params: { id: chat.id } });
       const carolView = yield* carol.client.chats.getChat({
         params: { id: chat.id },
       });
@@ -3056,6 +3069,7 @@ test("getUnreadChatCount sums across chats and only counts chats you're in", () 
           participantIds: [alice.user.id, bob.user.id],
         },
       });
+      yield* alice.client.chats.acceptChatRequest({ params: { id: group.id } });
       const withoutAlice = yield* bob.client.chats.createDirectChat({
         payload: { userId: carol.user.id },
       });
@@ -3105,6 +3119,10 @@ test("listChats with unread=true pages with the same cursor as the full list", (
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const bob = yield* registerAndLogin("bob", "pw-testpass");
+      // Already talking, so Bob's groups aren't message requests (#785).
+      yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
       const unreadIds: number[] = [];
       for (let i = 0; i < 5; i++) {
         const group = yield* bob.client.chats.createGroupChat({

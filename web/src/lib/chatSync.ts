@@ -252,6 +252,13 @@ export function patchReadReceipt(
 // One the full list hasn't loaded is left for that list's next refetch,
 // unless it now sorts into the loaded range, where it's refetched now.
 function upsertListedChat(queryClient: QueryClient, chat: Chat): void {
+  // A message request (issue #785) isn't in the main list until it's
+  // accepted, so it's only patched where it's already listed — the
+  // requests list — never placed into the main one.
+  if (chat.messageRequest) {
+    patchListedChat(queryClient, chat.id, () => chat);
+    return;
+  }
   const sortsBefore = (a: Chat, b: Chat) =>
     a.updatedAt > b.updatedAt || (a.updatedAt === b.updatedAt && a.id > b.id);
   let missing = false;

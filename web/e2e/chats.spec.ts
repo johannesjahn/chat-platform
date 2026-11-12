@@ -99,6 +99,15 @@ test("group chats can be created, renamed by the creator, and show all participa
   // Only the creator can rename — the rename control shouldn't even render
   // for B in the chat details panel (the group settings modal below `xl`),
   // and the chat still shows up in B's list under the old name.
+  // A and B have never chatted, so it reaches B as a message request
+  // (issue #785) — accepted first, it's in B's list from then on.
+  await pageB.goto("/chats/requests");
+  await pageB.getByRole("main").getByText("Playwright squad").click();
+  await pageB.getByRole("button", { name: "Accept" }).click();
+  // Wait for the accept to land: leaving the page straight away can abort it.
+  await expect(
+    pageB.getByRole("region", { name: "Message request" }),
+  ).toHaveCount(0);
   await pageB.goto("/chats");
   await expect(pageB.getByText("Playwright squad")).toBeVisible();
   await pageB.getByText("Playwright squad").click();
@@ -337,7 +346,15 @@ test("the creator can add participants to a group chat, and the new participant 
     pageA.getByRole("main").getByText("3 participants"),
   ).toBeVisible();
 
-  // The newly added participant now sees the chat in their own list.
+  // The newly added participant has never chatted with A, so it's a message
+  // request (issue #785); once accepted it's in their own list.
+  await pageC.goto("/chats/requests");
+  await pageC.getByRole("main").getByText("Add participants test").click();
+  await pageC.getByRole("button", { name: "Accept" }).click();
+  // Wait for the accept to land: leaving the page straight away can abort it.
+  await expect(
+    pageC.getByRole("region", { name: "Message request" }),
+  ).toHaveCount(0);
   await pageC.goto("/chats");
   await expect(pageC.getByText("Add participants test")).toBeVisible();
 

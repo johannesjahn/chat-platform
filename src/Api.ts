@@ -1045,6 +1045,15 @@ export const Message = Schema.Struct({
 }).annotate({ identifier: "Message" });
 export type Message = typeof Message.Type;
 
+// The viewer's pending message request for a chat (issue #785): they were
+// put in this group by someone they shared no chat with, and haven't
+// accepted yet. `addedBy` is who did it (null once that account is gone),
+// so declining can offer to block them.
+export const MessageRequest = Schema.Struct({
+  addedBy: Schema.NullOr(Schema.Finite),
+}).annotate({ identifier: "MessageRequest" });
+export type MessageRequest = typeof MessageRequest.Type;
+
 export const Chat = Schema.Struct({
   id: Schema.Finite,
   type: ChatType,
@@ -1074,6 +1083,12 @@ export const Chat = Schema.Struct({
   // those there's no `avatarUrl` counterpart here: a group avatar only ever
   // comes from an upload, not a linked external image.
   avatarVariants: Schema.NullOr(AvatarVariants),
+  // Non-null while this chat is a message request for the viewer (issue
+  // #785). Until they accept (`POST /chats/:id/accept`) it's left out of
+  // their chat list (`GET /chats?requests=true` lists it instead), its
+  // `unreadCount` stays 0 and it adds nothing to `/chats/unread-count`.
+  // Declining is just leaving (`POST /chats/:id/leave`).
+  messageRequest: Schema.NullOr(MessageRequest),
 }).annotate({ identifier: "Chat" });
 export type Chat = typeof Chat.Type;
 
@@ -1778,6 +1793,9 @@ export const MAX_CHATS_LIMIT = 100;
 // for the caller — the chat list's Unread filter — on the server, so an
 // older unread chat shows up without paging through every read chat ahead
 // of it. Same sort and cursor as the full list.
+//
+// `requests=true` (issue #785) lists the caller's pending message requests
+// instead — chats the default list leaves out until they're accepted.
 export const ChatsPageQuery = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
@@ -1786,6 +1804,7 @@ export const ChatsPageQuery = Schema.Struct({
     ),
   ),
   unread: Schema.optional(Schema.Literals(["true", "false"])),
+  requests: Schema.optional(Schema.Literals(["true", "false"])),
 });
 
 // The caller's unread total across every chat they're in (issue #756) —
@@ -2166,6 +2185,16 @@ const ChatsGroup = HttpApiGroup.make("chats")
         error: [NotFound, Forbidden, InvalidChatRequest],
       },
     ).middleware(Authentication),
+  )
+  .add(
+    // Accepts a pending message request (issue #785): the chat joins the
+    // caller's list, counts toward their unread total, and shares presence
+    // with its members from now on. A no-op for a chat that isn't a request.
+    HttpApiEndpoint.post("acceptChatRequest", "/chats/:id/accept", {
+      params: ChatIdPath,
+      success: Chat,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
   )
   .add(
     // A participant removes themselves from a group chat. If this empties

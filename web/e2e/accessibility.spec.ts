@@ -74,6 +74,7 @@ type Seeded = {
   userId: number;
   postId: number;
   chatId: number;
+  requestId: number;
   lobbyId: number;
 };
 
@@ -88,11 +89,14 @@ const SIGNED_IN_PAGES: { name: string; paths: (seeded: Seeded) => string[] }[] =
     },
     {
       name: "people and chats",
-      paths: ({ userId, chatId }) => [
+      paths: ({ userId, chatId, requestId }) => [
         `/users/${userId}`,
         "/users",
         "/chats",
         `/chats/${chatId}`,
+        // Message requests (issue #785): the list, and one open.
+        "/chats/requests",
+        `/chats/${requestId}`,
       ],
     },
     {
@@ -143,11 +147,20 @@ for (const { name, paths } of SIGNED_IN_PAGES) {
         content: "Hello there!",
       });
       const { id: lobbyId } = await post("/games/typing/lobbies");
+      // A group from a stranger is a message request.
+      const stranger = await createUser();
+      const created = await request.post(`${apiUrl}/chats/group`, {
+        headers: { Authorization: `Bearer ${stranger.session.accessToken}` },
+        data: { title: "A request", participantIds: [me.session.user.id] },
+      });
+      expect(created.ok()).toBe(true);
+      const { id: requestId } = (await created.json()) as { id: number };
 
       for (const path of paths({
         userId: me.session.user.id,
         postId,
         chatId,
+        requestId,
         lobbyId,
       })) {
         await page.goto(path);
