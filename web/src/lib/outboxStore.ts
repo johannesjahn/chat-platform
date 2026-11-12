@@ -14,6 +14,8 @@ export type OutboxReplyPreview = {
   senderName: string;
   contentType: MessageContentType;
   content: string;
+  // The quoted attachment's caption (issue #765), if it has one.
+  caption?: string | null;
 };
 
 export type OutboxMessage = {
@@ -27,6 +29,8 @@ export type OutboxMessage = {
   attachmentId?: number;
   // The uploaded file, kept so the bubble can preview it while sending.
   attachment?: Attachment;
+  // Text sent alongside the attachment (issue #765).
+  caption?: string;
   parentMessageId?: number;
   replyPreview?: OutboxReplyPreview;
   createdAt: number;

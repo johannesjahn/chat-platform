@@ -81,6 +81,8 @@ export type ReplyTarget = {
   senderName: string;
   contentType: MessageContentType;
   content: string;
+  // An attachment's caption (issue #765), shown in place of "Attachment".
+  caption?: string | null;
 };
 
 // What the conversation around the composer can ask of it: a file dropped
@@ -103,6 +105,8 @@ type ChatComposerProps = {
     attachmentId?: number;
     // The uploaded file itself, so the "sending" bubble can preview it.
     attachment?: Attachment;
+    // Text typed alongside the file (issue #765).
+    caption?: string;
     parentMessageId?: number;
   }) => void;
   // The message being replied to, or null when composing a normal message.
@@ -119,7 +123,8 @@ type ChatComposerProps = {
 
 function replyPreviewText(target: ReplyTarget): string {
   if (target.contentType === "image_url") return "📷 Photo";
-  if (target.contentType === "attachment") return "📎 Attachment";
+  if (target.contentType === "attachment")
+    return target.caption ? `📎 ${target.caption}` : "📎 Attachment";
   return target.content;
 }
 
@@ -181,9 +186,10 @@ export function ChatComposer({
   const urlInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Grow the textarea to fit what's been typed, up to MAX_VISIBLE_LINES.
+  // Grow the textarea to fit what's been typed, up to MAX_VISIBLE_LINES —
+  // the message field, or an attachment's caption field.
   useEffect(() => {
-    if (contentType !== "text") return;
+    if (contentType !== "text" && contentType !== "attachment") return;
     const textarea = textareaRef.current;
     if (!textarea) return;
     // An *empty* textarea still reports its wrapped placeholder's height in
@@ -254,9 +260,10 @@ export function ChatComposer({
   // Sending while offline is allowed for text/image_url — `onSend` queues the
   // message locally instead of failing (see lib/offlineQueue.ts). An
   // attachment message can't be queued the same way (it needs a completed
-  // upload, which needs a live connection), so it requires being online.
+  // upload, which needs a live connection), so it requires being online. A
+  // file's caption (issue #765) is held to the same length as a message.
   const canSend = usesAttachment(contentType)
-    ? attachment !== null && isOnline
+    ? attachment !== null && isOnline && !overLimit
     : trimmed.length > 0 && !overLimit && !invalidImageUrl;
 
   // With nothing typed there's nothing to send, so the trailing button is a
@@ -351,6 +358,11 @@ export function ChatComposer({
             content: attachment!.filename,
             attachmentId: attachment!.id,
             attachment: attachment!,
+            // What was typed in the message field goes along as the file's
+            // caption (issue #765) instead of being dropped.
+            ...(contentType === "attachment" && trimmed !== ""
+              ? { caption: trimmed }
+              : {}),
             parentMessageId,
           }
         : { contentType, content: trimmed, parentMessageId },
@@ -537,20 +549,42 @@ export function ChatComposer({
             />
           </div>
         ) : contentType === "attachment" ? (
-          <AttachmentUploadField
-            key={pickedFileKey}
-            attachment={attachment}
-            pendingFile={pickedFile}
-            onUploaded={setAttachment}
-            // Dropping the file drops the mode with it — there's nothing left
-            // to send as an attachment, so the composer goes back to text
-            // rather than sitting on an empty drop zone.
-            onClear={resetToText}
-            // The rounder corners the rest of the row now has — the field's
-            // own `rounded-lg` would read as a different surface sitting in
-            // the same row as the message pill.
-            className="min-w-0 flex-1 rounded-2xl"
-          />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <AttachmentUploadField
+              key={pickedFileKey}
+              attachment={attachment}
+              pendingFile={pickedFile}
+              onUploaded={setAttachment}
+              // Dropping the file drops the mode with it — there's nothing
+              // left to send as an attachment, so the composer goes back to
+              // text (keeping the caption as the message) rather than sitting
+              // on an empty drop zone.
+              onClear={resetToText}
+              // The rounder corners the rest of the row now has — the
+              // field's own `rounded-lg` would read as a different surface
+              // sitting in the same row as the message pill.
+              className="rounded-2xl"
+            />
+            {/* The message field carries on as the file's caption (issue
+                #765): what was typed before attaching stays, and is sent
+                with it. */}
+            <div className={fieldClassName}>
+              <MentionTextarea
+                ref={textareaRef}
+                value={content}
+                onValueChange={handleContentChange}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                placeholder="Add a caption…"
+                aria-label="Caption"
+                enterKeyHint={enterInsertsNewline ? "enter" : "send"}
+                rows={1}
+                aria-invalid={overLimit}
+                containerClassName="min-w-0 flex-1"
+                className="min-h-9 w-full resize-none overflow-hidden border-0 bg-transparent px-0 py-1.5 shadow-none transition-[height] duration-150 ease-smooth focus-visible:ring-0"
+              />
+            </div>
+          </div>
         ) : (
           <VoiceRecorderField
             attachment={attachment}

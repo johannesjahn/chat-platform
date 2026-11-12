@@ -260,8 +260,9 @@ test("an @mention in a caption notifies, and its excerpt is the caption", () =>
           .notifications.length,
       ).toBe(1);
       expect(
-        (yield* carol.client.notifications.listNotifications({ query: {} }))
-          .notifications.map((n) => n.type),
+        (yield* carol.client.notifications.listNotifications({
+          query: {},
+        })).notifications.map((n) => n.type),
       ).toEqual(["mention"]);
     }),
   ));

@@ -1002,6 +1002,7 @@ export function ChatConversation({
     content: string;
     attachmentId?: number;
     attachment?: Attachment;
+    caption?: string;
     parentMessageId?: number;
   }) {
     // Offline: queue instead of attempting the request at all — it would
@@ -1029,6 +1030,7 @@ export function ChatConversation({
               senderName: replyingTo.senderName,
               contentType: replyingTo.contentType,
               content: replyingTo.content,
+              caption: replyingTo.caption,
             }
           : undefined,
     });
@@ -1123,6 +1125,7 @@ export function ChatConversation({
                             senderName: sender ? userLabel(sender) : "Someone",
                             contentType: message.contentType,
                             content: message.content,
+                            caption: message.caption,
                           })
                         }
                         onForward={() => setForwarding({ message, open: true })}
@@ -1186,6 +1189,7 @@ export function ChatConversation({
                 attachment={
                   item.source === "outbox" ? item.attachment : undefined
                 }
+                caption={item.source === "outbox" ? item.caption : undefined}
                 replyPreview={
                   item.source === "outbox" ? item.replyPreview : undefined
                 }

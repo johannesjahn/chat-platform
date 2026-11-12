@@ -64,7 +64,8 @@ function preview(chat: Chat): string {
   const last = chat.lastMessage;
   if (!last) return "New message";
   if (last.contentType === "image_url") return "📷 Photo";
-  if (last.contentType === "attachment") return "📎 Attachment";
+  if (last.contentType === "attachment")
+    return `📎 ${last.caption || "Attachment"}`;
   return last.content;
 }
 

@@ -263,9 +263,18 @@ export function MessageBubble({
 
   const hasReactions = message.reactions.some((r) => r.count > 0);
   const wasEdited = message.updatedAt !== message.createdAt;
-  const isLongText =
-    message.contentType === "text" &&
-    message.content.length > MESSAGE_COLLAPSE_THRESHOLD;
+  // The prose the bubble shows: a text message's content, or an attachment's
+  // caption (issue #765), under the file. An attachment whose file is gone
+  // still shows its filename, as it always has.
+  const hasAttachment =
+    message.contentType === "attachment" && message.attachment !== null;
+  const bodyText =
+    message.contentType === "image_url"
+      ? null
+      : message.contentType === "attachment"
+        ? (message.caption ?? (hasAttachment ? null : message.content))
+        : message.content;
+  const isLongText = (bodyText?.length ?? 0) > MESSAGE_COLLAPSE_THRESHOLD;
   const {
     ref: textRef,
     expanded,
@@ -315,7 +324,7 @@ export function MessageBubble({
   async function copy(kind: "text" | "link") {
     const value =
       kind === "text"
-        ? message.content
+        ? (bodyText ?? message.content)
         : `${window.location.origin}/chats/${message.chatId}?message=${message.id}`;
     try {
       await navigator.clipboard.writeText(value);
@@ -488,7 +497,7 @@ export function MessageBubble({
       >
         <Star className={cn("size-3.5", message.starred && "fill-current")} />
       </Button>
-      {message.contentType === "text" && (
+      {(message.contentType === "text" || message.caption) && (
         <Button
           type="button"
           size="icon"
@@ -893,30 +902,33 @@ export function MessageBubble({
                 className="max-h-72 w-72 max-w-full rounded-lg bg-muted object-cover"
               />
             </button>
-          ) : message.contentType === "attachment" && message.attachment ? (
-            <AttachmentPreview
-              attachment={message.attachment}
-              className={attachmentWidthClassName}
-            />
           ) : (
             <>
-              <p
-                ref={textRef}
-                className={cn(
-                  "whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed",
-                  clamped && "line-clamp-4",
-                )}
-              >
-                <MentionText
-                  text={message.content}
-                  // The primary-tinted link colour is invisible on an own
-                  // message's primary-filled bubble — underline it against
-                  // the bubble's own foreground colour there instead.
-                  className={
-                    isOwn ? "text-primary-foreground underline" : undefined
-                  }
+              {hasAttachment && message.attachment && (
+                <AttachmentPreview
+                  attachment={message.attachment}
+                  className={attachmentWidthClassName}
                 />
-              </p>
+              )}
+              {bodyText !== null && (
+                <p
+                  ref={textRef}
+                  className={cn(
+                    "whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed",
+                    clamped && "line-clamp-4",
+                  )}
+                >
+                  <MentionText
+                    text={bodyText}
+                    // The primary-tinted link colour is invisible on an own
+                    // message's primary-filled bubble — underline it against
+                    // the bubble's own foreground colour there instead.
+                    className={
+                      isOwn ? "text-primary-foreground underline" : undefined
+                    }
+                  />
+                </p>
+              )}
               {isLongText && (
                 <Button
                   type="button"

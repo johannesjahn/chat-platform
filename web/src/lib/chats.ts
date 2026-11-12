@@ -35,7 +35,8 @@ export type MessageContentType = components["schemas"]["MessageContentType"];
 // pinned bar and the chat details panel's pinned/starred lists.
 export function messagePreview(message: ChatMessage): string {
   if (message.contentType === "image_url") return "📷 Photo";
-  if (message.contentType === "attachment") return "📎 Attachment";
+  if (message.contentType === "attachment")
+    return `📎 ${message.caption || "Attachment"}`;
   return message.content;
 }
 
@@ -61,7 +62,8 @@ export function lastMessageText(chat: Chat): string {
   const last = chat.lastMessage;
   if (!last) return "No messages yet";
   if (last.contentType === "image_url") return "Photo";
-  if (last.contentType === "attachment") return "Attachment";
+  // A captioned attachment previews as its caption (issue #765).
+  if (last.contentType === "attachment") return last.caption || "Attachment";
   return last.content;
 }
 
@@ -471,9 +473,12 @@ export function patchCachedMessage(
 export function parentPreviewText(parent: {
   contentType: MessageContentType;
   content: string;
+  // The quoted attachment's caption (issue #765), shown after the clip.
+  caption?: string | null;
 }): string {
   if (parent.contentType === "image_url") return "📷 Photo";
-  if (parent.contentType === "attachment") return "📎 Attachment";
+  if (parent.contentType === "attachment")
+    return `📎 ${parent.caption || "Attachment"}`;
   return parent.content;
 }
 

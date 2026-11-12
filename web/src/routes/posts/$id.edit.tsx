@@ -114,10 +114,11 @@ function EditPostPage() {
       initialContentType={post.contentType}
       initialContent={post.content}
       initialAttachment={post.attachment}
-      onSubmit={async ({ contentType, content, attachmentId }) => {
+      initialCaption={post.caption}
+      onSubmit={async ({ contentType, content, attachmentId, caption }) => {
         await updatePost.mutateAsync({
           params: { path: { id } },
-          body: { contentType, content, attachmentId },
+          body: { contentType, content, attachmentId, caption },
         });
         await queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
         await router.navigate({ to: "/" });
