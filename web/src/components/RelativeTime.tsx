@@ -1,39 +1,16 @@
 import { useSyncExternalStore } from "react";
+import { sharedClock } from "@/lib/clock";
 import { formatAbsoluteTime, formatRelativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
-// A single shared 30s clock drives every RelativeTime on the page, so a feed
-// of a hundred posts costs one interval instead of a hundred. Subscribers are
-// only notified while at least one <RelativeTime> is mounted — the interval is
-// created on the first subscriber and cleared when the last unmounts.
-const listeners = new Set<() => void>();
-let now = Date.now();
-let timer: ReturnType<typeof setInterval> | null = null;
-
-function subscribe(callback: () => void): () => void {
-  listeners.add(callback);
-  if (timer === null) {
-    timer = setInterval(() => {
-      now = Date.now();
-      for (const l of listeners) l();
-    }, 30_000);
-  }
-  return () => {
-    listeners.delete(callback);
-    if (listeners.size === 0 && timer !== null) {
-      clearInterval(timer);
-      timer = null;
-    }
-  };
-}
-
+// Every RelativeTime reads one shared clock (see lib/clock.ts): one interval
+// for the whole page, and a value that's re-read on mount after an idle
+// stretch, so a timestamp never shows an age frozen at the last tick.
 function useNow(): number {
-  // Server snapshot is a stable value — SSR renders the initial `now` and the
-  // client reconciles on first tick, avoiding a hydration mismatch loop.
   return useSyncExternalStore(
-    subscribe,
-    () => now,
-    () => now,
+    sharedClock.subscribe,
+    sharedClock.getNow,
+    sharedClock.getServerNow,
   );
 }
 
