@@ -1,6 +1,7 @@
 import { createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 import { NotFoundPage, RouteErrorPage } from "./components/RouteFallbacks";
+import { trackBackOrigins } from "./lib/backOrigin";
 import { settlePageEntrance } from "./lib/pageEntrance";
 
 // The router awaits only a transition's `updateCallbackDone`. Its `ready`
@@ -66,6 +67,8 @@ export function getRouter() {
   router.subscribe("onRendered", ({ pathChanged }) => {
     if (pathChanged) settlePageEntrance();
   });
+  // Lets a page's back control name where it returns to (issue #762).
+  trackBackOrigins(router);
   return router;
 }
 
