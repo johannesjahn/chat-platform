@@ -1,6 +1,7 @@
 import { queryOptions, useQueries } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
+import { USER_SUMMARY_STALE_TIME_MS } from "./realtimeFreshness";
 import { refetchUnlessWarmed } from "./routeLoader";
 
 export type UserSummary = {
@@ -107,6 +108,10 @@ export function userSummaryQueryOptions(id: number) {
       { params: { path: { id: String(id) } } },
     ] as const,
     refetchOnMount: refetchUnlessWarmed,
+    // Names and avatars rarely change, and the user's own edits invalidate
+    // these (issue #752). Only this observer's: the profile page reads the
+    // same entry with the default, so opening a profile still refetches it.
+    staleTime: USER_SUMMARY_STALE_TIME_MS,
     queryFn: async () => {
       const { data, error } = await fetchClient.GET("/users/{id}", {
         params: { path: { id: String(id) } },

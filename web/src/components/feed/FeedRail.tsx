@@ -15,6 +15,7 @@ import {
   type Chat,
 } from "@/lib/chats";
 import { useGameLobbies } from "@/lib/games/lobby";
+import { useGameHubRoom } from "@/lib/games/rooms";
 import { GAMES, gameThemeStyle, type GameId } from "@/lib/games/registry";
 import { useOnlineUserIds } from "@/lib/presence";
 import { useUserStatus } from "@/lib/status";
@@ -228,6 +229,10 @@ function RecentChat({
 
 function GameLobbiesRow({ gameId }: { gameId: GameId }) {
   const game = GAMES.find((g) => g.id === gameId)!;
+  // In the game's hub room, like the arcade's own lobby lists: it keeps
+  // this count live, and is what lets coming back to the feed reuse it
+  // instead of refetching it (issue #752).
+  useGameHubRoom(gameId);
   const { data: lobbies } = useGameLobbies(gameId, true);
   const waiting = lobbies?.filter((l) => l.phase === "waiting").length ?? 0;
   return (

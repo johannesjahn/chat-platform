@@ -8,7 +8,8 @@ import {
 import { fetchClient } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import type { GameId } from "./registry";
-import { resetGameProgress } from "./rooms";
+import { realtimeStaleTime } from "@/lib/realtimeFreshness";
+import { gameHubRoom, resetGameProgress } from "./rooms";
 
 export type GameLobby = components["schemas"]["GameLobby"];
 export type GameLobbyPlayer = components["schemas"]["GameLobbyPlayer"];
@@ -103,10 +104,14 @@ export function useGameLobby(lobbyId: number, enabled: boolean) {
   });
 }
 
+// Callers stay in the game's hub room (`useGameHubRoom`), whose
+// `game_lobbies_changed` events refresh this — which is what its
+// `staleTime` relies on (see realtimeFreshness.ts).
 export function useGameLobbies(game: GameId, enabled: boolean) {
   return useQuery({
     queryKey: gameLobbiesQueryKey(game),
     enabled,
+    staleTime: realtimeStaleTime(gameHubRoom(game)),
     queryFn: async () =>
       unwrap(
         await fetchClient.GET("/games/{game}/lobbies", {

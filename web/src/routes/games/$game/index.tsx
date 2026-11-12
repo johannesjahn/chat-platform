@@ -22,7 +22,7 @@ import {
   type LeaderboardPeriod,
 } from "@/lib/games/lobby";
 import { GAMES, gameTitle, getGame, type GameId } from "@/lib/games/registry";
-import { gameHubRoom, useGameRoom } from "@/lib/games/rooms";
+import { useGameHubRoom } from "@/lib/games/rooms";
 import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/games/$game/")({
@@ -63,7 +63,7 @@ function GameHub({ gameId }: { gameId: GameId }) {
   const navigate = useNavigate();
   const [period, setPeriod] = useState<LeaderboardPeriod>("week");
 
-  useGameRoom(session ? gameHubRoom(gameId) : null);
+  useGameHubRoom(session ? gameId : null);
   const lobbies = useGameLobbies(gameId, !!session);
   const leaderboard = useLeaderboard(gameId, period, !!session);
   const quickPlay = useQuickPlay(gameId);
