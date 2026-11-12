@@ -8,9 +8,13 @@ import {
   inArray,
   isNull,
   lt,
+  max,
+  ne,
+  notExists,
   or,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Cache, Effect, Metric } from "effect";
 import { setLogUser } from "./RedactedLogger.ts";
 import {
@@ -26,6 +30,7 @@ import {
   InvalidUsernameLookupRequest,
   InvalidUserSearchRequest,
   MAX_AVATAR_UPLOAD_SIZE_BYTES,
+  MAX_CONTACTS,
   MAX_USERNAME_LOOKUP_COUNT,
   MIN_USER_SEARCH_QUERY_LENGTH,
   NotFound,
@@ -61,6 +66,8 @@ import { RateLimiter, type RateLimitResult } from "./RateLimiter.ts";
 import { containsPattern } from "./search.ts";
 import {
   attachments,
+  chatParticipants,
+  chats,
   refreshTokens,
   userBlocks,
   users,
@@ -308,6 +315,65 @@ export const publicUserColumns = {
   statusExpiresAt: users.statusExpiresAt,
 } as const;
 
+// A user's contacts, for the suggestions shown before a directory search
+// (issue #764): everyone they share a chat with, ordered by that chat's
+// latest activity (`chats.updated_at`, bumped on every message), newest
+// first. It's the relationship `PresenceAudience` shares presence over —
+// only an *accepted* chat introduces anyone (a pending message request,
+// issue #785, on either side doesn't), and a block in either direction
+// hides the pair from each other (a mute doesn't: it never stops messaging
+// either). Never includes `userId` itself.
+//
+// This must only ever return people `userId` already shares a chat with:
+// it's what lets the client suggest people for a 1–2 character query
+// without reopening the browsable directory that `/users/search`'s
+// 3-character floor closed (issue #48).
+const contactParticipants = alias(chatParticipants, "contact_participants");
+
+export const contactsOf = (db: DrizzleDb, userId: number, limit: number) =>
+  db
+    .select(publicUserColumns)
+    .from(chatParticipants)
+    .innerJoin(chats, eq(chats.id, chatParticipants.chatId))
+    .innerJoin(
+      contactParticipants,
+      eq(contactParticipants.chatId, chatParticipants.chatId),
+    )
+    .innerJoin(users, eq(users.id, contactParticipants.userId))
+    .where(
+      and(
+        eq(chatParticipants.userId, userId),
+        ne(contactParticipants.userId, userId),
+        eq(chatParticipants.requestPending, false),
+        eq(contactParticipants.requestPending, false),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(userBlocks)
+            .where(
+              and(
+                eq(userBlocks.type, "block"),
+                or(
+                  and(
+                    eq(userBlocks.blockerId, userId),
+                    eq(userBlocks.blockedId, contactParticipants.userId),
+                  ),
+                  and(
+                    eq(userBlocks.blockerId, contactParticipants.userId),
+                    eq(userBlocks.blockedId, userId),
+                  ),
+                ),
+              ),
+            ),
+        ),
+      ),
+    )
+    // `users.id` is the primary key, so the other selected `users` columns
+    // are functionally dependent on it and Postgres accepts them ungrouped.
+    .groupBy(users.id)
+    .orderBy(desc(max(chats.updatedAt)), desc(users.id))
+    .limit(limit);
+
 // Auth funnel counter (issue #196) — labeled only by `event`
 // ("signup"/"login"/"refresh") and `outcome` ("success"/"failure"), never by
 // username/user id. A request rejected by enforceRateLimit above is counted
@@ -485,6 +551,15 @@ export const UsersHandlerLive = HttpApiBuilder.group(
               )
               .orderBy(users.username)
               .limit(USER_SEARCH_RESULTS_LIMIT),
+          ).pipe(Effect.orDie);
+          return rows.map(toPublicUser);
+        }),
+      )
+      .handle("listContacts", () =>
+        Effect.gen(function* () {
+          const currentUser = yield* CurrentUser;
+          const rows = yield* Effect.tryPromise(() =>
+            contactsOf(db, currentUser.id, MAX_CONTACTS),
           ).pipe(Effect.orDie);
           return rows.map(toPublicUser);
         }),

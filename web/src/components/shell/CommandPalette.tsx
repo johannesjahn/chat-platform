@@ -26,8 +26,10 @@ import {
 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { SearchHighlight } from "@/components/SearchHighlight";
+import { MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { chatDisplayName, useChatsList, type Chat } from "@/lib/chats";
+import { filterContacts, useContacts } from "@/lib/contacts";
 import { isImeComposing } from "@/lib/ime";
 import { useTransitionState } from "@/lib/motion";
 import { MIN_SEARCH_QUERY_LENGTH, useSearchAll } from "@/lib/search";
@@ -59,8 +61,10 @@ type PaletteItem = {
  * it's a switcher — your most recent chats and the app's main places — and
  * as you type it filters your chats by name and, past
  * `MIN_SEARCH_QUERY_LENGTH`, live-searches people, posts and messages
- * through the same `GET /search` the results page uses. ↑/↓ move, Enter
- * opens, and the last row is always "all results" on `/search`.
+ * through the same `GET /search` the results page uses (People below
+ * `MIN_USER_SEARCH_QUERY_LENGTH` come from your own contacts instead, issue
+ * #764). ↑/↓ move, Enter opens, and the last row is always "all results"
+ * on `/search`.
  *
  * It's a combobox over a listbox: focus stays in the input and the active
  * row is announced via `aria-activedescendant`.
@@ -126,6 +130,7 @@ function PaletteBody() {
   const debounced = useDebouncedValue(trimmed, 200);
   const searching = debounced.length >= MIN_SEARCH_QUERY_LENGTH;
   const { data: chatsData } = useChatsList(!!session);
+  const { data: contacts } = useContacts(!!session);
   const { data: results, isFetching } = useSearchAll(
     debounced,
     !!session && searching,
@@ -191,30 +196,41 @@ function PaletteBody() {
       return list;
     }
 
+    // People: below the directory search's floor (issue #48) — which
+    // `GET /search` applies to its users section too — they come from the
+    // caller's own contacts, filtered here (issue #764); past it, from the
+    // search.
+    const people =
+      trimmed.length < MIN_USER_SEARCH_QUERY_LENGTH
+        ? filterContacts(contacts ?? [], trimmed)
+        : searching && results
+          ? results.users.results.map((hit) => hit.user)
+          : [];
+    for (const user of people.slice(0, RESULT_LIMIT)) {
+      list.push({
+        key: `user-${user.id}`,
+        group: "People",
+        label: userLabel(user),
+        text: userLabel(user),
+        hint: userHandle(user),
+        leading: (
+          <Avatar
+            name={userAvatarName(user)}
+            avatarUrl={user.avatarUrl}
+            avatarVariants={user.avatarVariants}
+            size="sm"
+          />
+        ),
+        onSelect: go(() =>
+          navigate({
+            to: "/users/$id",
+            params: { id: String(user.id) },
+          }),
+        ),
+      });
+    }
+
     if (searching && results) {
-      for (const hit of results.users.results.slice(0, RESULT_LIMIT)) {
-        list.push({
-          key: `user-${hit.user.id}`,
-          group: "People",
-          label: userLabel(hit.user),
-          text: userLabel(hit.user),
-          hint: userHandle(hit.user),
-          leading: (
-            <Avatar
-              name={userAvatarName(hit.user)}
-              avatarUrl={hit.user.avatarUrl}
-              avatarVariants={hit.user.avatarVariants}
-              size="sm"
-            />
-          ),
-          onSelect: go(() =>
-            navigate({
-              to: "/users/$id",
-              params: { id: String(hit.user.id) },
-            }),
-          ),
-        });
-      }
       for (const hit of results.posts.results.slice(0, RESULT_LIMIT)) {
         const text = hit.snippet.map((s) => s.text).join("");
         list.push({
@@ -264,7 +280,7 @@ function PaletteBody() {
     return list;
     // `go`/`navigate` are stable in behaviour; the list only depends on data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, chatsData, trimmed, searching, results]);
+  }, [session, chatsData, contacts, trimmed, searching, results]);
 
   // Keep the selection on a real row as the list changes under it (-1 is
   // the search box itself).

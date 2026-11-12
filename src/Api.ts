@@ -1363,6 +1363,13 @@ export class InvalidUsernameLookupRequest extends Schema.TaggedError<InvalidUser
   { httpApiStatus: 400 },
 ) {}
 
+// How many people one `GET /users/contacts` call returns (issue #764). The
+// client filters this list itself for 1–2 character queries — below the
+// directory search's floor — so it has to hold most of the people someone
+// actually talks to, while staying a bounded payload however many chats
+// they're in.
+export const MAX_CONTACTS = 50;
+
 // Mime types `POST /users/me/avatar` accepts (issue #269) — narrower than
 // `ALLOWED_ATTACHMENT_MIME_TYPES`: no GIF (animated avatars are explicitly
 // out of scope for the initial cut) and no video/audio.
@@ -1427,6 +1434,21 @@ const UsersGroup = HttpApiGroup.make("users")
       query: UsernameLookupQuery,
       success: Schema.Array(User),
       error: InvalidUsernameLookupRequest,
+    }).middleware(Authentication),
+  )
+  .add(
+    // The caller's own contacts (issue #764): everyone they share an
+    // accepted chat with, most recent chat activity first, capped at
+    // `MAX_CONTACTS`. Backs the suggestions the New chat picker, `/users`
+    // and the palette show before (and, filtered client-side, below) the
+    // directory search's `MIN_USER_SEARCH_QUERY_LENGTH` floor — which this
+    // doesn't weaken, since it only ever returns people the caller already
+    // shares a chat with. Blocks in either direction, and pending message
+    // requests on either side (issue #785), are left out — the same set
+    // `PresenceAudience` shares presence with. Registered ahead of
+    // `getUser` like `/users/by-username`.
+    HttpApiEndpoint.get("listContacts", "/users/contacts", {
+      success: Schema.Array(User),
     }).middleware(Authentication),
   )
   .add(
