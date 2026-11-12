@@ -399,13 +399,32 @@ test("a post opens as an overlay over the feed, which keeps its place", async ({
   const me = await signUp(page);
   const ids = await seedPosts(request, apiUrl, me, 12);
   // "Feed post number 7": far enough down the (newest-first) feed that the
-  // page has to scroll, but still on its first page.
+  // page has to scroll.
   const postId = ids[6]!;
   await page.goto("/");
 
   const card = page.locator(`[data-post-id="${postId}"]`).first();
   const openLink = card.getByRole("link", { name: "Open post" });
+  // Scrolling to the card also brings the sentinel near enough to pull in the
+  // feed's second page (the first is 10 posts). Let that land, and centre the
+  // link, before measuring.
   await openLink.scrollIntoViewIfNeeded();
+  await expect(page.locator("[data-post-id]")).toHaveCount(ids.length);
+  await openLink.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  // Right after load, the navigation's view transition leaves `html` catching
+  // pointer events for a moment. A click that lands then is retried by
+  // Playwright at other scroll offsets, moving the feed away from where it's
+  // measured here — so wait until the link can actually be hit.
+  await expect
+    .poll(() =>
+      openLink.evaluate((el) => {
+        const { x, y, width, height } = el.getBoundingClientRect();
+        return el.contains(
+          document.elementFromPoint(x + width / 2, y + height / 2),
+        );
+      }),
+    )
+    .toBe(true);
   const scrollY = await page.evaluate(() => window.scrollY);
   expect(scrollY).toBeGreaterThan(0);
 
