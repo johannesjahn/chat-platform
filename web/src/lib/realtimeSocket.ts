@@ -14,7 +14,7 @@ import {
   chatsListQueryKey,
   patchCachedMessage,
 } from "./chats";
-import { commentsQueryKeyRoot } from "./comments";
+import { commentsQueryKeyRoot, invalidatePostComments } from "./comments";
 import {
   patchCachedPost,
   postDetailQueryKeyPrefix,
@@ -30,6 +30,7 @@ import { gameChatQueryKey } from "./games/chat";
 import { noteGameReaction } from "./games/reactions";
 import { noteGameProgress, setGameRoomsSocket } from "./games/rooms";
 import { notificationsQueryKeyRoot } from "./notifications";
+import { OWN_POST_SCOPE, ownCommentScope, ownWrites } from "./ownWrites";
 import { setRealtimeSocket } from "./postRooms";
 import {
   type PostChange,
@@ -280,24 +281,41 @@ export function useRealtimeSocket(enabled: boolean): void {
           case "post_changed":
             // Goes to every connected client, so it touches only the one
             // post — at most one request — rather than invalidating every
-            // loaded feed page (issue #662; see syncChangedPost).
-            void syncChangedPost(queryClient, parsed.postId, parsed.change);
+            // loaded feed page (issue #662; see syncChangedPost). The echo
+            // of this client's own create is dropped: the create already put
+            // the post in the cache (issue #753; see ownWrites.ts).
+            if (parsed.change === "updated" || parsed.change === "deleted") {
+              void syncChangedPost(queryClient, parsed.postId, parsed.change);
+            } else {
+              const { postId, change } = parsed;
+              ownWrites.intercept(OWN_POST_SCOPE, postId, () => {
+                void syncChangedPost(queryClient, postId, change);
+              });
+            }
             break;
-          case "comment_changed":
+          case "comment_changed": {
             // Scoped to this post's room (only arrives while its comment
-            // section is open — see postRooms.ts). Refetch the comment/reply
-            // queries; the event is id-only, so a refetch is how the new
+            // section is open — see postRooms.ts). Refetch that post's
+            // comment/reply queries — not every open section's (issue #753);
+            // the event is id-only, so a refetch is how the new
             // content/counts land.
-            void queryClient.invalidateQueries({
-              queryKey: commentsQueryKeyRoot,
-            });
+            //
             // The post's `commentCount` (surfaced on its card — issue #306)
             // also changes when a comment/reply is added or removed. Refetch
             // just that post and patch it in wherever it's cached (the card's
             // `CountUp` then animates old → new) — not the whole feed, which
             // would refetch every loaded page (issue #662).
-            void refreshCachedPost(queryClient, parsed.postId);
+            //
+            // The echo of this client's own new comment is dropped: the
+            // create already wrote it, and both counts, into the cache
+            // (issue #753; see ownWrites.ts).
+            const { postId, commentId } = parsed;
+            ownWrites.intercept(ownCommentScope(postId), commentId, () => {
+              void invalidatePostComments(queryClient, postId);
+              void refreshCachedPost(queryClient, postId);
+            });
             break;
+          }
           case "reaction_changed":
             // A post reaction goes out feed-wide, so this lands on *every*
             // connected client. Patch the affected post's counts in place

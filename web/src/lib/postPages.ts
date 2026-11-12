@@ -98,6 +98,22 @@ export function mergeNewestFeedPage(
   };
 }
 
+// Puts this client's just-created post (the mutation response) into the
+// cached feed, so creating one costs no refetch (issue #753). It goes where
+// `id desc` puts it on the first page — normally the very front, but someone
+// else's post may already have landed above it. One older than everything on
+// the first page belongs further down and arrives with its page.
+export function insertFeedPost(data: FeedData, post: Post): FeedData {
+  if (containsPost(data.pages, post.id)) return data;
+  const [first, ...rest] = data.pages;
+  if (!first) return data;
+  const at = first.posts.findIndex((p) => p.id < post.id);
+  if (at === -1 && first.nextCursor !== null) return data;
+  const posts = [...first.posts];
+  posts.splice(at === -1 ? posts.length : at, 0, post);
+  return { ...data, pages: [{ ...first, posts }, ...rest] };
+}
+
 // Puts a just-created post on the front of its author's profile feed. Only a
 // post newer than everything cached belongs there — anything older is
 // somewhere further down and will arrive with its page.

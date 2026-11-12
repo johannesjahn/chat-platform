@@ -1,6 +1,6 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
   Loader2,
@@ -20,17 +20,17 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import {
+  addCreatedComment,
   type Comment,
-  commentRepliesQueryKey,
-  commentsQueryKeyRoot,
+  invalidatePostComments,
   MAX_COMMENT_CONTENT_LENGTH,
-  postCommentsQueryKey,
   useComment,
   useComments,
   useReplies,
 } from "@/lib/comments";
 import { errorMessage, isNotFoundError } from "@/lib/errors";
 import { useTransitionState } from "@/lib/motion";
+import { ownCommentScope, ownWrites } from "@/lib/ownWrites";
 import { usePostCommentsSubscription } from "@/lib/postRooms";
 import {
   REACTION_EMOJIS,
@@ -40,6 +40,26 @@ import {
 } from "@/lib/reactions";
 import { authorLabelOf } from "@/lib/users";
 import { cn } from "@/lib/utils";
+
+// Creates a comment or reply as this client's own write (issue #753): the
+// response is written straight into the cache, and its realtime echo — which
+// can arrive before the response does — is dropped instead of refetching the
+// thread and the post (see ownWrites.ts).
+async function createOwnComment(
+  queryClient: QueryClient,
+  postId: number,
+  create: () => Promise<Comment>,
+): Promise<void> {
+  const settle = ownWrites.begin(ownCommentScope(postId));
+  let createdId: number | null = null;
+  try {
+    const created = await create();
+    createdId = created.id;
+    addCreatedComment(queryClient, created);
+  } finally {
+    settle(createdId);
+  }
+}
 
 // A small controlled composer used both for new comments/replies and for
 // editing an existing one. Clears itself on a successful submit unless it's an
@@ -369,8 +389,8 @@ function CommentItem({
   const deleteComment = $api.useMutation("delete", "/comments/{id}");
   const confirm = useConfirm();
 
-  const invalidateComments = () =>
-    queryClient.invalidateQueries({ queryKey: commentsQueryKeyRoot });
+  // Only this post's comment queries — not every open section's (#753).
+  const invalidateComments = () => invalidatePostComments(queryClient, postId);
 
   // The toggle only renders while there are replies, so the panel must close
   // with it when they drop to zero (deleted here or by someone else) — or it
@@ -549,15 +569,12 @@ function CommentItem({
                 submitLabel="Reply"
                 autoFocus
                 onSubmit={async (content) => {
-                  await createReply.mutateAsync({
-                    params: { path: { id: String(comment.id) } },
-                    body: { content },
-                  });
-                  await queryClient.invalidateQueries({
-                    queryKey: commentRepliesQueryKey(comment.id),
-                  });
-                  // Refreshes this comment's `replyCount` too.
-                  await invalidateComments();
+                  await createOwnComment(queryClient, postId, () =>
+                    createReply.mutateAsync({
+                      params: { path: { id: String(comment.id) } },
+                      body: { content },
+                    }),
+                  );
                   setReplying(false);
                   setShowReplies(true);
                 }}
@@ -681,13 +698,12 @@ export function CommentsSection({ postId }: { postId: number }) {
         placeholder="Write a comment…"
         submitLabel="Comment"
         onSubmit={async (content) => {
-          await createComment.mutateAsync({
-            params: { path: { id: String(postId) } },
-            body: { content },
-          });
-          await queryClient.invalidateQueries({
-            queryKey: postCommentsQueryKey(postId),
-          });
+          await createOwnComment(queryClient, postId, () =>
+            createComment.mutateAsync({
+              params: { path: { id: String(postId) } },
+              body: { content },
+            }),
+          );
         }}
       />
 
