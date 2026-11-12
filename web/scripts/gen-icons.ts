@@ -1,4 +1,4 @@
-// Renders the app icon (favicons, PWA icons, logo.png) from one SVG: the
+// Renders the app icon (favicons, PWA icons, logo.svg) from one SVG: the
 // in-app brand mark's speech bubble (see `BUBBLE` in
 // src/components/BrandLogo.tsx) in amber on a navy tile. Run from `web/`
 // with `bun scripts/gen-icons.ts` after changing the mark or the palette;
@@ -49,8 +49,12 @@ function iconSvg(small: boolean): string {
 `;
 }
 
-const SIZES = [16, 32, 48, 96, 128, 192, 256, 512];
+// Only the sizes something requests (issue #755): 32 is the tab icon
+// (lib/tabBadge.ts), 192 the apple-touch-icon and notification icon, and
+// 192/512 the manifest's install icons. 16 and 48 are only inside the ICO.
+const PNG_SIZES = [32, 192, 512];
 const ICO_SIZES = [16, 32, 48];
+const SIZES = [...new Set([...PNG_SIZES, ...ICO_SIZES])];
 const OUT = new URL("../public/", import.meta.url);
 
 const browser = await chromium.launch();
@@ -68,9 +72,10 @@ const pngs = new Map<number, Buffer>();
 for (const size of SIZES) {
   const png = await render(size);
   pngs.set(size, png);
-  await Bun.write(new URL(`favicon-${size}x${size}.png`, OUT), png);
+  if (PNG_SIZES.includes(size)) {
+    await Bun.write(new URL(`favicon-${size}x${size}.png`, OUT), png);
+  }
 }
-await Bun.write(new URL("logo.png", OUT), await render(1024));
 await Bun.write(new URL("logo.svg", OUT), iconSvg(false));
 await browser.close();
 

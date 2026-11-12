@@ -23,6 +23,53 @@ async function waitForServiceWorker(page: Page): Promise<void> {
   });
 }
 
+// The URLs the service worker precached at install, relative to the origin.
+async function precachedPaths(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const name = (await caches.keys()).find((key) =>
+      key.startsWith("workbox-precache"),
+    );
+    if (!name) return [];
+    const requests = await (await caches.open(name)).keys();
+    return requests.map((request) => new URL(request.url).pathname);
+  });
+}
+
+test("the precache holds the app shell, but neither unused images nor the games' chunks, which are cached once opened (issue #755)", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/");
+  await waitForServiceWorker(page);
+
+  const precached = await precachedPaths(page);
+  const notCode = precached.filter((path) => !/\.(?:js|css)$/.test(path));
+  expect(notCode.sort()).toEqual([
+    "/favicon-32x32.png",
+    "/favicon.ico",
+    "/index.html",
+    "/manifest.webmanifest",
+  ]);
+  expect(precached.some((path) => /\/assets\/games-/.test(path))).toBe(false);
+  expect(precached.some((path) => /\/assets\/admin-/.test(path))).toBe(false);
+
+  // Opening the games once (with the service worker in control) caches
+  // their chunk, so they open again offline.
+  await page.goto("/games");
+  await expect(page.getByText("Log in to play")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const requests = await (await caches.open("lazy-chunks")).keys();
+        return requests.map((request) => new URL(request.url).pathname);
+      }),
+    )
+    .toContainEqual(expect.stringMatching(/^\/assets\/games-.*\.js$/));
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.getByText("Log in to play")).toBeVisible();
+});
+
 test("reloading a chat while offline brings back the app shell and the persisted conversation", async ({
   page,
   context,

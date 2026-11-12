@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
-import { sharedPwaOptions } from "./vite.pwa-options.ts";
+import { optionalChunksPlugin, sharedPwaOptions } from "./vite.pwa-options.ts";
 
 export default defineConfig({
   resolve: {
@@ -29,5 +29,8 @@ export default defineConfig({
     // manifest.webmanifest are produced by a separate, isolated build —
     // see vite.pwa.config.ts, run as part of `bun run build`.
     VitePWA(sharedPwaOptions),
+    // Tells that separate build which lazy chunks to leave out of the
+    // precache (issue #755) — only this build sees the chunk graph.
+    optionalChunksPlugin(),
   ],
 });
