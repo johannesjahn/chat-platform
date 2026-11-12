@@ -1544,49 +1544,55 @@ test("a successful login clears the account's earlier failed attempts", () =>
     }),
   ));
 
-test("successful logins don't count toward the per-IP login limit, but failures still do", () =>
-  run(
-    Effect.gen(function* () {
-      const c = yield* makeClient;
-      const db = yield* Db;
-      // Issue #767: everyone behind one public address (a school, an
-      // office, CGNAT) shares the per-IP bucket. The harness resolves every
-      // call to the same "unknown" IP, so 50 people signing in to their own
-      // accounts here is exactly that, well past the old cap of 20
-      // attempts. Accounts are inserted directly (sharing one hash) rather
-      // than registered, which would trip register's own per-IP limits.
-      const passwordHash = yield* Effect.promise(() =>
-        Bun.password.hash("pw-shared-net", { algorithm: "argon2id" }),
-      );
-      const accounts = Array.from({ length: 50 }, (_, i) => `campus${i}`);
-      yield* Effect.tryPromise(() =>
-        db
-          .insert(users)
-          .values(accounts.map((username) => ({ username, passwordHash }))),
-      ).pipe(Effect.orDie);
-      for (const username of accounts) {
-        const session = yield* c.users.login({
-          payload: { username, password: "pw-shared-net" },
-        });
-        expect(session.user.username).toBe(username);
-      }
+test(
+  "successful logins don't count toward the per-IP login limit, but failures still do",
+  () =>
+    run(
+      Effect.gen(function* () {
+        const c = yield* makeClient;
+        const db = yield* Db;
+        // Issue #767: everyone behind one public address (a school, an
+        // office, CGNAT) shares the per-IP bucket. The harness resolves every
+        // call to the same "unknown" IP, so 50 people signing in to their own
+        // accounts here is exactly that, well past the old cap of 20
+        // attempts. Accounts are inserted directly (sharing one hash) rather
+        // than registered, which would trip register's own per-IP limits.
+        const passwordHash = yield* Effect.promise(() =>
+          Bun.password.hash("pw-shared-net", { algorithm: "argon2id" }),
+        );
+        const accounts = Array.from({ length: 50 }, (_, i) => `campus${i}`);
+        yield* Effect.tryPromise(() =>
+          db
+            .insert(users)
+            .values(accounts.map((username) => ({ username, passwordHash }))),
+        ).pipe(Effect.orDie);
+        for (const username of accounts) {
+          const session = yield* c.users.login({
+            payload: { username, password: "pw-shared-net" },
+          });
+          expect(session.user.username).toBe(username);
+        }
 
-      // Failures still count: LOGIN_MAX_FAILURES_PER_IP is 50. Each guess
-      // targets a different account, so the per-account buckets never trip
-      // and only the IP bucket can stop this spray.
-      for (const username of accounts) {
-        const attempt = yield* c.users
-          .login({ payload: { username, password: "wrong" } })
-          .pipe(Effect.flip);
-        expect(attempt._tag).toBe("InvalidCredentials");
-      }
-      const left = (yield* c.users
-        .login({ payload: { username: "campus-extra", password: "wrong" } })
-        .pipe(Effect.flip)) as { _tag: string; retryAfterSeconds: number };
-      expect(left._tag).toBe("TooManyRequests");
-      expect(left.retryAfterSeconds).toBeGreaterThan(0);
-    }),
-  ));
+        // Failures still count: LOGIN_MAX_FAILURES_PER_IP is 50. Each guess
+        // targets a different account, so the per-account buckets never trip
+        // and only the IP bucket can stop this spray.
+        for (const username of accounts) {
+          const attempt = yield* c.users
+            .login({ payload: { username, password: "wrong" } })
+            .pipe(Effect.flip);
+          expect(attempt._tag).toBe("InvalidCredentials");
+        }
+        const left = (yield* c.users
+          .login({ payload: { username: "campus-extra", password: "wrong" } })
+          .pipe(Effect.flip)) as { _tag: string; retryAfterSeconds: number };
+        expect(left._tag).toBe("TooManyRequests");
+        expect(left.retryAfterSeconds).toBeGreaterThan(0);
+      }),
+    ),
+  // About 100 real argon2id verifications — CPU-bound, so on a busy CI
+  // runner (parallel files, coverage) they alone can pass the suite-wide 15s.
+  60_000,
+);
 
 test("concurrent wrong-password logins can't race past the per-account limit", () =>
   run(
