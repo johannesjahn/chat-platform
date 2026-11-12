@@ -104,6 +104,10 @@ test("group chats can be created, renamed by the creator, and show all participa
   await pageB.goto("/chats/requests");
   await pageB.getByRole("main").getByText("Playwright squad").click();
   await pageB.getByRole("button", { name: "Accept" }).click();
+  // Wait for the accept to land: leaving the page straight away can abort it.
+  await expect(
+    pageB.getByRole("region", { name: "Message request" }),
+  ).toHaveCount(0);
   await pageB.goto("/chats");
   await expect(pageB.getByText("Playwright squad")).toBeVisible();
   await pageB.getByText("Playwright squad").click();
@@ -347,6 +351,10 @@ test("the creator can add participants to a group chat, and the new participant 
   await pageC.goto("/chats/requests");
   await pageC.getByRole("main").getByText("Add participants test").click();
   await pageC.getByRole("button", { name: "Accept" }).click();
+  // Wait for the accept to land: leaving the page straight away can abort it.
+  await expect(
+    pageC.getByRole("region", { name: "Message request" }),
+  ).toHaveCount(0);
   await pageC.goto("/chats");
   await expect(pageC.getByText("Add participants test")).toBeVisible();
 
