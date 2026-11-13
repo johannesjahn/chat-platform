@@ -5,6 +5,7 @@ import { Avatar } from "@/components/Avatar";
 import { CommentThreadPreview } from "@/components/CommentsSection";
 import { GameIcon } from "@/components/games/GameIcon";
 import { LobbyCard } from "@/components/games/LobbyCard";
+import { NOTIFICATION_ICONS } from "@/components/notificationIcons";
 import { PlaceBadge } from "@/components/games/PlaceBadge";
 import { PostCard, PostCardSkeleton } from "@/components/PostCard";
 import { Button } from "@/components/ui/button";
@@ -23,11 +24,7 @@ import {
   type GameId,
 } from "@/lib/games/registry";
 import { gameLobbyRoom, useGameRoom } from "@/lib/games/rooms";
-import {
-  NOTIFICATION_ICONS,
-  notificationTarget,
-  type Notification,
-} from "@/lib/notifications";
+import { notificationTarget, type Notification } from "@/lib/notifications";
 import { userAvatarName, userLabel } from "@/lib/users";
 
 // The `xl` preview of a notification on `/notifications` (issue #564): what

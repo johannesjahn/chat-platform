@@ -1,4 +1,10 @@
-import { type CSSProperties, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   createFileRoute,
@@ -10,9 +16,8 @@ import {
 } from "@tanstack/react-router";
 import { Loader2, PlusCircle, Sparkles } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
+import { Avatar } from "@/components/Avatar";
 import { FeedRail } from "@/components/feed/FeedRail";
-import { InlineComposer } from "@/components/feed/InlineComposer";
-import { PostOverlay } from "@/components/feed/PostOverlay";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PendingPostCard } from "@/components/PendingPostCard";
 import { PostCard, PostCardSkeleton } from "@/components/PostCard";
@@ -20,10 +25,11 @@ import { SessionPlaceholder } from "@/components/SessionPlaceholder";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { $api } from "@/lib/api";
+import { $api, type Session } from "@/lib/api";
 import { useSession, useSessionPending } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
-import { useIsDesktop, useMediaQuery } from "@/lib/media";
+import { lazyNamed } from "@/lib/lazy";
+import { DESKTOP_MEDIA_QUERY, useIsDesktop, useMediaQuery } from "@/lib/media";
 import {
   dismissQueuedItem,
   replayQueue,
@@ -39,6 +45,22 @@ import {
 import { queryClient } from "@/lib/query";
 import { warmed, warmRoute } from "@/lib/routeLoader";
 import { staticTitle } from "@/lib/title";
+import { userAvatarName } from "@/lib/users";
+
+// The feed's desktop-only pieces are lazy chunks (issue #754): the inline
+// composer (with the mention picker and the upload field) and the post
+// overlay (the whole post view). A phone never renders either, and on a
+// desktop the feed itself doesn't wait on them — the composer holds its
+// place with a look-alike until it lands, and the overlay renders nothing
+// until a post is opened.
+const InlineComposer = lazyNamed(
+  () => import("@/components/feed/InlineComposer"),
+  "InlineComposer",
+);
+const PostOverlay = lazyNamed(
+  () => import("@/components/feed/PostOverlay"),
+  "PostOverlay",
+);
 
 type FeedSearch = {
   // The post open in the desktop overlay (issue #561). Only ever reached
@@ -56,6 +78,12 @@ export const Route = createFileRoute("/")({
   // there's no second, per-author round of requests to chain after it.
   loader: () =>
     warmRoute(() => {
+      // The desktop pieces start loading beside the feed's own chunk and
+      // first page, not after them (signed in only, like the rest of this).
+      if (window.matchMedia(DESKTOP_MEDIA_QUERY).matches) {
+        InlineComposer.preload().catch(() => {});
+        PostOverlay.preload().catch(() => {});
+      }
       const feed = postsFeedQueryOptions();
       return [warmed(feed.queryKey, queryClient.ensureInfiniteQueryData(feed))];
     }),
@@ -160,7 +188,11 @@ function PostsFeedPage() {
           )}
         </div>
 
-        {session && <InlineComposer session={session} />}
+        {session && isDesktop && (
+          <Suspense fallback={<InlineComposerPlaceholder session={session} />}>
+            <InlineComposer session={session} />
+          </Suspense>
+        )}
 
         {session && pendingPosts.length > 0 && (
           <ul role="list" className="flex w-full flex-col items-center gap-6">
@@ -273,7 +305,9 @@ function PostsFeedPage() {
           overlay URL that lands there (a resize past the breakpoint) is
           turned into that page. */}
       {isDesktop ? (
-        <PostOverlay postId={openPostId} onClose={closePost} />
+        <Suspense fallback={null}>
+          <PostOverlay postId={openPostId} onClose={closePost} />
+        </Suspense>
       ) : (
         openPostId !== undefined && (
           <Navigate
@@ -284,6 +318,28 @@ function PostsFeedPage() {
         )
       )}
     </main>
+  );
+}
+
+// The inline composer as it first renders — collapsed, empty — while its
+// chunk loads, so the feed below doesn't shift when it arrives.
+function InlineComposerPlaceholder({ session }: { session: Session }) {
+  return (
+    <div
+      aria-hidden
+      className="w-full rounded-xl border border-border/60 bg-card/65 p-4 shadow-sm backdrop-blur-md"
+    >
+      <div className="flex items-start gap-3">
+        <Avatar
+          name={userAvatarName(session.user)}
+          avatarUrl={session.user.avatarUrl}
+          avatarVariants={session.user.avatarVariants}
+        />
+        <p className="min-h-9 flex-1 py-1.5 text-base text-muted-foreground">
+          What&apos;s on your mind?
+        </p>
+      </div>
+    </div>
   );
 }
 

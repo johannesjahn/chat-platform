@@ -3,11 +3,8 @@ import { Link } from "@tanstack/react-router";
 import { Avatar } from "@/components/Avatar";
 import { RelativeTime } from "@/components/RelativeTime";
 import { GAMES } from "@/lib/games/registry";
-import {
-  NOTIFICATION_ICONS,
-  notificationTarget,
-  type Notification,
-} from "@/lib/notifications";
+import { NOTIFICATION_ICONS } from "@/components/notificationIcons";
+import { notificationTarget, type Notification } from "@/lib/notifications";
 import { userAvatarName, userHandle, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
 

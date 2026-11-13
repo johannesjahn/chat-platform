@@ -21,7 +21,8 @@ import {
   useServerClock,
   type LeaderboardPeriod,
 } from "@/lib/games/lobby";
-import { GAMES, gameTitle, getGame, type GameId } from "@/lib/games/registry";
+import { gameTitle } from "@/lib/games/names";
+import { GAMES, getGame, type GameId } from "@/lib/games/registry";
 import { useGameHubRoom } from "@/lib/games/rooms";
 import { staticTitle } from "@/lib/title";
 
