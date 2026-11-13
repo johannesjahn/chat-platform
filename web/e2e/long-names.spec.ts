@@ -97,6 +97,11 @@ test(
       data: { title: "Long names", participantIds: [otherId] },
     });
     const { id: chatId } = await group.json();
+    // A message request for `other` until accepted (issue #808).
+    const accepted = await request.post(`${apiUrl}/chats/${chatId}/accept`, {
+      headers: { Authorization: `Bearer ${other.session.accessToken}` },
+    });
+    expect(accepted.ok()).toBe(true);
     const sent = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: { Authorization: `Bearer ${other.session.accessToken}` },
       data: { contentType: "text", content: "Hello there" },

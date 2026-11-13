@@ -35,6 +35,12 @@ test("a display name copying someone else's handle still shows the impersonator'
     [victim, "the real one"],
     [impostor, "trust me, it's me"],
   ] as const) {
+    // The viewer is a stranger to both, so it's a message request they
+    // accept before posting (issue #808).
+    const accepted = await request.post(`${apiUrl}/chats/${chatId}/accept`, {
+      headers: as(user.session.accessToken),
+    });
+    expect(accepted.ok()).toBe(true);
     const sent = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: as(user.session.accessToken),
       data: { contentType: "text", content },
