@@ -576,8 +576,9 @@ const searchMessagesPage = (
 ) =>
   Effect.gen(function* () {
     // The join on the caller's own participant row, inside each union arm, is
-    // the access control: a message in a chat they're not part of can never
-    // appear, no matter what it matches. It has to be *inside* the arm, not
+    // the access control: a message in a chat they're not part of — or one
+    // they haven't accepted yet (issue #808) — can never appear, no matter
+    // what it matches. It has to be *inside* the arm, not
     // applied to its result, or an arm could spend its whole page allowance on
     // messages the caller may not see.
     const rows = yield* query(() =>
@@ -601,6 +602,9 @@ const searchMessagesPage = (
               inner join ${chatParticipants} on ${and(
                 eq(chatParticipants.chatId, messages.chatId),
                 eq(chatParticipants.userId, viewerId),
+                // A chat that's still a message request for the viewer
+                // (issue #808) stays out of search until they accept it.
+                eq(chatParticipants.requestPending, false),
               )}
               where ${and(
                 branch,

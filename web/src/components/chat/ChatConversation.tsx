@@ -1146,6 +1146,7 @@ export function ChatConversation({
                             : undefined
                         }
                         onEditEnd={focusComposer}
+                        readOnly={chat.messageRequest != null}
                         compact={docked || !isDesktop}
                         animateIn={!wasShownBeforeConfirm(message)}
                         senderLabel={

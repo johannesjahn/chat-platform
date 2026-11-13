@@ -2087,7 +2087,9 @@ const SearchGroup = HttpApiGroup.make("search")
   )
   .add(
     // Messages in chats the current user participates in (access-scoped by a
-    // join on their participant rows), newest match first.
+    // join on their participant rows), newest match first. A chat that's
+    // still a message request for them (issue #808) isn't searched until
+    // they accept it.
     HttpApiEndpoint.get("searchMessages", "/search/messages", {
       query: SearchQuery,
       success: MessageSearchPage,

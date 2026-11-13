@@ -56,12 +56,18 @@ test("a stranger's group waits in Message requests until it's accepted", async (
   await expect(
     bar.getByText(`@${stranger.username} added you to this group.`),
   ).toBeVisible();
-  // Read-only until accepted.
+  // Read-only until accepted: no composer, and none of the message actions
+  // the server turns away from a pending request (issue #808).
   await expect(thread.getByPlaceholder("Message…")).toHaveCount(0);
+  for (const name of ["Pin message", "Reply to message"])
+    await expect(thread.getByRole("button", { name })).toHaveCount(0);
 
   await bar.getByRole("button", { name: "Accept" }).click();
   await expect(bar).toHaveCount(0);
   await expect(thread.getByPlaceholder("Message…")).toBeVisible();
+  await expect(thread.getByRole("button", { name: "Pin message" })).toHaveCount(
+    1,
+  );
   await expect(
     list.getByRole("link", { name: /Totally legit deals/ }),
   ).toBeVisible();

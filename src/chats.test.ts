@@ -1041,6 +1041,11 @@ test("markRead only moves the read watermark forward, and a repeat with nothing 
           participantIds: [bob.user.id, carol.user.id],
         },
       });
+      // A message request sends no receipts (issue #808), so accept it.
+      for (const member of [bob, carol])
+        yield* member.client.chats.acceptChatRequest({
+          params: { id: chat.id },
+        });
       const send = (content: string) =>
         alice.client.chats.createMessage({
           params: { id: chat.id },
@@ -1846,6 +1851,12 @@ test("chat version increments on every participant-visible mutation, and only th
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const bob = yield* registerAndLogin("bob", "pw-testpass");
       const carol = yield* registerAndLogin("carol", "pw-testpass");
+      // Not strangers to Alice, so the group is no message request for
+      // either — accepting one would bump the version too.
+      for (const friend of [bob, carol])
+        yield* alice.client.chats.createDirectChat({
+          payload: { userId: friend.user.id },
+        });
 
       const created = yield* alice.client.chats.createGroupChat({
         payload: { title: "Trip planning", participantIds: [bob.user.id] },
@@ -2559,7 +2570,9 @@ test("transferOwnership: once a chat is ownerless, any participant can claim it,
         .pipe(Effect.flip);
       expect(notParticipant._tag).toBe("Forbidden");
 
-      // But bob, a participant of the now-ownerless chat, can claim it.
+      // But bob, a participant of the now-ownerless chat, can claim it —
+      // once he's accepted it (it's a message request for him, issue #808).
+      yield* bob.client.chats.acceptChatRequest({ params: { id: chat.id } });
       const claimed = yield* bob.client.chats.transferOwnership({
         params: { id: chat.id },
         payload: { userId: bob.user.id },
@@ -2687,6 +2700,8 @@ test("admins (not just the owner) can rename, add/remove participants, and delet
       });
       expect(added.participants.map((p) => p.userId)).toContain(dave.user.id);
 
+      // Alice is a stranger to Carol, so she accepts before posting.
+      yield* carol.client.chats.acceptChatRequest({ params: { id: chat.id } });
       const message = yield* carol.client.chats.createMessage({
         params: { id: chat.id },
         payload: { contentType: "text", content: "hi all" },
@@ -3070,6 +3085,7 @@ test("getUnreadChatCount sums across chats and only counts chats you're in", () 
         },
       });
       yield* alice.client.chats.acceptChatRequest({ params: { id: group.id } });
+      yield* bob.client.chats.acceptChatRequest({ params: { id: group.id } });
       const withoutAlice = yield* bob.client.chats.createDirectChat({
         payload: { userId: carol.user.id },
       });

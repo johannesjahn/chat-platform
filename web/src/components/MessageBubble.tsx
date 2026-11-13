@@ -104,6 +104,11 @@ type MessageBubbleProps = {
   // Called when an edit ends (saved or cancelled), so the composer can take
   // focus back.
   onEditEnd?: () => void;
+  // A message request the viewer hasn't accepted yet (issue #785): they can
+  // read it, but the server turns away anything others would see — a
+  // reaction, a pin, a reply, an edit (issue #808) — so those aren't offered.
+  // Private actions (star, copy, forward out) stay.
+  readOnly?: boolean;
   // A narrow thread (a desktop docked chat window, issue #554, or any thread
   // below `lg`): the action group floats over the bubble's top edge as a
   // toolbar instead of sitting beside it, where — even invisible — it took
@@ -133,6 +138,7 @@ export function MessageBubble({
   highlightKey,
   editRequestKey,
   onEditEnd,
+  readOnly = false,
   compact = false,
   animateIn = true,
   style,
@@ -286,7 +292,7 @@ export function MessageBubble({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const confirm = useConfirm();
-  const canEdit = canModify && message.contentType === "text";
+  const canEdit = canModify && !readOnly && message.contentType === "text";
 
   function startEditing() {
     setDraft(message.content);
@@ -469,22 +475,24 @@ export function MessageBubble({
   // than duplicated on each side.
   const pinStarButtons = (
     <>
-      <Button
-        type="button"
-        size="icon"
-        variant="ghost"
-        aria-label={message.pinned ? "Unpin message" : "Pin message"}
-        aria-pressed={message.pinned}
-        disabled={pinPending}
-        onClick={() => void togglePin()}
-        className={cn("size-6", message.pinned && "text-primary")}
-      >
-        {message.pinned ? (
-          <PinOff className="size-3.5" />
-        ) : (
-          <Pin className="size-3.5" />
-        )}
-      </Button>
+      {!readOnly && (
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          aria-label={message.pinned ? "Unpin message" : "Pin message"}
+          aria-pressed={message.pinned}
+          disabled={pinPending}
+          onClick={() => void togglePin()}
+          className={cn("size-6", message.pinned && "text-primary")}
+        >
+          {message.pinned ? (
+            <PinOff className="size-3.5" />
+          ) : (
+            <Pin className="size-3.5" />
+          )}
+        </Button>
+      )}
       <Button
         type="button"
         size="icon"
@@ -713,15 +721,17 @@ export function MessageBubble({
 
       {isOwn && !isEditing && (
         <div className={actionGroupClassName}>
-          <ReactionAddButton
-            reactions={message.reactions}
-            pending={reactionPending}
-            onToggle={(emoji) => void toggleReaction(emoji)}
-            className="size-6 px-0"
-            iconClassName="size-3.5"
-          />
+          {!readOnly && (
+            <ReactionAddButton
+              reactions={message.reactions}
+              pending={reactionPending}
+              onToggle={(emoji) => void toggleReaction(emoji)}
+              className="size-6 px-0"
+              iconClassName="size-3.5"
+            />
+          )}
           {pinStarButtons}
-          {onReply && (
+          {onReply && !readOnly && (
             <Button
               type="button"
               size="icon"
@@ -1011,7 +1021,7 @@ export function MessageBubble({
           <div className="flex flex-wrap items-center gap-1">
             <ReactionList
               reactions={message.reactions}
-              pending={reactionPending}
+              pending={reactionPending || readOnly}
               onToggle={(emoji) => void toggleReaction(emoji)}
             />
           </div>
@@ -1030,15 +1040,17 @@ export function MessageBubble({
 
       {!isOwn && !isEditing && (
         <div className={actionGroupClassName}>
-          <ReactionAddButton
-            reactions={message.reactions}
-            pending={reactionPending}
-            onToggle={(emoji) => void toggleReaction(emoji)}
-            className="size-6 px-0"
-            iconClassName="size-3.5"
-          />
+          {!readOnly && (
+            <ReactionAddButton
+              reactions={message.reactions}
+              pending={reactionPending}
+              onToggle={(emoji) => void toggleReaction(emoji)}
+              className="size-6 px-0"
+              iconClassName="size-3.5"
+            />
+          )}
           {pinStarButtons}
-          {onReply && (
+          {onReply && !readOnly && (
             <Button
               type="button"
               size="icon"
