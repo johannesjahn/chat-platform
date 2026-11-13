@@ -10,9 +10,11 @@
 #
 # coverageThreshold, unlike timeout above, is actually honored: `bun test
 # --coverage` fails the run (non-zero exit) once either figure drops below
-# its threshold. Current coverage sits around 84% lines / 75% functions (see
-# `bun run test:coverage`); thresholds are set a few points below that as a
-# regression guard, not a target — raise them as coverage genuinely improves
-# rather than lowering them to make a drop pass.
+# its threshold. Coverage sat at 94.44% lines / 94.19% functions when these
+# were last set (issue #809, measured locally with no Redis/Postgres, so the
+# integration tests skipped — CI, which runs them, only covers more); the
+# thresholds sit about 3 points below that as a regression guard, not a
+# target — raise them as coverage genuinely improves rather than lowering
+# them to make a drop pass.
 [test]
-coverageThreshold = { line = 0.80, function = 0.70 }
+coverageThreshold = { line = 0.91, function = 0.91 }

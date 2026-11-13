@@ -168,6 +168,16 @@ Snippets/highlighting are built in TypeScript (`buildSnippet` in
 row server-side, and it can only highlight what the _tsquery_ matched, which
 would leave a pure substring hit unhighlighted.
 
+**Contacts below the 3-character floor.** User search needs 3 characters
+(issue #48) so the directory can't be browsed. Below that, New chat, `/users`
+and the palette's People section suggest `GET /users/contacts` (`contactsOf`
+in [`src/UsersHandler.ts`](src/UsersHandler.ts), issue #764), filtered
+client-side by `filterContacts` ([`web/src/lib/contactFilter.ts`](web/src/lib/contactFilter.ts)).
+It must only ever return people the caller already shares an **accepted**
+chat with (pending message requests on either side don't count), minus
+blocks in either direction (mutes stay), newest chat activity first, capped
+at `MAX_CONTACTS`.
+
 ## Admin dashboard
 
 `GET /admin/stats` (admin-only, 403 otherwise) backs the operator dashboard at
@@ -377,6 +387,52 @@ message into up to `MAX_FORWARD_TARGETS` chats — `forwardMessage` in
   the global per-IP budget (`chargeGlobalRequests`) — a forward to N chats is
   N sends.
 
+## Message requests
+
+Being put in a group by someone you share no chat with makes it a _message
+request_ for you (issue #785): `chat_participants.request_pending` and
+`added_by` (migration `0038`), decided by `strangersTo` in
+[`src/ChatsHandler.ts`](src/ChatsHandler.ts), accepted with
+`POST /chats/:id/accept`, declined with the existing `/leave`. Load-bearing:
+
+- **Per participant, not per chat.** The same group can be a request for one
+  member and a normal chat for another. Direct chats and invite-link joins
+  never create one.
+- **A stranger is judged on accepted chats only.** `strangersTo` counts a
+  shared chat only where the added user's row isn't pending, or one pending
+  request would vouch for the next.
+- **Pending means invisible.** Out of `GET /chats` (it's under
+  `?requests=true`, the `/chats/requests` page), `unreadCount` 0 and nothing
+  in `/chats/unread-count`, no presence either way (`PresenceAudience`), not
+  a contact (`contactsOf`). Any new query over `chat_participants` that
+  introduces people or counts unread must filter `request_pending = false`.
+- **`request_pending` defaults to `false` in the database**, like
+  `users.created_at`, so old replicas' inserts and pre-migration rows read as
+  accepted.
+- **Owner hand-off prefers accepted members**, ahead of seniority.
+- The client shows a request read-only with
+  [`MessageRequestBar`](web/src/components/chat/MessageRequestBar.tsx) in
+  place of the composer; "Decline and block" blocks `messageRequest.addedBy`.
+
+## Attachment captions
+
+Posts and messages carry an optional `caption` next to an attachment (issue
+#765, migration `0037`). Load-bearing:
+
+- **`content` stays the filename** on attachment rows, as on every row from
+  before captions — never repurpose it as the caption.
+- **`caption` only counts when `content_type = 'attachment'`.** An old
+  replica can re-type a row and leave the column behind, so every reader goes
+  through `captionOf` (PostsHandler.ts) / `messageCaption` (ChatsHandler.ts),
+  and the search arms restrict on content type themselves.
+- **Edits: omitted keeps, `null` clears**, so a client that predates captions
+  never wipes one. Sending a `caption` on a non-attachment is a 400.
+- **Search covers captions, never filenames**: extra _union arms_ over
+  partial expression GIN indexes (tsvector + trigram), each with its own
+  filters, per Search above.
+- Captions notify `@mentions` on posts (not chats, as usual), are the
+  notification excerpt, and are copied by a forward.
+
 ## Optimistic message sends
 
 A chat message shows up in the thread the moment it's sent and the composer
@@ -477,6 +533,18 @@ bar, the immersive chat shell and the phone menu stay exactly as they were.
   row or a chat bubble.
 - **Tab badge.** `useTabBadge` prefixes every title with the unread count
   and dots the favicon; compare titles through `stripTitleBadge`.
+- **Keep the entry chunk lean** (issue #754; budget in CI below). The
+  realtime socket, its cache patchers, browser notifications and offline
+  replay live in the lazy
+  [`ShellServices`](web/src/components/shell/ShellServices.tsx) (renders
+  nothing; the root preloads it at once) — don't import them from the root
+  or nav. Everything in a route file except `component` ships in the entry,
+  so `head`/`loader`/`validateSearch` import only light modules:
+  `lib/games/names.ts` (not the registry), `lib/chatQueries.ts` (not
+  `chats.ts`), `lib/notifications.ts` (icons are in
+  `components/notificationIcons.ts`). Heavy click-only UI (comments thread,
+  `LazyLightbox`, `InlineComposer`, `PostOverlay`, confirm dialog, toast
+  items) is lazy and warmed on idle or hover.
 
 **E2E:** the suite runs at Playwright's 1280px desktop, i.e. the desktop
 layout. Beside an open conversation the chat list pane repeats each chat's
@@ -536,6 +604,48 @@ end-to-end behaviour in
 [`web/e2e/route-loaders.spec.ts`](web/e2e/route-loaders.spec.ts) — start from
 `openSettled` (empty cache, app up, socket connected and its refetches back),
 hover the link first, then count the requests the navigation sends.
+
+## Realtime cache updates
+
+Realtime events used to mean "refetch everything"; now the client patches what
+it can and refetches only what it must. Three pieces, all pure and
+unit-tested, driven from `realtimeSocket.ts`:
+
+- **Chats — [`web/src/lib/chatSync.ts`](web/src/lib/chatSync.ts)** (issue
+  #749). `chat_updated` carries an optional `change` (`ChatChange` in
+  [`src/Realtime.ts`](src/Realtime.ts)): `message_created` (send, forward)
+  or `read` (`markRead`, the whole receipt range). A read is patched in with
+  no request; a new message in a chat on screen (`holdChatInView`) fetches
+  only `after=`, and the conversation's mark-read response
+  (`applyMarkedRead`) updates list, detail and unread total. **No `change`,
+  an unknown one, or a version gap still refetches all three** — keep
+  `change` additive and send none for any other mutation. Receipts stay one
+  publish to every participant: sending them only to senders would leave the
+  rest with a version gap. Query keys live in import-free
+  `lib/chatQueryKeys.ts` so this stays testable without the API client.
+- **Own posts/comments — [`web/src/lib/ownWrites.ts`](web/src/lib/ownWrites.ts)**
+  (issue #753). A create writes its response into the cache, and its
+  realtime echo (published _before_ the response, with no actor) is dropped:
+  events in the create's scope (`OWN_POST_SCOPE`, `ownCommentScope(postId)`)
+  are held while it's in flight, the one naming the created id is dropped,
+  the rest applied; a failed create applies what it held. Other tabs apply
+  the event normally. `comment_changed` invalidates only its post
+  (`invalidatePostComments`), never every comment query.
+- **`staleTime` — [`web/src/lib/realtimeFreshness.ts`](web/src/lib/realtimeFreshness.ts)**
+  (issue #752). `realtimeStaleTime(room?)` gives chat lists, unread counts
+  and `useGameLobbies` `REALTIME_STALE_TIME_MS` only while the socket (and
+  the room, for room-scoped data) has been live since the data arrived;
+  otherwise 0, the old behaviour. Use it only for data some event actually
+  invalidates. A room counts as joined once `subscribe_room` was sent
+  (`games/rooms.ts`); `useGameHubRoom` keeps a hub room joined for that same
+  window after its last user, which is what keeps the cached list honest.
+  It composes with `refetchUnlessWarmed` (which returns `true`, not
+  `"always"`).
+
+The reconnect self-heal (invalidate every event-driven query on each socket
+open) underpins all three; don't remove it. Request counts are pinned by
+`web/e2e/chat-request-fanout.spec.ts`, `own-writes.spec.ts` and
+`stale-time.spec.ts`.
 
 ## Notifications
 
@@ -727,7 +837,8 @@ and all PRs, with parallel jobs including: **lint** (`format:check` + `lint`),
 production build, then `check:bundle`: fails once the gzipped JS loaded
 before hydration, all JS, or all CSS outgrows
 [`web/bundle-budget.json`](web/bundle-budget.json) — raise it in the same PR
-when growth is deliberate), **openapi**
+when growth is deliberate; since #806 it sits only ~2 kB above the measured
+pre-hydration figure, so a sizeable new eager import will trip it), **openapi**
 (regenerates `openapi.json` and `web/src/lib/api-types.ts` via `gen:types` and
 fails if that produces a diff, i.e. catches a backend API change whose
 generated spec/types weren't regenerated and committed), **unit**
