@@ -286,6 +286,11 @@ test("a post queued offline by one user isn't sent under a different user who lo
   context,
   signUp,
 }) => {
+  // Two sign-ups, a login through the form, two log-outs and two
+  // connectivity flips, on top of booting its own backend: a median of
+  // ~21s on CI against the 30s default, which a loaded runner pushed it
+  // past once with every step passing, just slowly (issue #807).
+  test.slow();
   const { username: usernameA, password: passwordA } = await signUp(page);
 
   await expect(page.getByRole("heading", { name: "Feed" })).toBeVisible();
