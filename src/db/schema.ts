@@ -384,7 +384,10 @@ export const chatParticipants = pgTable(
     // a group by someone they shared no (accepted) chat with, until they
     // accept. A pending row is kept out of the participant's chat list and
     // unread counts, and out of presence in both directions — see
-    // `isMessageRequestFor` in ChatsHandler.ts. A database default (not an
+    // `isMessageRequestFor` in ChatsHandler.ts — and out of message search,
+    // with every write others would see (sends, forwards in, reactions,
+    // pins, typing, edits, read receipts) refused until accepted (issue
+    // #808, `requireAcceptedParticipant`). A database default (not an
     // app-side one) for the same rollout reason as `users.created_at`: old
     // replicas insert participants without the column, and those must read
     // as accepted, which is how every row predating the migration reads.

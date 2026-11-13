@@ -983,6 +983,52 @@ const requireParticipant = (db: DrizzleDb, chatId: number, userId: number) =>
       );
   });
 
+// Whether `userId` is in the chat for real — a participant who has accepted
+// it, not one it's still a message request for (issue #785). One read of
+// their participant row.
+const isAcceptedParticipant = (
+  db: DrizzleDb,
+  chatId: number,
+  userId: number,
+): Effect.Effect<boolean> =>
+  Effect.tryPromise(() =>
+    db
+      .select({ id: chatParticipants.id })
+      .from(chatParticipants)
+      .where(
+        and(
+          eq(chatParticipants.chatId, chatId),
+          eq(chatParticipants.userId, userId),
+          eq(chatParticipants.requestPending, false),
+        ),
+      )
+      .limit(1),
+  ).pipe(
+    Effect.orDie,
+    Effect.map((rows) => rows.length > 0),
+  );
+
+// Every write other participants would see — a message, a typing ping, a
+// reaction, a pin, an edit — needs the chat accepted first (issue #808). A
+// pending participant may read the chat to decide, but nothing they do
+// reaches anyone else as if they'd joined. Same 403 as a non-participant
+// gets, worded for the one case the caller can act on; it confirms nothing
+// they don't already know (the request itself shows them the chat).
+const requireAcceptedParticipant = (
+  db: DrizzleDb,
+  chatId: number,
+  userId: number,
+): Effect.Effect<void, Forbidden> =>
+  Effect.gen(function* () {
+    if (yield* isAcceptedParticipant(db, chatId, userId)) return;
+    yield* requireParticipant(db, chatId, userId);
+    return yield* Effect.fail(
+      new Forbidden({
+        message: "Accept this message request before taking part in the chat",
+      }),
+    );
+  });
+
 // Source-side authorization for forwarding a message (issue #601): the
 // caller must currently be in the chat, and the message must belong to it.
 // A caller who isn't (or is no longer) in the chat gets the same 404 as for a
@@ -2210,9 +2256,10 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           // null — see Chat.createdBy in Api.ts) can be claimed by any
           // current participant, so it doesn't stay permanently
           // unmanageable once its creator's account is gone (issue #66).
+          // Not by someone the chat is still a request for (issue #808).
           const canClaim =
             chatRow.createdBy === null &&
-            (yield* isParticipant(db, id, currentUser.id));
+            (yield* isAcceptedParticipant(db, id, currentUser.id));
           if (!canClaim) yield* requireChatOwner(db, currentUser, chatRow);
 
           const participants = yield* getParticipants(db, id);
@@ -2478,7 +2525,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           const chatRow = yield* getChatOr404(db, id);
-          yield* requireParticipant(db, id, currentUser.id);
+          yield* requireAcceptedParticipant(db, id, currentUser.id);
 
           // A repeat of a send the server already stored (issue #567) — e.g.
           // the page reloaded mid-request and the offline queue replayed it —
@@ -2714,15 +2761,17 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
             Effect.gen(function* () {
               // Target-side authorization: the caller must be in every
               // chat they post into, so a former member can't post into a
-              // group they've left. A chat that doesn't exist reads the
-              // same as one they're not in.
+              // group they've left — and must have accepted it, so a
+              // message request can't be posted into either (issue #808).
+              // A chat that doesn't exist reads the same as one they're not
+              // in.
               const chatRows = yield* Effect.tryPromise(() =>
                 db.select().from(chats).where(eq(chats.id, targetId)),
               ).pipe(Effect.orDie);
               const chatRow = chatRows[0];
               if (
                 !chatRow ||
-                !(yield* isParticipant(db, targetId, currentUser.id))
+                !(yield* isAcceptedParticipant(db, targetId, currentUser.id))
               )
                 return failed(
                   targetId,
@@ -2951,7 +3000,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* getChatOr404(db, id);
-          yield* requireParticipant(db, id, currentUser.id);
+          yield* requireAcceptedParticipant(db, id, currentUser.id);
 
           const participants = yield* getParticipants(db, id);
           const others = participants
@@ -2991,6 +3040,13 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
                 message: `Message ${payload.messageId} not found in chat ${id}`,
               }),
             );
+
+          // Reading a message request to decide on it (issue #808) sends no
+          // read receipt: that would tell whoever added the reader that
+          // they've looked, as if they'd joined. So it's a no-op that
+          // answers like one; the watermark starts moving once accepted.
+          if (!(yield* isAcceptedParticipant(db, id, currentUser.id)))
+            return yield* buildChat(db, storage, chatRow, currentUser.id);
 
           // Move the reader's watermark forward to the target (issue #659) —
           // never back, so re-reading an older message is a no-op. The
@@ -3083,7 +3139,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* getChatOr404(db, id);
-          yield* requireParticipant(db, id, currentUser.id);
+          yield* requireAcceptedParticipant(db, id, currentUser.id);
           const existing = yield* getMessageOr404(db, id, messageId);
           if (!canModifyMessage(currentUser, existing))
             return yield* Effect.fail(
@@ -3199,7 +3255,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* getChatOr404(db, id);
-          yield* requireParticipant(db, id, currentUser.id);
+          yield* requireAcceptedParticipant(db, id, currentUser.id);
           yield* getMessageOr404(db, id, messageId);
           // Idempotent: the (userId, messageId, emoji) unique constraint
           // turns a repeat reaction with the same emoji into a no-op rather
@@ -3247,7 +3303,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
           Effect.gen(function* () {
             const currentUser = yield* CurrentUser;
             yield* getChatOr404(db, id);
-            yield* requireParticipant(db, id, currentUser.id);
+            yield* requireAcceptedParticipant(db, id, currentUser.id);
             yield* getMessageOr404(db, id, messageId);
             const deleted = yield* Effect.tryPromise(() =>
               db
@@ -3298,7 +3354,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* getChatOr404(db, id);
-          yield* requireParticipant(db, id, currentUser.id);
+          yield* requireAcceptedParticipant(db, id, currentUser.id);
           // Validates the message belongs to *this* chat (a message from
           // another chat, or a nonexistent one, 404s here) and hands back the
           // row reused to build the response below.
@@ -3345,7 +3401,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* getChatOr404(db, id);
-          yield* requireParticipant(db, id, currentUser.id);
+          yield* requireAcceptedParticipant(db, id, currentUser.id);
           const row = yield* getMessageOr404(db, id, messageId);
           const deleted = yield* Effect.tryPromise(() =>
             db

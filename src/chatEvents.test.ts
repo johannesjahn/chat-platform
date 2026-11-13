@@ -218,6 +218,13 @@ test("one group message read by everyone is one publish per participant, not per
         },
       });
       const everyone = [owner, ...members].map((p) => p.user.id).sort();
+      // Strangers to the owner, so it's a message request for each of them
+      // until they accept — and a pending request sends no receipt.
+      let version = chat.version;
+      for (const member of members)
+        ({ version } = yield* member.client.chats.acceptChatRequest({
+          params: { id: chat.id },
+        }));
 
       const mark = published.length;
       const message = yield* owner.client.chats.createMessage({
@@ -252,7 +259,7 @@ test("one group message read by everyone is one publish per participant, not per
       // And versions stay consecutive, so no client mistakes any of this
       // for a missed update.
       expect(events.map((e) => e["version"])).toEqual(
-        events.map((_, i) => chat.version + 1 + i),
+        events.map((_, i) => version + 1 + i),
       );
     }),
   ));

@@ -3,8 +3,11 @@
 import { expect, test } from "bun:test";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
+import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { ChatApi } from "./Api.ts";
+import { Db } from "./Db.ts";
+import { users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
 
 const run = makeTestRun();
@@ -271,5 +274,251 @@ test("when the owner leaves, the group goes to someone who accepted it", () =>
         params: { id: group.id },
       });
       expect(view.createdBy).toBe(friend.user.id);
+    }),
+  ));
+
+// Issue #808: a pending request is readable (to decide on it), but stays out
+// of search, and nothing the recipient does reaches the others until they
+// accept.
+const searchHits = (member: Member, q: string) =>
+  Effect.gen(function* () {
+    const page = yield* member.client.search.searchMessages({ query: { q } });
+    const all = yield* member.client.search.searchAll({ query: { q } });
+    return {
+      messages: page.results.map((r) => r.chatId),
+      all: all.messages.results.map((r) => r.chatId),
+    };
+  });
+
+test("a pending request's messages stay out of every search until it's accepted", () =>
+  run(
+    Effect.gen(function* () {
+      const spammer = yield* registerAndLogin("spammer");
+      const alice = yield* registerAndLogin("alice");
+      const friend = yield* registerAndLogin("friend");
+      const group = yield* spammer.client.chats.createGroupChat({
+        payload: { title: "Deals", participantIds: [alice.user.id] },
+      });
+      yield* say(spammer, group.id, "cheap watches");
+      // A chat Alice is really in still matches, so the filter is per chat.
+      const direct = yield* friend.client.chats.createDirectChat({
+        payload: { userId: alice.user.id },
+      });
+      yield* say(friend, direct.id, "my watches arrived");
+
+      // A word/prefix hit and a substring-only one: each union arm filters.
+      for (const q of ["watch", "atche"])
+        expect(yield* searchHits(alice, q)).toEqual({
+          messages: [direct.id],
+          all: [direct.id],
+        });
+      // The spammer, who is in it for real, still finds it.
+      expect((yield* searchHits(spammer, "watch")).messages).toEqual([
+        group.id,
+      ]);
+
+      yield* alice.client.chats.acceptChatRequest({ params: { id: group.id } });
+      for (const q of ["watch", "atche"])
+        expect(yield* searchHits(alice, q)).toEqual({
+          messages: [direct.id, group.id],
+          all: [direct.id, group.id],
+        });
+    }),
+  ));
+
+const tagOf = <A, E extends { readonly _tag: string }, R>(
+  attempt: Effect.Effect<A, E, R>,
+) =>
+  attempt.pipe(
+    Effect.flip,
+    Effect.map((error) => error._tag),
+  );
+
+test("a pending request can't be sent, forwarded, reacted, pinned or typed into", () =>
+  run(
+    Effect.gen(function* () {
+      const spammer = yield* registerAndLogin("spammer");
+      const alice = yield* registerAndLogin("alice");
+      const friend = yield* registerAndLogin("friend");
+      const group = yield* spammer.client.chats.createGroupChat({
+        payload: { title: "Deals", participantIds: [alice.user.id] },
+      });
+      const spam = yield* say(spammer, group.id, "buy now");
+      const direct = yield* friend.client.chats.createDirectChat({
+        payload: { userId: alice.user.id },
+      });
+      const note = yield* say(friend, direct.id, "a note");
+      const chats = alice.client.chats;
+      const onSpam = { id: group.id, messageId: spam.id };
+
+      expect(yield* tagOf(say(alice, group.id, "hello?"))).toBe("Forbidden");
+      expect(yield* tagOf(chats.sendTyping({ params: { id: group.id } }))).toBe(
+        "Forbidden",
+      );
+      expect(
+        yield* tagOf(
+          chats.addMessageReaction({
+            params: onSpam,
+            payload: { emoji: "👍" },
+          }),
+        ),
+      ).toBe("Forbidden");
+      expect(
+        yield* tagOf(
+          chats.removeMessageReaction({
+            params: onSpam,
+            payload: { emoji: "👍" },
+          }),
+        ),
+      ).toBe("Forbidden");
+      expect(
+        yield* tagOf(
+          chats.pinMessage({
+            params: { id: group.id },
+            payload: { messageId: spam.id },
+          }),
+        ),
+      ).toBe("Forbidden");
+      expect(yield* tagOf(chats.unpinMessage({ params: onSpam }))).toBe(
+        "Forbidden",
+      );
+
+      const forwarded = yield* chats.forwardMessage({
+        params: { id: direct.id, messageId: note.id },
+        payload: { targetChatIds: [group.id, direct.id] },
+      });
+      expect(
+        forwarded.results.map((r) => [r.chatId, r.error?.reason ?? null]),
+      ).toEqual([
+        [group.id, "unavailable"],
+        [direct.id, null],
+      ]);
+
+      // Nothing landed: the spammer sees only their own message, with no
+      // reaction and no pin.
+      const seen = yield* spammer.client.chats.listMessages({
+        params: { id: group.id },
+        query: {},
+      });
+      expect(seen.messages.map((m) => m.content)).toEqual(["buy now"]);
+      expect(seen.messages[0]!.reactions.every((r) => r.count === 0)).toBe(
+        true,
+      );
+      expect(seen.messages[0]!.pinned).toBe(false);
+
+      // Reading is still allowed — the request is there to be judged.
+      const read = yield* chats.listMessages({
+        params: { id: group.id },
+        query: {},
+      });
+      expect(read.messages.map((m) => m.id)).toEqual([spam.id]);
+      expect(
+        yield* chats.listPinnedMessages({ params: { id: group.id } }),
+      ).toEqual([]);
+      // Starring is a private bookmark that reaches nobody, so it's allowed.
+      const starred = yield* chats.starMessage({ params: onSpam });
+      expect(starred.starred).toBe(true);
+    }),
+  ));
+
+test("reading a pending request sends no read receipt", () =>
+  run(
+    Effect.gen(function* () {
+      const spammer = yield* registerAndLogin("spammer");
+      const alice = yield* registerAndLogin("alice");
+      const group = yield* spammer.client.chats.createGroupChat({
+        payload: { title: "Deals", participantIds: [alice.user.id] },
+      });
+      const spam = yield* say(spammer, group.id, "buy now");
+      const readers = () =>
+        spammer.client.chats
+          .listMessages({ params: { id: group.id }, query: {} })
+          .pipe(Effect.map((page) => page.messages[0]!.readByUserIds));
+
+      const marked = yield* alice.client.chats.markRead({
+        params: { id: group.id },
+        payload: { messageId: spam.id },
+      });
+      expect(marked.messageRequest).toEqual({ addedBy: spammer.user.id });
+      expect(yield* readers()).toEqual([]);
+
+      yield* alice.client.chats.acceptChatRequest({ params: { id: group.id } });
+      yield* alice.client.chats.markRead({
+        params: { id: group.id },
+        payload: { messageId: spam.id },
+      });
+      expect(yield* readers()).toEqual([alice.user.id]);
+    }),
+  ));
+
+test("accepting a request lets the recipient send, react, pin and forward into it", () =>
+  run(
+    Effect.gen(function* () {
+      const spammer = yield* registerAndLogin("stranger");
+      const alice = yield* registerAndLogin("alice");
+      const friend = yield* registerAndLogin("friend");
+      const group = yield* spammer.client.chats.createGroupChat({
+        payload: { title: "Hello", participantIds: [alice.user.id] },
+      });
+      const hi = yield* say(spammer, group.id, "hi there");
+      const direct = yield* friend.client.chats.createDirectChat({
+        payload: { userId: alice.user.id },
+      });
+      const note = yield* say(friend, direct.id, "a note");
+
+      yield* alice.client.chats.acceptChatRequest({ params: { id: group.id } });
+      yield* say(alice, group.id, "hello!");
+      yield* alice.client.chats.sendTyping({ params: { id: group.id } });
+      yield* alice.client.chats.addMessageReaction({
+        params: { id: group.id, messageId: hi.id },
+        payload: { emoji: "👍" },
+      });
+      yield* alice.client.chats.pinMessage({
+        params: { id: group.id },
+        payload: { messageId: hi.id },
+      });
+      const forwarded = yield* alice.client.chats.forwardMessage({
+        params: { id: direct.id, messageId: note.id },
+        payload: { targetChatIds: [group.id] },
+      });
+      expect(forwarded.results[0]!.error).toBeNull();
+
+      const seen = yield* spammer.client.chats.listMessages({
+        params: { id: group.id },
+        query: {},
+      });
+      expect(seen.messages.map((m) => m.content)).toEqual([
+        "hi there",
+        "hello!",
+        "a note",
+      ]);
+      expect(seen.messages[0]!.pinned).toBe(true);
+      expect(
+        seen.messages[0]!.reactions.find((r) => r.emoji === "👍")?.count,
+      ).toBe(1);
+    }),
+  ));
+
+test("someone a chat is still a request for can't claim it once it's ownerless", () =>
+  run(
+    Effect.gen(function* () {
+      const owner = yield* registerAndLogin("owner");
+      const alice = yield* registerAndLogin("alice");
+      const group = yield* owner.client.chats.createGroupChat({
+        payload: { title: "G", participantIds: [alice.user.id] },
+      });
+      // The owner's account going away leaves the group ownerless.
+      const db = yield* Db;
+      yield* Effect.tryPromise(() =>
+        db.delete(users).where(eq(users.id, owner.user.id)),
+      ).pipe(Effect.orDie);
+      const claim = () =>
+        alice.client.chats.transferOwnership({
+          params: { id: group.id },
+          payload: { userId: alice.user.id },
+        });
+      expect(yield* tagOf(claim())).toBe("Forbidden");
+      yield* alice.client.chats.acceptChatRequest({ params: { id: group.id } });
+      expect((yield* claim()).createdBy).toBe(alice.user.id);
     }),
   ));
