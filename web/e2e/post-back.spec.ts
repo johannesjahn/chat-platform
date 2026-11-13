@@ -57,16 +57,26 @@ test(
     const target = page.locator(`[data-post-id="${ids[5]}"]`).first();
     const openLink = target.getByRole("link", { name: "Open post" });
     await openLink.scrollIntoViewIfNeeded();
-    // Let the scroll settle before reading it.
-    let scrollY = -1;
-    await expect(async () => {
-      const before = scrollY;
-      scrollY = await page.evaluate(() => window.scrollY);
-      expect(scrollY).toBe(before);
-    }).toPass();
-    expect(scrollY).toBeGreaterThan(0);
-
+    // Where the page is scrolled is read at the click itself, not before
+    // it: when the link isn't hittable where it was scrolled to (on a phone
+    // the sticky top bar can sit over it, or a card is still animating in),
+    // Playwright's click scrolls it again, to another alignment, before it
+    // clicks (issue #807). The post was opened from wherever that left it.
+    await page.evaluate(() =>
+      addEventListener(
+        "click",
+        () => {
+          (window as { scrollYAtClick?: number }).scrollYAtClick =
+            window.scrollY;
+        },
+        { capture: true, once: true },
+      ),
+    );
     await openLink.click();
+    const scrollY = await page.evaluate(
+      () => (window as { scrollYAtClick?: number }).scrollYAtClick ?? -1,
+    );
+    expect(scrollY).toBeGreaterThan(0);
     await expect(page).toHaveURL(/\/posts\/\d+$/);
     await expect(page.getByRole("main")).toContainText("Profile post 6");
 

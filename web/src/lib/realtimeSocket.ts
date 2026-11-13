@@ -35,6 +35,7 @@ import {
   syncChangedPost,
 } from "./postSync";
 import { replacePresence, setUserOnline } from "./presence";
+import { startRealtimeConnection } from "./realtimeConnection";
 import { noteSocketClosed, noteSocketOpened } from "./realtimeFreshness";
 import { mergeReactionCounts } from "./reactions";
 import { setUserStatus } from "./status";
@@ -96,14 +97,6 @@ type RealtimeSocketEvent =
     }
   | { type: "notifications_changed" };
 
-// A little more than the default Bun WebSocket idle timeout — sending
-// anything at all (the content is irrelevant, the server ignores incoming
-// messages) resets it, so this alone keeps the connection from being closed
-// as idle during a quiet conversation.
-const PING_INTERVAL_MS = 30_000;
-const RECONNECT_BASE_MS = 1_000;
-const RECONNECT_MAX_MS = 15_000;
-
 function realtimeSocketUrl(ticket: string): string {
   const url = new URL("/ws", API_URL);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -147,298 +140,270 @@ export function useRealtimeSocket(enabled: boolean): void {
     if (meId === undefined) return;
     const myId = meId;
 
-    let socket: WebSocket | null = null;
-    let pingTimer: ReturnType<typeof setInterval> | undefined;
-    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-    let reconnectDelay = RECONNECT_BASE_MS;
-    let stopped = false;
-
-    function scheduleReconnect() {
-      // Wait a random half-to-all of the backoff, so a deploy (which drops every
-      // client at once) doesn't bring them all back in lockstep.
-      const delay = reconnectDelay / 2 + Math.random() * (reconnectDelay / 2);
-      reconnectTimer = setTimeout(() => {
-        reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
-        void connect();
-      }, delay);
+    function handleOpen(socket: WebSocket) {
+      // From here the queries below are kept current by events, which is
+      // what their `staleTime`s rely on (issue #752; see
+      // realtimeFreshness.ts) — noted first, so the rooms re-joined just
+      // below count, and before the invalidation, so what it refetches
+      // counts as covered.
+      noteSocketOpened();
+      // Hand the live socket to the post-room manager so any comment
+      // sections currently open re-join their post rooms — the previous
+      // socket's server-side subscriptions died with it (see postRooms.ts).
+      setRealtimeSocket(socket);
+      // Same for any game lobby / lobby browser rooms (see games/rooms.ts).
+      setGameRoomsSocket(socket);
+      // Events are best-effort (see RealtimeEvent in src/Realtime.ts) — one
+      // dropped while this client was disconnected (or never sent because
+      // publish failed) would otherwise sit unnoticed until the next event
+      // for the same query happens to arrive. A full refetch of every query
+      // an event could have touched makes each (re)connect, including the
+      // very first one (which can be rehydrating a stale persisted cache
+      // from a previous session — see query.ts), self-healing regardless of
+      // what was missed (issue #54). `chat_updated`'s per-chat version
+      // check (issue #55) still avoids redundant refetches on top of this
+      // for the common case of a single missed push.
+      void queryClient.invalidateQueries({ queryKey: ["chats"] });
+      void queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
+      void queryClient.invalidateQueries({
+        queryKey: postDetailQueryKeyPrefix,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: userPostsQueryKeyPrefix,
+      });
+      void queryClient.invalidateQueries({ queryKey: commentsQueryKeyRoot });
+      void queryClient.invalidateQueries({ queryKey: gamesQueryKeyRoot });
+      void queryClient.invalidateQueries({
+        queryKey: notificationsQueryKeyRoot,
+      });
     }
 
-    async function connect() {
+    function handleMessage(data: unknown) {
+      let parsed: RealtimeSocketEvent;
+      try {
+        parsed = JSON.parse(data as string);
+      } catch {
+        return;
+      }
+      switch (parsed.type) {
+        case "chat_updated":
+          // Does only what the event's `change` needs — a read receipt is
+          // patched in, a new message in an open conversation fetches
+          // just that message — and refetches everything for anything
+          // else or after a missed version (issues #55, #749; see
+          // lib/chatSync.ts).
+          applyChatUpdated(queryClient, parsed, myId);
+          break;
+        case "chat_deleted": {
+          // Unlike `chat_updated`, always actioned regardless of any
+          // tracked version — there's no surviving row to compare against
+          // (see ChatDeletedEvent in src/Realtime.ts). Invalidating the
+          // list drops it from view; invalidating the detail/messages
+          // queries surfaces "Chat not found" if it's the one currently
+          // open, same as navigating to a chat that was never accessible.
+          forgetChatVersion(parsed.chatId);
+          void queryClient.invalidateQueries({
+            queryKey: chatsListQueryKey,
+          });
+          void queryClient.invalidateQueries({
+            queryKey: chatDetailQueryKey(parsed.chatId),
+          });
+          void queryClient.invalidateQueries({
+            queryKey: chatMessagesQueryKey(parsed.chatId),
+          });
+          break;
+        }
+        case "post_changed":
+          // Goes to every connected client, so it touches only the one
+          // post — at most one request — rather than invalidating every
+          // loaded feed page (issue #662; see syncChangedPost). The echo
+          // of this client's own create is dropped: the create already put
+          // the post in the cache (issue #753; see ownWrites.ts).
+          if (parsed.change === "updated" || parsed.change === "deleted") {
+            void syncChangedPost(queryClient, parsed.postId, parsed.change);
+          } else {
+            const { postId, change } = parsed;
+            ownWrites.intercept(OWN_POST_SCOPE, postId, () => {
+              void syncChangedPost(queryClient, postId, change);
+            });
+          }
+          break;
+        case "comment_changed": {
+          // Scoped to this post's room (only arrives while its comment
+          // section is open — see postRooms.ts). Refetch that post's
+          // comment/reply queries — not every open section's (issue #753);
+          // the event is id-only, so a refetch is how the new
+          // content/counts land.
+          //
+          // The post's `commentCount` (surfaced on its card — issue #306)
+          // also changes when a comment/reply is added or removed. Refetch
+          // just that post and patch it in wherever it's cached (the card's
+          // `CountUp` then animates old → new) — not the whole feed, which
+          // would refetch every loaded page (issue #662).
+          //
+          // The echo of this client's own new comment is dropped: the
+          // create already wrote it, and both counts, into the cache
+          // (issue #753; see ownWrites.ts).
+          const { postId, commentId } = parsed;
+          ownWrites.intercept(ownCommentScope(postId), commentId, () => {
+            void invalidatePostComments(queryClient, postId);
+            void refreshCachedPost(queryClient, postId);
+          });
+          break;
+        }
+        case "reaction_changed":
+          // A post reaction goes out feed-wide, so this lands on *every*
+          // connected client. Patch the affected post's counts in place
+          // from the event's `reactions` (that's exactly why it's on the
+          // wire — see ReactionEvent in src/Realtime.ts) instead of
+          // invalidating the whole feed, which would be an O(users ×
+          // reactions) refetch storm. `reactedByMe` is preserved rather
+          // than trusted from the event: it doesn't change for a
+          // non-actor, and the actor already reconciled it from its own
+          // mutation response (see mergeReactionCounts). A comment
+          // reaction arrives scoped to the post room (far lower volume),
+          // so it just refetches the comment queries. A message reaction
+          // arrives scoped to the message's chat participants and carries
+          // `chatId` (see ReactionEvent in src/Realtime.ts), so it's patched
+          // in place too, the same way a post reaction is.
+          if (parsed.targetType === "post") {
+            patchCachedPost(queryClient, parsed.targetId, (post) => ({
+              ...post,
+              reactions: mergeReactionCounts(post.reactions, parsed.reactions),
+            }));
+          } else if (parsed.targetType === "message") {
+            if (parsed.chatId != null) {
+              patchCachedMessage(
+                queryClient,
+                parsed.chatId,
+                parsed.targetId,
+                (message) => ({
+                  ...message,
+                  reactions: mergeReactionCounts(
+                    message.reactions,
+                    parsed.reactions,
+                  ),
+                }),
+              );
+            }
+          } else {
+            void queryClient.invalidateQueries({
+              queryKey: commentsQueryKeyRoot,
+            });
+          }
+          break;
+        case "message_pin_changed":
+          // Scoped to the chat's participants and carries the new `pinned`
+          // state (see MessagePinEvent in src/Realtime.ts), so — like a
+          // message reaction — patch the affected message's flag in place
+          // rather than refetching the whole window. The pinned *panel* is
+          // a separate query keyed by chat, so invalidate it too so the
+          // just-(un)pinned message enters/leaves the list. Starring emits
+          // no event: it's user-private, reconciled from the actor's own
+          // mutation response.
+          patchCachedMessage(
+            queryClient,
+            parsed.chatId,
+            parsed.messageId,
+            (message) => ({ ...message, pinned: parsed.pinned }),
+          );
+          void queryClient.invalidateQueries({
+            queryKey: chatPinnedQueryKey(parsed.chatId),
+          });
+          break;
+        case "presence":
+          setUserOnline(parsed.userId, parsed.online);
+          break;
+        case "presence_snapshot":
+          // Replaces whatever the previous connection left behind (see
+          // replacePresence).
+          replacePresence(parsed.userIds);
+          break;
+        case "typing":
+          noteTyping(
+            parsed.chatId,
+            parsed.userId,
+            parsed.username,
+            parsed.displayName,
+          );
+          break;
+        case "status_changed":
+          setUserStatus(parsed.userId, {
+            statusText: parsed.statusText,
+            statusEmoji: parsed.statusEmoji,
+            statusExpiresAt: parsed.statusExpiresAt,
+          });
+          break;
+        // Game events only arrive for rooms this client joined (see
+        // games/rooms.ts). The lobby ones are id-only — refetch; progress
+        // is transient and goes straight into its store.
+        case "game_lobby_updated":
+          void queryClient.invalidateQueries({
+            queryKey: gameLobbyQueryKey(parsed.lobbyId),
+          });
+          break;
+        case "game_lobbies_changed":
+          void queryClient.invalidateQueries({
+            queryKey: gameLobbiesQueryKey(parsed.game),
+          });
+          break;
+        case "game_progress":
+          noteGameProgress(parsed.lobbyId, parsed.userId, parsed.progress);
+          break;
+        case "game_chat":
+          void queryClient.invalidateQueries({
+            queryKey: gameChatQueryKey(parsed.lobbyId),
+          });
+          break;
+        // Our own reactions were already drawn when we sent them.
+        case "game_reaction":
+          if (parsed.userId !== meId) {
+            noteGameReaction(parsed.lobbyId, parsed.userId, parsed.reaction);
+          }
+          break;
+        // Something landed in (or was read from) this user's inbox —
+        // refetch the badge and, if it's open, the list.
+        case "notifications_changed":
+          void queryClient.invalidateQueries({
+            queryKey: notificationsQueryKeyRoot,
+          });
+          break;
+      }
+    }
+
+    // Connecting, reconnecting with backoff, and waiting out a lost
+    // connection (issue #807) live in realtimeConnection.ts.
+    const stop = startRealtimeConnection<WebSocket>({
+      isOnline: () => navigator.onLine !== false,
+      subscribeOnline: (listener) => {
+        window.addEventListener("online", listener);
+        return () => window.removeEventListener("online", listener);
+      },
       // Mint a short-lived, single-use ticket over authenticated REST (see
       // src/WsTicket.ts) rather than putting the long-lived access token
       // itself on the `/ws` URL, where it'd be liable to end up in access
-      // logs, proxy logs, or browser history (see issue #26). A network
-      // failure (offline, server unreachable) rejects rather than returning
-      // an `error`; it gets the same backoff — left to reject, it surfaced
-      // as an unhandled rejection and ended the reconnect loop (issue #618).
-      const result = await fetchClient
-        .POST("/realtime/ws-ticket")
-        .catch(() => null);
-      if (stopped) return;
-      const data = result?.data;
-      if (!data) {
-        scheduleReconnect();
-        return;
-      }
-
-      socket = new WebSocket(realtimeSocketUrl(data.ticket));
-
-      socket.onopen = () => {
-        reconnectDelay = RECONNECT_BASE_MS;
-        // From here the queries below are kept current by events, which is
-        // what their `staleTime`s rely on (issue #752; see
-        // realtimeFreshness.ts) — noted first, so the rooms re-joined just
-        // below count, and before the invalidation, so what it refetches
-        // counts as covered.
-        noteSocketOpened();
-        pingTimer = setInterval(() => socket?.send("ping"), PING_INTERVAL_MS);
-        // Hand the live socket to the post-room manager so any comment
-        // sections currently open re-join their post rooms — the previous
-        // socket's server-side subscriptions died with it (see postRooms.ts).
-        if (socket) setRealtimeSocket(socket);
-        // Same for any game lobby / lobby browser rooms (see games/rooms.ts).
-        if (socket) setGameRoomsSocket(socket);
-        // Events are best-effort (see RealtimeEvent in src/Realtime.ts) — one
-        // dropped while this client was disconnected (or never sent because
-        // publish failed) would otherwise sit unnoticed until the next event
-        // for the same query happens to arrive. A full refetch of every query
-        // an event could have touched makes each (re)connect, including the
-        // very first one (which can be rehydrating a stale persisted cache
-        // from a previous session — see query.ts), self-healing regardless of
-        // what was missed (issue #54). `chat_updated`'s per-chat version
-        // check (issue #55) still avoids redundant refetches on top of this
-        // for the common case of a single missed push.
-        void queryClient.invalidateQueries({ queryKey: ["chats"] });
-        void queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
-        void queryClient.invalidateQueries({
-          queryKey: postDetailQueryKeyPrefix,
-        });
-        void queryClient.invalidateQueries({
-          queryKey: userPostsQueryKeyPrefix,
-        });
-        void queryClient.invalidateQueries({ queryKey: commentsQueryKeyRoot });
-        void queryClient.invalidateQueries({ queryKey: gamesQueryKeyRoot });
-        void queryClient.invalidateQueries({
-          queryKey: notificationsQueryKeyRoot,
-        });
-      };
-
-      socket.onmessage = (event) => {
-        let parsed: RealtimeSocketEvent;
-        try {
-          parsed = JSON.parse(event.data as string);
-        } catch {
-          return;
-        }
-        switch (parsed.type) {
-          case "chat_updated":
-            // Does only what the event's `change` needs — a read receipt is
-            // patched in, a new message in an open conversation fetches
-            // just that message — and refetches everything for anything
-            // else or after a missed version (issues #55, #749; see
-            // lib/chatSync.ts).
-            applyChatUpdated(queryClient, parsed, myId);
-            break;
-          case "chat_deleted": {
-            // Unlike `chat_updated`, always actioned regardless of any
-            // tracked version — there's no surviving row to compare against
-            // (see ChatDeletedEvent in src/Realtime.ts). Invalidating the
-            // list drops it from view; invalidating the detail/messages
-            // queries surfaces "Chat not found" if it's the one currently
-            // open, same as navigating to a chat that was never accessible.
-            forgetChatVersion(parsed.chatId);
-            void queryClient.invalidateQueries({
-              queryKey: chatsListQueryKey,
-            });
-            void queryClient.invalidateQueries({
-              queryKey: chatDetailQueryKey(parsed.chatId),
-            });
-            void queryClient.invalidateQueries({
-              queryKey: chatMessagesQueryKey(parsed.chatId),
-            });
-            break;
-          }
-          case "post_changed":
-            // Goes to every connected client, so it touches only the one
-            // post — at most one request — rather than invalidating every
-            // loaded feed page (issue #662; see syncChangedPost). The echo
-            // of this client's own create is dropped: the create already put
-            // the post in the cache (issue #753; see ownWrites.ts).
-            if (parsed.change === "updated" || parsed.change === "deleted") {
-              void syncChangedPost(queryClient, parsed.postId, parsed.change);
-            } else {
-              const { postId, change } = parsed;
-              ownWrites.intercept(OWN_POST_SCOPE, postId, () => {
-                void syncChangedPost(queryClient, postId, change);
-              });
-            }
-            break;
-          case "comment_changed": {
-            // Scoped to this post's room (only arrives while its comment
-            // section is open — see postRooms.ts). Refetch that post's
-            // comment/reply queries — not every open section's (issue #753);
-            // the event is id-only, so a refetch is how the new
-            // content/counts land.
-            //
-            // The post's `commentCount` (surfaced on its card — issue #306)
-            // also changes when a comment/reply is added or removed. Refetch
-            // just that post and patch it in wherever it's cached (the card's
-            // `CountUp` then animates old → new) — not the whole feed, which
-            // would refetch every loaded page (issue #662).
-            //
-            // The echo of this client's own new comment is dropped: the
-            // create already wrote it, and both counts, into the cache
-            // (issue #753; see ownWrites.ts).
-            const { postId, commentId } = parsed;
-            ownWrites.intercept(ownCommentScope(postId), commentId, () => {
-              void invalidatePostComments(queryClient, postId);
-              void refreshCachedPost(queryClient, postId);
-            });
-            break;
-          }
-          case "reaction_changed":
-            // A post reaction goes out feed-wide, so this lands on *every*
-            // connected client. Patch the affected post's counts in place
-            // from the event's `reactions` (that's exactly why it's on the
-            // wire — see ReactionEvent in src/Realtime.ts) instead of
-            // invalidating the whole feed, which would be an O(users ×
-            // reactions) refetch storm. `reactedByMe` is preserved rather
-            // than trusted from the event: it doesn't change for a
-            // non-actor, and the actor already reconciled it from its own
-            // mutation response (see mergeReactionCounts). A comment
-            // reaction arrives scoped to the post room (far lower volume),
-            // so it just refetches the comment queries. A message reaction
-            // arrives scoped to the message's chat participants and carries
-            // `chatId` (see ReactionEvent in src/Realtime.ts), so it's patched
-            // in place too, the same way a post reaction is.
-            if (parsed.targetType === "post") {
-              patchCachedPost(queryClient, parsed.targetId, (post) => ({
-                ...post,
-                reactions: mergeReactionCounts(
-                  post.reactions,
-                  parsed.reactions,
-                ),
-              }));
-            } else if (parsed.targetType === "message") {
-              if (parsed.chatId != null) {
-                patchCachedMessage(
-                  queryClient,
-                  parsed.chatId,
-                  parsed.targetId,
-                  (message) => ({
-                    ...message,
-                    reactions: mergeReactionCounts(
-                      message.reactions,
-                      parsed.reactions,
-                    ),
-                  }),
-                );
-              }
-            } else {
-              void queryClient.invalidateQueries({
-                queryKey: commentsQueryKeyRoot,
-              });
-            }
-            break;
-          case "message_pin_changed":
-            // Scoped to the chat's participants and carries the new `pinned`
-            // state (see MessagePinEvent in src/Realtime.ts), so — like a
-            // message reaction — patch the affected message's flag in place
-            // rather than refetching the whole window. The pinned *panel* is
-            // a separate query keyed by chat, so invalidate it too so the
-            // just-(un)pinned message enters/leaves the list. Starring emits
-            // no event: it's user-private, reconciled from the actor's own
-            // mutation response.
-            patchCachedMessage(
-              queryClient,
-              parsed.chatId,
-              parsed.messageId,
-              (message) => ({ ...message, pinned: parsed.pinned }),
-            );
-            void queryClient.invalidateQueries({
-              queryKey: chatPinnedQueryKey(parsed.chatId),
-            });
-            break;
-          case "presence":
-            setUserOnline(parsed.userId, parsed.online);
-            break;
-          case "presence_snapshot":
-            // Replaces whatever the previous connection left behind (see
-            // replacePresence).
-            replacePresence(parsed.userIds);
-            break;
-          case "typing":
-            noteTyping(
-              parsed.chatId,
-              parsed.userId,
-              parsed.username,
-              parsed.displayName,
-            );
-            break;
-          case "status_changed":
-            setUserStatus(parsed.userId, {
-              statusText: parsed.statusText,
-              statusEmoji: parsed.statusEmoji,
-              statusExpiresAt: parsed.statusExpiresAt,
-            });
-            break;
-          // Game events only arrive for rooms this client joined (see
-          // games/rooms.ts). The lobby ones are id-only — refetch; progress
-          // is transient and goes straight into its store.
-          case "game_lobby_updated":
-            void queryClient.invalidateQueries({
-              queryKey: gameLobbyQueryKey(parsed.lobbyId),
-            });
-            break;
-          case "game_lobbies_changed":
-            void queryClient.invalidateQueries({
-              queryKey: gameLobbiesQueryKey(parsed.game),
-            });
-            break;
-          case "game_progress":
-            noteGameProgress(parsed.lobbyId, parsed.userId, parsed.progress);
-            break;
-          case "game_chat":
-            void queryClient.invalidateQueries({
-              queryKey: gameChatQueryKey(parsed.lobbyId),
-            });
-            break;
-          // Our own reactions were already drawn when we sent them.
-          case "game_reaction":
-            if (parsed.userId !== meId) {
-              noteGameReaction(parsed.lobbyId, parsed.userId, parsed.reaction);
-            }
-            break;
-          // Something landed in (or was read from) this user's inbox —
-          // refetch the badge and, if it's open, the list.
-          case "notifications_changed":
-            void queryClient.invalidateQueries({
-              queryKey: notificationsQueryKeyRoot,
-            });
-            break;
-        }
-      };
-
-      socket.onclose = () => {
-        if (pingTimer) clearInterval(pingTimer);
-        if (stopped) return;
-        // Nothing pushes changes until the next socket opens, so until then
-        // every mount refetches again.
-        noteSocketClosed();
-        scheduleReconnect();
-      };
-    }
-
-    void connect();
+      // logs, proxy logs, or browser history (see issue #26).
+      fetchTicket: async () =>
+        (await fetchClient.POST("/realtime/ws-ticket")).data?.ticket ?? null,
+      openSocket: (ticket, events) => {
+        const socket = new WebSocket(realtimeSocketUrl(ticket));
+        socket.onopen = () => events.open();
+        socket.onmessage = (event) => events.message(event.data);
+        socket.onclose = () => events.close();
+        return socket;
+      },
+      onOpen: handleOpen,
+      onMessage: handleMessage,
+      // Nothing pushes changes until the next socket opens, so until then
+      // every mount refetches again.
+      onClose: noteSocketClosed,
+    });
 
     return () => {
-      stopped = true;
+      stop();
       noteSocketClosed();
       setRealtimeSocket(null);
       setGameRoomsSocket(null);
-      if (pingTimer) clearInterval(pingTimer);
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      socket?.close();
     };
   }, [meId, queryClient]);
 }
