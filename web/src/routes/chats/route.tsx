@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import {
   createFileRoute,
   Link,
@@ -6,12 +6,12 @@ import {
   useMatch,
   useNavigate,
 } from "@tanstack/react-router";
-import { Link2, MessagesSquare, PlusCircle, Search } from "lucide-react";
+import { Link2, MessagesSquare, PlusCircle } from "lucide-react";
 import { ChatDetailsPanel } from "@/components/chat/ChatDetailsPanel";
-import { ChatList, type ChatListFilter } from "@/components/ChatList";
+import { ChatList } from "@/components/ChatList";
+import { ChatListFilterBar } from "@/components/ChatListFilterBar";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useSession } from "@/lib/auth";
 import { useChatDetailsAsPanel, useChatDetailsOpen } from "@/lib/chatDetails";
 import {
@@ -20,10 +20,13 @@ import {
   useChatsTwoPane,
   type Chat,
 } from "@/lib/chats";
+import {
+  ChatListFilterProvider,
+  useChatListFilterState,
+} from "@/lib/chatListFilter";
 import { useResizablePane } from "@/lib/paneWidth";
 import { queryClient } from "@/lib/query";
 import { warmed, warmRoute } from "@/lib/routeLoader";
-import { cn } from "@/lib/utils";
 import { useImmersiveShell } from "@/lib/viewport";
 
 export const Route = createFileRoute("/chats")({
@@ -36,15 +39,6 @@ export const Route = createFileRoute("/chats")({
     }),
   component: ChatsLayout,
 });
-
-const SHOW_OPTIONS: ReadonlyArray<{
-  value: ChatListFilter["show"];
-  label: string;
-}> = [
-  { value: "all", label: "All" },
-  { value: "unread", label: "Unread" },
-  { value: "groups", label: "Groups" },
-];
 
 /**
  * The layout around every `/chats/*` page.
@@ -75,10 +69,10 @@ function ChatsLayout() {
   const detailsAsPanel = useChatDetailsAsPanel();
   const detailsOpen = useChatDetailsOpen();
 
-  const [filter, setFilter] = useState<ChatListFilter>({
-    query: "",
-    show: "all",
-  });
+  // Held here on every layout, not just in the pane: below `lg` the `/chats`
+  // page reads it through the provider, so it outlives opening a chat.
+  const filterState = useChatListFilterState();
+  const [filter, setFilter] = filterState;
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // The list pane's width, resizable from its edge and remembered per device.
   const {
@@ -87,7 +81,13 @@ function ChatsLayout() {
     handleProps,
   } = useResizablePane("chat-pane-width");
 
-  if (!twoPane || !session) return <Outlet />;
+  if (!twoPane || !session) {
+    return (
+      <ChatListFilterProvider value={filterState}>
+        <Outlet />
+      </ChatListFilterProvider>
+    );
+  }
 
   return (
     <div className="flex min-h-0 grow basis-0">
@@ -135,46 +135,11 @@ function ChatsLayout() {
             </Button>
           </div>
         </div>
-        <div className="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-2.5">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              value={filter.query}
-              onChange={(e) =>
-                setFilter((prev) => ({ ...prev, query: e.target.value }))
-              }
-              placeholder="Filter chats"
-              aria-label="Filter chats"
-              className="h-9 pl-8"
-            />
-          </div>
-          <div
-            role="radiogroup"
-            aria-label="Show"
-            className="flex gap-1 rounded-lg bg-background/50 p-0.5"
-          >
-            {SHOW_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={filter.show === option.value}
-                onClick={() =>
-                  setFilter((prev) => ({ ...prev, show: option.value }))
-                }
-                className={cn(
-                  "flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
-                  filter.show === option.value
-                    ? "bg-primary/15 text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <ChatListFilterBar
+          filter={filter}
+          onChange={setFilter}
+          className="shrink-0 border-b border-border px-3 py-2.5"
+        />
         <div
           ref={scrollRef}
           className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain p-2"
@@ -192,7 +157,9 @@ function ChatsLayout() {
           scrolls its own thread; the other `/chats/*` pages are ordinary
           documents and scroll the pane. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-        <Outlet />
+        <ChatListFilterProvider value={filterState}>
+          <Outlet />
+        </ChatListFilterProvider>
       </div>
       {detailsAsPanel && detailsOpen && activeChatId !== undefined && (
         <ChatDetailsPanel chatId={activeChatId} currentUser={session.user} />

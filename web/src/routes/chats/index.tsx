@@ -1,11 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Link2, MessagesSquare, PlusCircle } from "lucide-react";
 import { ChatList } from "@/components/ChatList";
+import { ChatListFilterBar } from "@/components/ChatListFilterBar";
 import { EmptyState } from "@/components/EmptyState";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth";
+import { useChatListFilter } from "@/lib/chatListFilter";
 import { useChatsTwoPane } from "@/lib/chats";
 import { modKeyLabel } from "@/lib/shell";
 import { staticTitle } from "@/lib/title";
@@ -43,6 +45,7 @@ function SelectConversation() {
 
 function ChatsListPage() {
   const session = useSession();
+  const [filter, setFilter] = useChatListFilter();
 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col items-center gap-6 px-4 py-10">
@@ -70,7 +73,16 @@ function ChatsListPage() {
       </div>
 
       {session ? (
-        <ChatList session={session} />
+        <>
+          {/* The desktop pane's filters (issue #763), right under the
+              header, feeding the same `ChatList` filter. */}
+          <ChatListFilterBar
+            filter={filter}
+            onChange={setFilter}
+            className="-mt-3 w-full"
+          />
+          <ChatList session={session} filter={filter} />
+        </>
       ) : (
         <LoginPrompt
           title="Log in to see your chats"
