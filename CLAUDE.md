@@ -406,6 +406,14 @@ request_ for you (issue #785): `chat_participants.request_pending` and
   in `/chats/unread-count`, no presence either way (`PresenceAudience`), not
   a contact (`contactsOf`). Any new query over `chat_participants` that
   introduces people or counts unread must filter `request_pending = false`.
+  That includes message search: the condition sits inside each arm of
+  `matchingIds` (issue #808), per Search above.
+- **Read-only until accepted** (issue #808). Every write that others would
+  see — send, edit, typing, reactions, pins, claiming an ownerless group —
+  goes through `requireAcceptedParticipant` (403); a forward into a request
+  is that target's `unavailable`; `markRead` is a silent no-op, so viewing a
+  request sends no receipt. Reading, private stars, forwarding _out_, leave
+  and accept stay open. A new chat write must use the same guard.
 - **`request_pending` defaults to `false` in the database**, like
   `users.created_at`, so old replicas' inserts and pre-migration rows read as
   accepted.
