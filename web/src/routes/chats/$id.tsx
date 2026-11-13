@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ChatConversation } from "@/components/chat/ChatConversation";
-import { chatDetailQueryOptions, warmChatMessages } from "@/lib/chats";
+import { chatDetailQueryOptions, warmChatMessages } from "@/lib/chatQueries";
 import { queryClient } from "@/lib/query";
 import { warmed, warmRoute } from "@/lib/routeLoader";
 import { staticTitle } from "@/lib/title";

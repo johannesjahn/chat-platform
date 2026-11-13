@@ -60,14 +60,20 @@ import { staticTitle } from "@/lib/title";
 import { userHandle, userLabel } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
-type Section =
-  | "profile"
-  | "status"
-  | "appearance"
-  | "privacy"
-  | "notifications"
-  | "password"
-  | "account";
+// The section names alone, for `validateSearch`: route options other than
+// the component stay in the entry chunk, so reading `SECTIONS` there would
+// ship every section's icon to every cold load (issue #754).
+const SECTION_VALUES = [
+  "profile",
+  "status",
+  "appearance",
+  "privacy",
+  "notifications",
+  "password",
+  "account",
+] as const;
+
+type Section = (typeof SECTION_VALUES)[number];
 
 const SECTIONS: ReadonlyArray<{
   value: Section;
@@ -91,7 +97,7 @@ export const Route = createFileRoute("/settings")({
   // is addressable — `/settings?section=password` — and the back button
   // walks back through the ones visited.
   validateSearch: (search: Record<string, unknown>): SettingsSearch =>
-    SECTIONS.some((s) => s.value === search.section)
+    SECTION_VALUES.some((value) => value === search.section)
       ? { section: search.section as Section }
       : {},
   component: SettingsPage,

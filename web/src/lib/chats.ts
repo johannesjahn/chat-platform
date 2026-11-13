@@ -1,7 +1,5 @@
 import { useCallback, useRef, useState, useSyncExternalStore } from "react";
 import {
-  infiniteQueryOptions,
-  queryOptions,
   useInfiniteQuery,
   useQuery,
   useQueryClient,
@@ -20,10 +18,8 @@ import {
   chatPinnedQueryKey,
   chatStarredQueryKey,
 } from "./chatQueryKeys";
-import { recordChatVersion } from "./chatVersions";
 import { useIsDesktop } from "./media";
-import { realtimeStaleTime } from "./realtimeFreshness";
-import { isFreshlyWarmed, refetchUnlessWarmed, warmed } from "./routeLoader";
+import { isFreshlyWarmed, refetchUnlessWarmed } from "./routeLoader";
 import { userLabel } from "./users";
 
 export type Chat = components["schemas"]["Chat"];
@@ -87,17 +83,26 @@ export const MAX_GROUP_PARTICIPANTS = 20;
 // same idea as PostCard's threshold but shorter — chat bubbles are narrow.
 export const MESSAGE_COLLAPSE_THRESHOLD = 300;
 
-// Matches the backend's `DEFAULT_MESSAGES_LIMIT` (src/Api.ts): enough to fill
-// a tall desktop viewport on open, so the first page doesn't immediately
-// trigger a "load earlier" fetch, while staying well under
-// `MESSAGES_MAX_LIMIT` so several pages fit before a re-anchor.
-const MESSAGES_PAGE_SIZE = 30;
-const MESSAGES_MAX_LIMIT = 100;
+import {
+  chatDetailQueryOptions,
+  chatsListQueryOptions,
+  type ChatMessagesPage,
+  fetchMessagesPage,
+  type MessagesPageResponse,
+  MESSAGES_MAX_LIMIT,
+  MESSAGES_PAGE_SIZE,
+} from "./chatQueries";
 
-type MessagesPageResponse = components["schemas"]["MessagesPage"];
-
-// The query keys live in chatQueryKeys.ts (see there); most code reaches
-// them through here.
+// The shell's and the loaders' queries live in chatQueries.ts, and the query
+// keys in chatQueryKeys.ts (see there); most code reaches them through here.
+export {
+  chatDetailQueryOptions,
+  chatsListQueryOptions,
+  chatsUnreadCountQueryOptions,
+  type ChatMessagesPage,
+  useTotalUnreadCount,
+  warmChatMessages,
+} from "./chatQueries";
 export {
   chatsListQueryKey,
   unreadChatsListQueryKey,
@@ -151,40 +156,6 @@ export function useChatsList(
   return useInfiniteQuery({
     ...chatsListQueryOptions({ unreadOnly, requestsOnly }),
     enabled,
-  });
-}
-
-export function chatsListQueryOptions({
-  unreadOnly = false,
-  requestsOnly = false,
-}: { unreadOnly?: boolean; requestsOnly?: boolean } = {}) {
-  return infiniteQueryOptions({
-    queryKey: requestsOnly
-      ? chatRequestsListQueryKey
-      : unreadOnly
-        ? unreadChatsListQueryKey
-        : chatsListQueryKey,
-    refetchOnMount: refetchUnlessWarmed,
-    // `chat_updated`/`chat_deleted` keep every chat list current while the
-    // socket is up, so a mount doesn't refetch one (issue #752).
-    staleTime: realtimeStaleTime(),
-    initialPageParam: undefined as string | undefined,
-    queryFn: async ({ pageParam, signal }) => {
-      const { data, error } = await fetchClient.GET("/chats", {
-        params: {
-          query: {
-            ...(pageParam ? { cursor: pageParam } : {}),
-            ...(unreadOnly ? { unread: "true" as const } : {}),
-            ...(requestsOnly ? { requests: "true" as const } : {}),
-          },
-        },
-        signal,
-      });
-      if (error) throw error;
-      for (const chat of data.chats) recordChatVersion(chat.id, chat.version);
-      return data;
-    },
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 }
 
@@ -266,32 +237,6 @@ export function formatDaySeparator(
   });
 }
 
-export function chatsUnreadCountQueryOptions() {
-  return queryOptions({
-    queryKey: chatsUnreadCountQueryKey,
-    staleTime: realtimeStaleTime(),
-    queryFn: async ({ signal }) => {
-      const { data, error } = await fetchClient.GET("/chats/unread-count", {
-        signal,
-      });
-      if (error) throw error;
-      return data;
-    },
-  });
-}
-
-/**
- * The viewer's unread messages over every chat they're in — the Chats nav
- * badge, the phone header badge, the dock and the tab title. Counted by the
- * server (`GET /chats/unread-count`, issue #756), not summed over the loaded
- * pages of the chat list, which only ever hold the newest chats: an unread
- * chat that has dropped off the first page still counts.
- */
-export function useTotalUnreadCount(enabled: boolean): number {
-  const { data } = useQuery({ ...chatsUnreadCountQueryOptions(), enabled });
-  return data?.count ?? 0;
-}
-
 /**
  * The unread messages in whichever chat-list pages are loaded. Not the
  * total (that's `useTotalUnreadCount`) — only for code that pairs a count
@@ -314,22 +259,6 @@ export function useChatDetail(chatId: number | undefined, enabled: boolean) {
   return useQuery({
     ...chatDetailQueryOptions(chatId ?? -1),
     enabled: enabled && chatId != null,
-  });
-}
-
-// Shared with the conversation route's loader (see routes/chats/$id.tsx).
-export function chatDetailQueryOptions(chatId: number) {
-  return queryOptions({
-    queryKey: chatDetailQueryKey(chatId),
-    refetchOnMount: refetchUnlessWarmed,
-    queryFn: async () => {
-      const { data, error } = await fetchClient.GET("/chats/{id}", {
-        params: { path: { id: String(chatId) } },
-      });
-      if (error) throw error;
-      recordChatVersion(data.id, data.version);
-      return data;
-    },
   });
 }
 
@@ -376,65 +305,6 @@ export function useStarredMessages(
       return data;
     },
   });
-}
-
-// No cursor at all returns the newest window; `before`/`after` walk
-// backward/forward from a previous page's `earliestCursor`/`latestCursor`
-// (issue #50) — see `MessagesPageQuery` in src/Api.ts.
-async function fetchMessagesPage(
-  chatId: number,
-  cursor:
-    | { before: string; limit: number }
-    | { after: string; limit: number }
-    | { limit: number },
-): Promise<MessagesPageResponse> {
-  const { data, error } = await fetchClient.GET("/chats/{id}/messages", {
-    params: {
-      path: { id: String(chatId) },
-      query: {
-        limit: String(cursor.limit),
-        ...("before" in cursor ? { before: cursor.before } : {}),
-        ...("after" in cursor ? { after: cursor.after } : {}),
-      },
-    },
-  });
-  if (error) throw error;
-  return data;
-}
-
-export type ChatMessagesPage = {
-  messages: ChatMessage[];
-  hasEarlier: boolean;
-  // The cursors bounding `messages`, so a mount that adopts a window it
-  // didn't fetch itself (see `useChatMessages`) can page on from it.
-  // Optional: a window persisted before they were stored has none.
-  earliestCursor?: string | null;
-  latestCursor?: string | null;
-};
-
-// Warms a chat's newest window for its route's loader (see
-// routes/chats/$id.tsx) — the same first page `useChatMessages` fetches on
-// a fresh mount, which then adopts it. A window already cached is left as
-// it is.
-export function warmChatMessages(queryClient: QueryClient, chatId: number) {
-  const queryKey = chatMessagesQueryKey(chatId);
-  return warmed(
-    queryKey,
-    queryClient.ensureQueryData<ChatMessagesPage>({
-      queryKey,
-      queryFn: async () => {
-        const page = await fetchMessagesPage(chatId, {
-          limit: MESSAGES_PAGE_SIZE,
-        });
-        return {
-          messages: page.messages,
-          hasEarlier: page.hasEarlier,
-          earliestCursor: page.earliestCursor,
-          latestCursor: page.latestCursor,
-        };
-      },
-    }),
-  );
 }
 
 // Reads the window `useChatMessages` holds for `chatId` straight off the

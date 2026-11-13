@@ -368,9 +368,9 @@ async function drainQueue(queryClient: QueryClient): Promise<void> {
   }
 }
 
-// Mounted once near the root (see __root.tsx) — replays the queue whenever
-// connectivity is (re)established, including at app boot if items were
-// queued during a previous, now-closed session. Also re-runs on a session
+// Mounted once near the root (see components/shell/ShellServices.tsx) —
+// replays the queue whenever connectivity is (re)established, including at
+// app boot if items were queued during a previous, now-closed session. Also re-runs on a session
 // change: items queued by a user who was logged out (or a different user
 // entirely) at the time are skipped by `drainQueue`'s owner check above, so
 // logging back in as their owner needs its own trigger to pick them up
@@ -383,9 +383,4 @@ export function useOfflineQueueSync(): void {
   useEffect(() => {
     if (isOnline) void replayQueue(queryClient);
   }, [isOnline, userId, queryClient]);
-}
-
-export function OfflineQueueSync(): null {
-  useOfflineQueueSync();
-  return null;
 }

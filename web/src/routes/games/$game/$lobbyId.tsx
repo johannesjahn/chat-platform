@@ -46,9 +46,9 @@ import {
   useServerClock,
   type GameLobby,
 } from "@/lib/games/lobby";
+import { gameTitle } from "@/lib/games/names";
 import {
   GAMES,
-  gameTitle,
   getGame,
   type GameDefinition,
   type GameId,

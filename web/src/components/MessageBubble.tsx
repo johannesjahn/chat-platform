@@ -25,8 +25,8 @@ import {
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
 import { ProfileHoverCard } from "@/components/ProfileHoverCard";
-import { ReactionAddButton, ReactionList } from "@/components/CommentsSection";
-import { Lightbox } from "@/components/Lightbox";
+import { ReactionAddButton, ReactionList } from "@/components/ReactionPicker";
+import { Lightbox } from "@/components/LazyLightbox";
 import { MentionText } from "@/components/MentionText";
 import { MentionTextarea } from "@/components/MentionTextarea";
 import { Button } from "@/components/ui/button";
@@ -892,6 +892,8 @@ export function MessageBubble({
             <button
               type="button"
               onClick={() => setLightboxOpen(true)}
+              onPointerEnter={Lightbox.preload}
+              onFocus={Lightbox.preload}
               aria-label="View image full-size"
               className="block cursor-zoom-in"
             >

@@ -14,12 +14,8 @@ import { GradientText } from "@/components/reactbits/GradientText";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth";
 import { useChatDetailsAsPanel, useChatDetailsOpen } from "@/lib/chatDetails";
-import {
-  chatsListQueryOptions,
-  useChatsList,
-  useChatsTwoPane,
-  type Chat,
-} from "@/lib/chats";
+import { chatsListQueryOptions } from "@/lib/chatQueries";
+import { useChatsList, useChatsTwoPane, type Chat } from "@/lib/chats";
 import {
   ChatListFilterProvider,
   useChatListFilterState,

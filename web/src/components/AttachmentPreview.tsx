@@ -2,7 +2,7 @@ import { useState } from "react";
 import { FileText } from "lucide-react";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { BlurhashImage } from "@/components/BlurhashImage";
-import { Lightbox } from "@/components/Lightbox";
+import { Lightbox } from "@/components/LazyLightbox";
 import {
   attachmentKind,
   formatBytes,
@@ -101,6 +101,8 @@ function ImageAttachment({ attachment, className }: AttachmentPreviewProps) {
       <button
         type="button"
         onClick={() => setOpen(true)}
+        onPointerEnter={Lightbox.preload}
+        onFocus={Lightbox.preload}
         aria-label={`View ${attachment.filename} full-size`}
         className="block w-full cursor-zoom-in"
       >

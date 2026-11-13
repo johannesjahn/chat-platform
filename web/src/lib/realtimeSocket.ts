@@ -127,9 +127,9 @@ function realtimeSocketUrl(ticket: string): string {
 // `ChatParticipant` React Query has cached, and the store only overrides that
 // once something changes).
 //
-// Mounted once near the root (see `__root.tsx`'s `Nav`) so the nav's unread
-// badge, the `/chats` list, and the `/` feed all stay live even when the
-// user isn't looking at them.
+// Mounted once near the root (see components/shell/ShellServices.tsx) so
+// the nav's unread badge, the `/chats` list, and the `/` feed all stay live
+// even when the user isn't looking at them.
 export function useRealtimeSocket(enabled: boolean): void {
   const queryClient = useQueryClient();
   const session = useSession();

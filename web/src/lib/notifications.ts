@@ -6,15 +6,6 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import {
-  AtSign,
-  Bell,
-  CornerDownRight,
-  MessageSquare,
-  Swords,
-  Trophy,
-  type LucideIcon,
-} from "lucide-react";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
 import { realtimeStaleTime } from "./realtimeFreshness";
@@ -156,13 +147,3 @@ export function notificationTarget(n: Notification): NotificationTarget | null {
     return { to: "/posts/$id", params: { id: String(n.postId) } };
   return null;
 }
-
-// Each type's badge glyph, shared by the rows and the inbox's preview pane.
-export const NOTIFICATION_ICONS: Record<Notification["type"], LucideIcon> = {
-  comment: MessageSquare,
-  reply: CornerDownRight,
-  reaction: Bell,
-  mention: AtSign,
-  game_invite: Swords,
-  game_record: Trophy,
-};

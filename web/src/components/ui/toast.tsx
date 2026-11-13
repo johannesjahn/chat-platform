@@ -1,15 +1,18 @@
 import {
   createContext,
   type ReactNode,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
   useState,
 } from "react";
-import { CheckCircle2, AlertTriangle, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useTransitionState } from "@/lib/motion";
-import { cn } from "@/lib/utils";
+import { lazyNamed, whenIdle } from "@/lib/lazy";
+
+// A toast's own markup is a lazy chunk (issue #754): the provider — and the
+// live region, which has to be there before anything is announced — is on
+// every page, but a toast only ever follows an action. Warmed on idle.
+const ToastItem = lazyNamed(() => import("./toast-item"), "ToastItem");
 
 export type ToastOptions = {
   title: string;
@@ -34,19 +37,16 @@ export function useToast(): ShowToast {
   return show;
 }
 
-// Long enough to read a line or two; a toast with an action stays a little
-// longer so there's time to reach for it.
-const TOAST_MS = 5000;
-const TOAST_WITH_ACTION_MS = 8000;
 // Older toasts make way for new ones rather than stacking up the screen.
 const MAX_TOASTS = 3;
 
-type Entry = ToastOptions & { id: number; open: boolean };
+export type ToastEntry = ToastOptions & { id: number; open: boolean };
 
 let nextToastId = 0;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Entry[]>([]);
+  const [toasts, setToasts] = useState<ToastEntry[]>([]);
+  useEffect(() => whenIdle(() => void ToastItem.preload().catch(() => {})), []);
 
   const show = useCallback<ShowToast>((options) => {
     setToasts((prev) => [
@@ -78,100 +78,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         // Lifted clear of a chat's composer, which sits on the bottom edge.
         className="pointer-events-none fixed inset-x-0 bottom-24 z-[80] flex flex-col items-center gap-2 px-4"
       >
-        {toasts.map((toast) => (
-          <ToastItem
-            key={toast.id}
-            toast={toast}
-            onClose={close}
-            onExited={remove}
-          />
-        ))}
+        <Suspense fallback={null}>
+          {toasts.map((toast) => (
+            <ToastItem
+              key={toast.id}
+              toast={toast}
+              onClose={close}
+              onExited={remove}
+            />
+          ))}
+        </Suspense>
       </div>
     </ToastContext.Provider>
-  );
-}
-
-function ToastItem({
-  toast,
-  onClose,
-  onExited,
-}: {
-  toast: Entry;
-  onClose: (id: number) => void;
-  onExited: (id: number) => void;
-}) {
-  const { ref, phase, mounted } = useTransitionState<HTMLDivElement>(
-    toast.open,
-  );
-  const { id, open, action } = toast;
-
-  useEffect(() => {
-    if (!mounted) onExited(id);
-  }, [mounted, onExited, id]);
-
-  useEffect(() => {
-    if (!open) return;
-    const timer = setTimeout(
-      () => onClose(id),
-      action ? TOAST_WITH_ACTION_MS : TOAST_MS,
-    );
-    return () => clearTimeout(timer);
-  }, [open, onClose, id, action]);
-
-  if (!mounted) return null;
-  const warning = toast.tone === "warning";
-  const Icon = warning ? AlertTriangle : CheckCircle2;
-
-  return (
-    <div
-      ref={ref}
-      data-testid="toast"
-      className={cn(
-        "pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-2xl border border-border bg-popover px-4 py-3 text-popover-foreground shadow-lg",
-        phase === "exiting"
-          ? "motion-safe:animate-pop-close"
-          : "motion-safe:animate-banner-rise",
-      )}
-    >
-      <Icon
-        className={cn(
-          "mt-0.5 size-4 shrink-0",
-          warning ? "text-amber-500" : "text-primary",
-        )}
-        aria-hidden
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <p className="text-sm font-medium">{toast.title}</p>
-        {toast.description && (
-          <div className="text-xs text-muted-foreground">
-            {toast.description}
-          </div>
-        )}
-      </div>
-      {action && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-7 shrink-0"
-          onClick={() => {
-            action.onClick();
-            onClose(id);
-          }}
-        >
-          {action.label}
-        </Button>
-      )}
-      <Button
-        type="button"
-        size="icon"
-        variant="ghost"
-        aria-label="Dismiss"
-        className="-mr-1 size-6 shrink-0"
-        onClick={() => onClose(id)}
-      >
-        <X className="size-3.5" />
-      </Button>
-    </div>
   );
 }

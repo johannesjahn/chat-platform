@@ -52,20 +52,13 @@ import {
   useSession,
   useSessionPending,
 } from "../lib/auth";
-import { useBrowserNotifications } from "../lib/browserNotifications";
 import { useDockUser } from "../lib/chatDock";
 import { lazyNamed, type PreloadableComponent, whenIdle } from "../lib/lazy";
 import { DESKTOP_MEDIA_QUERY, useIsDesktop } from "../lib/media";
-import {
-  loadedUnreadCount,
-  useChatsList,
-  useTotalUnreadCount,
-} from "../lib/chats";
+import { useTotalUnreadCount } from "../lib/chatQueries";
 import { useUnreadNotificationCount } from "../lib/notifications";
-import { OfflineQueueSync } from "../lib/offlineQueue";
 import { useOnlineStatus } from "../lib/online";
 import { persistOptions, queryClient } from "../lib/query";
-import { useRealtimeSocket } from "../lib/realtimeSocket";
 import { useRedirectHere } from "../lib/redirect";
 import { type ShellOverlay, useOverlayOpen } from "../lib/shell";
 import { useTabBadge } from "../lib/tabBadge";
@@ -97,18 +90,24 @@ const ShortcutsDialog = lazyNamed(
   () => import("@/components/shell/ShortcutsDialog"),
   "ShortcutsDialog",
 );
+// Renders nothing; see ShellServices.tsx.
+const ShellServices = lazyNamed(
+  () => import("@/components/shell/ShellServices"),
+  "ShellServices",
+);
 const PwaUpdatePrompt = lazyNamed(
   () => import("@/components/PwaUpdatePrompt"),
   "PwaUpdatePrompt",
 );
 
-// On a desktop-width window, start fetching the sidebar as soon as this
-// module runs — alongside hydration rather than after it.
-if (
-  typeof window !== "undefined" &&
-  window.matchMedia(DESKTOP_MEDIA_QUERY).matches
-) {
-  DesktopSidebar.preload().catch(() => {});
+// Start fetching what the shell needs as soon as this module runs —
+// alongside hydration rather than after it: the background services on
+// every window, the sidebar on a desktop-width one.
+if (typeof window !== "undefined") {
+  ShellServices.preload().catch(() => {});
+  if (window.matchMedia(DESKTOP_MEDIA_QUERY).matches) {
+    DesktopSidebar.preload().catch(() => {});
+  }
 }
 
 export const Route = createRootRoute({
@@ -183,7 +182,9 @@ function RootComponent() {
       >
         <ConfirmProvider>
           <ToastProvider>
-            <OfflineQueueSync />
+            <Suspense fallback={null}>
+              <ShellServices />
+            </Suspense>
             <SkipLink />
             {/* The frame is a column below `lg` — the top bar over the page,
               as it always was — and a row from `lg` up, where the desktop
@@ -285,12 +286,13 @@ function LazyOverlay({
   );
 }
 
-// Owns what both navigations share — the realtime socket, the unread counts
-// (and with them the tab badge), logging out — and renders whichever of the
-// phone/tablet top bar and the desktop sidebar fits the window. Only one is
-// mounted, so there's never a second, hidden copy of every link and name in
-// the document; the bar's `lg:hidden` and the sidebar's `hidden lg:flex`
-// still hold the line for the first frame, before the media query is read.
+// Owns what both navigations share — the unread counts (and with them the
+// tab badge), logging out — and renders whichever of the phone/tablet top
+// bar and the desktop sidebar fits the window. Only one is mounted, so
+// there's never a second, hidden copy of every link and name in the
+// document; the bar's `lg:hidden` and the sidebar's `hidden lg:flex` still
+// hold the line for the first frame, before the media query is read. The
+// realtime socket lives in ShellServices instead (issue #754).
 //
 // The phone bar is the prerendered, mobile-first default, so it stays in
 // the entry chunk; the sidebar is a lazy chunk (issue #604). Until it's in,
@@ -300,20 +302,9 @@ function AppNavigation() {
   const session = useSession();
   const router = useRouter();
   const isDesktop = useIsDesktop();
-  useRealtimeSocket(!!session);
   const unreadCount = useTotalUnreadCount(!!session);
   const unreadNotifications = useUnreadNotificationCount(!!session);
   useTabBadge(unreadCount + unreadNotifications);
-  const { data: chatsData } = useChatsList(!!session);
-  useBrowserNotifications({
-    currentUserId: session?.user.id,
-    chats: chatsData?.pages.flatMap((page) => page.chats) ?? [],
-    // The loaded pages' count, not the server total: it names the chat
-    // from `chats`, so it has to move in step with that same response. A new
-    // message always bumps its chat onto the first page anyway.
-    unreadChats: loadedUnreadCount(chatsData?.pages ?? []),
-    unreadNotifications,
-  });
 
   const onLogout = session
     ? () => {

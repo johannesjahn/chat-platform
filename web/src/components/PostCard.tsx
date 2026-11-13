@@ -1,4 +1,4 @@
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, Suspense, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
@@ -13,9 +13,9 @@ import {
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar } from "@/components/Avatar";
 import { ProfileHoverCard } from "@/components/ProfileHoverCard";
-import { Lightbox } from "@/components/Lightbox";
+import { Lightbox } from "@/components/LazyLightbox";
 import { MentionText } from "@/components/MentionText";
-import { CommentsSection, ReactionPicker } from "@/components/CommentsSection";
+import { ReactionPicker } from "@/components/ReactionPicker";
 import { RelativeTime } from "@/components/RelativeTime";
 import { CountUp } from "@/components/reactbits/CountUp";
 import { Spotlight } from "@/components/reactbits/Spotlight";
@@ -30,12 +30,23 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { $api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
+import { lazyNamed, whenIdle } from "@/lib/lazy";
 import { useExpandableText } from "@/lib/motion";
 import { patchCachedPost, postText } from "@/lib/posts";
 import type { ReactionEmoji } from "@/lib/reactions";
 import { authorLabelOf } from "@/lib/users";
 import { cn } from "@/lib/utils";
 import type { Post } from "@/lib/posts";
+
+// The comment thread, and with it the mention-aware composer, is a lazy
+// chunk (issue #754): a card only shows its toggle until it's opened, so the
+// feed doesn't wait on either to render. Warmed on idle, and on intent on
+// the toggle, so opening it rarely waits on the network.
+const CommentsSection = lazyNamed(
+  () => import("@/components/CommentsSection"),
+  "CommentsSection",
+);
+const preloadComments = () => void CommentsSection.preload().catch(() => {});
 
 type PostCardProps = {
   // Its byline comes from the embedded `post.author` (issue #750) — no
@@ -130,6 +141,7 @@ export function PostCard({
     toggle: toggleExpanded,
   } = useExpandableText<HTMLParagraphElement>(!isLongText, "line-clamp-6");
   const [showComments, setShowComments] = useState(false);
+  useEffect(() => whenIdle(preloadComments), []);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const queryClient = useQueryClient();
@@ -251,6 +263,8 @@ export function PostCard({
           <button
             type="button"
             onClick={() => setLightboxOpen(true)}
+            onPointerEnter={Lightbox.preload}
+            onFocus={Lightbox.preload}
             aria-label="View image full-size"
             className="block w-full cursor-zoom-in"
           >
@@ -320,6 +334,8 @@ export function PostCard({
             size="sm"
             aria-expanded={showComments}
             onClick={() => setShowComments((prev) => !prev)}
+            onPointerEnter={preloadComments}
+            onFocus={preloadComments}
             className="h-8 gap-1.5 px-2 text-muted-foreground"
           >
             <MessageSquare className="size-4" />
@@ -392,7 +408,16 @@ export function PostCard({
         )}
       </CardFooter>
       <Collapse open={showComments}>
-        <CommentsSection postId={post.id} />
+        {/* The section's own loading state, while its chunk arrives. */}
+        <Suspense
+          fallback={
+            <div className="flex justify-center border-t border-border px-6 py-6">
+              <Loader2 className="size-4 animate-spin text-muted-foreground" />
+            </div>
+          }
+        >
+          <CommentsSection postId={post.id} />
+        </Suspense>
       </Collapse>
       {lightboxOpen && post.contentType === "image_url" && (
         <Lightbox

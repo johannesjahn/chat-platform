@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { components } from "@/lib/api-types";
+import { GAME_NAMES } from "./names";
 
 export type GameId = components["schemas"]["GameId"];
 
@@ -75,7 +76,7 @@ export const GAMES: ReadonlyArray<GameDefinition> = [
   {
     status: "live",
     id: "typing",
-    name: "Type Race",
+    name: GAME_NAMES.typing,
     tagline: "Fastest fingers win",
     description:
       "Race up to five friends to type a passage first. Watch every opponent's lane move live, then climb the leaderboard.",
@@ -116,7 +117,7 @@ export const GAMES: ReadonlyArray<GameDefinition> = [
   {
     status: "live",
     id: "drawing",
-    name: "Sketchy",
+    name: GAME_NAMES.drawing,
     tagline: "Draw badly, lie brilliantly",
     description:
       "Everyone draws a secret prompt, then invents fake titles for each other's doodles. Find the truth, fool your friends.",
@@ -157,7 +158,7 @@ export const GAMES: ReadonlyArray<GameDefinition> = [
   {
     status: "live",
     id: "reflex",
-    name: "Reflex Rush",
+    name: GAME_NAMES.reflex,
     tagline: "Blink and you lose",
     description:
       "Eight rounds of pure nerve: wait for green, dodge the decoys, snap the symbol, hit the target. Solo or head to head, milliseconds decide it.",
@@ -198,7 +199,7 @@ export const GAMES: ReadonlyArray<GameDefinition> = [
   {
     status: "soon",
     id: "trivia",
-    name: "Trivia Blitz",
+    name: GAME_NAMES.trivia,
     tagline: "Know it, buzz it",
     description:
       "Rapid-fire questions, one buzzer, no second chances. Coming to the arcade soon.",
@@ -231,11 +232,4 @@ export function gameThemeStyle(theme: GameTheme): CSSProperties {
     "--game-to": theme.to,
     "--game-glow": theme.glow,
   } as CSSProperties;
-}
-
-// A game's name for the document title, from an unvalidated URL slug — the
-// route's `head` runs before its component checks the slug, so an unknown
-// one falls back to the arcade's name rather than throwing like `getGame`.
-export function gameTitle(slug: string): string {
-  return GAMES.find((entry) => entry.id === slug)?.name ?? "Arcade";
 }
