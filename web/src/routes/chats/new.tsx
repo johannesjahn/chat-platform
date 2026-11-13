@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { MAX_GROUP_PARTICIPANTS, chatsListQueryKey } from "@/lib/chats";
+import { filterContacts, useContacts } from "@/lib/contacts";
 import { errorMessage } from "@/lib/errors";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { userAvatarName, userHandle, userLabel } from "@/lib/users";
@@ -47,6 +48,13 @@ function NewChatPage() {
     { params: { query: { q: query } } },
     { enabled: !!session && searchReady },
   );
+  // Below the directory search's floor (issue #48) the picker suggests the
+  // caller's own contacts instead (issue #764) — everyone with nothing
+  // typed, filtered here for 1–2 characters.
+  const showContacts = !searchReady;
+  const { data: contacts, isLoading: contactsLoading } = useContacts(
+    !!session && showContacts,
+  );
   const createDirectChat = $api.useMutation("post", "/chats/direct");
   const createGroupChat = $api.useMutation("post", "/chats/group");
 
@@ -62,7 +70,11 @@ function NewChatPage() {
     );
   }
 
-  const filtered = (users ?? []).filter((u) => u.id !== session.user.id);
+  const typed = search.trim();
+  const filtered = showContacts
+    ? filterContacts(contacts ?? [], typed)
+    : (users ?? []).filter((u) => u.id !== session.user.id);
+  const searchHint = `Type at least ${MIN_USER_SEARCH_QUERY_LENGTH} characters to search${showContacts && contacts?.length ? " everyone" : ""}.`;
 
   async function startDirectChat(userId: number) {
     setError(null);
@@ -181,10 +193,23 @@ function NewChatPage() {
               />
             </div>
 
-            {!searchReady ? (
+            {showContacts && filtered.length > 0 && (
+              <p
+                id="new-chat-contacts-heading"
+                className="pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+              >
+                {typed ? "Matching contacts" : "Recent contacts"}
+              </p>
+            )}
+            {showContacts && contactsLoading ? (
               <p className="py-4 text-center text-sm text-muted-foreground">
-                Type at least {MIN_USER_SEARCH_QUERY_LENGTH} characters to
-                search.
+                Loading your contacts…
+              </p>
+            ) : showContacts && filtered.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                {typed && contacts?.length
+                  ? `None of your contacts match. ${searchHint}`
+                  : searchHint}
               </p>
             ) : isLoading ? (
               <p className="py-4 text-center text-sm text-muted-foreground">
@@ -197,6 +222,9 @@ function NewChatPage() {
             ) : (
               <ul
                 role="list"
+                aria-labelledby={
+                  showContacts ? "new-chat-contacts-heading" : undefined
+                }
                 className="flex max-h-72 flex-col gap-1 overflow-y-auto"
               >
                 {filtered.map((user) => {
@@ -205,6 +233,7 @@ function NewChatPage() {
                     <li key={user.id}>
                       <button
                         type="button"
+                        aria-pressed={mode === "group" ? isSelected : undefined}
                         disabled={
                           mode === "direct" && pendingUserId === user.id
                         }
@@ -248,6 +277,11 @@ function NewChatPage() {
                   );
                 })}
               </ul>
+            )}
+            {showContacts && filtered.length > 0 && (
+              <p className="text-center text-xs text-muted-foreground">
+                {searchHint}
+              </p>
             )}
           </div>
 
