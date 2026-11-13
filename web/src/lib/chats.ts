@@ -22,6 +22,7 @@ import {
 } from "./chatQueryKeys";
 import { recordChatVersion } from "./chatVersions";
 import { useIsDesktop } from "./media";
+import { realtimeStaleTime } from "./realtimeFreshness";
 import { isFreshlyWarmed, refetchUnlessWarmed, warmed } from "./routeLoader";
 import { userLabel } from "./users";
 
@@ -164,6 +165,9 @@ export function chatsListQueryOptions({
         ? unreadChatsListQueryKey
         : chatsListQueryKey,
     refetchOnMount: refetchUnlessWarmed,
+    // `chat_updated`/`chat_deleted` keep every chat list current while the
+    // socket is up, so a mount doesn't refetch one (issue #752).
+    staleTime: realtimeStaleTime(),
     initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam, signal }) => {
       const { data, error } = await fetchClient.GET("/chats", {
@@ -265,6 +269,7 @@ export function formatDaySeparator(
 export function chatsUnreadCountQueryOptions() {
   return queryOptions({
     queryKey: chatsUnreadCountQueryKey,
+    staleTime: realtimeStaleTime(),
     queryFn: async ({ signal }) => {
       const { data, error } = await fetchClient.GET("/chats/unread-count", {
         signal,

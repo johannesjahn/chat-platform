@@ -6,7 +6,7 @@ import { GradientText } from "@/components/reactbits/GradientText";
 import { useSession } from "@/lib/auth";
 import { useGameLobbies } from "@/lib/games/lobby";
 import { GAMES, type GameId } from "@/lib/games/registry";
-import { gameHubRoom, useGameRoom } from "@/lib/games/rooms";
+import { useGameHubRoom } from "@/lib/games/rooms";
 import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/games/")({
@@ -17,7 +17,7 @@ export const Route = createFileRoute("/games/")({
 // A playable game's live-activity pill on its hub card: how many lobbies
 // are open right now, kept live through the game's hub room.
 function GameActivity({ game }: { game: GameId }) {
-  useGameRoom(gameHubRoom(game));
+  useGameHubRoom(game);
   const { data: lobbies } = useGameLobbies(game, true);
   if (!lobbies) return null;
   const players = lobbies.reduce((sum, l) => sum + l.players.length, 0);

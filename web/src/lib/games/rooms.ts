@@ -1,4 +1,9 @@
 import { useEffect, useSyncExternalStore } from "react";
+import {
+  noteRoomJoined,
+  noteRoomLeft,
+  REALTIME_STALE_TIME_MS,
+} from "../realtimeFreshness";
 
 // Bridges the games UI to the single `/ws` connection owned by
 // `useRealtimeSocket` — the named-room counterpart of lib/postRooms.ts. A
@@ -9,13 +14,28 @@ import { useEffect, useSyncExternalStore } from "react";
 // replayed whenever the socket (re)connects.
 
 let currentSocket: WebSocket | null = null;
-// room -> number of live subscribers on this client.
+// room -> number of live subscribers on this client. A lingering room (see
+// `acquireGameRoom`) stays here at 0, so a reconnect still re-joins it.
 const desired = new Map<string, number>();
+// room -> the timer that leaves a lingering room.
+const lingering = new Map<string, ReturnType<typeof setTimeout>>();
 
-function send(message: Record<string, unknown>): void {
+function send(message: Record<string, unknown>): boolean {
   if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
     currentSocket.send(JSON.stringify(message));
+    return true;
   }
+  return false;
+}
+
+function join(room: string): void {
+  if (send({ type: "subscribe_room", room })) noteRoomJoined(room);
+}
+
+function leave(room: string): void {
+  desired.delete(room);
+  noteRoomLeft(room);
+  send({ type: "unsubscribe_room", room });
 }
 
 // Called by `useRealtimeSocket` with the live socket on open and null on
@@ -24,21 +44,41 @@ function send(message: Record<string, unknown>): void {
 export function setGameRoomsSocket(socket: WebSocket | null): void {
   currentSocket = socket;
   if (socket) {
-    for (const room of desired.keys()) send({ type: "subscribe_room", room });
+    for (const room of desired.keys()) join(room);
   }
 }
 
-function acquire(room: string): () => void {
-  const count = desired.get(room) ?? 0;
-  desired.set(room, count + 1);
-  if (count === 0) send({ type: "subscribe_room", room });
+// `lingerMs` keeps the room joined that much longer after its last
+// subscriber leaves — so its events keep invalidating what was fetched
+// under it, and a page coming back within that time finds the data still
+// covered (see realtimeFreshness.ts) instead of refetching it.
+export function acquireGameRoom(room: string, lingerMs: number): () => void {
+  const timer = lingering.get(room);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    lingering.delete(room);
+  }
+  const count = desired.get(room);
+  desired.set(room, (count ?? 0) + 1);
+  if (count === undefined) join(room);
+  let released = false;
   return () => {
+    if (released) return;
+    released = true;
     const current = desired.get(room) ?? 0;
-    if (current <= 1) {
-      desired.delete(room);
-      send({ type: "unsubscribe_room", room });
-    } else {
+    if (current > 1) {
       desired.set(room, current - 1);
+    } else if (lingerMs > 0) {
+      desired.set(room, 0);
+      lingering.set(
+        room,
+        setTimeout(() => {
+          lingering.delete(room);
+          if (desired.get(room) === 0) leave(room);
+        }, lingerMs),
+      );
+    } else {
+      leave(room);
     }
   };
 }
@@ -50,8 +90,19 @@ export const gameHubRoom = (game: string) => `game-hub:${game}`;
 export function useGameRoom(room: string | null): void {
   useEffect(() => {
     if (!room) return;
-    return acquire(room);
+    return acquireGameRoom(room, 0);
   }, [room]);
+}
+
+// A game's lobby-browser room, for whatever shows its lobby list. Unlike a
+// lobby's room (which streams every racer's progress) it's quiet — an
+// id-only event per lobby change — so it's kept for as long as the list's
+// `staleTime` relies on it after the page using it is gone (issue #752).
+export function useGameHubRoom(game: string | null): void {
+  useEffect(() => {
+    if (!game) return;
+    return acquireGameRoom(gameHubRoom(game), REALTIME_STALE_TIME_MS);
+  }, [game]);
 }
 
 // Streams this client's race position to everyone in the lobby's room. The

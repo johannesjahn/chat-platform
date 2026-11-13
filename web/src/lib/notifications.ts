@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
+import { realtimeStaleTime } from "./realtimeFreshness";
 import { refetchUnlessWarmed } from "./routeLoader";
 
 // In-app notifications (issue #317): the header bell's badge and the
@@ -40,6 +41,9 @@ export function useUnreadNotificationCount(enabled: boolean): number {
   const { data } = useQuery({
     queryKey: unreadNotificationCountQueryKey,
     enabled,
+    // `notifications_changed` refreshes it while the socket is up (issue
+    // #752; see realtimeFreshness.ts).
+    staleTime: realtimeStaleTime(),
     queryFn: async ({ signal }) => {
       const { data, error } = await fetchClient.GET(
         "/notifications/unread-count",

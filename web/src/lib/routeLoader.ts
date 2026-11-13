@@ -96,6 +96,10 @@ export function isFreshlyWarmed(query: WarmableQuery): boolean {
 // everything the loader just fetched. Only that one mount's refetch is
 // skipped — focus/reconnect refetches, realtime invalidations and any later
 // mount (leaving the page and coming back) behave as before.
+//
+// It returns `true` rather than `"always"`, so a query that sets a
+// `staleTime` (the realtime-backed ones — see realtimeFreshness.ts) still
+// skips a later mount's refetch while its data is fresh.
 export function refetchUnlessWarmed(query: WarmableQuery): boolean {
   return !isFreshlyWarmed(query);
 }

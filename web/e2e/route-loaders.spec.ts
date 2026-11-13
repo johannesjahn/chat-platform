@@ -1,5 +1,5 @@
-import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { countApiGets, openSettled } from "./helpers";
 
 // Issue #605: the feed, chat and post routes warm their queries in a loader
 // (on link intent, or at the latest on navigation) with the same options
@@ -10,46 +10,6 @@ import { expect, test } from "./fixtures";
 // Measured on client-side navigations: a full page load also connects the
 // realtime socket, whose first connect deliberately refetches every
 // event-driven query (see realtimeSocket.ts), loader-warmed or not.
-
-// Every GET the page sends the backend, by path.
-function countApiGets(page: Page, apiUrl: string) {
-  const paths: string[] = [];
-  page.on("request", (request) => {
-    if (request.method() !== "GET" || !request.url().startsWith(apiUrl)) return;
-    paths.push(new URL(request.url()).pathname);
-  });
-  return (path: string) => paths.filter((p) => p === path).length;
-}
-
-// Loads `path` with nothing cached and waits until the app is up and quiet:
-// `ready` is on screen and the realtime socket has connected. A fixed sleep
-// isn't enough on a loaded runner — the app may not even have mounted
-// yet, and the socket's first-connect refetch would land among the requests
-// counted.
-async function openSettled(page: Page, path: string, ready: Locator) {
-  // `signUp` already loaded the feed, and the persister may have stored it
-  // — which would leave nothing for a hover to fetch. Dropped once, before
-  // the app boots.
-  await page.context().addInitScript(() => {
-    try {
-      if (sessionStorage.getItem("e2e-query-cache-dropped")) return;
-      sessionStorage.setItem("e2e-query-cache-dropped", "1");
-      for (const key of Object.keys(localStorage))
-        if (key.startsWith("chat-platform-query-cache"))
-          localStorage.removeItem(key);
-    } catch {
-      // about:blank has no storage; the real page load does it.
-    }
-  });
-  const socketUp = new Promise<void>((resolve) =>
-    page.on("websocket", (ws) => ws.once("framereceived", () => resolve())),
-  );
-  await page.goto(path);
-  await expect(ready).toBeVisible();
-  await socketUp;
-  // Let the refetches that connect set off come back.
-  await page.waitForTimeout(500);
-}
 
 test("hovering a link starts its page's requests, and following it doesn't repeat them", async ({
   page,

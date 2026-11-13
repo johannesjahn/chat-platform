@@ -35,6 +35,7 @@ import {
   syncChangedPost,
 } from "./postSync";
 import { replacePresence, setUserOnline } from "./presence";
+import { noteSocketClosed, noteSocketOpened } from "./realtimeFreshness";
 import { mergeReactionCounts } from "./reactions";
 import { setUserStatus } from "./status";
 import { noteTyping } from "./typing";
@@ -184,6 +185,12 @@ export function useRealtimeSocket(enabled: boolean): void {
 
       socket.onopen = () => {
         reconnectDelay = RECONNECT_BASE_MS;
+        // From here the queries below are kept current by events, which is
+        // what their `staleTime`s rely on (issue #752; see
+        // realtimeFreshness.ts) — noted first, so the rooms re-joined just
+        // below count, and before the invalidation, so what it refetches
+        // counts as covered.
+        noteSocketOpened();
         pingTimer = setInterval(() => socket?.send("ping"), PING_INTERVAL_MS);
         // Hand the live socket to the post-room manager so any comment
         // sections currently open re-join their post rooms — the previous
@@ -415,6 +422,9 @@ export function useRealtimeSocket(enabled: boolean): void {
       socket.onclose = () => {
         if (pingTimer) clearInterval(pingTimer);
         if (stopped) return;
+        // Nothing pushes changes until the next socket opens, so until then
+        // every mount refetches again.
+        noteSocketClosed();
         scheduleReconnect();
       };
     }
@@ -423,6 +433,7 @@ export function useRealtimeSocket(enabled: boolean): void {
 
     return () => {
       stopped = true;
+      noteSocketClosed();
       setRealtimeSocket(null);
       setGameRoomsSocket(null);
       if (pingTimer) clearInterval(pingTimer);
