@@ -123,7 +123,47 @@ jobs:
     name: Trigger ArgoCD sync
     needs: docker
     runs-on: ubuntu-latest
+    # Two releases close together (e.g. back-to-back merges that each bump
+    # the version) used to fire overlapping syncs, and ArgoCD refuses a sync
+    # while one is still running ("another operation is already in
+    # progress"). Queue syncs instead of running them side by side. GitHub
+    # keeps only the newest pending job in a group, cancelling older pending
+    # ones; that's harmless here, since every sync deploys main's HEAD.
+    concurrency:
+      group: argocd-sync
+      cancel-in-progress: false
     steps:
+      # The action only *starts* a sync and returns, so the concurrency group
+      # alone can't stop this job from hitting the previous release's
+      # operation while it's still rolling out (its pre-upgrade migration
+      # Job can take minutes). Wait for ArgoCD to report no running
+      # operation first. Best-effort: if the app can't be read (token
+      # without `get`, network), warn and try the sync anyway.
+      - name: Wait for any running ArgoCD operation
+        env:
+          ARGOCD_ADDRESS: ${{ vars.ARGOCD_ADDRESS }}
+          ARGOCD_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
+          ARGOCD_APP_NAME: ${{ vars.ARGOCD_APP_NAME }}
+        run: |
+          url="https://${ARGOCD_ADDRESS}/api/v1/applications/${ARGOCD_APP_NAME}"
+          deadline=$(( $(date +%s) + 900 ))
+          while :; do
+            if ! phase=$(curl -fsS -H "Authorization: Bearer ${ARGOCD_TOKEN}" "$url" | jq -r '.status.operationState.phase // "none"'); then
+              echo "::warning::Couldn't read the ArgoCD application; syncing without waiting."
+              exit 0
+            fi
+            if [ "$phase" != "Running" ]; then
+              echo "No ArgoCD operation running (last phase: $phase)."
+              exit 0
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::warning::An ArgoCD operation is still running after 15 minutes; trying the sync anyway."
+              exit 0
+            fi
+            echo "An ArgoCD operation is still running; checking again in 15s."
+            sleep 15
+          done
+
       # Not SHA-pinned like the other actions in this file: its action.yml
       # derives the ghcr.io image tag it docker-pulls from the *name of its
       # own checkout directory* (i.e. the ref you pin it to), rather than a
