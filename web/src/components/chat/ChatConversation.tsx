@@ -1,43 +1,36 @@
-import {
-  type CSSProperties,
-  Fragment,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { onlineManager, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import {
-  ArrowLeft,
-  Loader2,
-  PanelRight,
-  Paperclip,
-  Settings2,
-  Users,
-} from "lucide-react";
-import { Avatar } from "@/components/Avatar";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import {
   ChatComposer,
   type ChatComposerHandle,
   type ReplyTarget,
 } from "@/components/ChatComposer";
-import { MessageRequestBar } from "@/components/chat/MessageRequestBar";
 import {
-  ForwardDialog,
-  type ForwardOutcome,
-} from "@/components/chat/ForwardDialog";
-import { DateSeparator } from "@/components/DateSeparator";
+  CHAT_HEADER_CLASS,
+  ConversationHeader,
+} from "@/components/chat/ConversationHeader";
+import { DropOverlay } from "@/components/chat/DropOverlay";
+import { useFileDrop } from "@/components/chat/useFileDrop";
+import { ForwardDialog } from "@/components/chat/ForwardDialog";
+import { forwardToast } from "@/components/chat/forwardToast";
+import { MessageRequestBar } from "@/components/chat/MessageRequestBar";
+import { PendingMessageList } from "@/components/chat/PendingMessageList";
+import {
+  sendFromComposer,
+  usePendingMessages,
+} from "@/components/chat/pendingMessages";
+import {
+  ThreadMessages,
+  TypingIndicator,
+} from "@/components/chat/ThreadMessages";
+import { useMarkReadWhileVisible } from "@/components/chat/useMarkReadWhileVisible";
+import { useThreadScroll } from "@/components/chat/useThreadScroll";
 import { GroupManagementDialog } from "@/components/GroupManagementDialog";
 import { LoginPrompt } from "@/components/LoginPrompt";
-import { MessageBubble } from "@/components/MessageBubble";
-import { PendingMessageBubble } from "@/components/PendingMessageBubble";
 import { PinnedMessagesBar } from "@/components/PinnedMessagesBar";
-import { PresenceDot } from "@/components/PresenceDot";
-import { TypingDots } from "@/components/reactbits/TypingDots";
-import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -46,9 +39,8 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { type ToastOptions, useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/ui/toast";
 import { $api } from "@/lib/api";
-import type { Attachment } from "@/lib/attachments";
 import { useSession } from "@/lib/auth";
 import {
   setChatDetailsOpen,
@@ -56,208 +48,23 @@ import {
   useChatDetailsOpen,
   useJumpRequests,
 } from "@/lib/chatDetails";
+import { canManageChat } from "@/lib/chatRoles";
 import {
   chatDetailQueryKey,
   chatDisplayName,
-  chatViewTransitionNames,
-  localDayKey,
   type ChatMessage,
   useChatDetail,
   useChatMessages,
   useChatsTwoPane,
-  wasShownBeforeConfirm,
 } from "@/lib/chats";
-import {
-  applyMarkedRead,
-  applyNewestMessage,
-  beginOwnRead,
-  holdChatInView,
-} from "@/lib/chatSync";
-import {
-  dismissQueuedItem,
-  enqueueMessage,
-  replayQueue,
-  retryQueuedItem,
-  useQueuedMessages,
-} from "@/lib/offlineQueue";
-import {
-  dismissOutboxMessage,
-  retryOutboxMessage,
-  sendViaOutbox,
-  useOutboxMessages,
-} from "@/lib/outbox";
 import { useOnlineStatus } from "@/lib/online";
-import { usePageVisible } from "@/lib/pageVisibility";
 import { useIsDesktop } from "@/lib/media";
 import { useIsOnline } from "@/lib/presence";
-import { isStatusVisible, useUserStatus } from "@/lib/status";
-import { clearTyping, useTypingUsers } from "@/lib/typing";
-import { userAvatarName, userHandle, userLabel } from "@/lib/users";
+import { useUserStatus } from "@/lib/status";
+import { clearTyping } from "@/lib/typing";
 import { cn } from "@/lib/utils";
 import { useImmersiveShell } from "@/lib/viewport";
 import { usePageTitle } from "@/lib/title";
-
-// Splits oldest-first messages into runs sharing a local calendar day, keeping
-// each message's index in the full list (used for the entry-animation stagger).
-function groupByDay<T extends { createdAt: number }>(messages: T[]) {
-  const groups: { message: T; i: number }[][] = [];
-  let lastKey: string | undefined;
-  messages.forEach((message, i) => {
-    const key = localDayKey(message.createdAt);
-    if (key !== lastKey) groups.push([]);
-    groups[groups.length - 1]!.push({ message, i });
-    lastKey = key;
-  });
-  return groups;
-}
-
-const FORWARD_FAILURE_LABELS = {
-  unavailable: "you're not in it",
-  blocked: "blocked",
-  quota_exceeded: "your storage is full",
-  invalid_content: "it can't be sent",
-} as const;
-
-// What to tell someone once a forward (issue #601) comes back: how many of
-// the chats they picked got it, and which didn't and why. A single target
-// that worked offers a jump to it.
-function forwardToast(
-  { results, chatNames }: ForwardOutcome,
-  openChat: (chatId: number) => void,
-): ToastOptions {
-  const sent = results.filter((r) => r.message !== null);
-  const failed = results.filter((r) => r.error !== null);
-  const chats = (n: number) => `${n} ${n === 1 ? "chat" : "chats"}`;
-  const description =
-    failed.length > 0
-      ? `Not sent to ${failed
-          .map(
-            (r) =>
-              `${chatNames.get(r.chatId) ?? "a chat"} (${FORWARD_FAILURE_LABELS[r.error!.reason]})`,
-          )
-          .join(", ")}`
-      : undefined;
-  const only = results.length === 1 ? sent[0] : undefined;
-  return {
-    title:
-      failed.length === 0
-        ? `Forwarded to ${chats(sent.length)}`
-        : sent.length === 0
-          ? "Couldn't forward the message"
-          : `Forwarded to ${sent.length} of ${chats(results.length)}`,
-    description,
-    tone: failed.length === 0 ? "success" : "warning",
-    action: only
-      ? { label: "Open chat", onClick: () => openChat(only.chatId) }
-      : undefined,
-  };
-}
-
-// How close to the bottom of the thread still counts as "at the bottom" —
-// fractional scroll heights (sub-pixel layout, zoom) mean an exact
-// `scrollHeight - scrollTop === clientHeight` comparison almost never lands.
-const BOTTOM_EPSILON_PX = 24;
-
-// The thread owns its scroll position; the router's scroll restoration
-// (`scrollRestoration` in router.tsx) must never put it back anywhere. The
-// router remembers every element it saw scroll under a selector — the
-// element's `data-scroll-restoration-id` if it has one, else its CSS path —
-// and once a navigation renders, writes the remembered offset back onto
-// whatever element that selector finds. A thread restored that way lands at
-// an offset from an older, shorter window: scrolled up from the newest
-// message (issue #614).
-//
-// So the thread wears a restoration id that no remembered entry can match:
-// unique to this mount (the random part outlives a reload, which a counter
-// alone wouldn't — the router keeps its entries in sessionStorage), and
-// renamed on every scroll, so an entry recorded on an earlier visit to this
-// URL can't find a thread that has scrolled since — a docked window, or a
-// search-param change, keeps its thread mounted across navigations. The
-// conversation's own scrolls rename it as they're made, not just once their
-// `scroll` event arrives a frame later, so one made while a navigation renders
-// can't be undone by the entry recorded just before it. Whatever entry does
-// still match was recorded after the last scroll, i.e. holds the offset the
-// thread is already at.
-const THREAD_RESTORATION_PREFIX = `chat-thread-${Math.random().toString(36).slice(2)}`;
-let threadRestorationIds = 0;
-function nextThreadRestorationId() {
-  return `${THREAD_RESTORATION_PREFIX}-${++threadRestorationIds}`;
-}
-function renameForScrollRestoration(thread: HTMLElement) {
-  thread.setAttribute("data-scroll-restoration-id", nextThreadRestorationId());
-}
-
-// How many pages of older history `jumpToMessage` will pull in while hunting
-// for a message that isn't in the loaded window yet (a pinned message, or the
-// message a reply is quoting). Generous enough to reach well back through a
-// conversation, bounded so a jump can never turn into an unbounded scrape of
-// the whole history.
-const JUMP_MAX_EARLIER_PAGES = 20;
-
-// How long the highlight `jumpToMessage` puts on the message it lands on (see
-// `highlightKey` on MessageBubble and `animate-jump-flash`) is left there —
-// two runs of the 0.9s pulse, which is also roughly how long the static tint
-// the reduced-motion build paints instead should hold for.
-const JUMP_FLASH_MS = 1800;
-
-// How long a jump's smooth scroll is given to travel and settle before the
-// thread goes back to reading its own scroll position normally. Comfortably
-// longer than a smooth scroll across a screenful or two, short enough that it
-// can't be mistaken for a scroll the reader did themselves.
-const JUMP_SETTLE_MS = 1200;
-
-// Resolves once the browser has painted, i.e. after React has committed any
-// state update that landed in this tick. Two frames because the first can be
-// scheduled ahead of React's own render for an update that came from outside
-// an event handler (a resolved fetch), which would have us look for the newly
-// loaded rows before they exist.
-// "X is typing…" under the messages. Its own component, subscribed to the
-// typing store on its own, so a typing ping re-renders just this bubble —
-// not the whole chat view and every message in it.
-function TypingIndicator({
-  chatId,
-  meId,
-  showNames,
-}: {
-  chatId: number;
-  meId: number;
-  showNames: boolean;
-}) {
-  const typingUsers = useTypingUsers(chatId).filter((t) => t.userId !== meId);
-  if (typingUsers.length === 0) return null;
-  return (
-    <div className="flex w-full justify-start motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2 motion-safe:duration-300">
-      <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-sm border border-border bg-card px-3.5 py-2.5 text-muted-foreground shadow-sm">
-        <TypingDots />
-        {showNames && (
-          <span className="text-xs">
-            {typingUsers.map((t) => userLabel(t)).join(", ")}{" "}
-            {typingUsers.length === 1 ? "is" : "are"} typing…
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function nextPaint(): Promise<void> {
-  return new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  });
-}
-
-// The conversation's own header, shared with the loading skeleton so the two
-// are the same height and opening a chat doesn't shift the thread.
-//
-// It owns `env(safe-area-inset-top)` below `sm`, where the immersive shell
-// hides the site nav (see styles.css) and this becomes the topmost chrome on
-// screen — `viewport-fit=cover` lets the page run under the status bar, so
-// something has to put a background there or the clock sits on the messages.
-// Above `sm` the nav is back and owns the inset again, hence `sm:pt-3`.
-// At `lg` it's exactly as tall as the chat list pane's header beside it
-// (issue #554), so the two read as one bar across the messenger.
-const CHAT_HEADER_CLASS =
-  "flex shrink-0 flex-row items-center gap-3 border-b border-border pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-3 lg:h-16 lg:py-0";
 
 // The conversation's <main> and card. Below `lg` it's the centred card it
 // always was; at `lg`+ it sits in the two-pane layout's right pane (see
@@ -371,7 +178,6 @@ export function ChatConversation({
     otherParticipant,
   );
 
-  const markRead = $api.useMutation("post", "/chats/{id}/read");
   const updateMessage = $api.useMutation(
     "put",
     "/chats/{id}/messages/{messageId}",
@@ -416,158 +222,35 @@ export function ChatConversation({
     messageId: number;
     key: number;
   } | null>(null);
-  // Files dragged over the conversation: a counter rather than a flag,
-  // because `dragenter`/`dragleave` fire for every child crossed on the way.
-  const [dragDepth, setDragDepth] = useState(0);
-
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  // Rendered once, then renamed imperatively on every scroll (see
-  // `renameForScrollRestoration`); React leaves the attribute alone since
-  // this value never changes.
-  const [initialRestorationId] = useState(nextThreadRestorationId);
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const lastMessageIdRef = useRef<number | null>(null);
-  const prevScrollHeightRef = useRef<number | null>(null);
-  const initializedRef = useRef(false);
-  // Whether the thread should stay stuck to its bottom edge. Starts true so a
-  // chat that hasn't been scrolled yet keeps following the newest message
-  // while it's still settling (see the ResizeObserver below).
-  const atBottomRef = useRef(true);
-  const lastScrollTopRef = useRef(0);
-  const [loadingEarlier, setLoadingEarlier] = useState(false);
-  // Set while `jumpToMessage` is paging backwards looking for its target, so
-  // a second click (or a click during the hunt) doesn't start a rival loop.
-  const jumpingRef = useRef(false);
-  // Set while a jump's smooth scroll is still travelling, and cleared once it
-  // has had time to land — see `jumpToMessage` for what it holds off.
-  const jumpScrollingRef = useRef(false);
-  const jumpSettleTimerRef = useRef<number | null>(null);
-  // The message a jump last landed on, plus a counter that changes on every
-  // jump so landing on the same message twice replays its highlight. Cleared
-  // again after `JUMP_FLASH_MS`.
-  const [jumpHighlight, setJumpHighlight] = useState<{
-    messageId: number;
-    key: number;
-  } | null>(null);
-  const jumpHighlightTimerRef = useRef<number | null>(null);
-  useEffect(
-    () => () => {
-      if (jumpSettleTimerRef.current !== null) {
-        window.clearTimeout(jumpSettleTimerRef.current);
-      }
-      if (jumpHighlightTimerRef.current !== null) {
-        window.clearTimeout(jumpHighlightTimerRef.current);
-      }
-    },
-    [],
-  );
-
-  function scrollToBottom(behavior: ScrollBehavior) {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior });
-    renameForScrollRestoration(el);
-    atBottomRef.current = true;
-    lastScrollTopRef.current = el.scrollTop;
-  }
+  // Files dragged over the conversation become the message's attachment.
+  const fileDrop = useFileDrop((file) => composerRef.current?.attachFile(file));
 
   const messages = messagesData?.messages ?? [];
-  // Messages the server hasn't confirmed yet: queued offline, and live sends
-  // still on their way (or rejected). Either can already be in `messages` —
-  // the realtime refetch for a send can beat its own POST response, and a
-  // replayed queue item can arrive the same way — so anything whose
-  // `clientId` the loaded messages already carry is hidden rather than shown
-  // twice.
-  const queuedMessages = useQueuedMessages(chatId);
-  const outboxMessages = useOutboxMessages(chatId);
-  const loadedMessages = messagesData?.messages;
-  const confirmedClientIds = useMemo(
-    () =>
-      new Set(
-        (loadedMessages ?? []).flatMap((m) =>
-          m.clientId != null ? [m.clientId] : [],
-        ),
-      ),
-    [loadedMessages],
-  );
-  const pendingMessages = useMemo(
-    () =>
-      [
-        ...queuedMessages.map((item) => ({
-          ...item,
-          source: "queue" as const,
-        })),
-        ...outboxMessages.map((item) => ({
-          ...item,
-          source: "outbox" as const,
-        })),
-      ].filter((item) => !confirmedClientIds.has(item.clientId)),
-    [queuedMessages, outboxMessages, confirmedClientIds],
-  );
+  const pendingMessages = usePendingMessages(chatId, messagesData?.messages);
 
   const myUserId = session?.user.id;
-  // The conversation's own markup (and with it `scrollRef`/`contentRef`) only
-  // mounts once the chat has loaded — the effects below key off this so they
-  // re-run against the real elements rather than the loading skeleton's nulls.
-  const chatReady = chat != null;
-
   const newestMessage = messages[messages.length - 1];
   const newestMessageId = newestMessage?.id;
   const newestMessageSenderId = newestMessage?.senderId;
-  const oldestMessageId = messages[0]?.id;
 
-  // Auto-scroll to the bottom on first load and whenever the newest message
-  // changes — a real new message, not just an earlier page loading in.
-  // `useLayoutEffect`, so the opening jump lands before the browser paints:
-  // with `useEffect` the thread was visible at the top for a frame first.
-  // A later message only pulls the view down when the user is already at the
-  // bottom (or sent it themselves) — otherwise someone reading back through
-  // the history would get yanked away from what they're reading.
-  // The messages can be there before the thread is (the route's loader warms
-  // them alongside the chat), so nothing counts as seen until `scrollRef`
-  // is — otherwise the opening jump would be spent on a missing element.
-  useLayoutEffect(() => {
-    if (newestMessageId == null || !scrollRef.current) return;
-    if (lastMessageIdRef.current === newestMessageId) return;
-    lastMessageIdRef.current = newestMessageId;
-    const isInitial = !initializedRef.current;
-    initializedRef.current = true;
-    if (isInitial) {
-      scrollToBottom("auto");
-    } else if (atBottomRef.current || newestMessageSenderId === myUserId) {
-      scrollToBottom("smooth");
-    }
-  }, [newestMessageId, newestMessageSenderId, myUserId, chatReady]);
-
-  // Content that grows *after* it was first laid out — an image finishing its
-  // load, the composer expanding to a second line, the pinned bar opening —
-  // pushes the newest message back out of view again. Re-pin to the bottom
-  // whenever the thread or its viewport is resized while the user is already
-  // there, so "opens scrolled to the bottom" survives those late reflows.
-  useLayoutEffect(() => {
-    const scroller = scrollRef.current;
-    const content = contentRef.current;
-    if (!scroller || !content) return;
-    const observer = new ResizeObserver(() => {
-      if (!atBottomRef.current) return;
-      scroller.scrollTop = scroller.scrollHeight;
-      renameForScrollRestoration(scroller);
-    });
-    observer.observe(scroller);
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [chatReady]);
-
-  // A message just sent (or queued offline) appends below the loaded history
-  // the same way a real new message would — scroll down to reveal it, even
-  // when the user had scrolled up: they just sent it. Keyed on the newest
-  // one, so a pending bubble going away (its real message taking over)
-  // doesn't count as a new send.
-  const newestPendingClientId = pendingMessages.at(-1)?.clientId;
-  useEffect(() => {
-    if (newestPendingClientId === undefined) return;
-    scrollToBottom("smooth");
-  }, [newestPendingClientId]);
+  const {
+    scrollRef,
+    contentRef,
+    restorationId,
+    onScroll,
+    jumpToMessage,
+    jumpHighlight,
+    loadingEarlier,
+  } = useThreadScroll({
+    messages,
+    myUserId,
+    chatReady: chat != null,
+    newestPendingClientId: pendingMessages.at(-1)?.clientId,
+    hasEarlier: messagesData?.hasEarlier,
+    loadEarlier,
+    targetMessageId,
+    messagesLoading,
+  });
 
   // A newly-arrived message means its sender is done typing — clear their
   // indicator immediately instead of leaving it up until the TTL in
@@ -578,263 +261,19 @@ export function ChatConversation({
     clearTyping(chatId, newestMessageSenderId);
   }, [chatId, newestMessageId, newestMessageSenderId]);
 
-  // Preserve scroll position when older messages are prepended by the
-  // infinite-scroll-to-top loader — without this the view would jump to the
-  // (now-shifted) top. Uses useLayoutEffect (not useEffect) so the
-  // correction lands before the browser paints the prepended content —
-  // otherwise the user would see a visible flash at the wrong position.
-  useLayoutEffect(() => {
-    if (prevScrollHeightRef.current != null && scrollRef.current) {
-      const delta =
-        scrollRef.current.scrollHeight - prevScrollHeightRef.current;
-      scrollRef.current.scrollTop += delta;
-      renameForScrollRestoration(scrollRef.current);
-      prevScrollHeightRef.current = null;
-    }
-  }, [oldestMessageId]);
-
-  // Infinite scroll: reaching near the top of the scroll container loads the
-  // previous page of older messages, anchored so scroll position is preserved
-  // once they're prepended (see the effect above). The spinner clears when
-  // the triggering fetch settles, even on failure.
-  function handleScroll(e: React.UIEvent<HTMLDivElement>) {
-    const el = e.currentTarget;
-    renameForScrollRestoration(el);
-    // Re-evaluated on every scroll (ahead of the guards below) so the
-    // auto-scroll and resize handlers know whether to keep following the
-    // newest message. Landing at the bottom re-arms it; only scrolling *up*
-    // releases it. Deliberately not "released whenever we're not at the
-    // bottom": a scroll event is dispatched a frame after the scroll itself,
-    // so a jump-to-bottom that raced content still growing underneath it
-    // reports a stale gap — and treating that as "the user scrolled away"
-    // used to switch the pinning off before it had ever taken effect.
-    //
-    // A jump's own smooth scroll is exempt: it usually sets off from the
-    // bottom edge, so its first few events would re-arm the pinning it just
-    // released and the view would be dragged back down (see `jumpToMessage`).
-    if (!jumpScrollingRef.current) {
-      const distanceFromBottom =
-        el.scrollHeight - el.scrollTop - el.clientHeight;
-      if (distanceFromBottom <= BOTTOM_EPSILON_PX) {
-        atBottomRef.current = true;
-      } else if (el.scrollTop < lastScrollTopRef.current) {
-        atBottomRef.current = false;
-      }
-    }
-    lastScrollTopRef.current = el.scrollTop;
-    if (!initializedRef.current || loadingEarlier) return;
-    if (!messagesData?.hasEarlier) return;
-    if (el.scrollTop > 120) return;
-    prevScrollHeightRef.current = el.scrollHeight;
-    setLoadingEarlier(true);
-    void loadEarlier().finally(() => setLoadingEarlier(false));
-  }
-
-  // Scroll the thread to a given message and briefly highlight it — used both
-  // by the pinned bar's rows and by the quoted snippet on a reply ("what was
-  // this answering?"). The target often isn't in the loaded window: a pin, or
-  // a reply to something said much earlier, can point far up a history that
-  // hasn't been paged in yet, so older pages are pulled in a page at a time
-  // until it turns up (or the history runs out / the budget below is spent,
-  // where it gives up quietly rather than erroring).
-  //
-  // `behavior` is "auto" when arriving from outside the chat (a search
-  // result): there's no "where you were" to travel from, so it just lands.
-  async function jumpToMessage(
-    messageId: number,
-    behavior: ScrollBehavior = "smooth",
-  ) {
-    // Scrolls to the message if it's rendered, reporting whether it was.
-    const scrollToTarget = () => {
-      const el = scrollRef.current?.querySelector<HTMLElement>(
-        `[data-message-id="${messageId}"]`,
-      );
-      if (!el) return false;
-      // Landing anywhere but the bottom means the thread must stop following
-      // the newest message, or the ResizeObserver above would yank the view
-      // straight back down again — the messages that just paged in animate
-      // as they mount, which is more than enough to trigger it. The flag
-      // below holds that release in place until the smooth scroll has
-      // actually travelled; see `handleScroll`.
-      atBottomRef.current = false;
-      jumpScrollingRef.current = true;
-      if (jumpSettleTimerRef.current !== null) {
-        window.clearTimeout(jumpSettleTimerRef.current);
-      }
-      jumpSettleTimerRef.current = window.setTimeout(() => {
-        jumpSettleTimerRef.current = null;
-        jumpScrollingRef.current = false;
-      }, JUMP_SETTLE_MS);
-      el.scrollIntoView({ behavior, block: "center" });
-      if (scrollRef.current) renameForScrollRestoration(scrollRef.current);
-      // A double pulse (see `animate-jump-flash` in styles.css), so the
-      // target is still calling attention to itself once a long smooth
-      // scroll arrives. It's React state rather than a class poked onto the
-      // row, which the row's own entrance animation out-ranked and any
-      // re-render overwrote — see `highlightKey` on MessageBubble.
-      setJumpHighlight((prev) => ({
-        messageId,
-        key: (prev?.key ?? 0) + 1,
-      }));
-      // A timer rather than `animationend`, because with motion reduced the
-      // highlight paints a plain static tint and no animation runs at all —
-      // there would be no event to clean up after, and it would never leave.
-      if (jumpHighlightTimerRef.current !== null) {
-        window.clearTimeout(jumpHighlightTimerRef.current);
-      }
-      jumpHighlightTimerRef.current = window.setTimeout(() => {
-        jumpHighlightTimerRef.current = null;
-        setJumpHighlight(null);
-      }, JUMP_FLASH_MS);
-      return true;
-    };
-
-    if (scrollToTarget()) return;
-    // Already hunting (or the scroll handler is mid-page-load) — don't stack
-    // a second run of overlapping `loadEarlier` fetches on top.
-    if (jumpingRef.current || loadingEarlier) return;
-    jumpingRef.current = true;
-    // Reuses the infinite-scroll spinner, which doubles as the guard that
-    // keeps `handleScroll` from firing its own page load underneath this one.
-    setLoadingEarlier(true);
-    try {
-      for (let i = 0; i < JUMP_MAX_EARLIER_PAGES; i++) {
-        const result = await loadEarlier();
-        // The refetch resolving only means the cache holds the older page —
-        // React still has to commit it before the row exists in the DOM.
-        await nextPaint();
-        if (scrollToTarget()) return;
-        if (!result.data?.hasEarlier) return;
-      }
-    } finally {
-      jumpingRef.current = false;
-      setLoadingEarlier(false);
-    }
-  }
-
-  // Arriving with `?message=` (a search result): once the thread has
-  // rendered, jump to that message instead of leaving the view at the bottom.
-  // A layout effect declared after the scroll-to-bottom one above, so on the
-  // commit that first shows the messages it runs second and the thread paints
-  // straight at the target. Once per target: later renders (new messages, a
-  // refetch) mustn't keep yanking the reader back to it. The param stays in
-  // the URL — it works as a link to the message — and following a result
-  // again remounts this view (it's keyed by chat, and search is another
-  // route), so the jump happens afresh.
-  const handledTargetRef = useRef<number | null>(null);
-  useLayoutEffect(() => {
-    if (targetMessageId == null || !chatReady || messagesLoading) return;
-    if (handledTargetRef.current === targetMessageId) return;
-    handledTargetRef.current = targetMessageId;
-    void jumpToMessage(targetMessageId, "auto");
-    // `jumpToMessage` is recreated every render; this should only fire when
-    // there's a new target and a thread to find it in.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetMessageId, chatReady, messagesLoading]);
-
   // A pinned, starred or media row picked in the details panel.
   useJumpRequests(docked ? undefined : chatId, (messageId) => {
     void jumpToMessage(messageId);
   });
 
-  // Mark everything up to the newest loaded message as read once we know
-  // there's something unread — keeps this chat's badge and the nav badge live.
-  // Only while the page is visible (issue #663): a conversation left open in
-  // a background tab mustn't read what arrives there; it's marked read when
-  // the user comes back.
-  //
-  // While it's on screen, a new message's event refetches neither the chat
-  // list nor this chat (issue #749, see lib/chatSync.ts): this is what
-  // brings them up to date instead, with the chat the mark-read answers
-  // with — or, when the new messages are all our own and there's nothing
-  // to read, by writing the newest one in as the preview.
-  const pageVisible = usePageVisible();
-  useEffect(() => {
-    if (!pageVisible) return;
-    return holdChatInView(chatId);
-  }, [chatId, pageVisible]);
-
-  // Everything up to here is known read (or was just sent off to be).
-  // `null` until the chat and its window have first settled.
-  const readThroughRef = useRef<number | null>(null);
-  // One mark-read at a time: a second one fired while the first is out
-  // (e.g. the cached window being replaced by the fresh one on a cold load)
-  // was a duplicate request. A ref, so a re-run in the same commit sees it;
-  // the counter re-runs the effect once it's back.
-  const readInFlightRef = useRef(false);
-  const failedReadRef = useRef<number | null>(null);
-  const [readsSettled, setReadsSettled] = useState(0);
-  useEffect(() => {
-    if (
-      !pageVisible ||
-      !session ||
-      !chat ||
-      newestMessage == null ||
-      readInFlightRef.current ||
-      // Wait for what's being fetched: the unread count and the newest
-      // message may both be about to change, and marking against the stale
-      // ones was the second request.
-      chatFetching ||
-      messagesFetching
-    )
-      return;
-    const target = newestMessage.id;
-    const readThrough = readThroughRef.current;
-    if (readThrough === null && chat.unreadCount === 0) {
-      readThroughRef.current = target;
-      return;
-    }
-    if (readThrough !== null && target <= readThrough) return;
-    // Don't hammer a failing request; the next message tries again.
-    if (failedReadRef.current === target) return;
-    const myId = session.user.id;
-    const somethingToRead =
-      readThrough === null ||
-      messages.some((m) => m.id > readThrough && m.senderId !== myId);
-    if (!somethingToRead) {
-      readThroughRef.current = target;
-      applyNewestMessage(queryClient, chatId, newestMessage);
-      return;
-    }
-    readInFlightRef.current = true;
-    const endOwnRead = beginOwnRead(chatId);
-    // `mutateAsync`, not `mutate`'s callbacks: those are skipped once this
-    // view unmounts, and the bookkeeping above has to be undone regardless.
-    markRead
-      .mutateAsync({
-        params: { path: { id: String(chatId) } },
-        body: { messageId: target },
-      })
-      .then(
-        (updated) => {
-          readThroughRef.current = Math.max(
-            readThroughRef.current ?? 0,
-            target,
-          );
-          // The response is the chat as it now stands — written in, not
-          // refetched, along with the list entry and the unread total.
-          applyMarkedRead(queryClient, updated);
-        },
-        () => {
-          failedReadRef.current = target;
-        },
-      )
-      .finally(() => {
-        endOwnRead();
-        readInFlightRef.current = false;
-        setReadsSettled((n) => n + 1);
-      });
-    // Only re-run when what decides it changes — `markRead` and `messages`
-    // are new every render, and `newestMessage` moves with its id.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    chat?.unreadCount,
-    newestMessageId,
-    pageVisible,
+  useMarkReadWhileVisible({
+    chatId,
+    myUserId,
+    chat,
+    messages,
     chatFetching,
     messagesFetching,
-    readsSettled,
-  ]);
+  });
 
   function editLastMessage() {
     const mine = [...messages]
@@ -849,34 +288,6 @@ export function ChatConversation({
 
   function focusComposer() {
     composerRef.current?.focus();
-  }
-
-  // Drop a file anywhere on the conversation — thread, header, composer —
-  // and it becomes the message's attachment (issue #554), not just on the
-  // composer's own small upload field. Only drags carrying files count, so
-  // dragging selected text around the page doesn't raise the overlay.
-  const draggingFiles = (e: React.DragEvent) =>
-    e.dataTransfer.types.includes("Files");
-  function onDragEnter(e: React.DragEvent) {
-    if (!draggingFiles(e)) return;
-    e.preventDefault();
-    setDragDepth((depth) => depth + 1);
-  }
-  function onDragOver(e: React.DragEvent) {
-    if (!draggingFiles(e)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-  }
-  function onDragLeave(e: React.DragEvent) {
-    if (!draggingFiles(e)) return;
-    setDragDepth((depth) => Math.max(0, depth - 1));
-  }
-  function onDrop(e: React.DragEvent) {
-    if (!draggingFiles(e)) return;
-    e.preventDefault();
-    setDragDepth(0);
-    const file = e.dataTransfer.files[0];
-    if (file) composerRef.current?.attachFile(file);
   }
 
   if (!session) {
@@ -984,61 +395,11 @@ export function ChatConversation({
   }
 
   const name = chatDisplayName(chat, session.user.id);
-  // Shared with the chat list's row for this chat, so opening a conversation
-  // morphs its avatar and title into the header instead of the two screens
-  // simply cross-fading (see chatViewTransitionNames / router.tsx).
-  const transitionNames = chatViewTransitionNames(chatId);
-  const myRole = chat.participants.find(
-    (p) => p.userId === session.user.id,
-  )?.role;
-  // Mirrors the backend's `requireChatManager` (see src/chats/access.ts): the
-  // chat's owner or admin (per-chat role, issue #220), or a site-wide
-  // admin — a site admin only reaches this UI at all once they're a
-  // participant, since `getChat` still requires that.
-  const canManage =
-    myRole === "owner" || myRole === "admin" || session.user.role === "admin";
-
-  function handleSend(values: {
-    contentType: "text" | "image_url" | "attachment";
-    content: string;
-    attachmentId?: number;
-    attachment?: Attachment;
-    caption?: string;
-    parentMessageId?: number;
-  }) {
-    // Offline: queue instead of attempting the request at all — it would
-    // just fail (see lib/offlineQueue.ts, replayed once back online). An
-    // attachment message can't be queued this way (ChatComposer only lets
-    // one through while online, since it needs an already-completed
-    // upload), so it always goes out live below.
-    if (values.contentType !== "attachment" && !onlineManager.isOnline()) {
-      enqueueMessage(chatId, {
-        contentType: values.contentType,
-        content: values.content,
-        parentMessageId: values.parentMessageId,
-      });
-      return;
-    }
-    // Shown straight away as a "sending" bubble and sent in the background
-    // (lib/outbox.ts). The server also pushes a `chat_updated` event to every
-    // participant, the sender included, which reconciles what the response
-    // can't carry (e.g. read receipts).
-    sendViaOutbox(chatId, {
-      ...values,
-      replyPreview:
-        replyingTo && replyingTo.id === values.parentMessageId
-          ? {
-              senderName: replyingTo.senderName,
-              contentType: replyingTo.contentType,
-              content: replyingTo.content,
-              caption: replyingTo.caption,
-            }
-          : undefined,
-    });
-  }
+  // Mirrors the backend's `requireChatManager` (see src/chats/access.ts).
+  const canManage = canManageChat(chat, session.user);
 
   async function handleEditMessage(messageId: number, content: string) {
-    // No manual refetch here either — same reasoning as handleSend, the
+    // No manual refetch here either — same reasoning as a send, the
     // `chat_updated` WS push triggered by this edit already invalidates the
     // messages/list queries for every participant, including this client.
     await updateMessage.mutateAsync({
@@ -1062,13 +423,14 @@ export function ChatConversation({
     <>
       {/* Two elements, not one: the outer div is the fixed-height viewport
         that scrolls, the inner one is the thread whose height changes as
-        content loads. The ResizeObserver above watches both — a single
-        element can't report its own content growing. `overscroll-contain`
-        keeps a flick past either end from chaining out to the page. */}
+        content loads. The ResizeObserver in useThreadScroll watches both — a
+        single element can't report its own content growing.
+        `overscroll-contain` keeps a flick past either end from chaining out
+        to the page. */}
       <div
         ref={scrollRef}
-        onScroll={handleScroll}
-        data-scroll-restoration-id={initialRestorationId}
+        onScroll={onScroll}
+        data-scroll-restoration-id={restorationId}
         data-testid="chat-scroll"
         className="h-full overflow-y-auto overflow-x-hidden overscroll-contain"
       >
@@ -1092,126 +454,24 @@ export function ChatConversation({
               No messages yet — say hi 👋
             </p>
           ) : (
-            groupByDay(messages).map((group) => (
-              // One wrapper per calendar day: a sticky element only stays
-              // pinned while its parent is on screen, so scoping each
-              // separator to its own day makes it get pushed out by the
-              // next day's separator instead of piling up behind it.
-              <div key={group[0]!.message.id} className="flex flex-col gap-2">
-                {group.map(({ message, i }) => {
-                  const isOwn = message.senderId === session.user.id;
-                  const sender = chat.participants.find(
-                    (p) => p.userId === message.senderId,
-                  );
-                  // Null for a normal message, and also once the quoted
-                  // message has been deleted — nothing to jump to either way.
-                  const parentId = message.parentMessage?.id;
-                  const isFirstOfDay = group[0]!.i === i;
-                  return (
-                    <Fragment key={message.id}>
-                      {isFirstOfDay && <DateSeparator ms={message.createdAt} />}
-                      <MessageBubble
-                        message={message}
-                        isOwn={isOwn}
-                        isRead={message.readByUserIds.length > 0}
-                        canModify={isOwn || session.user.role === "admin"}
-                        canDeleteOthers={!isOwn && canManage}
-                        onEdit={(content) =>
-                          handleEditMessage(message.id, content)
-                        }
-                        onDelete={() => handleDeleteMessage(message.id)}
-                        onReply={() =>
-                          setReplyingTo({
-                            id: message.id,
-                            senderName: sender ? userLabel(sender) : "Someone",
-                            contentType: message.contentType,
-                            content: message.content,
-                            caption: message.caption,
-                          })
-                        }
-                        onForward={() => setForwarding({ message, open: true })}
-                        onJumpToParent={
-                          parentId == null
-                            ? undefined
-                            : () => void jumpToMessage(parentId)
-                        }
-                        highlightKey={
-                          jumpHighlight?.messageId === message.id
-                            ? jumpHighlight.key
-                            : undefined
-                        }
-                        editRequestKey={
-                          editRequest?.messageId === message.id
-                            ? editRequest.key
-                            : undefined
-                        }
-                        onEditEnd={focusComposer}
-                        readOnly={chat.messageRequest != null}
-                        compact={docked || !isDesktop}
-                        animateIn={!wasShownBeforeConfirm(message)}
-                        senderLabel={
-                          chat.type === "group" && sender
-                            ? userLabel(sender)
-                            : undefined
-                        }
-                        senderHandle={
-                          chat.type === "group" && sender
-                            ? userHandle(sender)
-                            : undefined
-                        }
-                        senderAvatar={
-                          chat.type === "group" && sender && !isOwn
-                            ? {
-                                name: userAvatarName(sender),
-                                avatarUrl: sender.avatarUrl,
-                                avatarVariants: sender.avatarVariants,
-                              }
-                            : undefined
-                        }
-                        style={
-                          {
-                            "--stagger-index": Math.min(i, 6),
-                          } as CSSProperties
-                        }
-                      />
-                    </Fragment>
-                  );
-                })}
-              </div>
-            ))
+            <ThreadMessages
+              chat={chat}
+              messages={messages}
+              me={session.user}
+              canManage={canManage}
+              compact={docked || !isDesktop}
+              jumpHighlight={jumpHighlight}
+              editRequest={editRequest}
+              onEdit={handleEditMessage}
+              onDelete={handleDeleteMessage}
+              onReply={setReplyingTo}
+              onForward={(message) => setForwarding({ message, open: true })}
+              onJumpTo={(messageId) => void jumpToMessage(messageId)}
+              onEditEnd={focusComposer}
+            />
           )}
 
-          {!messagesLoading &&
-            pendingMessages.map((item) => (
-              <PendingMessageBubble
-                key={item.clientId}
-                status={item.status}
-                contentType={item.contentType}
-                content={item.content}
-                attachment={
-                  item.source === "outbox" ? item.attachment : undefined
-                }
-                caption={item.source === "outbox" ? item.caption : undefined}
-                replyPreview={
-                  item.source === "outbox" ? item.replyPreview : undefined
-                }
-                createdAt={item.createdAt}
-                error={item.error}
-                onRetry={() => {
-                  if (item.source === "outbox") {
-                    retryOutboxMessage(item.clientId);
-                  } else {
-                    retryQueuedItem(item.clientId);
-                    void replayQueue(queryClient);
-                  }
-                }}
-                onDismiss={() =>
-                  item.source === "outbox"
-                    ? dismissOutboxMessage(item.clientId)
-                    : dismissQueuedItem(item.clientId)
-                }
-              />
-            ))}
+          {!messagesLoading && <PendingMessageList items={pendingMessages} />}
 
           <TypingIndicator
             chatId={chatId}
@@ -1257,7 +517,7 @@ export function ChatConversation({
     <ChatComposer
       ref={composerRef}
       chatId={chatId}
-      onSend={handleSend}
+      onSend={(values) => sendFromComposer(chatId, values, replyingTo)}
       replyingTo={replyingTo}
       onCancelReply={() => setReplyingTo(null)}
       onEditLast={editLastMessage}
@@ -1272,12 +532,9 @@ export function ChatConversation({
     return (
       <div
         className="relative flex min-h-0 flex-1 flex-col"
-        onDragEnter={onDragEnter}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
+        {...fileDrop.handlers}
       >
-        {dragDepth > 0 && <DropOverlay />}
+        {fileDrop.dragging && <DropOverlay />}
         <div className="min-h-0 flex-1">{thread}</div>
         {composer}
       </div>
@@ -1308,154 +565,19 @@ export function ChatConversation({
           CHAT_CARD_CLASS,
           "relative motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500",
         )}
-        onDragEnter={onDragEnter}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
+        {...fileDrop.handlers}
       >
-        {dragDepth > 0 && <DropOverlay />}
-        <CardHeader className={CHAT_HEADER_CLASS}>
-          {/* Beside the desktop chat list there's nothing to go back to. */}
-          <Button
-            asChild
-            size="icon"
-            variant="ghost"
-            aria-label="Back to chats"
-            className="lg:hidden"
-          >
-            <Link to="/chats">
-              <ArrowLeft className="size-4" />
-            </Link>
-          </Button>
-
-          {chat.type === "direct" && otherParticipantId != null ? (
-            <Link
-              to="/users/$id"
-              params={{ id: String(otherParticipantId) }}
-              className="flex min-w-0 flex-1 items-center gap-3"
-            >
-              <div className="relative shrink-0">
-                {/* A gradient halo turning slowly behind an avatar whose
-                    owner is online — the same "live" language as the
-                    presence dot, at a size you notice without looking for
-                    it. Purely decorative and sized off the avatar, so it
-                    never affects layout. */}
-                {otherParticipantOnline && (
-                  <span
-                    aria-hidden
-                    className="pointer-events-none absolute -inset-0.5 rounded-full opacity-70 blur-[1px] motion-safe:animate-avatar-ring"
-                    style={{
-                      background:
-                        "conic-gradient(from 0deg, oklch(0.72 0.16 150 / 0.9), oklch(0.62 0.19 277 / 0.5), transparent 60%, oklch(0.72 0.16 150 / 0.9))",
-                    }}
-                  />
-                )}
-                <Avatar
-                  name={name}
-                  avatarUrl={otherParticipant?.avatarUrl}
-                  avatarVariants={otherParticipant?.avatarVariants}
-                  // The other half of the shared-element view transition out
-                  // of the chat list — the row's avatar travels here rather
-                  // than the two screens cross-fading past each other.
-                  style={{ viewTransitionName: transitionNames.avatar }}
-                />
-                <PresenceDot
-                  online={otherParticipantOnline}
-                  className="absolute -bottom-0.5 -right-0.5"
-                />
-              </div>
-              <div className="flex min-w-0 flex-1 flex-col leading-tight">
-                <span
-                  className="truncate font-semibold"
-                  style={{ viewTransitionName: transitionNames.title }}
-                >
-                  {name}
-                </span>
-                <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-                  {otherParticipant && userHandle(otherParticipant) && (
-                    <>
-                      <span className="truncate">
-                        {userHandle(otherParticipant)}
-                      </span>
-                      <span className="shrink-0">·</span>
-                    </>
-                  )}
-                  <span className="shrink-0">
-                    {otherParticipantOnline ? "Online" : "Direct message"}
-                  </span>
-                  {isStatusVisible(otherParticipantStatus) && (
-                    <>
-                      <span className="shrink-0">·</span>
-                      <UserStatusBadge
-                        status={otherParticipantStatus}
-                        className="min-w-0"
-                      />
-                    </>
-                  )}
-                </div>
-              </div>
-            </Link>
-          ) : (
-            <button
-              type="button"
-              onClick={openDetails}
-              className="group/hdr flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-accent/50"
-            >
-              {chat.avatarVariants ? (
-                <Avatar
-                  name={name}
-                  avatarVariants={chat.avatarVariants}
-                  className="shrink-0 transition-transform motion-safe:group-hover/hdr:scale-105"
-                  style={{ viewTransitionName: transitionNames.avatar }}
-                />
-              ) : (
-                <div
-                  className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground transition-transform motion-safe:group-hover/hdr:scale-105"
-                  style={{ viewTransitionName: transitionNames.avatar }}
-                >
-                  <Users className="size-4" />
-                </div>
-              )}
-              <div className="flex min-w-0 flex-1 flex-col leading-tight">
-                <span
-                  className="truncate font-semibold"
-                  style={{ viewTransitionName: transitionNames.title }}
-                >
-                  {name}
-                </span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {chat.participants.length} participant
-                  {chat.participants.length === 1 ? "" : "s"}
-                </span>
-              </div>
-            </button>
-          )}
-
-          {detailsAsPanel ? (
-            <Button
-              size="icon"
-              variant={detailsOpen ? "secondary" : "ghost"}
-              aria-label="Chat details"
-              title="Chat details"
-              aria-pressed={detailsOpen}
-              onClick={() => setChatDetailsOpen(!detailsOpen)}
-            >
-              <PanelRight className="size-4" />
-            </Button>
-          ) : (
-            chat.type === "group" && (
-              <Button
-                variant="outline"
-                size="sm"
-                aria-label="Manage group"
-                onClick={openDetails}
-              >
-                <Settings2 className="size-4" />
-                <span className="hidden sm:inline">Manage</span>
-              </Button>
-            )
-          )}
-        </CardHeader>
+        {fileDrop.dragging && <DropOverlay />}
+        <ConversationHeader
+          chat={chat}
+          name={name}
+          otherParticipant={otherParticipant}
+          otherParticipantOnline={otherParticipantOnline}
+          otherParticipantStatus={otherParticipantStatus}
+          detailsAsPanel={detailsAsPanel}
+          detailsOpen={detailsOpen}
+          onOpenDetails={openDetails}
+        />
         <PinnedMessagesBar
           chatId={chatId}
           participants={chat.participants}
@@ -1476,21 +598,6 @@ export function ChatConversation({
         />
       )}
     </main>
-  );
-}
-
-// What the conversation shows while a file is dragged over it.
-function DropOverlay() {
-  return (
-    <div
-      aria-hidden
-      className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-primary bg-background/85 text-sm font-medium text-foreground backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-200"
-    >
-      <span className="flex size-12 items-center justify-center rounded-full bg-primary/15 text-primary">
-        <Paperclip className="size-5" />
-      </span>
-      Drop to attach
-    </div>
   );
 }
 

@@ -1,53 +1,32 @@
-import {
-  type CSSProperties,
-  type TouchEvent,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import {
-  Check,
-  CheckCheck,
-  Copy,
-  Forward,
-  Link2,
-  Loader2,
-  Pencil,
-  Pin,
-  PinOff,
-  Reply,
-  Star,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Check, CheckCheck, Loader2, Pin, Star, X } from "lucide-react";
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
 import { ProfileHoverCard } from "@/components/ProfileHoverCard";
-import { ReactionAddButton, ReactionList } from "@/components/ReactionPicker";
+import { MessageActionGroup } from "@/components/chat/bubble/MessageActionGroup";
+import {
+  ForwardedLabel,
+  QuotedParent,
+} from "@/components/chat/bubble/MessageQuote";
+import { useBubbleReveal } from "@/components/chat/bubble/useBubbleReveal";
+import { useMessageToggles } from "@/components/chat/bubble/useMessageToggles";
+import { ReactionList } from "@/components/ReactionPicker";
 import { Lightbox } from "@/components/LazyLightbox";
 import { MentionText } from "@/components/MentionText";
 import { MentionTextarea } from "@/components/MentionTextarea";
 import { Button } from "@/components/ui/button";
 import { DisclosureChevron } from "@/components/ui/collapse";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { $api } from "@/lib/api";
 import { attachmentKind } from "@/lib/attachments";
 import {
-  chatPinnedQueryKey,
-  chatStarredQueryKey,
   MAX_MESSAGE_CONTENT_LENGTH,
   MESSAGE_COLLAPSE_THRESHOLD,
-  parentPreviewText,
-  patchCachedMessage,
   type ChatMessage,
 } from "@/lib/chats";
-import { errorMessage } from "@/lib/errors";
 import { isImeComposing } from "@/lib/ime";
 import { useExpandableText } from "@/lib/motion";
 import { formatAbsoluteTime } from "@/lib/time";
-import type { ReactionEmoji } from "@/lib/reactions";
 import { cn } from "@/lib/utils";
 
 type MessageBubbleProps = {
@@ -143,129 +122,17 @@ export function MessageBubble({
   animateIn = true,
   style,
 }: MessageBubbleProps) {
-  const queryClient = useQueryClient();
-  const addReaction = $api.useMutation(
-    "post",
-    "/chats/{id}/messages/{messageId}/reactions",
-  );
-  const removeReaction = $api.useMutation(
-    "delete",
-    "/chats/{id}/messages/{messageId}/reactions",
-  );
-  const reactionPending = addReaction.isPending || removeReaction.isPending;
-  const [reactionError, setReactionError] = useState<string | null>(null);
-
-  // Any participant may react, not just the sender — wired up unconditionally
-  // rather than gated behind `canModify`. Mirrors PostCard/CommentItem's
-  // `toggleReaction`: the mutation's own response is the authoritative
-  // `reactions` array, patched straight into the cache rather than waiting on
-  // the `reaction_changed` WS round trip, and a failure surfaces visibly
-  // instead of silently doing nothing (issue #233).
-  const toggleReaction = async (emoji: string) => {
-    const mine = message.reactions.find((r) => r.emoji === emoji)?.reactedByMe;
-    const mutation = mine ? removeReaction : addReaction;
-    setReactionError(null);
-    try {
-      const result = await mutation.mutateAsync({
-        params: {
-          path: {
-            id: String(message.chatId),
-            messageId: String(message.id),
-          },
-        },
-        body: { emoji: emoji as ReactionEmoji },
-      });
-      patchCachedMessage(queryClient, message.chatId, message.id, (m) => ({
-        ...m,
-        reactions: result.reactions,
-      }));
-    } catch (err) {
-      setReactionError(errorMessage(err));
-    }
-  };
-
-  const pinMessage = $api.useMutation("post", "/chats/{id}/pins");
-  const unpinMessage = $api.useMutation(
-    "delete",
-    "/chats/{id}/pins/{messageId}",
-  );
-  const starMessage = $api.useMutation(
-    "post",
-    "/chats/{id}/messages/{messageId}/star",
-  );
-  const unstarMessage = $api.useMutation(
-    "delete",
-    "/chats/{id}/messages/{messageId}/star",
-  );
-  const pinPending = pinMessage.isPending || unpinMessage.isPending;
-  const starPending = starMessage.isPending || unstarMessage.isPending;
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  // Pinning is chat-wide: patch the flag straight from the mutation response
-  // (the `message_pin_changed` WS event reconciles every other participant),
-  // and invalidate the pinned panel so the message enters/leaves it. Unpin
-  // takes the id in the path; pin takes it in the body — see src/Api.ts.
-  const togglePin = async () => {
-    setActionError(null);
-    try {
-      const result = message.pinned
-        ? await unpinMessage.mutateAsync({
-            params: {
-              path: {
-                id: String(message.chatId),
-                messageId: String(message.id),
-              },
-            },
-          })
-        : await pinMessage.mutateAsync({
-            params: { path: { id: String(message.chatId) } },
-            body: { messageId: message.id },
-          });
-      patchCachedMessage(queryClient, message.chatId, message.id, (m) => ({
-        ...m,
-        pinned: result.pinned,
-      }));
-      void queryClient.invalidateQueries({
-        queryKey: chatPinnedQueryKey(message.chatId),
-      });
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  };
-
-  // Starring is private — no realtime event, so only this client's cache
-  // updates (from the mutation response), plus its own starred panel.
-  const toggleStar = async () => {
-    setActionError(null);
-    try {
-      const result = message.starred
-        ? await unstarMessage.mutateAsync({
-            params: {
-              path: {
-                id: String(message.chatId),
-                messageId: String(message.id),
-              },
-            },
-          })
-        : await starMessage.mutateAsync({
-            params: {
-              path: {
-                id: String(message.chatId),
-                messageId: String(message.id),
-              },
-            },
-          });
-      patchCachedMessage(queryClient, message.chatId, message.id, (m) => ({
-        ...m,
-        starred: result.starred,
-      }));
-      void queryClient.invalidateQueries({
-        queryKey: chatStarredQueryKey(message.chatId),
-      });
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  };
+  const {
+    reactionPending,
+    reactionError,
+    toggleReaction,
+    pinPending,
+    starPending,
+    actionError,
+    setActionError,
+    togglePin,
+    toggleStar,
+  } = useMessageToggles(message);
 
   const hasReactions = message.reactions.some((r) => r.count > 0);
   const wasEdited = message.updatedAt !== message.createdAt;
@@ -340,88 +207,10 @@ export function MessageBubble({
     }
   }
 
-  // Touch equivalent of the desktop hover-reveal (issue #309). The per-message
-  // action group (react/pin/star/reply/edit/delete) is otherwise only shown on
-  // `group-hover`, which touch devices never produce — so on phones/tablets it
-  // was completely unreachable. A long press on the bubble reveals the same
-  // group, mirroring the long-press-to-react gesture of most mobile messaging
-  // apps; desktop hover behaviour is left untouched.
-  const [touchRevealed, setTouchRevealed] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
-  // Set once the long press actually fires, so the follow-up `contextmenu`
-  // event (which mobile browsers emit on a long press) can be suppressed
-  // without also swallowing a genuine desktop right-click.
-  const longPressFired = useRef(false);
-
-  const clearLongPress = () => {
-    if (longPressTimer.current !== null) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  };
-
-  // Cancel any pending timer if the bubble unmounts mid-press.
-  useEffect(() => clearLongPress, []);
-
-  // While the touch-revealed group is showing, dismiss it when the next tap
-  // lands outside this message row (the reaction popover itself portals to
-  // document.body, so picking an emoji counts as "outside" and collapses the
-  // group too — which is the desired outcome once a reaction is chosen).
-  //
-  // A desktop right-click reveals the same group (issue #554) and is put
-  // away the same way, or with Escape.
-  useEffect(() => {
-    if (!touchRevealed) return;
-    const dismiss = (event: Event) => {
-      const target = event.target as Node;
-      if (rowRef.current && !rowRef.current.contains(target)) {
-        setTouchRevealed(false);
-      }
-    };
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setTouchRevealed(false);
-    };
-    document.addEventListener("pointerdown", dismiss);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", dismiss);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [touchRevealed]);
-
-  const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {
-    if (isEditing) return;
-    const touch = e.touches[0];
-    if (!touch) return;
-    touchStart.current = { x: touch.clientX, y: touch.clientY };
-    longPressFired.current = false;
-    clearLongPress();
-    longPressTimer.current = setTimeout(() => {
-      longPressFired.current = true;
-      longPressTimer.current = null;
-      setTouchRevealed(true);
-      // A short haptic cue on trigger where supported (unsupported on e.g.
-      // iOS Safari, hence the capability check rather than optional-call).
-      if (typeof navigator.vibrate === "function") navigator.vibrate(10);
-    }, 450);
-  };
-
-  const handleTouchMove = (e: TouchEvent<HTMLDivElement>) => {
-    const start = touchStart.current;
-    const touch = e.touches[0];
-    if (!start || !touch) return;
-    // A finger that travels more than a few pixels is a scroll, not a press —
-    // cancel so the picker never pops up mid-scroll.
-    if (
-      Math.abs(touch.clientX - start.x) > 10 ||
-      Math.abs(touch.clientY - start.y) > 10
-    ) {
-      clearLongPress();
-    }
-  };
+  const reveal = useBubbleReveal(rowRef, isEditing);
+  const touchRevealed = reveal.revealed;
 
   const trimmedDraft = draft.trim();
   const canSave =
@@ -469,181 +258,6 @@ export function MessageBubble({
       setDeleting(false);
     }
   }
-
-  // Pin (chat-wide) and star (private) toggles — shown in both the own-message
-  // and incoming-message hover action groups, so the JSX is shared here rather
-  // than duplicated on each side.
-  const pinStarButtons = (
-    <>
-      {!readOnly && (
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          aria-label={message.pinned ? "Unpin message" : "Pin message"}
-          aria-pressed={message.pinned}
-          disabled={pinPending}
-          onClick={() => void togglePin()}
-          className={cn("size-6", message.pinned && "text-primary")}
-        >
-          {message.pinned ? (
-            <PinOff className="size-3.5" />
-          ) : (
-            <Pin className="size-3.5" />
-          )}
-        </Button>
-      )}
-      <Button
-        type="button"
-        size="icon"
-        variant="ghost"
-        aria-label={message.starred ? "Unstar message" : "Star message"}
-        aria-pressed={message.starred}
-        disabled={starPending}
-        onClick={() => void toggleStar()}
-        className={cn("size-6", message.starred && "text-amber-500")}
-      >
-        <Star className={cn("size-3.5", message.starred && "fill-current")} />
-      </Button>
-      {(message.contentType === "text" || message.caption) && (
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          aria-label={copied === "text" ? "Copied" : "Copy text"}
-          onClick={() => void copy("text")}
-          className="size-6"
-        >
-          {copied === "text" ? (
-            <Check className="size-3.5 text-primary" />
-          ) : (
-            <Copy className="size-3" />
-          )}
-        </Button>
-      )}
-      <Button
-        type="button"
-        size="icon"
-        variant="ghost"
-        aria-label={copied === "link" ? "Link copied" : "Copy link"}
-        onClick={() => void copy("link")}
-        className="size-6"
-      >
-        {copied === "link" ? (
-          <Check className="size-3.5 text-primary" />
-        ) : (
-          <Link2 className="size-3.5" />
-        )}
-      </Button>
-    </>
-  );
-
-  // Quoted parent (issue #217) — the message this one replies to, shown as a
-  // compact snippet above the body. A left accent bar and muted background
-  // set it apart from the reply's own content; it's tinted to sit on
-  // whichever bubble background it's on (own vs incoming). Null once the
-  // quoted message has been deleted server-side (the FK is set-null), so it
-  // simply doesn't render.
-  //
-  // With `onJumpToParent` wired up the whole snippet is a button that scrolls
-  // the thread back to the message being quoted; without it (no thread to
-  // scroll) it stays a plain, non-interactive block.
-  const parent = message.parentMessage;
-  const quoteClassName = cn(
-    "mb-0.5 flex flex-col gap-0.5 rounded-md border-l-2 py-1 pl-2 pr-2 text-xs",
-    isOwn
-      ? "border-primary-foreground/50 bg-primary-foreground/10"
-      : "border-primary/50 bg-muted",
-  );
-  const quoteBody = parent && (
-    <>
-      <span
-        className={cn(
-          "flex items-center gap-1 font-semibold",
-          isOwn ? "text-primary-foreground/90" : "text-primary",
-        )}
-      >
-        {parent.forwarded && (
-          <Forward className="size-3 shrink-0" aria-label="Forwarded" />
-        )}
-        {parent.senderName}
-      </span>
-      <span
-        className={cn(
-          "line-clamp-2 break-words",
-          isOwn ? "text-primary-foreground/80" : "text-muted-foreground",
-        )}
-      >
-        {parentPreviewText(parent)}
-      </span>
-    </>
-  );
-  const quotedParent = !parent ? null : onJumpToParent ? (
-    <button
-      type="button"
-      onClick={onJumpToParent}
-      aria-label={`Go to the message from ${parent.senderName} this replies to`}
-      className={cn(
-        quoteClassName,
-        "cursor-pointer text-left transition-colors",
-        isOwn
-          ? "hover:bg-primary-foreground/20"
-          : "hover:bg-muted-foreground/15",
-      )}
-    >
-      {quoteBody}
-    </button>
-  ) : (
-    <div className={quoteClassName}>{quoteBody}</div>
-  );
-
-  const forwardButton = onForward && (
-    <Button
-      type="button"
-      size="icon"
-      variant="ghost"
-      aria-label="Forward message"
-      className="size-6"
-      onClick={onForward}
-    >
-      <Forward className="size-3.5" />
-    </Button>
-  );
-
-  // "Forwarded from X" (issue #601) — the original sender's name as it was
-  // when the message was forwarded, so it still reads right after they
-  // rename, leave, or delete their account. It only links to a profile
-  // while that account exists (`senderId` goes null once it's deleted).
-  const forwardedFrom = message.forwardedFrom;
-  const forwardedLabel = forwardedFrom && (
-    <span
-      data-testid="forwarded-label"
-      className={cn(
-        "flex items-center gap-1 text-xs italic",
-        isOwn ? "text-primary-foreground/75" : "text-muted-foreground",
-      )}
-    >
-      <Forward className="size-3 shrink-0" aria-hidden />
-      <span className="min-w-0 truncate">
-        Forwarded from{" "}
-        {forwardedFrom.senderId !== null ? (
-          <ProfileHoverCard userId={forwardedFrom.senderId}>
-            <Link
-              to="/users/$id"
-              params={{ id: String(forwardedFrom.senderId) }}
-              className="font-medium not-italic hover:underline"
-            >
-              {forwardedFrom.senderName}
-            </Link>
-          </ProfileHoverCard>
-        ) : (
-          <span className="font-medium not-italic">
-            {forwardedFrom.senderName}
-          </span>
-        )}
-      </span>
-    </span>
-  );
 
   // Shared visibility classes for both action groups (own + incoming). Hidden
   // and revealed on `group-hover` for pointer devices as before; when a long
@@ -720,84 +334,29 @@ export function MessageBubble({
       )}
 
       {isOwn && !isEditing && (
-        <div className={actionGroupClassName}>
-          {!readOnly && (
-            <ReactionAddButton
-              reactions={message.reactions}
-              pending={reactionPending}
-              onToggle={(emoji) => void toggleReaction(emoji)}
-              className="size-6 px-0"
-              iconClassName="size-3.5"
-            />
-          )}
-          {pinStarButtons}
-          {onReply && !readOnly && (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              aria-label="Reply to message"
-              className="size-6"
-              onClick={onReply}
-            >
-              <Reply className="size-3.5" />
-            </Button>
-          )}
-          {forwardButton}
-          {canEdit && (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              aria-label="Edit message"
-              className="size-6"
-              onClick={startEditing}
-            >
-              <Pencil className="size-3" />
-            </Button>
-          )}
-          {canModify && (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              aria-label="Delete message"
-              disabled={deleting}
-              onClick={() => void handleDelete()}
-              className="size-6 text-destructive hover:text-destructive"
-            >
-              {deleting ? (
-                <Loader2 className="size-3 animate-spin" />
-              ) : (
-                <Trash2 className="size-3" />
-              )}
-            </Button>
-          )}
-        </div>
+        <MessageActionGroup
+          message={message}
+          className={actionGroupClassName}
+          readOnly={readOnly}
+          reactionPending={reactionPending}
+          onToggleReaction={(emoji) => void toggleReaction(emoji)}
+          pinPending={pinPending}
+          starPending={starPending}
+          onTogglePin={() => void togglePin()}
+          onToggleStar={() => void toggleStar()}
+          copied={copied}
+          onCopy={(kind) => void copy(kind)}
+          onReply={onReply}
+          onForward={onForward}
+          deleting={deleting}
+          onDelete={() => void handleDelete()}
+          onEdit={canEdit ? startEditing : undefined}
+          canDelete={canModify}
+        />
       )}
 
       <div
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={clearLongPress}
-        onTouchCancel={clearLongPress}
-        onContextMenu={(e) => {
-          // Suppress the browser's own long-press context menu on touch.
-          if (longPressFired.current) {
-            e.preventDefault();
-            return;
-          }
-          // A desktop right-click opens the message's actions, the way the
-          // long press does on touch (issue #554) — except on a link, a
-          // picture or player, or over selected text, where the browser's
-          // own menu (copy link, save image, copy) is what's wanted.
-          if (isEditing) return;
-          const target = e.target as Element;
-          if (target.closest("a, img, video, audio, button")) return;
-          if (window.getSelection()?.toString()) return;
-          e.preventDefault();
-          setTouchRevealed(true);
-        }}
+        {...reveal.handlers}
         className={cn(
           // On a wide desktop pane the bubble is capped in characters too,
           // so lines stay readable — the pane takes the width, not the text.
@@ -835,9 +394,13 @@ export function MessageBubble({
             </ProfileHoverCard>
           )}
 
-          {forwardedLabel}
+          <ForwardedLabel forwardedFrom={message.forwardedFrom} isOwn={isOwn} />
 
-          {quotedParent}
+          <QuotedParent
+            parent={message.parentMessage}
+            isOwn={isOwn}
+            onJumpToParent={onJumpToParent}
+          />
 
           {isEditing ? (
             <div className="flex flex-col gap-1.5">
@@ -1039,48 +602,24 @@ export function MessageBubble({
       </div>
 
       {!isOwn && !isEditing && (
-        <div className={actionGroupClassName}>
-          {!readOnly && (
-            <ReactionAddButton
-              reactions={message.reactions}
-              pending={reactionPending}
-              onToggle={(emoji) => void toggleReaction(emoji)}
-              className="size-6 px-0"
-              iconClassName="size-3.5"
-            />
-          )}
-          {pinStarButtons}
-          {onReply && !readOnly && (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              aria-label="Reply to message"
-              className="size-6"
-              onClick={onReply}
-            >
-              <Reply className="size-3.5" />
-            </Button>
-          )}
-          {forwardButton}
-          {canDeleteOthers && (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              aria-label="Delete message"
-              disabled={deleting}
-              onClick={() => void handleDelete()}
-              className="size-6 text-destructive hover:text-destructive"
-            >
-              {deleting ? (
-                <Loader2 className="size-3 animate-spin" />
-              ) : (
-                <Trash2 className="size-3" />
-              )}
-            </Button>
-          )}
-        </div>
+        <MessageActionGroup
+          message={message}
+          className={actionGroupClassName}
+          readOnly={readOnly}
+          reactionPending={reactionPending}
+          onToggleReaction={(emoji) => void toggleReaction(emoji)}
+          pinPending={pinPending}
+          starPending={starPending}
+          onTogglePin={() => void togglePin()}
+          onToggleStar={() => void toggleStar()}
+          copied={copied}
+          onCopy={(kind) => void copy(kind)}
+          onReply={onReply}
+          onForward={onForward}
+          deleting={deleting}
+          onDelete={() => void handleDelete()}
+          canDelete={canDeleteOthers}
+        />
       )}
       {lightboxOpen && message.contentType === "image_url" && (
         <Lightbox

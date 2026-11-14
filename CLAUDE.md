@@ -554,7 +554,14 @@ bar, the immersive chat shell and the phone menu stay exactly as they were.
   restoration with a `data-scroll-restoration-id` that's unique per mount and
   renamed on every scroll (issue #614), so no remembered offset ever matches
   it — any new code that scrolls the thread must call
-  `renameForScrollRestoration` too.
+  `renameForScrollRestoration` too. Its pieces sit beside it in
+  `components/chat/` (issue #811): `useThreadScroll` (that scroll ownership,
+  paging older history, jump-to-message — and `renameForScrollRestoration`),
+  `useMarkReadWhileVisible`, `pendingMessages.ts` + `PendingMessageList`
+  (the outbox wiring), `ConversationHeader` and `ThreadMessages`; a bubble's
+  hooks and action group are in `components/chat/bubble/`, the group
+  settings' sections in `components/chat/group/`. Role checks the UI mirrors
+  from the server go through `web/src/lib/chatRoles.ts`.
 - **Chat details panel.** At `xl`+ the chats layout grows an optional third
   pane, [`ChatDetailsPanel`](web/src/components/chat/ChatDetailsPanel.tsx)
   (issue #563), toggled from the conversation header and remembered per
