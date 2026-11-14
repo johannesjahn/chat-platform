@@ -1,23 +1,8 @@
 import { and, count, desc, eq, inArray, lt, or } from "drizzle-orm";
 import { Effect } from "effect";
-import {
-  ALLOWED_AVATAR_MIME_TYPES,
-  AvatarTooLarge,
-  DEFAULT_CHATS_LIMIT,
-  InvalidAvatarUpload,
-  InvalidChatRequest,
-  MAX_AVATAR_UPLOAD_SIZE_BYTES,
-  NotFound,
-} from "../Api.ts";
+import { DEFAULT_CHATS_LIMIT, InvalidChatRequest, NotFound } from "../Api.ts";
 import { CurrentUser } from "../Auth.ts";
-import {
-  avatarStorageKey,
-  generateAvatarToken,
-  deleteAvatarObjects,
-  toAvatarVariants,
-} from "../avatars.ts";
-import { processAvatar } from "../ImageProcessing.ts";
-import { withMediaProcessingPermit } from "../MediaProcessingLimit.ts";
+import { deleteAvatarObjects, toAvatarVariants } from "../avatars.ts";
 import { serializableTransaction } from "../serializableTransaction.ts";
 
 import { chatParticipants, chats } from "../db/schema.ts";
@@ -33,15 +18,8 @@ import {
 } from "./chatState.ts";
 import { getLastMessagesForChats } from "./messageViews.ts";
 import { getUnreadCountsForChats, hasUnreadFor } from "./unread.ts";
-import { enforceRateLimit } from "../RateLimiter.ts";
 import { dbQuery } from "../Db.ts";
-
-// Mirrors AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT/AVATAR_UPLOAD_WINDOW_SECONDS
-// in users/profileHandlers.ts — same rationale (real image-decoding/resizing
-// work, a rare deliberate action) applies to a group's avatar.
-const CHAT_AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT = 10;
-
-const CHAT_AVATAR_UPLOAD_WINDOW_SECONDS = 60 * 60;
+import { storeAvatarUpload } from "../avatarUpload.ts";
 
 // Keyset cursor for `listChats` over its `updated_at desc, id desc` sort —
 // see `ChatsPageQuery` in Api.ts for why this is a cursor rather than an
@@ -333,85 +311,15 @@ export const chatHandlers = ({
         // `uploadAvatar` in users/profileHandlers.ts — a caller who manages
         // several groups shares one budget across all of them instead of
         // getting a fresh one per chat.
-        yield* enforceRateLimit(
+        const keys = yield* storeAvatarUpload(
           limiter,
+          storage,
           `chat-avatar-upload:account:${currentUser.id}`,
-          CHAT_AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT,
-          CHAT_AVATAR_UPLOAD_WINDOW_SECONDS,
+          payload,
         );
 
-        if (
-          !(ALLOWED_AVATAR_MIME_TYPES as ReadonlyArray<string>).includes(
-            payload.file.contentType,
-          )
-        )
-          return yield* Effect.fail(
-            new InvalidAvatarUpload({
-              message: `Unsupported file type: ${payload.file.contentType}`,
-            }),
-          );
-
-        const bunFile = Bun.file(payload.file.path);
-        if (bunFile.size > MAX_AVATAR_UPLOAD_SIZE_BYTES)
-          return yield* Effect.fail(
-            new AvatarTooLarge({
-              message: `File exceeds the maximum size of ${MAX_AVATAR_UPLOAD_SIZE_BYTES} bytes`,
-            }),
-          );
-
-        const processed = yield* Effect.tryPromise({
-          try: async () =>
-            processAvatar(await bunFile.bytes(), {
-              x: payload.x,
-              y: payload.y,
-              size: payload.size,
-            }),
-          catch: (err) =>
-            new InvalidAvatarUpload({
-              message:
-                err instanceof Error ? err.message : "Invalid avatar image",
-            }),
-        }).pipe(withMediaProcessingPermit);
-
-        // Mint a fresh token per variant and push the processed bytes to
-        // object storage before touching the row — same ordering rationale
-        // as `uploadAvatar` in users/profileHandlers.ts (a failed upload leaves
-        // at most a few orphaned objects rather than a row pointing at bytes
-        // that never landed).
-        const smallToken = generateAvatarToken();
-        const mediumToken = generateAvatarToken();
-        const largeToken = generateAvatarToken();
-        yield* Effect.all(
-          [
-            storage.upload(
-              avatarStorageKey(smallToken),
-              processed.small,
-              processed.contentType,
-            ),
-            storage.upload(
-              avatarStorageKey(mediumToken),
-              processed.medium,
-              processed.contentType,
-            ),
-            storage.upload(
-              avatarStorageKey(largeToken),
-              processed.large,
-              processed.contentType,
-            ),
-          ],
-          { concurrency: "unbounded" },
-        ).pipe(Effect.orDie);
-
         const updated = yield* dbQuery(() =>
-          db
-            .update(chats)
-            .set({
-              avatarSmallKey: smallToken,
-              avatarMediumKey: mediumToken,
-              avatarLargeKey: largeToken,
-            })
-            .where(eq(chats.id, id))
-            .returning(),
+          db.update(chats).set(keys).where(eq(chats.id, id)).returning(),
         );
         const row = updated[0];
         if (!row)

@@ -1,33 +1,13 @@
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import {
-  ALLOWED_AVATAR_MIME_TYPES,
-  AvatarTooLarge,
-  InvalidAvatarUpload,
-  MAX_AVATAR_UPLOAD_SIZE_BYTES,
-} from "../Api.ts";
+import {} from "../Api.ts";
 import { CurrentUser } from "../Auth.ts";
-import {
-  avatarStorageKey,
-  deleteAvatarObjects,
-  generateAvatarToken,
-} from "../avatars.ts";
-import { processAvatar } from "../ImageProcessing.ts";
-import { withMediaProcessingPermit } from "../MediaProcessingLimit.ts";
+import { deleteAvatarObjects } from "../avatars.ts";
 import { users } from "../db/schema.ts";
 import { type UsersDeps, type UsersHandlers } from "./handlerKit.ts";
-import { enforceRateLimit } from "../RateLimiter.ts";
 import { toPublicUser, toUserProfile } from "./userViews.ts";
 import { dbQuery } from "../Db.ts";
-
-// Avatar uploads involve real image-decoding/resizing work (processAvatar,
-// ImageProcessing.ts) and are a rare, deliberate action (changing your
-// avatar), not something a normal client ever does in a burst — mirrors
-// AttachmentsHandler's enforceUploadLimit's rationale for bounding a
-// scripted flood tighter than the global per-IP limiter.
-const AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT = 10;
-
-const AVATAR_UPLOAD_WINDOW_SECONDS = 60 * 60;
+import { storeAvatarUpload } from "../avatarUpload.ts";
 
 export const profileHandlers = ({
   db,
@@ -108,49 +88,16 @@ export const profileHandlers = ({
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
 
-        yield* enforceRateLimit(
+        const keys = yield* storeAvatarUpload(
           limiter,
+          storage,
           `avatar-upload:account:${currentUser.id}`,
-          AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT,
-          AVATAR_UPLOAD_WINDOW_SECONDS,
+          payload,
         );
-
-        if (
-          !(ALLOWED_AVATAR_MIME_TYPES as ReadonlyArray<string>).includes(
-            payload.file.contentType,
-          )
-        )
-          return yield* Effect.fail(
-            new InvalidAvatarUpload({
-              message: `Unsupported file type: ${payload.file.contentType}`,
-            }),
-          );
-
-        const bunFile = Bun.file(payload.file.path);
-        if (bunFile.size > MAX_AVATAR_UPLOAD_SIZE_BYTES)
-          return yield* Effect.fail(
-            new AvatarTooLarge({
-              message: `File exceeds the maximum size of ${MAX_AVATAR_UPLOAD_SIZE_BYTES} bytes`,
-            }),
-          );
-
-        const processed = yield* Effect.tryPromise({
-          try: async () =>
-            processAvatar(await bunFile.bytes(), {
-              x: payload.x,
-              y: payload.y,
-              size: payload.size,
-            }),
-          catch: (err) =>
-            new InvalidAvatarUpload({
-              message:
-                err instanceof Error ? err.message : "Invalid avatar image",
-            }),
-        }).pipe(withMediaProcessingPermit);
 
         // The tokens the row points at *before* this upload — their objects
         // become orphans once the row is repointed below, so sweep them
-        // afterwards. Read up front (an UPDATE ... RETURNING would hand back
+        // afterwards. Read before the UPDATE (its RETURNING would hand back
         // the post-update values, not these).
         const prevRows = yield* dbQuery(() =>
           db
@@ -165,36 +112,6 @@ export const profileHandlers = ({
         );
         const prev = prevRows[0];
 
-        // Mint a fresh token per variant and push the processed bytes to
-        // object storage before touching the row — an upload that fails
-        // partway leaves at most a few unreferenced objects (cleaned up like
-        // any other orphan) rather than a row pointing at bytes that never
-        // landed. Fresh tokens (never the previous upload's) are what make
-        // the served URLs cache-bust on re-upload — see avatars.ts.
-        const smallToken = generateAvatarToken();
-        const mediumToken = generateAvatarToken();
-        const largeToken = generateAvatarToken();
-        yield* Effect.all(
-          [
-            storage.upload(
-              avatarStorageKey(smallToken),
-              processed.small,
-              processed.contentType,
-            ),
-            storage.upload(
-              avatarStorageKey(mediumToken),
-              processed.medium,
-              processed.contentType,
-            ),
-            storage.upload(
-              avatarStorageKey(largeToken),
-              processed.large,
-              processed.contentType,
-            ),
-          ],
-          { concurrency: "unbounded" },
-        ).pipe(Effect.orDie);
-
         // Repoint the row at the freshly stored variants, nulling the legacy
         // base64 columns at the same time so a pre-#289 avatar's bytes stop
         // riding along in the row.
@@ -206,9 +123,7 @@ export const profileHandlers = ({
               avatarSmall: null,
               avatarMedium: null,
               avatarLarge: null,
-              avatarSmallKey: smallToken,
-              avatarMediumKey: mediumToken,
-              avatarLargeKey: largeToken,
+              ...keys,
             })
             .where(eq(users.id, currentUser.id))
             .returning({
