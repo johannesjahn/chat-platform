@@ -387,10 +387,15 @@ keeps the request parameters typed.
   handler modules.
 - **Database calls go through `dbQuery`** ([`src/Db.ts`](src/Db.ts)): it runs
   one query/transaction thunk and dies on failure, the same as the
-  `Effect.tryPromise(...).pipe(Effect.orDie)` it replaced — one place to add
-  query spans or metrics. Code that deliberately keeps a database failure as a
-  typed error (the best-effort writes in `notifications.ts`) keeps its
-  `Effect.tryPromise`.
+  `Effect.tryPromise(...).pipe(Effect.orDie)` it replaced. It's timed by
+  `timedDbCall`, which records `db_query_duration_seconds` (labeled only by
+  `outcome`: success/failure/aborted) and counts `db_query_errors_total`.
+  Code that keeps a database failure as a typed error (the best-effort writes
+  in `notifications.ts`, the forward's transaction, `serializableTransaction`)
+  wraps its `Effect.tryPromise` in `timedDbCall` directly, passing `isAbort`
+  for an expected abort (a retried serialization failure, a deliberate
+  rollback) so it isn't counted as an error. A new database call that skips
+  both goes unmeasured.
 - **API schemas are split by area too**: `src/api/<area>.ts` holds that area's
   schemas, errors and endpoint group; `src/Api.ts` re-exports them all and
   assembles `ChatApi`, so code keeps importing from `Api.ts`. The `api/`

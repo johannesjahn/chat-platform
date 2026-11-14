@@ -26,7 +26,7 @@ import {
 } from "./Api.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
 import { CurrentUser } from "./Auth.ts";
-import { Db, type DrizzleDb } from "./Db.ts";
+import { Db, dbQuery, type DrizzleDb } from "./Db.ts";
 import {
   buildSnippet,
   containsPattern,
@@ -224,12 +224,6 @@ const toSearchUser = (row: UserRow): User => ({
   ...effectiveStatus(row),
 });
 
-// Every DB call in this module is a plain read whose failure is a bug, not a
-// domain outcome — same `orDie` treatment the other handlers give their
-// queries.
-const query = <A>(run: () => Promise<A>): Effect.Effect<A> =>
-  Effect.tryPromise(run).pipe(Effect.orDie);
-
 // Resolves the opaque id cursor, or fails with a typed 400. Returns `null`
 // when no cursor was supplied (first page).
 const resolveCursor = (cursor: string | undefined) =>
@@ -254,7 +248,7 @@ const splitPage = <A>(rows: A[], limit: number) => ({
 // hidden from search exactly as they're hidden from the feed (issue #219).
 // Resolved once per request and shared by both sections.
 const hiddenAuthorIds = (db: DrizzleDb, viewerId: number) =>
-  query(() => blockedOrMutedUserIds(db, viewerId));
+  dbQuery(() => blockedOrMutedUserIds(db, viewerId));
 
 const excludeAuthors = (column: PgColumn, ids: ReadonlyArray<number>) =>
   ids.length > 0 ? notInArray(column, [...ids]) : undefined;
@@ -337,7 +331,7 @@ const searchUsersPage = (
     const rank = userMatchRank(q);
     const sortName = sql<string>`lower(${users.username})`;
 
-    const rows = yield* query(() =>
+    const rows = yield* dbQuery(() =>
       db
         .select({ ...userColumns, rank, sortName })
         .from(users)
@@ -385,7 +379,7 @@ const searchPostsPage = (
   after: number | null,
   hidden: ReadonlyArray<number>,
 ) =>
-  query(() =>
+  dbQuery(() =>
     db
       .select({
         id: posts.id,
@@ -443,7 +437,7 @@ const searchCommentsPage = (
   after: number | null,
   hidden: ReadonlyArray<number>,
 ) =>
-  query(() =>
+  dbQuery(() =>
     db
       .select({
         id: comments.id,
@@ -505,13 +499,13 @@ const loadMessageSearchChats = (
     if (chatIds.length === 0) return [];
     const [chatRows, participantRows] = yield* Effect.all(
       [
-        query(() =>
+        dbQuery(() =>
           db
             .select({ id: chats.id, type: chats.type, title: chats.title })
             .from(chats)
             .where(inArray(chats.id, [...chatIds])),
         ),
-        query(() =>
+        dbQuery(() =>
           db
             .select({
               chatId: chatParticipants.chatId,
@@ -583,7 +577,7 @@ const searchMessagesPage = (
     // what it matches. It has to be *inside* the arm, not
     // applied to its result, or an arm could spend its whole page allowance on
     // messages the caller may not see.
-    const rows = yield* query(() =>
+    const rows = yield* dbQuery(() =>
       db
         .select({
           id: messages.id,

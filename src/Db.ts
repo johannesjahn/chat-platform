@@ -5,7 +5,8 @@ import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
 import { drizzle as drizzleBunSql } from "drizzle-orm/bun-sql";
 import { migrate as migrateBunSql } from "drizzle-orm/bun-sql/migrator";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Metric } from "effect";
+import { dbQueryDurationSeconds, dbQueryErrorsTotal } from "./Metrics.ts";
 import * as schema from "./db/schema.ts";
 
 // The concrete driver (PGlite vs Bun.sql, see DbLive below) only differs in
@@ -18,14 +19,44 @@ export type DrizzleDb = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 export class Db extends Context.Service<Db, DrizzleDb>()("Db") {}
 
+// Times one database call — an Effect wrapping the promise, as built by
+// `dbQuery` — into `db_query_duration_seconds` and counts a failure in
+// `db_query_errors_total` (Metrics.ts). `isAbort` marks errors that are an
+// expected way for the call to end — a serialization failure about to be
+// retried, a transaction rolled back on purpose — which are timed as
+// "aborted" and not counted as errors. The error stays in the error channel.
+export const timedDbCall = <A, E>(
+  call: Effect.Effect<A, E>,
+  isAbort: (error: E) => boolean = () => false,
+): Effect.Effect<A, E> =>
+  Effect.suspend(() => {
+    const start = performance.now();
+    const record = (outcome: "success" | "failure" | "aborted") =>
+      Metric.update(
+        Metric.withAttributes(dbQueryDurationSeconds, { outcome }),
+        (performance.now() - start) / 1000,
+      ).pipe(
+        Effect.andThen(
+          outcome === "failure"
+            ? Metric.update(dbQueryErrorsTotal, 1)
+            : Effect.void,
+        ),
+      );
+    return call.pipe(
+      Effect.tap(() => record("success")),
+      Effect.tapError((error) =>
+        record(isAbort(error) ? "aborted" : "failure"),
+      ),
+    );
+  });
+
 // Runs one database call (a query builder, a transaction, a `Promise.all` of
 // them) as an Effect. A database failure is a defect, not a typed error —
 // there's nothing a handler could do about it but surface a 500 — so it dies,
-// exactly like the `Effect.tryPromise(...).pipe(Effect.orDie)` this replaces
-// (issue #811). Every query goes through here, which leaves one place to add
-// query spans or metrics.
+// exactly like the `Effect.tryPromise(...).pipe(Effect.orDie)` this replaced
+// (issue #811). Timed and counted by `timedDbCall`.
 export const dbQuery = <A>(run: () => PromiseLike<A>): Effect.Effect<A> =>
-  Effect.tryPromise(run).pipe(Effect.orDie);
+  timedDbCall(Effect.tryPromise(run)).pipe(Effect.orDie);
 
 // PGlite ships contrib extensions as separate WASM bundles that have to be
 // registered when the instance is created — `CREATE EXTENSION pg_trgm` in

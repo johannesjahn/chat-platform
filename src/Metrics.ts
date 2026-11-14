@@ -57,13 +57,34 @@ export const websocketConnectionsActive = register(
   }),
 );
 
-// See recordHttpMetrics below for why this counts request-level defects
-// rather than instrumenting every `db.*` call site individually. Eagerly
-// `register`ed for the same reason as websocketConnectionsActive above.
+// Database calls that failed, counted where they run: `timedDbCall` in
+// Db.ts, which every query goes through (`dbQuery`, `serializableTransaction`,
+// the best-effort writes in notifications.ts). An expected abort — a
+// serialization failure that gets retried, a deliberate rollback — isn't one.
+// Eagerly `register`ed for the same reason as websocketConnectionsActive
+// above.
 export const dbQueryErrorsTotal = register(
   Metric.counter("db_query_errors_total", {
-    description: "DB failures observed while handling HTTP requests.",
+    description: "Database calls that failed.",
   }),
+);
+
+// Seconds per database call (a query, a `Promise.all` of them, or a whole
+// transaction attempt), labeled only by `outcome` ("success"/"failure"/
+// "aborted", see timedDbCall in Db.ts) — never by table, route or user, so
+// it stays a handful of series. Exponential from 0.5ms up to ~16s: most
+// queries finish in a few milliseconds, well under the HTTP histogram's
+// first bucket.
+export const dbQueryDurationSeconds = Metric.histogram(
+  "db_query_duration_seconds",
+  {
+    description: "Database call duration in seconds, labeled by outcome.",
+    boundaries: Metric.exponentialBoundaries({
+      start: 0.0005,
+      factor: 2,
+      count: 16,
+    }),
+  },
 );
 
 export const pubsubPublishTotal = Metric.counter("pubsub_publish_total", {
@@ -193,8 +214,6 @@ export const recordHttpMetrics = <E, R>(
       Metric.withAttributes(httpRequestDurationSeconds, attributes),
       durationSeconds,
     );
-    if (exit._tag === "Failure" && Cause.hasDies(exit.cause))
-      yield* Metric.update(dbQueryErrorsTotal, 1);
 
     return yield* exit;
   });

@@ -1,5 +1,6 @@
-import { Duration, Effect, Schedule } from "effect";
-import type { DrizzleDb } from "./Db.ts";
+import { Duration, Effect, Metric, Schedule } from "effect";
+import { type DrizzleDb, timedDbCall } from "./Db.ts";
+import { dbQueryErrorsTotal } from "./Metrics.ts";
 
 // A few handlers (createDirectChat, addParticipants, joinViaInvite) run a
 // check-then-write in a `serializable` transaction so concurrent requests
@@ -66,17 +67,28 @@ export const isRetryableAbort = (error: unknown): boolean => {
 // failures and deadlocks. Any other error — and a serialization failure that outlasts the
 // retries — dies, same as an unexpected DB error anywhere else. `run` may be
 // called more than once, so it must not have side effects outside `tx`.
+// Each attempt is timed on its own; a retried abort is "aborted", and the
+// one that outlasts the retries is counted in db_query_errors_total here,
+// since every attempt was an abort (see timedDbCall in Db.ts).
 export const serializableTransaction = <A>(
   db: DrizzleDb,
   run: (tx: Transaction) => Promise<A>,
 ): Effect.Effect<A> =>
-  Effect.tryPromise(() =>
-    db.transaction(run, { isolationLevel: "serializable" }),
+  timedDbCall(
+    Effect.tryPromise(() =>
+      db.transaction(run, { isolationLevel: "serializable" }),
+    ),
+    isRetryableAbort,
   ).pipe(
     Effect.retry({
       while: isRetryableAbort,
       schedule: RETRY_SCHEDULE,
       times: SERIALIZABLE_MAX_RETRIES,
     }),
+    Effect.tapError((error) =>
+      isRetryableAbort(error)
+        ? Metric.update(dbQueryErrorsTotal, 1)
+        : Effect.void,
+    ),
     Effect.orDie,
   );
