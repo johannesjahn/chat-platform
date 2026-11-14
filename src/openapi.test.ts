@@ -22,7 +22,7 @@ import {
 // The endpoint still works at runtime, but the generated openapi.json (and
 // therefore the typed frontend client generated from it) ends up with zero
 // documented/typed parameters for that location — no error, just silently
-// missing. See PostsPageQuery in Api.ts, and the note in CLAUDE.md.
+// missing. See PostsPageQuery in api/posts.ts, and the note in CLAUDE.md.
 //
 // This walks every endpoint in ChatApi and checks that any endpoint
 // declaring a path/query/header schema actually produced matching
@@ -79,9 +79,10 @@ type HttpApiEndpointLike = {
 
 // Issue #761: effect's `Schema.isMinLength(n)` documents a string as
 // `minLength: Math.ceil(n / 2)` (a code-point-safe approximation of a UTF-16
-// check), so openapi.json advertised half of every floor. Api.ts routes every
-// min-length check through its own `isMinLength`, which documents the
-// enforced bound; these hold the spec to the constants.
+// check), so openapi.json advertised half of every floor. The API schemas
+// route every min-length check through their own `isMinLength`
+// (api/common.ts), which documents the enforced bound; these hold the spec to
+// the constants.
 type JsonSchemaLike = {
   readonly minLength?: number;
   readonly maxLength?: number;
@@ -144,12 +145,21 @@ test("search query length bounds are documented as enforced", () => {
 });
 
 test("Api.ts never uses effect's halving length checks directly", async () => {
-  const source = await Bun.file(new URL("./Api.ts", import.meta.url)).text();
-  // The one allowed call is inside Api.ts's own `isMinLength` wrapper.
+  // Api.ts plus the per-area schema modules it re-exports (src/api/).
+  const files = [
+    "Api.ts",
+    ...new Bun.Glob("api/*.ts").scanSync(import.meta.dir),
+  ];
+  expect(files.length, "src/api/ modules not found").toBeGreaterThan(1);
+  const sources = await Promise.all(
+    files.map((file) => Bun.file(`${import.meta.dir}/${file}`).text()),
+  );
+  const source = sources.join("\n");
+  // The one allowed call is inside the `isMinLength` wrapper (api/common.ts).
   const minLengthCalls = source.match(/\bSchema\.isMinLength\(/g) ?? [];
   expect(
     minLengthCalls.length,
-    "use Api.ts's isMinLength, not Schema.isMinLength (issue #761)",
+    "use api/common.ts's isMinLength, not Schema.isMinLength (issue #761)",
   ).toBe(1);
   // `isBetweenLength` halves its minimum the same way.
   expect(source).not.toMatch(/\bSchema\.isBetweenLength\(/);

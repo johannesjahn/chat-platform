@@ -207,7 +207,7 @@ the migration all read as having signed up when it ran.
 ## Games (arcade)
 
 Multiplayer games live under `/games` in the frontend, backed by the `games`
-group in [`src/Api.ts`](src/Api.ts) and
+group in [`src/api/games.ts`](src/api/games.ts) and
 [`src/GamesHandler.ts`](src/GamesHandler.ts) (handlers in `src/games/*Handlers.ts`,
 lobby loading in `lobbyStore.ts`, settling in `settlement.ts`). The first game
 is a typing race;
@@ -234,7 +234,7 @@ everything else is shared plumbing keyed by a game slug (`GameId`):
   scored, rate-limited per connection (see `makeIncomingHandler` in
   [`src/RealtimeSocket.ts`](src/RealtimeSocket.ts)).
 
-**Adding a game:** add its slug to `GameId` (Api.ts); add a `GameRules`
+**Adding a game:** add its slug to `GameId` (api/games.ts); add a `GameRules`
 module next to [`src/games/typing.ts`](src/games/typing.ts) and register it in
 `GAME_RULES` ([`src/games/rules.ts`](src/games/rules.ts)) — a `"race"` (every
 finish scored as it lands) or its own kind, with its seat bounds; add its
@@ -384,6 +384,11 @@ keeps the request parameters typed.
   (avatars.ts), `enforceUploadQuota` (attachments.ts), the `Post` view
   (posts.ts), the `User` view (users/userViews.ts). Helper modules never import
   handler modules.
+- **API schemas are split by area too**: `src/api/<area>.ts` holds that area's
+  schemas, errors and endpoint group; `src/Api.ts` re-exports them all and
+  assembles `ChatApi`, so code keeps importing from `Api.ts`. The `api/`
+  modules build schemas at load time, so they must not import each other in
+  a cycle: shared pieces go in `api/common.ts` (and errors in `api/errors.ts`).
 
 ## Forwarding messages
 
@@ -688,7 +693,7 @@ open) underpins all three; don't remove it. Request counts are pinned by
 
 In-app notifications (issue #317) — the header bell and the `/notifications`
 inbox — are backed by the `notifications` table (migration `0027`) and the
-`notifications` group in [`src/Api.ts`](src/Api.ts), read by
+`notifications` group in [`src/api/notifications.ts`](src/api/notifications.ts), read by
 [`src/NotificationsHandler.ts`](src/NotificationsHandler.ts). Rows are written
 by the handler that performed the action, always through `createNotifications`
 in [`src/notifications.ts`](src/notifications.ts), which owns the suppression
@@ -716,7 +721,7 @@ your all-time #1 spot on a game's leaderboard.
   (via `GET /comments/:id`), an invite's lobby, or a record's leaderboard.
   Modified clicks and Enter still navigate; ↑/↓ move the preview.
 
-To add a notification type: add it to `NotificationType` (Api.ts), call
+To add a notification type: add it to `NotificationType` (api/notifications.ts), call
 `createNotifications` from the handler that causes it, give it a sentence and
 icon in `web/src/components/NotificationRow.tsx` / `NOTIFICATION_ICONS`
 (`web/src/components/notificationIcons.ts`), a target in
@@ -859,10 +864,11 @@ run it (`bun test ./src`) after touching any endpoint signature.
 
 effect's `Schema.isMinLength(n)` documents a string as `minLength:
 Math.ceil(n / 2)` (JSON Schema counts code points, `string.length` UTF-16
-units), which halved every documented floor (issue #761). In `src/Api.ts`
-use the local `isMinLength` wrapper instead, which documents the enforced
-bound; `src/openapi.test.ts` fails on a direct `Schema.isMinLength(` call and
-checks the spec's `minLength`/`maxLength` against the `MIN_*`/`MAX_*`
+units), which halved every documented floor (issue #761). In the API schemas
+(`src/Api.ts` and `src/api/`) use the `isMinLength` wrapper from
+`api/common.ts` instead, which documents the enforced bound;
+`src/openapi.test.ts` fails on a direct `Schema.isMinLength(` call in any of
+them and checks the spec's `minLength`/`maxLength` against the `MIN_*`/`MAX_*`
 constants.
 
 ## CI
