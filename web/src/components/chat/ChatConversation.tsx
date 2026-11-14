@@ -991,7 +991,7 @@ export function ChatConversation({
   const myRole = chat.participants.find(
     (p) => p.userId === session.user.id,
   )?.role;
-  // Mirrors the backend's `requireChatManager` (see ChatsHandler.ts): the
+  // Mirrors the backend's `requireChatManager` (see src/chats/access.ts): the
   // chat's owner or admin (per-chat role, issue #220), or a site-wide
   // admin — a site admin only reaches this UI at all once they're a
   // participant, since `getChat` still requires that.

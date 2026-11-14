@@ -25,8 +25,8 @@ export const blockedOrMutedUserIds = async (
 };
 
 // Whether a *block* (not a mere mute) exists in either direction between two
-// users — the gate on direct messaging (see `createMessage` in
-// ChatsHandler.ts). Blocking is symmetric for messaging: if A blocked B,
+// users — the gate on direct messaging (see `directChatBlocked` in
+// chats/sendPath.ts). Blocking is symmetric for messaging: if A blocked B,
 // neither A nor B can message the other in their direct chat. A mute never
 // blocks messaging, so it's excluded here.
 export const directBlockExists = async (
@@ -53,7 +53,7 @@ export const directBlockExists = async (
 // Of `otherIds`, the subset with a *block* (not a mute) in either direction
 // with `userId` — the batch form of `directBlockExists`. Gates putting
 // someone into a group chat with someone else (issue #757): see
-// `requireNoBlockWith` in ChatsHandler.ts. Returns an empty set for an empty
+// `requireNoBlockWith` in chats/access.ts. Returns an empty set for an empty
 // `otherIds`.
 export const blockedPeersAmong = async (
   db: DrizzleDb,

@@ -356,11 +356,26 @@ fails on a call anywhere else in `src/`. Load-bearing:
 A new video or audio MIME type in `ALLOWED_ATTACHMENT_MIME_TYPES` needs its demuxer
 and decoders checked in `MediaInput.ts`.
 
+## Chats handler layout
+
+The `chats` group is split by area under [`src/chats/`](src/chats/) (issue
+#811); [`src/ChatsHandler.ts`](src/ChatsHandler.ts) only resolves the services
+and combines the areas with `handlers.handleAll`, which fails to typecheck if
+an endpoint is left unhandled. Each `*Handlers.ts` module returns its slice of
+handlers `satisfies ChatsHandlers` ([`handlerKit.ts`](src/chats/handlerKit.ts)),
+which keeps the request parameters typed. Put a new endpoint in the area it
+belongs to, and a helper next to its only caller until a second area needs it;
+then it moves to one of the shared modules: `sendPath.ts` (the one send path —
+`insertMessage`, `directChatBlocked`, `publishNewMessage`), `access.ts`
+(404 lookups and participation/role checks), `chatState.ts` (participants,
+`version`, `buildChat`), `messageViews.ts` (the `Message` view) or `unread.ts`.
+Helper modules never import handler modules.
+
 ## Forwarding messages
 
 `POST /chats/:id/messages/:messageId/forward` (issue #601) posts a copy of a
 message into up to `MAX_FORWARD_TARGETS` chats — `forwardMessage` in
-[`src/ChatsHandler.ts`](src/ChatsHandler.ts), picked from
+[`src/chats/forwardHandlers.ts`](src/chats/forwardHandlers.ts), picked from
 [`ForwardDialog`](web/src/components/chat/ForwardDialog.tsx). Load-bearing:
 
 - **A forward is a new message owned by the forwarder**, built through the
@@ -392,7 +407,7 @@ message into up to `MAX_FORWARD_TARGETS` chats — `forwardMessage` in
 Being put in a group by someone you share no chat with makes it a _message
 request_ for you (issue #785): `chat_participants.request_pending` and
 `added_by` (migration `0038`), decided by `strangersTo` in
-[`src/ChatsHandler.ts`](src/ChatsHandler.ts), accepted with
+[`src/chats/membershipHandlers.ts`](src/chats/membershipHandlers.ts), accepted with
 `POST /chats/:id/accept`, declined with the existing `/leave`. Load-bearing:
 
 - **Per participant, not per chat.** The same group can be a request for one
@@ -431,7 +446,7 @@ Posts and messages carry an optional `caption` next to an attachment (issue
   before captions — never repurpose it as the caption.
 - **`caption` only counts when `content_type = 'attachment'`.** An old
   replica can re-type a row and leave the column behind, so every reader goes
-  through `captionOf` (PostsHandler.ts) / `messageCaption` (ChatsHandler.ts),
+  through `captionOf` (PostsHandler.ts) / `messageCaption` (chats/messageViews.ts),
   and the search arms restrict on content type themselves.
 - **Edits: omitted keeps, `null` clears**, so a client that predates captions
   never wipes one. Sending a `caption` on a non-attachment is a 400.

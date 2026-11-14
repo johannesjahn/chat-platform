@@ -320,11 +320,11 @@ export const chats = pgTable("chats", {
     .$defaultFn(() => new Date()),
   // Monotonically incremented on every participant-visible change to this
   // chat (message sent/edited/deleted, read receipts advancing, rename,
-  // participants added) — see `bumpChatVersion` in ChatsHandler.ts. Carried
-  // on the `chat_updated` realtime event and in the `Chat` API response so
-  // clients can tell exactly when they've missed an event (the version they
-  // observe jumps by more than one) instead of only being able to guess from
-  // a dropped/delayed socket message (issue #55).
+  // participants added) — see `bumpChatVersion` in chats/chatState.ts.
+  // Carried on the `chat_updated` realtime event and in the `Chat` API
+  // response so clients can tell exactly when they've missed an event (the
+  // version they observe jumps by more than one) instead of only being able
+  // to guess from a dropped/delayed socket message (issue #55).
   version: integer("version").notNull().default(1),
   // Uploaded-and-cropped group avatar (only set for `type: "group"` chats),
   // stored and served exactly like an uploaded user avatar (issue #269/#289)
@@ -364,9 +364,9 @@ export const chatParticipants = pgTable(
     // chats leave every participant at the "member" default since there's
     // nothing to manage. Kept in sync with `chats.createdBy` at every point
     // that reassigns ownership (transferOwnership, and the automatic
-    // reassignment in `departParticipant` — see ChatsHandler.ts) so exactly
-    // one participant holds "owner" whenever the chat has a non-null
-    // `createdBy`.
+    // reassignment in `departParticipant` — see chats/membershipHandlers.ts)
+    // so exactly one participant holds "owner" whenever the chat has a
+    // non-null `createdBy`.
     role: text("role", { enum: ["owner", "admin", "member"] })
       .notNull()
       .default("member"),
@@ -384,10 +384,10 @@ export const chatParticipants = pgTable(
     // a group by someone they shared no (accepted) chat with, until they
     // accept. A pending row is kept out of the participant's chat list and
     // unread counts, and out of presence in both directions — see
-    // `isMessageRequestFor` in ChatsHandler.ts — and out of message search,
-    // with every write others would see (sends, forwards in, reactions,
-    // pins, typing, edits, read receipts) refused until accepted (issue
-    // #808, `requireAcceptedParticipant`). A database default (not an
+    // `isMessageRequestFor` in chats/chatState.ts — and out of message
+    // search, with every write others would see (sends, forwards in,
+    // reactions, pins, typing, edits, read receipts) refused until accepted
+    // (issue #808, `requireAcceptedParticipant`). A database default (not an
     // app-side one) for the same rollout reason as `users.created_at`: old
     // replicas insert participants without the column, and those must read
     // as accepted, which is how every row predating the migration reads.
@@ -436,13 +436,14 @@ export const messages = pgTable(
     caption: text("caption"),
     // Threaded/quoted replies (issue #217) — null for a normal message, set to
     // the id of the message this one is replying to. Validated at create time
-    // (see ChatsHandler.ts) to reference a message in the *same* chat. The
-    // `AnyPgColumn` return annotation is required for this self-referencing FK
-    // (same as `comments.parentCommentId`), without which the column type
-    // would be inferred circularly. `set null` (not cascade): deleting a
-    // message that others replied to should leave those replies in place — the
-    // quoted preview just falls back to "message unavailable" client-side —
-    // rather than silently removing every reply along with it.
+    // (`createMessage` in chats/messageHandlers.ts) to reference a message in
+    // the *same* chat. The `AnyPgColumn` return annotation is required for
+    // this self-referencing FK (same as `comments.parentCommentId`), without
+    // which the column type would be inferred circularly. `set null` (not
+    // cascade): deleting a message that others replied to should leave those
+    // replies in place — the quoted preview just falls back to "message
+    // unavailable" client-side — rather than silently removing every reply
+    // along with it.
     parentMessageId: integer("parent_message_id").references(
       (): AnyPgColumn => messages.id,
       { onDelete: "set null" },
@@ -713,7 +714,8 @@ export type NewDbLike = typeof likes.$inferInsert;
 // only ever has the code on hand. An invite is valid to redeem while
 // `revokedAt` is null, `expiresAt` is null or in the future, and (if
 // `maxUses` is set) `useCount < maxUses` — all enforced in the application
-// layer at redemption time (see ChatsHandler.ts), not by constraints here.
+// layer at redemption time (`joinChatViaInvite` in chats/inviteHandlers.ts),
+// not by constraints here.
 export const chatInvites = pgTable(
   "chat_invites",
   {
@@ -756,7 +758,7 @@ export type NewDbChatInvite = typeof chatInvites.$inferInsert;
 //     blocker's feed, suppresses their chat notifications, *and* prevents
 //     either party from sending a message in a direct chat between them (the
 //     block is symmetric for messaging — see `directBlockExists` in
-//     src/blocks.ts and `createMessage` in ChatsHandler.ts).
+//     src/blocks.ts and `directChatBlocked` in chats/sendPath.ts).
 //   - "mute" is the softer action: it likewise hides the target's posts and
 //     suppresses their chat notifications for the muter, but never blocks
 //     messaging — a muted user can still DM you, you just aren't pinged.

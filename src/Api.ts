@@ -955,8 +955,8 @@ const MessageContent = Schema.Trimmed.check(Schema.isNonEmpty()).check(
 // `parentMessage` preview (issue #217). Chat bubbles show only a one-line
 // snippet of what's being replied to, so the full body (up to
 // MAX_MESSAGE_CONTENT_LENGTH) never needs to ride along on every reply — the
-// backend truncates to this before sending (see `toParentPreview` in
-// ChatsHandler.ts). Kept generous enough to fill a preview line at any
+// backend truncates to this before sending (see `resolveParentPreviews`
+// in chats/messageViews.ts). Kept generous enough to fill a preview line at any
 // sensible width.
 export const PARENT_MESSAGE_PREVIEW_LENGTH = 120;
 
@@ -1179,7 +1179,7 @@ export const CreateMessageBody = Schema.Struct({
   // Id of the message this one replies to (issue #217). Omitted for a normal
   // message. Validated server-side to reference a message in this same chat —
   // a parent from another chat (or a nonexistent one) 404s (see
-  // ChatsHandler.ts).
+  // `createMessage` in chats/messageHandlers.ts).
   parentMessageId: Schema.optional(Schema.Finite),
   // Idempotency key (issue #567): a client-generated id, reused when a send is
   // retried. If this sender already stored a message with the same key in
@@ -1262,7 +1262,7 @@ export const MarkReadBody = Schema.Struct({
 // Which message to pin, for `POST /chats/:id/pins` (issue #223). Unpinning
 // takes the message id in the path (`DELETE /chats/:id/pins/:messageId`)
 // instead, so it needs no body. Validated server-side to reference a message
-// in this same chat (see ChatsHandler.ts).
+// in this same chat (see chats/pinStarHandlers.ts).
 export const PinMessageBody = Schema.Struct({
   messageId: Schema.Finite,
 }).annotate({ identifier: "PinMessageBody" });
@@ -2157,7 +2157,7 @@ const ChatsGroup = HttpApiGroup.make("chats")
     // Uploads and stores a square-cropped group avatar (mirrors
     // `POST /users/me/avatar`) — the owner or an admin. Overwrites any
     // existing group avatar; the old variants are swept from object storage
-    // once the row is repointed (see ChatsHandler.ts).
+    // once the row is repointed (see chats/chatHandlers.ts).
     HttpApiEndpoint.post("uploadChatAvatar", "/chats/:id/avatar", {
       params: ChatIdPath,
       payload: UploadAvatarBody,

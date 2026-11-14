@@ -53,12 +53,12 @@ export type ChatChange =
     };
 
 // Pushed to every user who had access to a chat the moment it's deleted
-// (see `deleteChat`/`leaveChat` in ChatsHandler.ts) — a dedicated event
-// rather than a `chat_updated` with a bumped version because there's no
-// surviving row to bump: the chat, its participants, and its messages are
-// already gone by the time this is published. Clients drop it from any
-// cached list/detail view unconditionally, without going through the
-// version staleness check `chat_updated` uses (issue #66).
+// (see `deleteChat`/`leaveChat` in chats/membershipHandlers.ts) — a
+// dedicated event rather than a `chat_updated` with a bumped version because
+// there's no surviving row to bump: the chat, its participants, and its
+// messages are already gone by the time this is published. Clients drop it
+// from any cached list/detail view unconditionally, without going through
+// the version staleness check `chat_updated` uses (issue #66).
 export type ChatDeletedEvent = {
   readonly type: "chat_deleted";
   readonly chatId: number;
@@ -110,7 +110,7 @@ export type CommentEvent = {
 // never `reactedByMe`, which is inherently per-viewer and can't be baked into
 // one broadcast payload shared by every recipient (each client's own reaction
 // state is reconciled from its own mutation response instead — see
-// EngagementHandler.ts/ChatsHandler.ts).
+// EngagementHandler.ts/chats/messageHandlers.ts).
 export type ReactionEvent = {
   readonly type: "reaction_changed";
   readonly targetType: "post" | "comment" | "message";
@@ -160,7 +160,7 @@ export type MessagePinEvent = {
 };
 
 // Pushed to a chat's other participants while `userId` is composing a
-// message in it (see `POST /chats/:id/typing` in ChatsHandler.ts). Purely
+// message in it (see `sendTyping` in chats/messageHandlers.ts). Purely
 // transient — the server keeps no "is typing" state at all, so there's no
 // corresponding "stopped typing" event; a client that stops receiving fresh
 // pushes for a given chat/user pair is expected to expire the indicator

@@ -5,7 +5,7 @@ import { AttachmentStorage } from "./AttachmentStorage.ts";
 import type { DrizzleDb } from "./Db.ts";
 import { attachments, type DbAttachment } from "./db/schema.ts";
 
-// Shared by ChatsHandler and PostsHandler — both messages and posts attach
+// Shared by src/chats/ and PostsHandler — both messages and posts attach
 // (at most) one row from the same `attachments` table (see db/schema.ts),
 // so the "look up the row, mint a fresh presigned URL" logic lives here
 // once rather than twice.

@@ -140,8 +140,8 @@ const AVATAR_UPLOAD_WINDOW_SECONDS = 60 * 60;
 // rejection, `rate_limit_rejections_total` is labeled only by the bucket
 // *kind* (the part of `key` before its first ":", e.g. "login"/"register") —
 // never by the IP/account/user id the rest of `key` encodes.
-// Exported — shared with ChatsHandler.ts's group-avatar upload, which needs
-// the same per-account bucketing/rejection-metric behavior.
+// Exported — shared with chats/chatHandlers.ts's group-avatar upload, which
+// needs the same per-account bucketing/rejection-metric behavior.
 export const enforceRateLimit = (
   limiter: RateLimiter["Service"],
   key: string,
@@ -203,7 +203,7 @@ export { toAvatarVariants };
 // deletion). Best-effort — an orphaned object is a harmless storage leak, not
 // a correctness problem, so a delete failure must never fail the user-facing
 // write. `null` tokens (no prior uploaded avatar) are skipped. Exported —
-// shared with ChatsHandler.ts's group-avatar upload/clear, which sweeps a
+// shared with chats/chatHandlers.ts's group-avatar upload/clear, which sweeps a
 // chat's old avatar objects the same way.
 export const deleteAvatarObjects = (
   storage: AttachmentStorage["Service"],
@@ -258,7 +258,7 @@ const deleteUserAndObjects = (
 // A status past its `statusExpiresAt` is treated as fully unset wherever a
 // user is read, rather than needing a background sweep to null the columns
 // out — mirrors `toAvatarVariants`'s role of folding raw DB columns into the
-// API shape. Shared with ChatsHandler.ts for the same reason `toAvatarVariants`
+// API shape. Shared with src/chats/ for the same reason `toAvatarVariants`
 // is.
 export const effectiveStatus = (row: {
   statusText: string | null;
