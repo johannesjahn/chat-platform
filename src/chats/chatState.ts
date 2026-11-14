@@ -249,3 +249,29 @@ export const buildChat = (
       messageRequest,
     };
   });
+
+// The tail of every participant-visible chat mutation other than a send and
+// a read receipt (issue #811): bump `chats.version`, then publish it to
+// every current participant — with no `change`, so clients refetch, as the
+// "Realtime cache updates" rule in CLAUDE.md requires for anything but
+// `message_created`/`read`. Returns the new version and the participants it
+// went to, which most callers render the response from.
+export const publishChatChange = (
+  db: DrizzleDb,
+  connections: RealtimeConnections["Service"],
+  chatId: number,
+): Effect.Effect<{
+  version: number;
+  participants: ReadonlyArray<ChatParticipant>;
+}> =>
+  Effect.gen(function* () {
+    const version = yield* bumpChatVersion(db, chatId);
+    const participants = yield* getParticipants(db, chatId);
+    yield* notifyChatUpdated(
+      connections,
+      chatId,
+      version,
+      participants.map((p) => p.userId),
+    );
+    return { version, participants };
+  });

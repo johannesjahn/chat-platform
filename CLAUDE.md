@@ -376,8 +376,9 @@ keeps the request parameters typed.
   shared modules. For chats: `sendPath.ts` (the one send path —
   `insertMessage`, `directChatBlocked`, `publishNewMessage`), `access.ts` (404
   lookups and participation/role checks), `chatState.ts` (participants,
-  `version`, `buildChat`), `messageViews.ts` (the `Message` view) and
-  `unread.ts`. For users: `userViews.ts` and `credentials.ts`. For games:
+  `version`, `buildChat`, and `publishChatChange` — bump + publish with no
+  `change`, the tail of every mutation but a send or a read receipt),
+  `messageViews.ts` (the `Message` view) and `unread.ts`. For users: `userViews.ts` and `credentials.ts`. For games:
   `lobbyStore.ts` and `settlement.ts`.
 - **Handler modules never import each other.** Code another group needs lives
   in a library module: `enforceRateLimit` (RateLimiter.ts), avatar helpers

@@ -22,12 +22,7 @@ import {
   loadChatAs,
   loadGroupChatAs,
 } from "./access.ts";
-import {
-  buildChat,
-  bumpChatVersion,
-  getParticipants,
-  notifyChatUpdated,
-} from "./chatState.ts";
+import { buildChat, publishChatChange } from "./chatState.ts";
 import { newestMessageIdIn } from "./unread.ts";
 import { dbQuery } from "../Db.ts";
 
@@ -264,15 +259,12 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
         if (!result.joined)
           return yield* buildChat(db, storage, chatRow, currentUser.id);
 
-        const version = yield* bumpChatVersion(db, chatRow.id);
-        const participants = yield* getParticipants(db, chatRow.id);
-        const participantIds = participants.map((p) => p.userId);
-        yield* notifyChatUpdated(
+        const { version, participants } = yield* publishChatChange(
+          db,
           connections,
           chatRow.id,
-          version,
-          participantIds,
         );
+        const participantIds = participants.map((p) => p.userId);
         yield* connections.introduceContacts([currentUser.id], participantIds);
         return yield* buildChat(
           db,

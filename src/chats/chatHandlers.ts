@@ -25,11 +25,11 @@ import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
 import { existingUserIds, loadChatAs, loadGroupChatAs } from "./access.ts";
 import {
   buildChat,
-  bumpChatVersion,
   getParticipants,
   getParticipantsForChats,
   notifyChatUpdated,
   toMessageRequest,
+  publishChatChange,
 } from "./chatState.ts";
 import { getLastMessagesForChats } from "./messageViews.ts";
 import { getUnreadCountsForChats, hasUnreadFor } from "./unread.ts";
@@ -305,13 +305,10 @@ export const chatHandlers = ({
         const row = updated[0];
         if (!row)
           return yield* Effect.die(new Error("UPDATE returned no rows"));
-        const version = yield* bumpChatVersion(db, id);
-        const participants = yield* getParticipants(db, id);
-        yield* notifyChatUpdated(
+        const { version, participants } = yield* publishChatChange(
+          db,
           connections,
           id,
-          version,
-          participants.map((p) => p.userId),
         );
         return yield* buildChat(
           db,
@@ -419,13 +416,10 @@ export const chatHandlers = ({
         const row = updated[0];
         if (!row)
           return yield* Effect.die(new Error("UPDATE returned no rows"));
-        const version = yield* bumpChatVersion(db, id);
-        const participants = yield* getParticipants(db, id);
-        yield* notifyChatUpdated(
+        const { version, participants } = yield* publishChatChange(
+          db,
           connections,
           id,
-          version,
-          participants.map((p) => p.userId),
         );
 
         yield* deleteAvatarObjects(storage, [
@@ -467,13 +461,10 @@ export const chatHandlers = ({
         const row = updated[0];
         if (!row)
           return yield* Effect.die(new Error("UPDATE returned no rows"));
-        const version = yield* bumpChatVersion(db, id);
-        const participants = yield* getParticipants(db, id);
-        yield* notifyChatUpdated(
+        const { version, participants } = yield* publishChatChange(
+          db,
           connections,
           id,
-          version,
-          participants.map((p) => p.userId),
         );
 
         yield* deleteAvatarObjects(storage, [

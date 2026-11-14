@@ -20,11 +20,7 @@ import { messagePinStarInfo, messagePinStarInfoOne } from "../pinsStars.ts";
 import { likes, messages } from "../db/schema.ts";
 import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
 import { getMessageOr404, getParticipantRole, loadChatAs } from "./access.ts";
-import {
-  bumpChatVersion,
-  getParticipants,
-  notifyChatUpdated,
-} from "./chatState.ts";
+import { getParticipants, publishChatChange } from "./chatState.ts";
 import {
   NO_REACTIONS,
   buildMessageResponse,
@@ -397,14 +393,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
         const pinStar = yield* dbQuery(() =>
           messagePinStarInfoOne(db, messageId, currentUser.id),
         );
-        const version = yield* bumpChatVersion(db, id);
-        const participants = yield* getParticipants(db, id);
-        yield* notifyChatUpdated(
-          connections,
-          id,
-          version,
-          participants.map((p) => p.userId),
-        );
+        yield* publishChatChange(db, connections, id);
         return toApiMessage(
           row,
           readers,
@@ -439,14 +428,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
           db.delete(messages).where(eq(messages.id, messageId)),
         );
 
-        const version = yield* bumpChatVersion(db, id);
-        const participants = yield* getParticipants(db, id);
-        yield* notifyChatUpdated(
-          connections,
-          id,
-          version,
-          participants.map((p) => p.userId),
-        );
+        yield* publishChatChange(db, connections, id);
       }),
     addMessageReaction: ({ params: { id, messageId }, payload }) =>
       Effect.gen(function* () {

@@ -28,9 +28,9 @@ import {
 } from "./access.ts";
 import {
   buildChat,
-  bumpChatVersion,
   getParticipants,
   notifyChatUpdated,
+  publishChatChange,
 } from "./chatState.ts";
 import { newestMessageIdIn } from "./unread.ts";
 import { deleteAvatarObjects } from "../avatars.ts";
@@ -368,10 +368,12 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
             }),
           );
 
-        const version = yield* bumpChatVersion(db, id);
-        const participants = yield* getParticipants(db, id);
+        const { version, participants } = yield* publishChatChange(
+          db,
+          connections,
+          id,
+        );
         const participantIds = participants.map((p) => p.userId);
-        yield* notifyChatUpdated(connections, id, version, participantIds);
         yield* connections.introduceContacts(result.newIds, participantIds);
         return yield* buildChat(
           db,
@@ -464,10 +466,12 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
         if (accepted.length === 0)
           return yield* buildChat(db, storage, row, currentUser.id);
 
-        const version = yield* bumpChatVersion(db, id);
-        const participants = yield* getParticipants(db, id);
+        const { version, participants } = yield* publishChatChange(
+          db,
+          connections,
+          id,
+        );
         const participantIds = participants.map((p) => p.userId);
-        yield* notifyChatUpdated(connections, id, version, participantIds);
         // Presence was held back while the request was pending.
         yield* connections.introduceContacts([currentUser.id], participantIds);
         return yield* buildChat(
@@ -660,13 +664,10 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
             ),
         );
 
-        const version = yield* bumpChatVersion(db, id);
-        const participants = yield* getParticipants(db, id);
-        yield* notifyChatUpdated(
+        const { version, participants } = yield* publishChatChange(
+          db,
           connections,
           id,
-          version,
-          participants.map((p) => p.userId),
         );
         return yield* buildChat(
           db,
