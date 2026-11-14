@@ -5,11 +5,7 @@ import { NotFound } from "../Api.ts";
 import { CurrentUser } from "../Auth.ts";
 import { chatParticipants, messageReads, messages } from "../db/schema.ts";
 import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
-import {
-  getChatOr404,
-  isAcceptedParticipant,
-  requireParticipant,
-} from "./access.ts";
+import { isAcceptedParticipant, loadChatAs } from "./access.ts";
 import {
   buildChat,
   bumpChatVersion,
@@ -29,8 +25,7 @@ export const readHandlers = ({ db, storage, connections }: ChatsDeps) =>
     markRead: ({ params: { id }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const chatRow = yield* getChatOr404(db, id);
-        yield* requireParticipant(db, id, currentUser.id);
+        const chatRow = yield* loadChatAs(db, id, currentUser, "participant");
 
         const target = yield* dbQuery(() =>
           db

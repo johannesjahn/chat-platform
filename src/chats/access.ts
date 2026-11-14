@@ -1,6 +1,11 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
-import { Forbidden, NotFound, type ChatRole } from "../Api.ts";
+import {
+  Forbidden,
+  InvalidChatRequest,
+  NotFound,
+  type ChatRole,
+} from "../Api.ts";
 import { blockedPeersAmong } from "../blocks.ts";
 import { type DrizzleDb, dbQuery } from "../Db.ts";
 import {
@@ -229,3 +234,69 @@ export const existingUserIds = (
     : dbQuery(() =>
         db.select({ id: users.id }).from(users).where(inArray(users.id, ids)),
       ).pipe(Effect.map((rows) => new Set(rows.map((r) => r.id))));
+
+// What a chats handler requires of the caller, from loosest to strictest:
+// any participant, including one whose message request is still pending
+// (reading, private stars, leaving); an *accepted* participant (every write
+// others would see — issue #808); a chat owner/admin or site admin; the chat
+// owner or a site admin.
+export type ChatAccess = "participant" | "accepted" | "manager" | "owner";
+
+// A 400 for an endpoint that only makes sense on a group chat.
+export const requireGroupChat = (
+  chat: DbChat,
+  message: string,
+): Effect.Effect<void, InvalidChatRequest> =>
+  chat.type === "group"
+    ? Effect.void
+    : Effect.fail(new InvalidChatRequest({ message }));
+
+// The one way a chats handler loads the chat it acts on (issue #811): a 404
+// if it doesn't exist, then the `access` check, so the guard is a required
+// argument rather than a call a new handler can forget.
+export const loadChatAs = (
+  db: DrizzleDb,
+  chatId: number,
+  currentUser: { readonly id: number; readonly role: string },
+  access: ChatAccess,
+): Effect.Effect<DbChat, NotFound | Forbidden> =>
+  Effect.gen(function* () {
+    const chat = yield* getChatOr404(db, chatId);
+    yield* requireAccess(db, chat, currentUser, access);
+    return chat;
+  });
+
+// `loadChatAs` for an endpoint that only makes sense on a group chat: a
+// direct chat gets a 400 with `message`, checked before access as every
+// group-only endpoint always has.
+export const loadGroupChatAs = (
+  db: DrizzleDb,
+  chatId: number,
+  currentUser: { readonly id: number; readonly role: string },
+  access: ChatAccess,
+  message: string,
+): Effect.Effect<DbChat, NotFound | Forbidden | InvalidChatRequest> =>
+  Effect.gen(function* () {
+    const chat = yield* getChatOr404(db, chatId);
+    yield* requireGroupChat(chat, message);
+    yield* requireAccess(db, chat, currentUser, access);
+    return chat;
+  });
+
+const requireAccess = (
+  db: DrizzleDb,
+  chat: DbChat,
+  currentUser: { readonly id: number; readonly role: string },
+  access: ChatAccess,
+): Effect.Effect<void, Forbidden> => {
+  switch (access) {
+    case "participant":
+      return requireParticipant(db, chat.id, currentUser.id);
+    case "accepted":
+      return requireAcceptedParticipant(db, chat.id, currentUser.id);
+    case "manager":
+      return requireChatManager(db, currentUser, chat);
+    case "owner":
+      return requireChatOwner(db, currentUser, chat);
+  }
+};

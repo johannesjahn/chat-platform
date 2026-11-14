@@ -18,8 +18,9 @@ import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
 import {
   getChatOr404,
   isParticipant,
-  requireChatManager,
   requireNoBlockWith,
+  loadChatAs,
+  loadGroupChatAs,
 } from "./access.ts";
 import {
   buildChat,
@@ -47,14 +48,13 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
     createChatInvite: ({ params: { id }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const chatRow = yield* getChatOr404(db, id);
-        if (chatRow.type !== "group")
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "Only group chats support invite links",
-            }),
-          );
-        yield* requireChatManager(db, currentUser, chatRow);
+        yield* loadGroupChatAs(
+          db,
+          id,
+          currentUser,
+          "manager",
+          "Only group chats support invite links",
+        );
 
         const now = new Date();
         // Only still-active invites (not revoked, not expired) count
@@ -107,8 +107,7 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
     listChatInvites: ({ params: { id } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const chatRow = yield* getChatOr404(db, id);
-        yield* requireChatManager(db, currentUser, chatRow);
+        yield* loadChatAs(db, id, currentUser, "manager");
 
         const rows = yield* dbQuery(() =>
           db
@@ -122,8 +121,7 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
     revokeChatInvite: ({ params: { id, inviteId } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const chatRow = yield* getChatOr404(db, id);
-        yield* requireChatManager(db, currentUser, chatRow);
+        yield* loadChatAs(db, id, currentUser, "manager");
 
         // Only matches a still-active invite (`revokedAt IS NULL`) — an
         // already-revoked one 404s on a second call rather than silently

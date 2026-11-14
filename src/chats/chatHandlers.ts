@@ -22,12 +22,7 @@ import { serializableTransaction } from "../serializableTransaction.ts";
 
 import { chatParticipants, chats } from "../db/schema.ts";
 import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
-import {
-  existingUserIds,
-  getChatOr404,
-  requireChatManager,
-  requireParticipant,
-} from "./access.ts";
+import { existingUserIds, loadChatAs, loadGroupChatAs } from "./access.ts";
 import {
   buildChat,
   bumpChatVersion,
@@ -175,8 +170,7 @@ export const chatHandlers = ({
     getChat: ({ params: { id } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const row = yield* getChatOr404(db, id);
-        yield* requireParticipant(db, id, currentUser.id);
+        const row = yield* loadChatAs(db, id, currentUser, "participant");
         return yield* buildChat(db, storage, row, currentUser.id);
       }),
     createDirectChat: ({ payload }) =>
@@ -293,14 +287,13 @@ export const chatHandlers = ({
     updateChat: ({ params: { id }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const existing = yield* getChatOr404(db, id);
-        if (existing.type !== "group")
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "Only group chats can be renamed",
-            }),
-          );
-        yield* requireChatManager(db, currentUser, existing);
+        yield* loadGroupChatAs(
+          db,
+          id,
+          currentUser,
+          "manager",
+          "Only group chats can be renamed",
+        );
 
         const updated = yield* dbQuery(() =>
           db
@@ -331,14 +324,13 @@ export const chatHandlers = ({
     uploadChatAvatar: ({ params: { id }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const existing = yield* getChatOr404(db, id);
-        if (existing.type !== "group")
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "Only group chats can have an avatar",
-            }),
-          );
-        yield* requireChatManager(db, currentUser, existing);
+        const existing = yield* loadGroupChatAs(
+          db,
+          id,
+          currentUser,
+          "manager",
+          "Only group chats can have an avatar",
+        );
 
         // Bucketed by the uploading account rather than the chat, mirroring
         // `uploadAvatar` in users/profileHandlers.ts — a caller who manages
@@ -453,14 +445,13 @@ export const chatHandlers = ({
     deleteChatAvatar: ({ params: { id } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const existing = yield* getChatOr404(db, id);
-        if (existing.type !== "group")
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "Only group chats can have an avatar",
-            }),
-          );
-        yield* requireChatManager(db, currentUser, existing);
+        const existing = yield* loadGroupChatAs(
+          db,
+          id,
+          currentUser,
+          "manager",
+          "Only group chats can have an avatar",
+        );
 
         const updated = yield* dbQuery(() =>
           db

@@ -20,10 +20,11 @@ import {
   getChatOr404,
   getParticipantRole,
   isAcceptedParticipant,
-  requireChatManager,
   requireChatOwner,
   requireNoBlockWith,
-  requireParticipant,
+  loadChatAs,
+  requireGroupChat,
+  loadGroupChatAs,
 } from "./access.ts";
 import {
   buildChat,
@@ -292,14 +293,13 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
     addParticipants: ({ params: { id }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const existing = yield* getChatOr404(db, id);
-        if (existing.type !== "group")
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "Only group chats can have participants added",
-            }),
-          );
-        yield* requireChatManager(db, currentUser, existing);
+        const existing = yield* loadGroupChatAs(
+          db,
+          id,
+          currentUser,
+          "manager",
+          "Only group chats can have participants added",
+        );
 
         // Existence-check the requested users up front — unrelated to the
         // cap race below, so it doesn't need to be inside the transaction.
@@ -384,14 +384,13 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
     removeParticipant: ({ params: { id, userId } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const chatRow = yield* getChatOr404(db, id);
-        if (chatRow.type !== "group")
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "Only group chats can have participants removed",
-            }),
-          );
-        yield* requireChatManager(db, currentUser, chatRow);
+        const chatRow = yield* loadGroupChatAs(
+          db,
+          id,
+          currentUser,
+          "manager",
+          "Only group chats can have participants removed",
+        );
         if (userId === currentUser.id)
           return yield* Effect.fail(
             new InvalidChatRequest({
@@ -448,8 +447,7 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
     acceptChatRequest: ({ params: { id } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const row = yield* getChatOr404(db, id);
-        yield* requireParticipant(db, id, currentUser.id);
+        const row = yield* loadChatAs(db, id, currentUser, "participant");
         const accepted = yield* dbQuery(() =>
           db
             .update(chatParticipants)
@@ -483,14 +481,13 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
     leaveChat: ({ params: { id } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const chatRow = yield* getChatOr404(db, id);
-        if (chatRow.type !== "group")
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "Only group chats can be left",
-            }),
-          );
-        yield* requireParticipant(db, id, currentUser.id);
+        const chatRow = yield* loadGroupChatAs(
+          db,
+          id,
+          currentUser,
+          "participant",
+          "Only group chats can be left",
+        );
 
         const result = yield* departParticipant(
           db,
@@ -514,14 +511,13 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
     deleteChat: ({ params: { id } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const chatRow = yield* getChatOr404(db, id);
-        if (chatRow.type !== "group")
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "Only group chats can be deleted",
-            }),
-          );
-        yield* requireChatManager(db, currentUser, chatRow);
+        yield* loadGroupChatAs(
+          db,
+          id,
+          currentUser,
+          "manager",
+          "Only group chats can be deleted",
+        );
 
         const participants = yield* getParticipants(db, id);
         const sweepAvatar = yield* dbQuery(() =>
@@ -538,12 +534,10 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
         const chatRow = yield* getChatOr404(db, id);
-        if (chatRow.type !== "group")
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "Only group chats have an owner to transfer",
-            }),
-          );
+        yield* requireGroupChat(
+          chatRow,
+          "Only group chats have an owner to transfer",
+        );
 
         // Normally owner/site-admin-only, but an ownerless chat (createdBy
         // null — see Chat.createdBy in Api.ts) can be claimed by any
@@ -631,14 +625,13 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
     updateParticipantRole: ({ params: { id, userId }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const chatRow = yield* getChatOr404(db, id);
-        if (chatRow.type !== "group")
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "Only group chats have participant roles",
-            }),
-          );
-        yield* requireChatOwner(db, currentUser, chatRow);
+        const chatRow = yield* loadGroupChatAs(
+          db,
+          id,
+          currentUser,
+          "owner",
+          "Only group chats have participant roles",
+        );
 
         if (userId === chatRow.createdBy)
           return yield* Effect.fail(

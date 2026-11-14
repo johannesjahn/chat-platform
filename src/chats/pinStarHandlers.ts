@@ -4,12 +4,7 @@ import { CurrentUser } from "../Auth.ts";
 import { pinnedMessageIds, starredMessageIdsInChat } from "../pinsStars.ts";
 import { pinnedMessages, starredMessages } from "../db/schema.ts";
 import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
-import {
-  getChatOr404,
-  getMessageOr404,
-  requireAcceptedParticipant,
-  requireParticipant,
-} from "./access.ts";
+import { getMessageOr404, loadChatAs } from "./access.ts";
 import { getParticipants } from "./chatState.ts";
 import { buildMessageResponse, buildMessagesInOrder } from "./messageViews.ts";
 import { dbQuery } from "../Db.ts";
@@ -19,16 +14,14 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
     listPinnedMessages: ({ params: { id } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "participant");
         const ids = yield* dbQuery(() => pinnedMessageIds(db, id));
         return yield* buildMessagesInOrder(db, storage, ids, currentUser.id);
       }),
     pinMessage: ({ params: { id }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireAcceptedParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "accepted");
         // Validates the message belongs to *this* chat (a message from
         // another chat, or a nonexistent one, 404s here) and hands back the
         // row reused to build the response below.
@@ -73,8 +66,7 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
     unpinMessage: ({ params: { id, messageId } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireAcceptedParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "accepted");
         const row = yield* getMessageOr404(db, id, messageId);
         const deleted = yield* dbQuery(() =>
           db
@@ -110,8 +102,7 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
     listStarredMessages: ({ params: { id } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "participant");
         const ids = yield* dbQuery(() =>
           starredMessageIdsInChat(db, id, currentUser.id),
         );
@@ -120,8 +111,7 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
     starMessage: ({ params: { id, messageId } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "participant");
         const row = yield* getMessageOr404(db, id, messageId);
         // Idempotent via the (userId, messageId) unique constraint. No
         // realtime event: a star is private to `currentUser` (see
@@ -144,8 +134,7 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
     unstarMessage: ({ params: { id, messageId } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "participant");
         const row = yield* getMessageOr404(db, id, messageId);
         yield* dbQuery(() =>
           db

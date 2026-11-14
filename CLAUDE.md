@@ -453,7 +453,11 @@ request_ for you (issue #785): `chat_participants.request_pending` and
   goes through `requireAcceptedParticipant` (403); a forward into a request
   is that target's `unavailable`; `markRead` is a silent no-op, so viewing a
   request sends no receipt. Reading, private stars, forwarding _out_, leave
-  and accept stay open. A new chat write must use the same guard.
+  and accept stay open. A new chat write must use the same guard: chat
+  handlers start with `loadChatAs(db, id, currentUser, access)` (or
+  `loadGroupChatAs`, chats/access.ts), whose required `access` —
+  `"participant"`, `"accepted"`, `"manager"` or `"owner"` — makes the choice
+  explicit.
 - **`request_pending` defaults to `false` in the database**, like
   `users.created_at`, so old replicas' inserts and pre-migration rows read as
   accepted.

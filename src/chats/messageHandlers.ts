@@ -19,13 +19,7 @@ import { messageReactionInfo, messageReactionInfoOne } from "../reactions.ts";
 import { messagePinStarInfo, messagePinStarInfoOne } from "../pinsStars.ts";
 import { likes, messages } from "../db/schema.ts";
 import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
-import {
-  getChatOr404,
-  getMessageOr404,
-  getParticipantRole,
-  requireAcceptedParticipant,
-  requireParticipant,
-} from "./access.ts";
+import { getMessageOr404, getParticipantRole, loadChatAs } from "./access.ts";
 import {
   bumpChatVersion,
   getParticipants,
@@ -90,8 +84,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
     listMessages: ({ params: { id }, query: urlParams }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "participant");
 
         if (urlParams.before !== undefined && urlParams.after !== undefined)
           return yield* Effect.fail(
@@ -218,8 +211,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
     createMessage: ({ params: { id }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const chatRow = yield* getChatOr404(db, id);
-        yield* requireAcceptedParticipant(db, id, currentUser.id);
+        const chatRow = yield* loadChatAs(db, id, currentUser, "accepted");
 
         // A repeat of a send the server already stored (issue #567) — e.g.
         // the page reloaded mid-request and the offline queue replayed it —
@@ -329,8 +321,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
     sendTyping: ({ params: { id } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireAcceptedParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "accepted");
 
         const participants = yield* getParticipants(db, id);
         const others = participants
@@ -348,8 +339,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
     updateMessage: ({ params: { id, messageId }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireAcceptedParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "accepted");
         const existing = yield* getMessageOr404(db, id, messageId);
         if (!canModifyMessage(currentUser, existing))
           return yield* Effect.fail(
@@ -429,8 +419,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
     deleteMessage: ({ params: { id, messageId } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "participant");
         const existing = yield* getMessageOr404(db, id, messageId);
         const canDelete = yield* canDeleteMessage(
           db,
@@ -462,8 +451,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
     addMessageReaction: ({ params: { id, messageId }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireAcceptedParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "accepted");
         yield* getMessageOr404(db, id, messageId);
         // Idempotent: the (userId, messageId, emoji) unique constraint
         // turns a repeat reaction with the same emoji into a no-op rather
@@ -507,8 +495,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
     removeMessageReaction: ({ params: { id, messageId }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* getChatOr404(db, id);
-        yield* requireAcceptedParticipant(db, id, currentUser.id);
+        yield* loadChatAs(db, id, currentUser, "accepted");
         yield* getMessageOr404(db, id, messageId);
         const deleted = yield* dbQuery(() =>
           db
