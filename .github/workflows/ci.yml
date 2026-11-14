@@ -613,7 +613,7 @@ jobs:
     # Playwright's Docker docs: Docker's default 64 MB /dev/shm is too small
     # for Chromium, which otherwise crashes under load.
     container:
-      image: mcr.microsoft.com/playwright:v1.65.0-noble
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
       options: --ipc=host
     strategy:
       fail-fast: false
@@ -678,7 +678,7 @@ jobs:
     timeout-minutes: 45
     # Same image as the e2e job — see the comment there.
     container:
-      image: mcr.microsoft.com/playwright:v1.65.0-noble
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
       options: --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -748,7 +748,7 @@ jobs:
     timeout-minutes: 20
     # Same image as the e2e job — see the comment there.
     container:
-      image: mcr.microsoft.com/playwright:v1.65.0-noble
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
       options: --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -792,7 +792,7 @@ jobs:
     # "Playwright" group): the script drives Playwright's Chromium, whose
     # build must match web/'s pinned @playwright/test.
     container:
-      image: mcr.microsoft.com/playwright:v1.65.0-noble
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
       options: --ipc=host
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
