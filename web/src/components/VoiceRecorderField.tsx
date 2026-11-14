@@ -16,7 +16,6 @@ type VoiceRecorderFieldProps = {
   // voice message as just another flavor of "attachment" content type.
   attachment: Attachment | null;
   onUploaded: (attachment: Attachment) => void;
-  onClear: () => void;
   // Start recording the moment the field appears. The chat composer's mic
   // button is itself the "start recording" tap, so tapping a second target
   // inside the field would be one tap too many.
@@ -82,7 +81,6 @@ function formatDuration(ms: number): string {
 export function VoiceRecorderField({
   attachment,
   onUploaded,
-  onClear,
   autoStart = false,
   onCancel,
   disabled = false,
@@ -222,24 +220,13 @@ export function VoiceRecorderField({
   }
 
   if (attachment) {
-    // A recorded clip is always audio — AudioPlayer's pill already fills the
-    // row edge to edge, so (unlike AttachmentUploadField's image/video/pdf
-    // cases, which have empty corners to float a button over) the remove
-    // control sits beside it rather than overlaid on top.
+    // A recorded clip is always audio. No remove button of its own: the
+    // composer's leading trigger already reads "Cancel voice message" in this
+    // mode, and a second X right next to it (plus the send button on the
+    // other side) crowded the player off a phone-width row.
     return (
-      <div className={cn("flex items-center gap-2", className)}>
+      <div className={cn("flex min-w-0 items-center", className)}>
         <AttachmentPreview attachment={attachment} className="min-w-0 flex-1" />
-        <Button
-          type="button"
-          size="icon"
-          variant="secondary"
-          aria-label="Remove voice message"
-          disabled={disabled}
-          onClick={onClear}
-          className="size-8 shrink-0 shadow"
-        >
-          <X className="size-3.5" />
-        </Button>
       </div>
     );
   }

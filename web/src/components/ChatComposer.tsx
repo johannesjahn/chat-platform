@@ -592,7 +592,6 @@ export function ChatComposer({
             // tap a second target inside the composer would be one too many.
             autoStart
             onUploaded={setAttachment}
-            onClear={resetToText}
             onCancel={resetToText}
             className="min-w-0 flex-1 rounded-2xl"
           />

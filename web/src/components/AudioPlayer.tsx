@@ -32,6 +32,24 @@ type AudioPlayerProps = {
 const PLAYED_FILL = "currentColor";
 const UNPLAYED_FILL = "color-mix(in oklab, currentColor 28%, transparent)";
 
+// The narrowest a bar plus the gap after it may get. With the full
+// WAVEFORM_BAR_COUNT bars a narrow row (a phone composer, beside its send
+// button) can't fit them, and the row overflowed into the time label — so
+// a row that narrow draws fewer, still averaged from the same levels.
+const MIN_BAR_SLOT_PX = 4;
+const BAR_GAP_PX = 2;
+
+function barCountForWidth(width: number): number {
+  if (width <= 0) return WAVEFORM_BAR_COUNT;
+  return Math.max(
+    1,
+    Math.min(
+      WAVEFORM_BAR_COUNT,
+      Math.floor((width + BAR_GAP_PX) / MIN_BAR_SLOT_PX),
+    ),
+  );
+}
+
 // A bar is filled left-to-right by the playhead rather than flipping whole,
 // so progress reads continuously instead of stepping a bar at a time.
 function barFill(fraction: number): string {
@@ -89,10 +107,22 @@ export function AudioPlayer({
         ? durationMs / 1000
         : 0;
 
+  const [barCount, setBarCount] = useState(WAVEFORM_BAR_COUNT);
+  useEffect(() => {
+    const row = barsRef.current;
+    if (!row || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setBarCount(barCountForWidth(entry.contentRect.width));
+    });
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, []);
+
   const levels = waveform ?? decodedWaveform;
   const bars = useMemo(
-    () => (levels ? resampleWaveform(levels) : flatWaveform()),
-    [levels],
+    () =>
+      levels ? resampleWaveform(levels, barCount) : flatWaveform(barCount),
+    [levels, barCount],
   );
 
   useEffect(() => {
@@ -251,7 +281,7 @@ export function AudioPlayer({
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onKeyDown={onBarsKeyDown}
-        className="flex h-8 min-w-0 flex-1 cursor-pointer touch-none items-center gap-[2px] rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-current/40"
+        className="flex h-8 min-w-0 flex-1 cursor-pointer touch-none items-center gap-[2px] overflow-hidden rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-current/40"
       >
         {bars.map((level, i) => (
           <span
