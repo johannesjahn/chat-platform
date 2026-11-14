@@ -13,7 +13,7 @@ import {
   toApiAttachment,
 } from "../attachments.ts";
 import { CurrentUser } from "../Auth.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { contentCreatedTotal } from "../Metrics.ts";
 import { messageReactionInfo, messageReactionInfoOne } from "../reactions.ts";
 import { messagePinStarInfo, messagePinStarInfoOne } from "../pinsStars.ts";
@@ -128,14 +128,14 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
           // Forward page: whatever arrived after a previously-loaded
           // window's newest message (catching up after a `chat_updated`
           // event) — ascending, same direction as the base sort.
-          const fetched = yield* Effect.tryPromise(() =>
+          const fetched = yield* dbQuery(() =>
             db
               .select()
               .from(messages)
               .where(and(eq(messages.chatId, id), gt(messages.id, after)))
               .orderBy(messages.id)
               .limit(limit + 1),
-          ).pipe(Effect.orDie);
+          );
           hasNewer = fetched.length > limit;
           rows = fetched.slice(0, limit);
           // `after`'s own message (older than everything returned here) is
@@ -146,7 +146,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
           // `limit` messages immediately preceding `before` (paging up) —
           // fetched newest-first so `limit + 1` finds the right end of the
           // window, then reversed back to the base oldest-first order.
-          const fetched = yield* Effect.tryPromise(() =>
+          const fetched = yield* dbQuery(() =>
             db
               .select()
               .from(messages)
@@ -157,7 +157,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
               )
               .orderBy(desc(messages.id))
               .limit(limit + 1),
-          ).pipe(Effect.orDie);
+          );
           hasEarlier = fetched.length > limit;
           rows = fetched.slice(0, limit).reverse();
           // `before`'s own message (newer than everything returned here) is
@@ -179,12 +179,12 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
           storage,
           rows.map((r) => r.attachmentId),
         );
-        const reactionsByMessage = yield* Effect.tryPromise(() =>
+        const reactionsByMessage = yield* dbQuery(() =>
           messageReactionInfo(db, messageIds, currentUser.id),
-        ).pipe(Effect.orDie);
-        const pinStarByMessage = yield* Effect.tryPromise(() =>
+        );
+        const pinStarByMessage = yield* dbQuery(() =>
           messagePinStarInfo(db, messageIds, currentUser.id),
-        ).pipe(Effect.orDie);
+        );
         const parentPreviews = yield* resolveParentPreviews(
           db,
           rows.map((r) => r.parentMessageId),
@@ -277,7 +277,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
         }
 
         const now = new Date();
-        const row = yield* Effect.tryPromise(() =>
+        const row = yield* dbQuery(() =>
           insertMessage(db, {
             chatId: id,
             senderId: currentUser.id,
@@ -290,7 +290,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
             createdAt: now,
             updatedAt: now,
           }),
-        ).pipe(Effect.orDie);
+        );
         if (!row && payload.clientId !== undefined) {
           // Lost a race with a concurrent send of the same key.
           const existing = yield* findMessageByClientId(
@@ -369,7 +369,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
           );
         }
 
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .update(messages)
             .set({
@@ -388,15 +388,15 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
             })
             .where(eq(messages.id, messageId))
             .returning(),
-        ).pipe(Effect.orDie);
+        );
         const row = rows[0];
         if (!row)
           return yield* Effect.die(new Error("UPDATE returned no rows"));
 
         const readers = yield* getReaders(db, row);
-        const reactions = yield* Effect.tryPromise(() =>
+        const reactions = yield* dbQuery(() =>
           messageReactionInfoOne(db, messageId, currentUser.id),
-        ).pipe(Effect.orDie);
+        );
         // An edit never changes what a reply quotes (UpdateMessageBody has no
         // `parentMessageId`), but the response must still carry the existing
         // preview so the client doesn't drop the quote on edit.
@@ -404,9 +404,9 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
           db,
           row.parentMessageId,
         );
-        const pinStar = yield* Effect.tryPromise(() =>
+        const pinStar = yield* dbQuery(() =>
           messagePinStarInfoOne(db, messageId, currentUser.id),
-        ).pipe(Effect.orDie);
+        );
         const version = yield* bumpChatVersion(db, id);
         const participants = yield* getParticipants(db, id);
         yield* notifyChatUpdated(
@@ -446,9 +446,9 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
             }),
           );
 
-        yield* Effect.tryPromise(() =>
+        yield* dbQuery(() =>
           db.delete(messages).where(eq(messages.id, messageId)),
-        ).pipe(Effect.orDie);
+        );
 
         const version = yield* bumpChatVersion(db, id);
         const participants = yield* getParticipants(db, id);
@@ -469,7 +469,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
         // turns a repeat reaction with the same emoji into a no-op rather
         // than a duplicate row or an error — same convention as
         // `addPostReaction`/`addCommentReaction` (see EngagementHandler.ts).
-        const inserted = yield* Effect.tryPromise(() =>
+        const inserted = yield* dbQuery(() =>
           db
             .insert(likes)
             .values({
@@ -479,10 +479,10 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
             })
             .onConflictDoNothing()
             .returning(),
-        ).pipe(Effect.orDie);
-        const reactions = yield* Effect.tryPromise(() =>
+        );
+        const reactions = yield* dbQuery(() =>
           messageReactionInfoOne(db, messageId, currentUser.id),
-        ).pipe(Effect.orDie);
+        );
         if (inserted.length > 0) {
           // Scoped to the message's chat participants, not broadcast — a
           // chat message is private to them, unlike a post's feed-wide
@@ -510,7 +510,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
         yield* getChatOr404(db, id);
         yield* requireAcceptedParticipant(db, id, currentUser.id);
         yield* getMessageOr404(db, id, messageId);
-        const deleted = yield* Effect.tryPromise(() =>
+        const deleted = yield* dbQuery(() =>
           db
             .delete(likes)
             .where(
@@ -521,10 +521,10 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
               ),
             )
             .returning(),
-        ).pipe(Effect.orDie);
-        const reactions = yield* Effect.tryPromise(() =>
+        );
+        const reactions = yield* dbQuery(() =>
           messageReactionInfoOne(db, messageId, currentUser.id),
-        ).pipe(Effect.orDie);
+        );
         if (deleted.length > 0) {
           const participants = yield* getParticipants(db, id);
           yield* connections.notifyUsers(

@@ -20,6 +20,7 @@ import {
   loadSnapshot,
 } from "./lobbyStore.ts";
 import { publicUserColumns, toPublicUser } from "../users/userViews.ts";
+import { dbQuery } from "../Db.ts";
 
 // A lobby's chat fans every line out to the whole room, so a per-user cap
 // keeps one flooder from drowning it — roomy for a lively conversation.
@@ -70,10 +71,10 @@ export const lobbyChatHandlers = ({ limiter, db, connections }: GamesDeps) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
         yield* loadLobbyOr404(db, id);
-        const hidden = yield* Effect.tryPromise(() =>
+        const hidden = yield* dbQuery(() =>
           blockedOrMutedUserIds(db, currentUser.id),
-        ).pipe(Effect.orDie);
-        const rows = yield* Effect.tryPromise(() =>
+        );
+        const rows = yield* dbQuery(() =>
           db
             .select({
               id: gameLobbyMessages.id,
@@ -94,7 +95,7 @@ export const lobbyChatHandlers = ({ limiter, db, connections }: GamesDeps) =>
             )
             .orderBy(desc(gameLobbyMessages.id))
             .limit(GAME_CHAT_PAGE_SIZE),
-        ).pipe(Effect.orDie);
+        );
         return { messages: rows.reverse().map(toApiChatMessage) };
       }),
     postGameChat: ({ params: { id }, payload }) =>
@@ -107,7 +108,7 @@ export const lobbyChatHandlers = ({ limiter, db, connections }: GamesDeps) =>
           );
         }
         yield* enforceChatLimit(limiter, currentUser.id);
-        const [row] = yield* Effect.tryPromise(() =>
+        const [row] = yield* dbQuery(() =>
           db
             .insert(gameLobbyMessages)
             .values({
@@ -116,14 +117,14 @@ export const lobbyChatHandlers = ({ limiter, db, connections }: GamesDeps) =>
               text: payload.text,
             })
             .returning(),
-        ).pipe(Effect.orDie);
-        const [author] = yield* Effect.tryPromise(() =>
+        );
+        const [author] = yield* dbQuery(() =>
           db
             .select(publicUserColumns)
             .from(users)
             .where(eq(users.id, currentUser.id))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         yield* connections.notifyRoom(gameLobbyRoom(id), {
           type: "game_chat",
           lobbyId: id,

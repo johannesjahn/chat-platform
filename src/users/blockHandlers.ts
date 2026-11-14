@@ -5,13 +5,14 @@ import { CurrentUser } from "../Auth.ts";
 import { userBlocks, users } from "../db/schema.ts";
 import { type UsersDeps, type UsersHandlers } from "./handlerKit.ts";
 import { publicUserColumns, toPublicUser } from "./userViews.ts";
+import { dbQuery } from "../Db.ts";
 
 export const blockHandlers = ({ db }: UsersDeps) =>
   ({
     listBlocks: () =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .select({
               ...publicUserColumns,
@@ -25,7 +26,7 @@ export const blockHandlers = ({ db }: UsersDeps) =>
             // existing pair, which keeps the original row, doesn't reorder.
             .orderBy(desc(userBlocks.id))
             .where(eq(userBlocks.blockerId, currentUser.id)),
-        ).pipe(Effect.orDie);
+        );
         return rows.map(({ blockType, blockedAt, ...userRow }) => ({
           user: toPublicUser(userRow),
           type: blockType,
@@ -45,13 +46,13 @@ export const blockHandlers = ({ db }: UsersDeps) =>
 
         // The target must exist — otherwise the FK would reject the insert
         // as a die; surface a clean 404 instead.
-        const targetRows = yield* Effect.tryPromise(() =>
+        const targetRows = yield* dbQuery(() =>
           db
             .select(publicUserColumns)
             .from(users)
             .where(eq(users.id, id))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         const target = targetRows[0];
         if (!target)
           return yield* Effect.fail(
@@ -62,7 +63,7 @@ export const blockHandlers = ({ db }: UsersDeps) =>
         // mute inserts, and re-issuing the other action on the same target
         // updates the existing row's `type` in place (keeping its original
         // `createdAt`) rather than stacking a second relationship.
-        const inserted = yield* Effect.tryPromise(() =>
+        const inserted = yield* dbQuery(() =>
           db
             .insert(userBlocks)
             .values({
@@ -78,7 +79,7 @@ export const blockHandlers = ({ db }: UsersDeps) =>
               type: userBlocks.type,
               createdAt: userBlocks.createdAt,
             }),
-        ).pipe(Effect.orDie);
+        );
         const row = inserted[0];
         if (!row)
           return yield* Effect.die(new Error("UPSERT returned no rows"));
@@ -94,7 +95,7 @@ export const blockHandlers = ({ db }: UsersDeps) =>
         const currentUser = yield* CurrentUser;
         // Idempotent — deleting a non-existent relationship is a no-op that
         // still succeeds, so unblocking/unmuting never 404s.
-        yield* Effect.tryPromise(() =>
+        yield* dbQuery(() =>
           db
             .delete(userBlocks)
             .where(
@@ -103,6 +104,6 @@ export const blockHandlers = ({ db }: UsersDeps) =>
                 eq(userBlocks.blockedId, id),
               ),
             ),
-        ).pipe(Effect.orDie);
+        );
       }),
   }) satisfies UsersHandlers;

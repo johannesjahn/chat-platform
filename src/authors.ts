@@ -2,7 +2,7 @@ import { inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import type { AuthorSummary } from "./Api.ts";
 import { toAvatarVariants } from "./avatars.ts";
-import type { DrizzleDb } from "./Db.ts";
+import { dbQuery, type DrizzleDb } from "./Db.ts";
 import { users } from "./db/schema.ts";
 
 // The embedded `author` on every `Post`/`Comment` response (issue #750): one
@@ -50,7 +50,7 @@ export const loadAuthors = (
   db: DrizzleDb,
   authorIds: ReadonlyArray<number>,
 ): Effect.Effect<Map<number, AuthorSummary>> =>
-  Effect.tryPromise(() => authorSummaries(db, authorIds)).pipe(Effect.orDie);
+  dbQuery(() => authorSummaries(db, authorIds));
 
 // One row's author, or `onMissing`'s error (see `authorSummaries` for when
 // that can happen).

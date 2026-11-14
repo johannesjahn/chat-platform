@@ -39,6 +39,7 @@ import {
 import { getLastMessagesForChats } from "./messageViews.ts";
 import { getUnreadCountsForChats, hasUnreadFor } from "./unread.ts";
 import { enforceRateLimit } from "../RateLimiter.ts";
+import { dbQuery } from "../Db.ts";
 
 // Mirrors AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT/AVATAR_UPLOAD_WINDOW_SECONDS
 // in users/profileHandlers.ts — same rationale (real image-decoding/resizing
@@ -90,7 +91,7 @@ export const chatHandlers = ({
 
         // Fetch one row past `limit` to derive `nextCursor` without a
         // separate `COUNT(*)` — same trick as `MessagesPage.hasMore`.
-        const fetched = yield* Effect.tryPromise(() =>
+        const fetched = yield* dbQuery(() =>
           db
             .select({
               id: chats.id,
@@ -137,7 +138,7 @@ export const chatHandlers = ({
             )
             .orderBy(desc(chats.updatedAt), desc(chats.id))
             .limit(limit + 1),
-        ).pipe(Effect.orDie);
+        );
         const hasMore = fetched.length > limit;
         const rows = fetched.slice(0, limit);
         const lastRow = rows[rows.length - 1];
@@ -301,13 +302,13 @@ export const chatHandlers = ({
           );
         yield* requireChatManager(db, currentUser, existing);
 
-        const updated = yield* Effect.tryPromise(() =>
+        const updated = yield* dbQuery(() =>
           db
             .update(chats)
             .set({ title: payload.title })
             .where(eq(chats.id, id))
             .returning(),
-        ).pipe(Effect.orDie);
+        );
         const row = updated[0];
         if (!row)
           return yield* Effect.die(new Error("UPDATE returned no rows"));
@@ -412,7 +413,7 @@ export const chatHandlers = ({
           { concurrency: "unbounded" },
         ).pipe(Effect.orDie);
 
-        const updated = yield* Effect.tryPromise(() =>
+        const updated = yield* dbQuery(() =>
           db
             .update(chats)
             .set({
@@ -422,7 +423,7 @@ export const chatHandlers = ({
             })
             .where(eq(chats.id, id))
             .returning(),
-        ).pipe(Effect.orDie);
+        );
         const row = updated[0];
         if (!row)
           return yield* Effect.die(new Error("UPDATE returned no rows"));
@@ -461,7 +462,7 @@ export const chatHandlers = ({
           );
         yield* requireChatManager(db, currentUser, existing);
 
-        const updated = yield* Effect.tryPromise(() =>
+        const updated = yield* dbQuery(() =>
           db
             .update(chats)
             .set({
@@ -471,7 +472,7 @@ export const chatHandlers = ({
             })
             .where(eq(chats.id, id))
             .returning(),
-        ).pipe(Effect.orDie);
+        );
         const row = updated[0];
         if (!row)
           return yield* Effect.die(new Error("UPDATE returned no rows"));

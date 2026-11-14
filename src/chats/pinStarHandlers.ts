@@ -12,6 +12,7 @@ import {
 } from "./access.ts";
 import { getParticipants } from "./chatState.ts";
 import { buildMessageResponse, buildMessagesInOrder } from "./messageViews.ts";
+import { dbQuery } from "../Db.ts";
 
 export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
   ({
@@ -20,9 +21,7 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
         const currentUser = yield* CurrentUser;
         yield* getChatOr404(db, id);
         yield* requireParticipant(db, id, currentUser.id);
-        const ids = yield* Effect.tryPromise(() =>
-          pinnedMessageIds(db, id),
-        ).pipe(Effect.orDie);
+        const ids = yield* dbQuery(() => pinnedMessageIds(db, id));
         return yield* buildMessagesInOrder(db, storage, ids, currentUser.id);
       }),
     pinMessage: ({ params: { id }, payload }) =>
@@ -37,7 +36,7 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
         // Idempotent: the unique index on `messageId` turns re-pinning an
         // already-pinned message into a no-op (no second row, no error),
         // same convention as `addMessageReaction`.
-        const inserted = yield* Effect.tryPromise(() =>
+        const inserted = yield* dbQuery(() =>
           db
             .insert(pinnedMessages)
             .values({
@@ -47,7 +46,7 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
             })
             .onConflictDoNothing()
             .returning(),
-        ).pipe(Effect.orDie);
+        );
         if (inserted.length > 0) {
           // Scoped to the chat's participants, not broadcast — a chat and
           // its pins are private to them (see MessagePinEvent in
@@ -77,7 +76,7 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
         yield* getChatOr404(db, id);
         yield* requireAcceptedParticipant(db, id, currentUser.id);
         const row = yield* getMessageOr404(db, id, messageId);
-        const deleted = yield* Effect.tryPromise(() =>
+        const deleted = yield* dbQuery(() =>
           db
             .delete(pinnedMessages)
             .where(
@@ -87,7 +86,7 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
               ),
             )
             .returning(),
-        ).pipe(Effect.orDie);
+        );
         if (deleted.length > 0) {
           const participants = yield* getParticipants(db, id);
           yield* connections.notifyUsers(
@@ -113,9 +112,9 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
         const currentUser = yield* CurrentUser;
         yield* getChatOr404(db, id);
         yield* requireParticipant(db, id, currentUser.id);
-        const ids = yield* Effect.tryPromise(() =>
+        const ids = yield* dbQuery(() =>
           starredMessageIdsInChat(db, id, currentUser.id),
-        ).pipe(Effect.orDie);
+        );
         return yield* buildMessagesInOrder(db, storage, ids, currentUser.id);
       }),
     starMessage: ({ params: { id, messageId } }) =>
@@ -127,12 +126,12 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
         // Idempotent via the (userId, messageId) unique constraint. No
         // realtime event: a star is private to `currentUser` (see
         // pinsStars.ts), so there's nothing to broadcast.
-        yield* Effect.tryPromise(() =>
+        yield* dbQuery(() =>
           db
             .insert(starredMessages)
             .values({ userId: currentUser.id, messageId })
             .onConflictDoNothing(),
-        ).pipe(Effect.orDie);
+        );
         return yield* buildMessageResponse(
           db,
           storage,
@@ -148,7 +147,7 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
         yield* getChatOr404(db, id);
         yield* requireParticipant(db, id, currentUser.id);
         const row = yield* getMessageOr404(db, id, messageId);
-        yield* Effect.tryPromise(() =>
+        yield* dbQuery(() =>
           db
             .delete(starredMessages)
             .where(
@@ -157,7 +156,7 @@ export const pinStarHandlers = ({ db, storage, connections }: ChatsDeps) =>
                 eq(starredMessages.messageId, messageId),
               ),
             ),
-        ).pipe(Effect.orDie);
+        );
         return yield* buildMessageResponse(
           db,
           storage,

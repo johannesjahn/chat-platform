@@ -18,7 +18,7 @@ import {
 } from "./attachments.ts";
 import { processAudio } from "./AudioProcessing.ts";
 import { CurrentUser } from "./Auth.ts";
-import { Db } from "./Db.ts";
+import { Db, dbQuery } from "./Db.ts";
 import { processImage } from "./ImageProcessing.ts";
 import { withMediaProcessingPermit } from "./MediaProcessingLimit.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
@@ -170,7 +170,7 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
             .upload(storageKey, uploadData, uploadContentType)
             .pipe(Effect.orDie);
 
-          const rows = yield* Effect.tryPromise(() =>
+          const rows = yield* dbQuery(() =>
             db
               .insert(attachments)
               .values({
@@ -186,7 +186,7 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
                 durationMs,
               })
               .returning(),
-          ).pipe(Effect.orDie);
+          );
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
@@ -210,9 +210,9 @@ export const AttachmentsHandlerLive = HttpApiBuilder.group(
           );
 
           yield* storage.delete(row.storageKey).pipe(Effect.orDie);
-          yield* Effect.tryPromise(() =>
+          yield* dbQuery(() =>
             db.delete(attachments).where(eq(attachments.id, row.id)),
-          ).pipe(Effect.orDie);
+          );
         }),
       );
   }),

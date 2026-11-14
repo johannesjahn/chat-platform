@@ -18,7 +18,7 @@ import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
 import { loadAuthor } from "./authors.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
-import { Db, type DrizzleDb } from "./Db.ts";
+import { Db, type DrizzleDb, dbQuery } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { notifyMentions } from "./notifications.ts";
 import { postReactionInfo } from "./reactions.ts";
@@ -53,9 +53,9 @@ const mentionText = (row: {
 
 const getPostOr404 = (db: DrizzleDb, id: number) =>
   Effect.gen(function* () {
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db.select().from(posts).where(eq(posts.id, id)).limit(1),
-    ).pipe(Effect.orDie);
+    );
     const row = rows[0];
     if (!row)
       return yield* Effect.fail(
@@ -83,16 +83,16 @@ const buildPostResponse = (
 ) =>
   Effect.gen(function* () {
     const author = yield* loadPostAuthor(db, row);
-    const reactions = yield* Effect.tryPromise(() =>
+    const reactions = yield* dbQuery(() =>
       postReactionInfo(db, [row.id], viewerId),
-    ).pipe(Effect.orDie);
-    const commentCounts = yield* Effect.tryPromise(async () =>
+    );
+    const commentCounts = yield* dbQuery(async () =>
       postCommentCounts(
         db,
         [row.id],
         await blockedOrMutedUserIds(db, viewerId),
       ),
-    ).pipe(Effect.orDie);
+    );
     const attachments = yield* resolveAttachments(db, storage, [
       row.attachmentId,
     ]);
@@ -114,16 +114,13 @@ const findPostByClientId = (
   authorId: number,
   clientId: string,
 ): Effect.Effect<DbPost | undefined> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select()
       .from(posts)
       .where(and(eq(posts.authorId, authorId), eq(posts.clientId, clientId)))
       .limit(1),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows[0]),
-  );
+  ).pipe(Effect.map((rows) => rows[0]));
 
 export const PostsHandlerLive = HttpApiBuilder.group(
   ChatApi,
@@ -159,15 +156,15 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           // distinguish them. Kept as a `NOT IN` filter alongside the keyset
           // cursor rather than post-filtering the page, so a page never comes
           // back short after excluding a blocked author's posts.
-          const hiddenAuthorIds = yield* Effect.tryPromise(() =>
+          const hiddenAuthorIds = yield* dbQuery(() =>
             blockedOrMutedUserIds(db, currentUser.id),
-          ).pipe(Effect.orDie);
+          );
 
           // Fetch one row past `limit` instead of firing a separate
           // `COUNT(*)` — whether that extra row came back is all
           // `nextCursor` needs, and unlike a full-table count this stays
           // cheap no matter how large `posts` grows (issue #51).
-          const fetched = yield* Effect.tryPromise(() =>
+          const fetched = yield* dbQuery(() =>
             db
               .select()
               .from(posts)
@@ -181,7 +178,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               )
               .orderBy(desc(posts.id))
               .limit(limit + 1),
-          ).pipe(Effect.orDie);
+          );
           const hasMore = fetched.length > limit;
           const page = fetched.slice(0, limit);
           const lastRow = page[page.length - 1];
@@ -189,20 +186,20 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             hasMore && lastRow ? encodePostsCursor(lastRow.id) : null;
           const authored = yield* withAuthors(db, page);
           const rows = authored.map((a) => a.row);
-          const reactionInfo = yield* Effect.tryPromise(() =>
+          const reactionInfo = yield* dbQuery(() =>
             postReactionInfo(
               db,
               rows.map((r) => r.id),
               currentUser.id,
             ),
-          ).pipe(Effect.orDie);
-          const commentCounts = yield* Effect.tryPromise(() =>
+          );
+          const commentCounts = yield* dbQuery(() =>
             postCommentCounts(
               db,
               rows.map((r) => r.id),
               hiddenAuthorIds,
             ),
-          ).pipe(Effect.orDie);
+          );
           const attachments = yield* resolveAttachments(
             db,
             storage,
@@ -266,7 +263,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           // calls can land a millisecond apart, and a freshly created post's
           // createdAt/updatedAt should be identical, not just close.
           const now = new Date();
-          const rows = yield* Effect.tryPromise(() =>
+          const rows = yield* dbQuery(() =>
             db
               .insert(posts)
               .values({
@@ -281,7 +278,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               })
               .onConflictDoNothing()
               .returning(),
-          ).pipe(Effect.orDie);
+          );
           const row = rows[0];
           if (!row && payload.clientId !== undefined) {
             // Lost a race with a concurrent create of the same key.
@@ -346,7 +343,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             );
           }
 
-          const rows = yield* Effect.tryPromise(() =>
+          const rows = yield* dbQuery(() =>
             db
               .update(posts)
               .set({
@@ -365,23 +362,23 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               })
               .where(eq(posts.id, id))
               .returning(),
-          ).pipe(Effect.orDie);
+          );
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
           // Editing a post's content leaves its reactions and comments
           // untouched — reflect the existing state in the response rather than
           // resetting it.
-          const reactions = yield* Effect.tryPromise(() =>
+          const reactions = yield* dbQuery(() =>
             postReactionInfo(db, [row.id], currentUser.id),
-          ).pipe(Effect.orDie);
-          const commentCounts = yield* Effect.tryPromise(async () =>
+          );
+          const commentCounts = yield* dbQuery(async () =>
             postCommentCounts(
               db,
               [row.id],
               await blockedOrMutedUserIds(db, currentUser.id),
             ),
-          ).pipe(Effect.orDie);
+          );
           yield* connections.broadcastAll({
             type: "post_changed",
             postId: row.id,
@@ -421,9 +418,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          yield* Effect.tryPromise(() =>
-            db.delete(posts).where(eq(posts.id, id)),
-          ).pipe(Effect.orDie);
+          yield* dbQuery(() => db.delete(posts).where(eq(posts.id, id)));
           yield* connections.broadcastAll({
             type: "post_changed",
             postId: id,

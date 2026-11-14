@@ -2,7 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { type Attachment, AttachmentQuotaExceeded, NotFound } from "./Api.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
-import type { DrizzleDb } from "./Db.ts";
+import { dbQuery, type DrizzleDb } from "./Db.ts";
 import { attachments, type DbAttachment, users } from "./db/schema.ts";
 
 // Shared by src/chats/ and PostsHandler — both messages and posts attach
@@ -38,13 +38,13 @@ export const resolveAttachment = (
 ): Effect.Effect<Attachment | null> =>
   Effect.gen(function* () {
     if (attachmentId === null) return null;
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db
         .select()
         .from(attachments)
         .where(eq(attachments.id, attachmentId))
         .limit(1),
-    ).pipe(Effect.orDie);
+    );
     const row = rows[0];
     if (!row) return null;
     return toApiAttachment(row, storage.presignGetUrl(row.storageKey));
@@ -65,9 +65,9 @@ export const resolveAttachments = (
       ...new Set(attachmentIds.filter((id): id is number => id !== null)),
     ];
     if (ids.length === 0) return result;
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db.select().from(attachments).where(inArray(attachments.id, ids)),
-    ).pipe(Effect.orDie);
+    );
     for (const row of rows) {
       result.set(
         row.id,
@@ -88,13 +88,13 @@ export const getOwnedAttachmentOr404 = (
   uploaderId: number,
 ): Effect.Effect<DbAttachment, NotFound> =>
   Effect.gen(function* () {
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db
         .select()
         .from(attachments)
         .where(eq(attachments.id, attachmentId))
         .limit(1),
-    ).pipe(Effect.orDie);
+    );
     const row = rows[0];
     if (!row || row.uploaderId !== uploaderId)
       return yield* Effect.fail(
@@ -122,12 +122,12 @@ export const enforceUploadQuota = (
     // A single-row read of the running total a trigger on `attachments`
     // keeps up to date (migration 0033), rather than re-summing every
     // attachment the user has ever kept (issue #326).
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db
         .select({ storageUsedBytes: users.storageUsedBytes })
         .from(users)
         .where(eq(users.id, userId)),
-    ).pipe(Effect.orDie);
+    );
     const currentTotal = rows[0]?.storageUsedBytes ?? 0;
     if (currentTotal + incomingSize > ATTACHMENT_QUOTA_MAX_BYTES) {
       return yield* Effect.fail(

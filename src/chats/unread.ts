@@ -9,7 +9,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { Effect } from "effect";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { chatParticipants, messages } from "../db/schema.ts";
 
 // Unread counts against each participant's read watermark
@@ -52,7 +52,7 @@ export const getUnreadCountsForChats = (
     : // Joined through the reader's own participant row, so each chat only
       // counts past its watermark — a range scan over `(chat_id, id)` that
       // reads the unread messages, not the whole history (issue #659).
-      Effect.tryPromise(() =>
+      dbQuery(() =>
         db
           .select({ chatId: messages.chatId, total: count() })
           .from(chatParticipants)
@@ -77,7 +77,6 @@ export const getUnreadCountsForChats = (
           )
           .groupBy(messages.chatId),
       ).pipe(
-        Effect.orDie,
         Effect.map((rows) => new Map(rows.map((r) => [r.chatId, r.total]))),
       );
 
@@ -89,7 +88,7 @@ export const getUnreadTotal = (
   db: DrizzleDb,
   userId: number,
 ): Effect.Effect<{ count: number; chats: number }> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select({ count: count(), chats: countDistinct(messages.chatId) })
       .from(chatParticipants)
@@ -112,7 +111,6 @@ export const getUnreadTotal = (
         ),
       ),
   ).pipe(
-    Effect.orDie,
     Effect.map((rows) => ({
       count: rows[0]?.count ?? 0,
       chats: rows[0]?.chats ?? 0,

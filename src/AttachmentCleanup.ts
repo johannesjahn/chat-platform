@@ -1,7 +1,7 @@
 import { and, eq, isNotNull, lt, notInArray } from "drizzle-orm";
 import { Duration, Effect, Layer, Schedule } from "effect";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
-import { Db } from "./Db.ts";
+import { Db, dbQuery } from "./Db.ts";
 import { attachments, messages, posts } from "./db/schema.ts";
 
 // An attachment (issue #221) uploaded via `POST /attachments` but never
@@ -26,7 +26,7 @@ export const cleanupOrphanedAttachments: Effect.Effect<
   const storage = yield* AttachmentStorage;
   const cutoff = new Date(Date.now() - Duration.toMillis(ORPHAN_GRACE_PERIOD));
 
-  const orphaned = yield* Effect.tryPromise(() =>
+  const orphaned = yield* dbQuery(() =>
     db
       .select({ id: attachments.id, storageKey: attachments.storageKey })
       .from(attachments)
@@ -49,7 +49,7 @@ export const cleanupOrphanedAttachments: Effect.Effect<
           ),
         ),
       ),
-  ).pipe(Effect.orDie);
+  );
 
   for (const row of orphaned) {
     // Best-effort: a failed bucket delete shouldn't stop the row (and thus
@@ -66,9 +66,9 @@ export const cleanupOrphanedAttachments: Effect.Effect<
           ).pipe(Effect.annotateLogs({ storageKey: row.storageKey, cause })),
         ),
       );
-    yield* Effect.tryPromise(() =>
+    yield* dbQuery(() =>
       db.delete(attachments).where(eq(attachments.id, row.id)),
-    ).pipe(Effect.orDie);
+    );
   }
 });
 

@@ -28,6 +28,7 @@ import {
   notifyChatUpdated,
 } from "./chatState.ts";
 import { newestMessageIdIn } from "./unread.ts";
+import { dbQuery } from "../Db.ts";
 
 const toApiChatInvite = (row: DbChatInvite): ChatInvite => ({
   id: row.id,
@@ -61,7 +62,7 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
         // "slot" a caller could ever redeem, so it shouldn't keep this
         // chat permanently stuck at the limit (matches the "revoke an old
         // one first" wording below: revoking must actually free a slot).
-        const existingCount = yield* Effect.tryPromise(() =>
+        const existingCount = yield* dbQuery(() =>
           db
             .select({ total: count() })
             .from(chatInvites)
@@ -75,17 +76,14 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
                 ),
               ),
             ),
-        ).pipe(
-          Effect.orDie,
-          Effect.map((rows) => rows[0]?.total ?? 0),
-        );
+        ).pipe(Effect.map((rows) => rows[0]?.total ?? 0));
         if (existingCount >= MAX_INVITES_PER_CHAT)
           return yield* Effect.fail(
             new InvalidChatRequest({
               message: `This chat has reached its limit of ${MAX_INVITES_PER_CHAT} active invites — revoke an old one first`,
             }),
           );
-        const created = yield* Effect.tryPromise(() =>
+        const created = yield* dbQuery(() =>
           db
             .insert(chatInvites)
             .values({
@@ -100,7 +98,7 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
               maxUses: payload.maxUses ?? null,
             })
             .returning(),
-        ).pipe(Effect.orDie);
+        );
         const row = created[0];
         if (!row)
           return yield* Effect.die(new Error("INSERT returned no rows"));
@@ -112,13 +110,13 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
         const chatRow = yield* getChatOr404(db, id);
         yield* requireChatManager(db, currentUser, chatRow);
 
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .select()
             .from(chatInvites)
             .where(eq(chatInvites.chatId, id))
             .orderBy(desc(chatInvites.createdAt)),
-        ).pipe(Effect.orDie);
+        );
         return rows.map(toApiChatInvite);
       }),
     revokeChatInvite: ({ params: { id, inviteId } }) =>
@@ -131,7 +129,7 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
         // already-revoked one 404s on a second call rather than silently
         // no-op'ing, so a caller can tell "I revoked it" from "someone
         // else already had".
-        const updated = yield* Effect.tryPromise(() =>
+        const updated = yield* dbQuery(() =>
           db
             .update(chatInvites)
             .set({ revokedAt: new Date() })
@@ -143,7 +141,7 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
               ),
             )
             .returning({ id: chatInvites.id }),
-        ).pipe(Effect.orDie);
+        );
         if (updated.length === 0)
           return yield* Effect.fail(
             new NotFound({
@@ -155,13 +153,13 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
 
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .select()
             .from(chatInvites)
             .where(eq(chatInvites.code, code))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         const invite = rows[0];
         if (!invite)
           return yield* Effect.fail(

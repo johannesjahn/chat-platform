@@ -14,7 +14,7 @@ import {
   type AdminTimelinePoint,
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
-import { Db, type DrizzleDb } from "./Db.ts";
+import { Db, type DrizzleDb, dbQuery } from "./Db.ts";
 import { PubSub } from "./PubSub.ts";
 import {
   attachments,
@@ -70,7 +70,7 @@ const windowedCounts = (
   createdAt: PgColumn,
   since: Readonly<Record<"d1" | "d7" | "d30", Date>>,
 ): Effect.Effect<WindowedCounts> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select({
         total: count(),
@@ -79,29 +79,22 @@ const windowedCounts = (
         d30: countSince(createdAt, since.d30),
       })
       .from(table),
-  ).pipe(
-    Effect.map((rows) => rows[0] ?? ZERO_COUNTS),
-    Effect.orDie,
-  );
+  ).pipe(Effect.map((rows) => rows[0] ?? ZERO_COUNTS));
 
 const totalCount = (db: DrizzleDb, table: PgTable): Effect.Effect<number> =>
-  Effect.tryPromise(() => db.select({ total: count() }).from(table)).pipe(
+  dbQuery(() => db.select({ total: count() }).from(table)).pipe(
     Effect.map((rows) => rows[0]?.total ?? 0),
-    Effect.orDie,
   );
 
 // Bytes currently held in the object store for attachments still referenced
 // by a row (orphans are swept separately — see AttachmentCleanup.ts).
 // `coalesce` because `sum()` over zero rows is null, not 0.
 const attachmentBytes = (db: DrizzleDb): Effect.Effect<number> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select({ bytes: INT(sql`coalesce(sum(${attachments.size}), 0)`) })
       .from(attachments),
-  ).pipe(
-    Effect.map((rows) => rows[0]?.bytes ?? 0),
-    Effect.orDie,
-  );
+  ).pipe(Effect.map((rows) => rows[0]?.bytes ?? 0));
 
 // Distinct users who created *any* content in the window — the same
 // definition `active_users{window}` uses (see ActiveUsersMetrics.ts), but
@@ -135,11 +128,8 @@ const countActiveUsersSince = (
       .where(gte(messages.createdAt, since)),
   ).as("active_user_ids");
 
-  return Effect.tryPromise(() =>
-    db.select({ total: count() }).from(activeIds),
-  ).pipe(
+  return dbQuery(() => db.select({ total: count() }).from(activeIds)).pipe(
     Effect.map((rows) => rows[0]?.total ?? 0),
-    Effect.orDie,
   );
 };
 
@@ -159,7 +149,7 @@ const dailyCounts = (
   since: Date,
 ): Effect.Effect<ReadonlyMap<string, number>> => {
   const day = utcDay(createdAt);
-  return Effect.tryPromise(() =>
+  return dbQuery(() =>
     db
       .select({ day, total: INT(sql`count(*)`) })
       .from(table)
@@ -167,7 +157,6 @@ const dailyCounts = (
       .groupBy(day),
   ).pipe(
     Effect.map((rows) => new Map(rows.map((row) => [row.day, row.total]))),
-    Effect.orDie,
   );
 };
 
@@ -380,15 +369,12 @@ export const AdminHandlerLive = HttpApiBuilder.group(
               { concurrency: "unbounded" },
             ),
             runtimeCounters,
-            Effect.tryPromise(() =>
+            dbQuery(() =>
               db
                 .select({ total: count() })
                 .from(users)
                 .where(eq(users.role, "admin")),
-            ).pipe(
-              Effect.map((rows) => rows[0]?.total ?? 0),
-              Effect.orDie,
-            ),
+            ).pipe(Effect.map((rows) => rows[0]?.total ?? 0)),
           ],
           { concurrency: "unbounded" },
         );

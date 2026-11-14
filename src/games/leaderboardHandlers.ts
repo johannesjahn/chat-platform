@@ -10,6 +10,7 @@ import { gameResults, users } from "../db/schema.ts";
 
 import { type GamesDeps, type GamesHandlers } from "./handlerKit.ts";
 import { publicUserColumns, toPublicUser } from "../users/userViews.ts";
+import { dbQuery } from "../Db.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -81,7 +82,7 @@ export const leaderboardHandlers = ({ db }: GamesDeps) =>
             )
             .groupBy(gameResults.userId),
         );
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .with(stats)
             .select({
@@ -102,7 +103,7 @@ export const leaderboardHandlers = ({ db }: GamesDeps) =>
               ),
             )
             .orderBy(asc(stats.rank), asc(stats.userId)),
-        ).pipe(Effect.orDie);
+        );
 
         const entries = rows.map(leaderboardEntry);
         return {

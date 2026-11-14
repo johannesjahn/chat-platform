@@ -9,7 +9,7 @@ import {
   type GameLobbyPhase,
   type ReflexGame,
 } from "../Api.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import {
   gameLobbies,
   gameLobbyPlayers,
@@ -77,12 +77,9 @@ export const lobbyPhase = (
 };
 
 export const loadLobby = (db: DrizzleDb, id: number) =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db.select().from(gameLobbies).where(eq(gameLobbies.id, id)).limit(1),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows[0] ?? null),
-  );
+  ).pipe(Effect.map((rows) => rows[0] ?? null));
 
 export const loadLobbyOr404 = (db: DrizzleDb, id: number) =>
   loadLobby(db, id).pipe(
@@ -99,7 +96,7 @@ export const loadPlayers = (db: DrizzleDb, lobbyIds: ReadonlyArray<number>) =>
   Effect.gen(function* () {
     const byLobby = new Map<number, PlayerRow[]>();
     if (lobbyIds.length === 0) return byLobby;
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db
         .select({
           lobbyId: gameLobbyPlayers.lobbyId,
@@ -115,7 +112,7 @@ export const loadPlayers = (db: DrizzleDb, lobbyIds: ReadonlyArray<number>) =>
         .innerJoin(users, eq(users.id, gameLobbyPlayers.userId))
         .where(inArray(gameLobbyPlayers.lobbyId, [...lobbyIds]))
         .orderBy(asc(gameLobbyPlayers.joinedAt), asc(gameLobbyPlayers.id)),
-    ).pipe(Effect.orDie);
+    );
     for (const row of rows) {
       const list = byLobby.get(row.lobbyId) ?? [];
       list.push(row);
@@ -403,12 +400,12 @@ export const notifyLobbyChanged = (
   );
 
 export const touchLobby = (db: DrizzleDb, id: number, extra: object = {}) =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .update(gameLobbies)
       .set({ updatedAt: new Date(), ...extra })
       .where(eq(gameLobbies.id, id)),
-  ).pipe(Effect.orDie);
+  );
 
 // createLobby/quickPlay read back a lobby they've only just created or
 // joined, so a NotFound there is a defect (it was deleted in between), not a

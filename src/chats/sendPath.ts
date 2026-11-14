@@ -1,7 +1,7 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { directBlockExists, recipientsMutingSender } from "../blocks.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { RealtimeConnections } from "../Realtime.ts";
 import {
   chatParticipants,
@@ -32,7 +32,7 @@ export const directChatBlocked = (
 ): Effect.Effect<boolean> =>
   Effect.gen(function* () {
     if (chatRow.type !== "direct") return false;
-    const others = yield* Effect.tryPromise(() =>
+    const others = yield* dbQuery(() =>
       db
         .select({ userId: chatParticipants.userId })
         .from(chatParticipants)
@@ -43,12 +43,10 @@ export const directChatBlocked = (
           ),
         )
         .limit(1),
-    ).pipe(Effect.orDie);
+    );
     const otherId = others[0]?.userId;
     if (otherId === undefined) return false;
-    return yield* Effect.tryPromise(() =>
-      directBlockExists(db, senderId, otherId),
-    ).pipe(Effect.orDie);
+    return yield* dbQuery(() => directBlockExists(db, senderId, otherId));
   });
 
 // Inserts a message and bumps its chat's `updatedAt` (which `listChats`
@@ -88,7 +86,7 @@ export const findMessageByClientId = (
   senderId: number,
   clientId: string,
 ): Effect.Effect<DbMessage | undefined> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select()
       .from(messages)
@@ -100,10 +98,7 @@ export const findMessageByClientId = (
         ),
       )
       .limit(1),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows[0]),
-  );
+  ).pipe(Effect.map((rows) => rows[0]));
 
 // Publishes a newly stored message to the chat: reads back the version the
 // insert bumped and nudges every participant. Suppresses the nudge for any
@@ -122,9 +117,9 @@ export const publishNewMessage = (
     const version = yield* getChatVersion(db, chatId);
     const participants = yield* getParticipants(db, chatId);
     const recipientIds = participants.map((p) => p.userId);
-    const muting = yield* Effect.tryPromise(() =>
+    const muting = yield* dbQuery(() =>
       recipientsMutingSender(db, senderId, recipientIds),
-    ).pipe(Effect.orDie);
+    );
     yield* notifyChatUpdated(
       connections,
       chatId,

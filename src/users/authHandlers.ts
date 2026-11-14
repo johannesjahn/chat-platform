@@ -3,7 +3,7 @@ import { Cache, Effect, Metric } from "effect";
 import { setLogUser } from "../RedactedLogger.ts";
 import { InvalidCredentials, UsernameTaken } from "../Api.ts";
 import { CurrentUser } from "../Auth.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { Jwt, type TokenUser } from "../Jwt.ts";
 import { authEventsTotal } from "../Metrics.ts";
 import { clientIp } from "../ClientIp.ts";
@@ -89,14 +89,14 @@ const issueRefreshToken = (
 ): Effect.Effect<string> =>
   Effect.gen(function* () {
     const { token, jti, expiresAt } = yield* jwt.signRefreshToken(user);
-    yield* Effect.tryPromise(() =>
+    yield* dbQuery(() =>
       db.insert(refreshTokens).values({
         jti,
         userId: user.id,
         familyId: crypto.randomUUID(),
         expiresAt,
       }),
-    ).pipe(Effect.orDie);
+    );
     return token;
   });
 
@@ -120,7 +120,7 @@ const rotateRefreshToken = (
 ): Effect.Effect<string | null> =>
   Effect.gen(function* () {
     const { token, jti, expiresAt } = yield* jwt.signRefreshToken(user);
-    const rotated = yield* Effect.tryPromise(() =>
+    const rotated = yield* dbQuery(() =>
       db.transaction(async (tx) => {
         const revoked = await tx
           .update(refreshTokens)
@@ -136,7 +136,7 @@ const rotateRefreshToken = (
           .values({ jti, userId: user.id, familyId, expiresAt });
         return true;
       }),
-    ).pipe(Effect.orDie);
+    );
     return rotated ? token : null;
   });
 
@@ -146,7 +146,7 @@ const rotateRefreshToken = (
 // they have a valid token, so the whole chain (including whatever the
 // legitimate holder rotated to) is cut off, forcing a fresh login.
 const revokeFamily = (db: DrizzleDb, familyId: string): Effect.Effect<void> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .update(refreshTokens)
       .set({ revokedAt: new Date() })
@@ -156,7 +156,7 @@ const revokeFamily = (db: DrizzleDb, familyId: string): Effect.Effect<void> =>
           isNull(refreshTokens.revokedAt),
         ),
       ),
-  ).pipe(Effect.orDie, Effect.asVoid);
+  ).pipe(Effect.asVoid);
 
 export const authHandlers = ({
   db,
@@ -183,7 +183,7 @@ export const authHandlers = ({
           REGISTER_WINDOW_SECONDS,
         );
 
-        const existing = yield* Effect.tryPromise(() =>
+        const existing = yield* dbQuery(() =>
           db
             .select({ id: users.id })
             .from(users)
@@ -191,7 +191,7 @@ export const authHandlers = ({
               eq(sql`lower(${users.username})`, payload.username.toLowerCase()),
             )
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         if (existing[0]) {
           yield* recordAuthEvent("signup", "failure");
           return yield* Effect.fail(
@@ -203,7 +203,7 @@ export const authHandlers = ({
 
         const passwordHash = yield* hashPassword(payload.password);
 
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .insert(users)
             // Registration always creates a "user" — admins are promoted
@@ -226,7 +226,7 @@ export const authHandlers = ({
               statusEmoji: users.statusEmoji,
               statusExpiresAt: users.statusExpiresAt,
             }),
-        ).pipe(Effect.orDie);
+        );
         if (!rows[0])
           return yield* Effect.die(new Error("INSERT returned no rows"));
         yield* recordAuthEvent("signup", "success");
@@ -263,7 +263,7 @@ export const authHandlers = ({
           LOGIN_MAX_FAILURES_PER_ACCOUNT,
           LOGIN_WINDOW_SECONDS,
         );
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .select()
             .from(users)
@@ -271,7 +271,7 @@ export const authHandlers = ({
               eq(sql`lower(${users.username})`, payload.username.toLowerCase()),
             )
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
 
         // Always run a verify — against a dummy hash when the user is
         // missing — so timing doesn't reveal whether the username exists.
@@ -334,7 +334,7 @@ export const authHandlers = ({
         // signature- and expiry-valid token whose row is gone (never
         // issued by this server, or already reclaimed after expiry) is
         // refused rather than trusted on claims alone.
-        const stored = yield* Effect.tryPromise(() =>
+        const stored = yield* dbQuery(() =>
           db
             .select({
               familyId: refreshTokens.familyId,
@@ -343,7 +343,7 @@ export const authHandlers = ({
             .from(refreshTokens)
             .where(eq(refreshTokens.jti, tokenUser.jti))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         const storedToken = stored[0];
         if (!storedToken) {
           yield* recordAuthEvent("refresh", "failure");
@@ -374,7 +374,7 @@ export const authHandlers = ({
         // Re-fetch rather than trust the token's claims, so a deleted
         // account or a role change since the refresh token was issued
         // takes effect immediately instead of surviving up to its full TTL.
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .select({
               id: users.id,
@@ -385,7 +385,7 @@ export const authHandlers = ({
             .from(users)
             .where(eq(users.id, tokenUser.id))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         const dbUser = rows[0];
         // Also reject if the presented token was signed under an older
         // token_version — it survived the store lookup above (rotation
@@ -442,7 +442,7 @@ export const authHandlers = ({
           .pipe(Effect.orElseSucceed(() => undefined));
         if (!tokenUser) return;
 
-        yield* Effect.tryPromise(() =>
+        yield* dbQuery(() =>
           payload.allSessions
             ? // A "forced logout" of every session: besides revoking the
               // refresh tokens, bump token_version so any access token
@@ -461,7 +461,7 @@ export const authHandlers = ({
             : db
                 .delete(refreshTokens)
                 .where(eq(refreshTokens.jti, tokenUser.jti)),
-        ).pipe(Effect.orDie);
+        );
 
         yield* Cache.invalidate(tokenVersionCache, tokenUser.id);
         yield* pubsub
@@ -485,13 +485,13 @@ export const authHandlers = ({
           CHANGE_PASSWORD_WINDOW_SECONDS,
         );
 
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .select({ passwordHash: users.passwordHash })
             .from(users)
             .where(eq(users.id, currentUser.id))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         const dbUser = rows[0];
         const valid =
           dbUser &&
@@ -507,7 +507,7 @@ export const authHandlers = ({
         // same transaction as the password update mirrors `logout`'s
         // `allSessions` option: every other outstanding session (access and
         // refresh tokens alike) stops working immediately.
-        const updated = yield* Effect.tryPromise(() =>
+        const updated = yield* dbQuery(() =>
           db.transaction(async (tx) => {
             await tx
               .delete(refreshTokens)
@@ -527,7 +527,7 @@ export const authHandlers = ({
               });
             return result[0];
           }),
-        ).pipe(Effect.orDie);
+        );
         if (!updated)
           return yield* Effect.die(new Error("UPDATE returned no rows"));
 

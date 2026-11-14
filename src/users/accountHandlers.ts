@@ -3,7 +3,7 @@ import { Cache, Effect } from "effect";
 import { Forbidden, InvalidCredentials, NotFound } from "../Api.ts";
 import { AttachmentStorage } from "../AttachmentStorage.ts";
 import { CurrentUser } from "../Auth.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { attachments, users } from "../db/schema.ts";
 import { type UsersDeps, type UsersHandlers } from "./handlerKit.ts";
 import { deleteAvatarObjects } from "../avatars.ts";
@@ -38,7 +38,7 @@ const deleteUserAndObjects = (
   avatarTokens: ReadonlyArray<string | null>,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const storageKeys = yield* Effect.tryPromise(() =>
+    const storageKeys = yield* dbQuery(() =>
       db.transaction(async (tx) => {
         const removed = await tx
           .delete(attachments)
@@ -47,7 +47,7 @@ const deleteUserAndObjects = (
         await tx.delete(users).where(eq(users.id, userId));
         return removed.map((row) => row.storageKey);
       }),
-    ).pipe(Effect.orDie);
+    );
 
     yield* deleteAvatarObjects(storage, avatarTokens);
     yield* Effect.forEach(
@@ -79,7 +79,7 @@ export const accountHandlers = ({
 
         // Also pull the avatar tokens, for `deleteUserAndObjects` to sweep
         // from the bucket once the row is gone.
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .select({
               passwordHash: users.passwordHash,
@@ -90,7 +90,7 @@ export const accountHandlers = ({
             .from(users)
             .where(eq(users.id, currentUser.id))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         const dbUser = rows[0];
         const valid =
           dbUser &&
@@ -125,7 +125,7 @@ export const accountHandlers = ({
         // target user can't keep acting under its old role for the rest of
         // its TTL — mirrors `changePassword`'s reasoning, since `role` is
         // embedded in the token's claims.
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .update(users)
             .set({
@@ -146,7 +146,7 @@ export const accountHandlers = ({
               statusEmoji: users.statusEmoji,
               statusExpiresAt: users.statusExpiresAt,
             }),
-        ).pipe(Effect.orDie);
+        );
         const updated = rows[0];
         if (!updated)
           return yield* Effect.fail(
@@ -185,7 +185,7 @@ export const accountHandlers = ({
 
         // Pull the avatar tokens first, for `deleteUserAndObjects` to sweep
         // — same as `deleteAccount` above.
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .select({
               avatarSmallKey: users.avatarSmallKey,
@@ -195,7 +195,7 @@ export const accountHandlers = ({
             .from(users)
             .where(eq(users.id, id))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         const dbUser = rows[0];
         if (!dbUser)
           return yield* Effect.fail(

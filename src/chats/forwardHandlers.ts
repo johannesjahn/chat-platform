@@ -11,7 +11,7 @@ import {
 import { toApiAttachment, enforceUploadQuota } from "../attachments.ts";
 
 import { CurrentUser } from "../Auth.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { chargeGlobalRequests } from "../GlobalRateLimit.ts";
 import { contentCreatedTotal } from "../Metrics.ts";
 import {
@@ -98,7 +98,7 @@ export const forwardHandlers = ({
             forwardedFromSenderName: source.forwardedFromSenderName,
           };
         } else {
-          const senders = yield* Effect.tryPromise(() =>
+          const senders = yield* dbQuery(() =>
             db
               .select({
                 displayName: users.displayName,
@@ -107,7 +107,7 @@ export const forwardHandlers = ({
               .from(users)
               .where(eq(users.id, source.senderId))
               .limit(1),
-          ).pipe(Effect.orDie);
+          );
           const sender = senders[0];
           forwardedFrom = {
             forwardedFromMessageId: source.id,
@@ -133,13 +133,13 @@ export const forwardHandlers = ({
           const rows =
             source.attachmentId === null
               ? []
-              : yield* Effect.tryPromise(() =>
+              : yield* dbQuery(() =>
                   db
                     .select()
                     .from(attachments)
                     .where(eq(attachments.id, source.attachmentId!))
                     .limit(1),
-                ).pipe(Effect.orDie);
+                );
           sourceAttachment = rows[0] ?? null;
           if (!sourceAttachment)
             contentProblem = "The attachment is no longer available";
@@ -155,7 +155,7 @@ export const forwardHandlers = ({
         const existingByChat = new Map<number, DbMessage>();
         if (payload.clientId !== undefined) {
           const keys = targetIds.map((t) => keyFor(t)!);
-          const rows = yield* Effect.tryPromise(() =>
+          const rows = yield* dbQuery(() =>
             db
               .select()
               .from(messages)
@@ -166,7 +166,7 @@ export const forwardHandlers = ({
                   inArray(messages.clientId, keys),
                 ),
               ),
-          ).pipe(Effect.orDie);
+          );
           for (const row of rows)
             if (row.clientId === keyFor(row.chatId))
               existingByChat.set(row.chatId, row);
@@ -203,9 +203,9 @@ export const forwardHandlers = ({
             // message request can't be posted into either (issue #808).
             // A chat that doesn't exist reads the same as one they're not
             // in.
-            const chatRows = yield* Effect.tryPromise(() =>
+            const chatRows = yield* dbQuery(() =>
               db.select().from(chats).where(eq(chats.id, targetId)),
-            ).pipe(Effect.orDie);
+            );
             const chatRow = chatRows[0];
             if (
               !chatRow ||
@@ -269,9 +269,9 @@ export const forwardHandlers = ({
               row = copied.row;
               attachment = copied.attachment;
             } else {
-              row = yield* Effect.tryPromise(() =>
+              row = yield* dbQuery(() =>
                 insertMessage(db, { ...values, attachmentId: null }),
-              ).pipe(Effect.orDie);
+              );
             }
 
             if (!row && clientId !== null) {

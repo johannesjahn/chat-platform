@@ -6,7 +6,7 @@ import {
   type MessageRequest,
 } from "../Api.ts";
 import { AttachmentStorage } from "../AttachmentStorage.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { type ChatChange, RealtimeConnections } from "../Realtime.ts";
 
 import { chatParticipants, chats, users, type DbChat } from "../db/schema.ts";
@@ -22,7 +22,7 @@ export const getParticipants = (
   db: DrizzleDb,
   chatId: number,
 ): Effect.Effect<ReadonlyArray<ChatParticipant>> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select({
         userId: chatParticipants.userId,
@@ -41,7 +41,6 @@ export const getParticipants = (
       .innerJoin(users, eq(users.id, chatParticipants.userId))
       .where(eq(chatParticipants.chatId, chatId)),
   ).pipe(
-    Effect.orDie,
     Effect.map((rows) =>
       rows.map(
         ({
@@ -78,31 +77,25 @@ export const bumpChatVersion = (
   db: DrizzleDb,
   chatId: number,
 ): Effect.Effect<number> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .update(chats)
       .set({ version: sql`${chats.version} + 1` })
       .where(eq(chats.id, chatId))
       .returning({ version: chats.version }),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows[0]?.version ?? 0),
-  );
+  ).pipe(Effect.map((rows) => rows[0]?.version ?? 0));
 
 export const getChatVersion = (
   db: DrizzleDb,
   chatId: number,
 ): Effect.Effect<number> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select({ version: chats.version })
       .from(chats)
       .where(eq(chats.id, chatId))
       .limit(1),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows[0]?.version ?? 0),
-  );
+  ).pipe(Effect.map((rows) => rows[0]?.version ?? 0));
 
 // Pushes a `chat_updated` event to every current participant of `chatId` so
 // their chat list / open conversation can refetch instead of polling for it.
@@ -140,7 +133,7 @@ export const getParticipantsForChats = (
 ): Effect.Effect<Map<number, ChatParticipant[]>> =>
   chatIds.length === 0
     ? Effect.succeed(new Map())
-    : Effect.tryPromise(() =>
+    : dbQuery(() =>
         db
           .select({
             chatId: chatParticipants.chatId,
@@ -160,7 +153,6 @@ export const getParticipantsForChats = (
           .innerJoin(users, eq(users.id, chatParticipants.userId))
           .where(inArray(chatParticipants.chatId, chatIds)),
       ).pipe(
-        Effect.orDie,
         Effect.map((rows) => {
           const byChat = new Map<number, ChatParticipant[]>();
           for (const {
@@ -201,7 +193,7 @@ const isMessageRequestFor = (
   chatId: number,
   userId: number,
 ): Effect.Effect<MessageRequest | null> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select({
         requestPending: chatParticipants.requestPending,
@@ -215,10 +207,7 @@ const isMessageRequestFor = (
         ),
       )
       .limit(1),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => (rows[0] ? toMessageRequest(rows[0]) : null)),
-  );
+  ).pipe(Effect.map((rows) => (rows[0] ? toMessageRequest(rows[0]) : null)));
 
 // `participants`, if passed, is used as-is instead of re-fetching — callers
 // that already have a fresh list (e.g. because they just notified over the

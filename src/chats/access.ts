@@ -2,7 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { Forbidden, NotFound, type ChatRole } from "../Api.ts";
 import { blockedPeersAmong } from "../blocks.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import {
   chatParticipants,
   chats,
@@ -24,7 +24,7 @@ export const getParticipantRole = (
   chatId: number,
   userId: number,
 ): Effect.Effect<ChatRole | null> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select({ role: chatParticipants.role })
       .from(chatParticipants)
@@ -35,10 +35,7 @@ export const getParticipantRole = (
         ),
       )
       .limit(1),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows[0]?.role ?? null),
-  );
+  ).pipe(Effect.map((rows) => rows[0]?.role ?? null));
 
 export const getMessageOr404 = (
   db: DrizzleDb,
@@ -46,13 +43,13 @@ export const getMessageOr404 = (
   messageId: number,
 ): Effect.Effect<DbMessage, NotFound> =>
   Effect.gen(function* () {
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db
         .select()
         .from(messages)
         .where(and(eq(messages.chatId, chatId), eq(messages.id, messageId)))
         .limit(1),
-    ).pipe(Effect.orDie);
+    );
     const row = rows[0];
     if (!row)
       return yield* Effect.fail(
@@ -68,7 +65,7 @@ export const isParticipant = (
   chatId: number,
   userId: number,
 ): Effect.Effect<boolean> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select({ id: chatParticipants.id })
       .from(chatParticipants)
@@ -79,19 +76,16 @@ export const isParticipant = (
         ),
       )
       .limit(1),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows.length > 0),
-  );
+  ).pipe(Effect.map((rows) => rows.length > 0));
 
 export const getChatOr404 = (
   db: DrizzleDb,
   id: number,
 ): Effect.Effect<DbChat, NotFound> =>
   Effect.gen(function* () {
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db.select().from(chats).where(eq(chats.id, id)).limit(1),
-    ).pipe(Effect.orDie);
+    );
     const row = rows[0];
     if (!row)
       return yield* Effect.fail(
@@ -121,7 +115,7 @@ export const isAcceptedParticipant = (
   chatId: number,
   userId: number,
 ): Effect.Effect<boolean> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select({ id: chatParticipants.id })
       .from(chatParticipants)
@@ -133,10 +127,7 @@ export const isAcceptedParticipant = (
         ),
       )
       .limit(1),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows.length > 0),
-  );
+  ).pipe(Effect.map((rows) => rows.length > 0));
 
 // Every write other participants would see — a message, a typing ping, a
 // reaction, a pin, an edit — needs the chat accepted first (issue #808). A
@@ -175,9 +166,9 @@ export const requireNoBlockWith = (
   message: string,
 ): Effect.Effect<void, Forbidden> =>
   Effect.gen(function* () {
-    const blocked = yield* Effect.tryPromise(() =>
+    const blocked = yield* dbQuery(() =>
       blockedPeersAmong(db, actorId, otherIds),
-    ).pipe(Effect.orDie);
+    );
     if (blocked.size > 0) return yield* Effect.fail(new Forbidden({ message }));
   });
 
@@ -235,9 +226,6 @@ export const existingUserIds = (
 ): Effect.Effect<Set<number>> =>
   ids.length === 0
     ? Effect.succeed(new Set())
-    : Effect.tryPromise(() =>
+    : dbQuery(() =>
         db.select({ id: users.id }).from(users).where(inArray(users.id, ids)),
-      ).pipe(
-        Effect.orDie,
-        Effect.map((rows) => new Set(rows.map((r) => r.id))),
-      );
+      ).pipe(Effect.map((rows) => new Set(rows.map((r) => r.id))));

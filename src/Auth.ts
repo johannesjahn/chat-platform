@@ -9,7 +9,7 @@ import {
   Redacted,
   Schema,
 } from "effect";
-import { Db } from "./Db.ts";
+import { Db, dbQuery } from "./Db.ts";
 import { PubSub } from "./PubSub.ts";
 import { users } from "./db/schema.ts";
 import { Jwt, type TokenUser } from "./Jwt.ts";
@@ -53,13 +53,13 @@ export const TokenVersionCacheLive = Layer.effect(
       timeToLive: Duration.seconds(5),
       lookup: (userId: number) =>
         Effect.gen(function* () {
-          const rows = yield* Effect.tryPromise(() =>
+          const rows = yield* dbQuery(() =>
             db
               .select({ tokenVersion: users.tokenVersion })
               .from(users)
               .where(eq(users.id, userId))
               .limit(1),
-          ).pipe(Effect.orDie);
+          );
           return rows[0]?.tokenVersion ?? -1;
         }),
     });

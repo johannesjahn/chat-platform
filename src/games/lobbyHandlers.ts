@@ -8,7 +8,7 @@ import {
   type GameId,
 } from "../Api.ts";
 import { CurrentUser } from "../Auth.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import {
   gameDrawings,
   gameLobbies,
@@ -65,7 +65,7 @@ const leaveLobby = (
   userId: number,
 ) =>
   Effect.gen(function* () {
-    const removed = yield* Effect.tryPromise(() =>
+    const removed = yield* dbQuery(() =>
       db
         .delete(gameLobbyPlayers)
         .where(
@@ -75,23 +75,23 @@ const leaveLobby = (
           ),
         )
         .returning({ id: gameLobbyPlayers.id }),
-    ).pipe(Effect.orDie);
+    );
     if (removed.length === 0) return;
 
     const lobby = yield* loadLobby(db, lobbyId);
     if (!lobby) return;
-    const remaining = yield* Effect.tryPromise(() =>
+    const remaining = yield* dbQuery(() =>
       db
         .select({ userId: gameLobbyPlayers.userId })
         .from(gameLobbyPlayers)
         .where(eq(gameLobbyPlayers.lobbyId, lobbyId))
         .orderBy(asc(gameLobbyPlayers.joinedAt), asc(gameLobbyPlayers.id)),
-    ).pipe(Effect.orDie);
+    );
 
     if (remaining.length === 0) {
-      yield* Effect.tryPromise(() =>
+      yield* dbQuery(() =>
         db.delete(gameLobbies).where(eq(gameLobbies.id, lobbyId)),
-      ).pipe(Effect.orDie);
+      );
     } else if (lobby.hostId === userId) {
       yield* touchLobby(db, lobbyId, { hostId: remaining[0]!.userId });
     } else {
@@ -109,7 +109,7 @@ const leaveOtherLobbies = (
   keepLobbyId: number | null,
 ) =>
   Effect.gen(function* () {
-    const seats = yield* Effect.tryPromise(() =>
+    const seats = yield* dbQuery(() =>
       db
         .select({ lobbyId: gameLobbyPlayers.lobbyId })
         .from(gameLobbyPlayers)
@@ -121,7 +121,7 @@ const leaveOtherLobbies = (
                 ne(gameLobbyPlayers.lobbyId, keepLobbyId),
               ),
         ),
-    ).pipe(Effect.orDie);
+    );
     yield* Effect.forEach(
       seats,
       (seat) => leaveLobby(db, connections, seat.lobbyId, userId),
@@ -152,12 +152,12 @@ const joinLobby = (
       );
     }
     yield* leaveOtherLobbies(db, connections, userId, lobbyId);
-    yield* Effect.tryPromise(() =>
+    yield* dbQuery(() =>
       db
         .insert(gameLobbyPlayers)
         .values({ lobbyId, userId })
         .onConflictDoNothing(),
-    ).pipe(Effect.orDie);
+    );
     yield* touchLobby(db, lobbyId);
     yield* notifyLobbyChanged(connections, lobby);
     return yield* buildLobby({ db, connections }, lobbyId, userId);
@@ -172,13 +172,13 @@ const createLobby = (
   Effect.gen(function* () {
     yield* leaveOtherLobbies(db, connections, userId, null);
     // Opportunistic cleanup of long-abandoned lobbies (their seats cascade).
-    yield* Effect.tryPromise(() =>
+    yield* dbQuery(() =>
       db
         .delete(gameLobbies)
         .where(lt(gameLobbies.updatedAt, new Date(Date.now() - DEAD_LOBBY_MS))),
-    ).pipe(Effect.orDie);
+    );
     const rules = GAME_RULES[game];
-    const [lobby] = yield* Effect.tryPromise(() =>
+    const [lobby] = yield* dbQuery(() =>
       db
         .insert(gameLobbies)
         .values({
@@ -188,10 +188,10 @@ const createLobby = (
           settings: rules.kind === "drawing" ? DEFAULT_DRAWING_SETTINGS : null,
         })
         .returning(),
-    ).pipe(Effect.orDie);
-    yield* Effect.tryPromise(() =>
+    );
+    yield* dbQuery(() =>
       db.insert(gameLobbyPlayers).values({ lobbyId: lobby!.id, userId }),
-    ).pipe(Effect.orDie);
+    );
     yield* notifyLobbyChanged(connections, lobby!);
     return yield* buildLobby({ db, connections }, lobby!.id, userId);
   });
@@ -277,7 +277,7 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
     listGameLobbies: ({ params: { game } }) =>
       Effect.gen(function* () {
         const now = Date.now();
-        const lobbies = yield* Effect.tryPromise(() =>
+        const lobbies = yield* dbQuery(() =>
           db
             .select()
             .from(gameLobbies)
@@ -289,7 +289,7 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
             )
             .orderBy(desc(gameLobbies.updatedAt), desc(gameLobbies.id))
             .limit(MAX_LISTED_LOBBIES),
-        ).pipe(Effect.orDie);
+        );
         const snapshots = yield* loadSnapshots(db, lobbies);
         return {
           lobbies: snapshots
@@ -308,7 +308,7 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
         const now = Date.now();
-        const open = yield* Effect.tryPromise(() =>
+        const open = yield* dbQuery(() =>
           db
             .select()
             .from(gameLobbies)
@@ -320,7 +320,7 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
               ),
             )
             .orderBy(desc(gameLobbies.updatedAt)),
-        ).pipe(Effect.orDie);
+        );
         const players = yield* loadPlayers(
           db,
           open.map((lobby) => lobby.id),
@@ -404,7 +404,7 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
           }
           // Conditional on still "waiting", so a double-click (or two
           // tabs) can't restart a race that's already counting down.
-          const started = yield* Effect.tryPromise(() =>
+          const started = yield* dbQuery(() =>
             db
               .update(gameLobbies)
               .set({
@@ -418,7 +418,7 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
                 and(eq(gameLobbies.id, id), eq(gameLobbies.status, "waiting")),
               )
               .returning({ id: gameLobbies.id }),
-          ).pipe(Effect.orDie);
+          );
           if (started.length === 0) {
             return yield* invalid("The game already started");
           }
@@ -437,7 +437,7 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
           // The deal and the status flip land together: a reader must
           // never see a started game with no drawings (its timeline would
           // be empty, i.e. over before it began).
-          const started = yield* Effect.tryPromise(() =>
+          const started = yield* dbQuery(() =>
             db.transaction(async (tx) => {
               const flipped = await tx
                 .update(gameLobbies)
@@ -461,7 +461,7 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
               await tx.insert(gameDrawings).values(drawings);
               return true;
             }),
-          ).pipe(Effect.orDie);
+          );
           if (!started) return yield* invalid("The game already started");
         }
         yield* notifyLobbyChanged(connections, lobby);
@@ -501,13 +501,13 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
             new InvalidGameRequest({ message: "This lobby is full" }),
           );
         }
-        const invitee = yield* Effect.tryPromise(() =>
+        const invitee = yield* dbQuery(() =>
           db
             .select({ id: users.id })
             .from(users)
             .where(eq(users.id, payload.userId))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         if (invitee.length === 0) {
           return yield* Effect.fail(
             new NotFound({ message: "User not found" }),
@@ -516,7 +516,7 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
         yield* enforceInviteLimit(limiter, currentUser.id);
         // Re-inviting someone who hasn't opened the last invite to this
         // same lobby yet is a no-op rather than a second inbox entry.
-        const pending = yield* Effect.tryPromise(() =>
+        const pending = yield* dbQuery(() =>
           db
             .select({ id: notifications.id })
             .from(notifications)
@@ -530,7 +530,7 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
               ),
             )
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         if (pending.length > 0) return;
         // A recipient who blocked/muted the caller is silently skipped
         // inside createNotifications — the response is the same either
@@ -560,7 +560,7 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
         // The typing race keeps `passage` (hidden while waiting — see
         // toApiLobby) so the next start can avoid repeating it; Sketchy
         // carries its prompts over in its settings for the same reason.
-        const reset = yield* Effect.tryPromise(() =>
+        const reset = yield* dbQuery(() =>
           db
             .update(gameLobbies)
             .set({
@@ -586,9 +586,9 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
               and(eq(gameLobbies.id, id), eq(gameLobbies.round, lobby.round)),
             )
             .returning({ id: gameLobbies.id }),
-        ).pipe(Effect.orDie);
+        );
         if (reset.length > 0) {
-          yield* Effect.tryPromise(() =>
+          yield* dbQuery(() =>
             db
               .update(gameLobbyPlayers)
               .set({
@@ -599,11 +599,11 @@ export const lobbyHandlers = ({ limiter, db, connections }: GamesDeps) =>
                 detail: null,
               })
               .where(eq(gameLobbyPlayers.lobbyId, id)),
-          ).pipe(Effect.orDie);
+          );
           // Bluffs and votes go with their drawings (cascade).
-          yield* Effect.tryPromise(() =>
+          yield* dbQuery(() =>
             db.delete(gameDrawings).where(eq(gameDrawings.lobbyId, id)),
-          ).pipe(Effect.orDie);
+          );
           yield* notifyLobbyChanged(connections, lobby);
         }
         return yield* buildLobby({ db, connections }, id, currentUser.id);

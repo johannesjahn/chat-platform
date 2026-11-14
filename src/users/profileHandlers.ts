@@ -18,6 +18,7 @@ import { users } from "../db/schema.ts";
 import { type UsersDeps, type UsersHandlers } from "./handlerKit.ts";
 import { enforceRateLimit } from "../RateLimiter.ts";
 import { toPublicUser, toUserProfile } from "./userViews.ts";
+import { dbQuery } from "../Db.ts";
 
 // Avatar uploads involve real image-decoding/resizing work (processAvatar,
 // ImageProcessing.ts) and are a rare, deliberate action (changing your
@@ -47,7 +48,7 @@ export const profileHandlers = ({
         // `uploadAvatar` below is the inverse. Read the current `*Key` tokens
         // first so their storage objects can be swept once the row is cleared
         // (a `RETURNING` list reflects post-update values, i.e. the nulls).
-        const prevRows = yield* Effect.tryPromise(() =>
+        const prevRows = yield* dbQuery(() =>
           db
             .select({
               avatarSmallKey: users.avatarSmallKey,
@@ -57,10 +58,10 @@ export const profileHandlers = ({
             .from(users)
             .where(eq(users.id, currentUser.id))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         const prev = prevRows[0];
 
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .update(users)
             .set({
@@ -91,7 +92,7 @@ export const profileHandlers = ({
               statusExpiresAt: users.statusExpiresAt,
               bio: users.bio,
             }),
-        ).pipe(Effect.orDie);
+        );
         const updated = rows[0];
         if (!updated)
           return yield* Effect.die(new Error("UPDATE returned no rows"));
@@ -151,7 +152,7 @@ export const profileHandlers = ({
         // become orphans once the row is repointed below, so sweep them
         // afterwards. Read up front (an UPDATE ... RETURNING would hand back
         // the post-update values, not these).
-        const prevRows = yield* Effect.tryPromise(() =>
+        const prevRows = yield* dbQuery(() =>
           db
             .select({
               avatarSmallKey: users.avatarSmallKey,
@@ -161,7 +162,7 @@ export const profileHandlers = ({
             .from(users)
             .where(eq(users.id, currentUser.id))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         const prev = prevRows[0];
 
         // Mint a fresh token per variant and push the processed bytes to
@@ -197,7 +198,7 @@ export const profileHandlers = ({
         // Repoint the row at the freshly stored variants, nulling the legacy
         // base64 columns at the same time so a pre-#289 avatar's bytes stop
         // riding along in the row.
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .update(users)
             .set({
@@ -223,7 +224,7 @@ export const profileHandlers = ({
               statusEmoji: users.statusEmoji,
               statusExpiresAt: users.statusExpiresAt,
             }),
-        ).pipe(Effect.orDie);
+        );
         const updated = rows[0];
         if (!updated)
           return yield* Effect.die(new Error("UPDATE returned no rows"));
@@ -246,7 +247,7 @@ export const profileHandlers = ({
             ? new Date(Date.now() + payload.expiresInMinutes * 60_000)
             : null;
 
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .update(users)
             .set({
@@ -268,7 +269,7 @@ export const profileHandlers = ({
               statusEmoji: users.statusEmoji,
               statusExpiresAt: users.statusExpiresAt,
             }),
-        ).pipe(Effect.orDie);
+        );
         const updated = rows[0];
         if (!updated)
           return yield* Effect.die(new Error("UPDATE returned no rows"));

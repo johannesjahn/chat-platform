@@ -384,6 +384,12 @@ keeps the request parameters typed.
   (avatars.ts), `enforceUploadQuota` (attachments.ts), the `Post` view
   (posts.ts), the `User` view (users/userViews.ts). Helper modules never import
   handler modules.
+- **Database calls go through `dbQuery`** ([`src/Db.ts`](src/Db.ts)): it runs
+  one query/transaction thunk and dies on failure, the same as the
+  `Effect.tryPromise(...).pipe(Effect.orDie)` it replaced — one place to add
+  query spans or metrics. Code that deliberately keeps a database failure as a
+  typed error (the best-effort writes in `notifications.ts`) keeps its
+  `Effect.tryPromise`.
 - **API schemas are split by area too**: `src/api/<area>.ts` holds that area's
   schemas, errors and endpoint group; `src/Api.ts` re-exports them all and
   assembles `ChatApi`, so code keeps importing from `Api.ts`. The `api/`

@@ -10,7 +10,7 @@ import {
 } from "../Api.ts";
 import { AttachmentStorage } from "../AttachmentStorage.ts";
 import { CurrentUser } from "../Auth.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { serializableTransaction } from "../serializableTransaction.ts";
 
 import { chatParticipants, chats, type DbChat } from "../db/schema.ts";
@@ -49,7 +49,7 @@ const strangersTo = (
 ): Effect.Effect<Set<number>> =>
   userIds.length === 0
     ? Effect.succeed(new Set())
-    : Effect.tryPromise(() =>
+    : dbQuery(() =>
         db
           .selectDistinct({ userId: chatParticipants.userId })
           .from(chatParticipants)
@@ -67,7 +67,6 @@ const strangersTo = (
             ),
           ),
       ).pipe(
-        Effect.orDie,
         Effect.map((rows) => {
           const known = new Set(rows.map((row) => row.userId));
           return new Set(userIds.filter((id) => !known.has(id)));
@@ -126,7 +125,7 @@ const departParticipant = (
     }
 > =>
   Effect.gen(function* () {
-    const result = yield* Effect.tryPromise(() =>
+    const result = yield* dbQuery(() =>
       db.transaction(async (tx) => {
         await tx
           .delete(chatParticipants)
@@ -185,7 +184,7 @@ const departParticipant = (
 
         return { deleted: false as const, chat: updated[0]! };
       }),
-    ).pipe(Effect.orDie);
+    );
 
     if (result.deleted) {
       yield* result.sweepAvatar;
@@ -240,7 +239,7 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
           ...uniqueIds,
         ]);
         const now = new Date();
-        const created = yield* Effect.tryPromise(() =>
+        const created = yield* dbQuery(() =>
           db
             .insert(chats)
             .values({
@@ -251,12 +250,12 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
               updatedAt: now,
             })
             .returning(),
-        ).pipe(Effect.orDie);
+        );
         const chatRow = created[0];
         if (!chatRow)
           return yield* Effect.die(new Error("INSERT returned no rows"));
 
-        yield* Effect.tryPromise(() =>
+        yield* dbQuery(() =>
           db.insert(chatParticipants).values(
             [currentUser.id, ...uniqueIds].map((userId) => ({
               chatId: chatRow.id,
@@ -270,7 +269,7 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
               addedBy: userId === currentUser.id ? null : currentUser.id,
             })),
           ),
-        ).pipe(Effect.orDie);
+        );
 
         const participants = yield* getParticipants(db, chatRow.id);
         const participantIds = participants.map((p) => p.userId);
@@ -451,7 +450,7 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
         const currentUser = yield* CurrentUser;
         const row = yield* getChatOr404(db, id);
         yield* requireParticipant(db, id, currentUser.id);
-        const accepted = yield* Effect.tryPromise(() =>
+        const accepted = yield* dbQuery(() =>
           db
             .update(chatParticipants)
             .set({ requestPending: false })
@@ -463,7 +462,7 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
               ),
             )
             .returning({ id: chatParticipants.id }),
-        ).pipe(Effect.orDie);
+        );
         if (accepted.length === 0)
           return yield* buildChat(db, storage, row, currentUser.id);
 
@@ -525,9 +524,9 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
         yield* requireChatManager(db, currentUser, chatRow);
 
         const participants = yield* getParticipants(db, id);
-        const sweepAvatar = yield* Effect.tryPromise(() =>
+        const sweepAvatar = yield* dbQuery(() =>
           deleteChatRow(db, storage, id),
-        ).pipe(Effect.orDie);
+        );
 
         yield* connections.notifyUsers(
           participants.map((p) => p.userId),
@@ -565,7 +564,7 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
           );
 
         const previousOwnerId = chatRow.createdBy;
-        const row = yield* Effect.tryPromise(() =>
+        const row = yield* dbQuery(() =>
           db.transaction(async (tx) => {
             const updated = await tx
               .update(chats)
@@ -607,7 +606,7 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
             }
             return updated[0];
           }),
-        ).pipe(Effect.orDie);
+        );
         if (!row)
           return yield* Effect.die(new Error("UPDATE returned no rows"));
 
@@ -656,7 +655,7 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
             }),
           );
 
-        yield* Effect.tryPromise(() =>
+        yield* dbQuery(() =>
           db
             .update(chatParticipants)
             .set({ role: payload.role })
@@ -666,7 +665,7 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
                 eq(chatParticipants.userId, userId),
               ),
             ),
-        ).pipe(Effect.orDie);
+        );
 
         const version = yield* bumpChatVersion(db, id);
         const participants = yield* getParticipants(db, id);

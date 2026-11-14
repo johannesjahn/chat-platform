@@ -22,7 +22,7 @@ import {
 import { CurrentUser } from "./Auth.ts";
 import { loadAuthor, loadAuthors } from "./authors.ts";
 import { blockedOrMutedUserIds, blockedPeersAmong } from "./blocks.ts";
-import { Db, type DrizzleDb } from "./Db.ts";
+import { Db, type DrizzleDb, dbQuery } from "./Db.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import {
   commentReactionInfo,
@@ -178,21 +178,21 @@ const requireNoBlockWith = (
   message: string,
 ): Effect.Effect<void, Forbidden> =>
   Effect.gen(function* () {
-    const blocked = yield* Effect.tryPromise(() =>
+    const blocked = yield* dbQuery(() =>
       blockedPeersAmong(
         db,
         actorId,
         authorIds.filter((id) => id !== actorId),
       ),
-    ).pipe(Effect.orDie);
+    );
     if (blocked.size > 0) return yield* Effect.fail(new Forbidden({ message }));
   });
 
 const getPostOr404 = (db: DrizzleDb, id: number) =>
   Effect.gen(function* () {
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db.select().from(posts).where(eq(posts.id, id)).limit(1),
-    ).pipe(Effect.orDie);
+    );
     const row = rows[0];
     if (!row)
       return yield* Effect.fail(
@@ -203,9 +203,9 @@ const getPostOr404 = (db: DrizzleDb, id: number) =>
 
 const getCommentOr404 = (db: DrizzleDb, id: number) =>
   Effect.gen(function* () {
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db.select().from(comments).where(eq(comments.id, id)).limit(1),
-    ).pipe(Effect.orDie);
+    );
     const row = rows[0];
     if (!row)
       return yield* Effect.fail(
@@ -239,13 +239,13 @@ const listThread = (
         );
     }
 
-    const hiddenAuthorIds = yield* Effect.tryPromise(() =>
+    const hiddenAuthorIds = yield* dbQuery(() =>
       blockedOrMutedUserIds(db, currentUser.id),
-    ).pipe(Effect.orDie);
+    );
 
     // Fetch one past `limit` to derive `nextCursor` without a separate
     // COUNT(*), same trick as `listPosts`.
-    const fetched = yield* Effect.tryPromise(() =>
+    const fetched = yield* dbQuery(() =>
       db
         .select()
         .from(comments)
@@ -260,7 +260,7 @@ const listThread = (
         )
         .orderBy(asc(comments.id))
         .limit(limit + 1),
-    ).pipe(Effect.orDie);
+    );
     const hasMore = fetched.length > limit;
     const page = fetched.slice(0, limit);
     const lastRow = page[page.length - 1];
@@ -275,20 +275,20 @@ const listThread = (
     );
     const rows = page.filter((r) => authors.has(r.authorId));
 
-    const reactionInfo = yield* Effect.tryPromise(() =>
+    const reactionInfo = yield* dbQuery(() =>
       commentReactionInfo(
         db,
         rows.map((r) => r.id),
         currentUser.id,
       ),
-    ).pipe(Effect.orDie);
-    const replyCounts = yield* Effect.tryPromise(() =>
+    );
+    const replyCounts = yield* dbQuery(() =>
       commentReplyCounts(
         db,
         rows.map((r) => r.id),
         hiddenAuthorIds,
       ),
-    ).pipe(Effect.orDie);
+    );
 
     return {
       comments: rows.map((r) =>
@@ -328,7 +328,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           // duplicate row or an error. `.returning()` lets us tell an actual
           // new reaction from a no-op so we only fan out a realtime event
           // when the counts really changed.
-          const inserted = yield* Effect.tryPromise(() =>
+          const inserted = yield* dbQuery(() =>
             db
               .insert(likes)
               .values({
@@ -338,10 +338,10 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               })
               .onConflictDoNothing()
               .returning(),
-          ).pipe(Effect.orDie);
-          const reactions = yield* Effect.tryPromise(() =>
+          );
+          const reactions = yield* dbQuery(() =>
             postReactionInfoOne(db, id, currentUser.id),
-          ).pipe(Effect.orDie);
+          );
           if (inserted.length > 0) {
             yield* recordContentCreated("reaction");
             yield* connections.broadcastAll({
@@ -368,7 +368,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
           yield* getPostOr404(db, id);
-          const deleted = yield* Effect.tryPromise(() =>
+          const deleted = yield* dbQuery(() =>
             db
               .delete(likes)
               .where(
@@ -379,10 +379,10 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
                 ),
               )
               .returning(),
-          ).pipe(Effect.orDie);
-          const reactions = yield* Effect.tryPromise(() =>
+          );
+          const reactions = yield* dbQuery(() =>
             postReactionInfoOne(db, id, currentUser.id),
-          ).pipe(Effect.orDie);
+          );
           // Only broadcast if a reaction was actually removed — removing one
           // that isn't there is a no-op and shouldn't fan out a redundant
           // event.
@@ -428,7 +428,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             "You can't comment on this post because of a block",
           );
           const now = new Date();
-          const rows = yield* Effect.tryPromise(() =>
+          const rows = yield* dbQuery(() =>
             db
               .insert(comments)
               .values({
@@ -440,7 +440,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
                 updatedAt: now,
               })
               .returning(),
-          ).pipe(Effect.orDie);
+          );
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
@@ -489,16 +489,16 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           const row = yield* getCommentOr404(db, id);
-          const reactions = yield* Effect.tryPromise(() =>
+          const reactions = yield* dbQuery(() =>
             commentReactionInfoOne(db, id, currentUser.id),
-          ).pipe(Effect.orDie);
-          const replyCounts = yield* Effect.tryPromise(async () =>
+          );
+          const replyCounts = yield* dbQuery(async () =>
             commentReplyCounts(
               db,
               [row.id],
               await blockedOrMutedUserIds(db, currentUser.id),
             ),
-          ).pipe(Effect.orDie);
+          );
           return toApiComment(
             row,
             yield* loadCommentAuthor(db, row),
@@ -531,7 +531,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             "You can't reply to this comment because of a block",
           );
           const now = new Date();
-          const rows = yield* Effect.tryPromise(() =>
+          const rows = yield* dbQuery(() =>
             db
               .insert(comments)
               .values({
@@ -543,7 +543,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
                 updatedAt: now,
               })
               .returning(),
-          ).pipe(Effect.orDie);
+          );
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
@@ -586,7 +586,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             [comment.authorId],
             "You can't react to this comment because of a block",
           );
-          const inserted = yield* Effect.tryPromise(() =>
+          const inserted = yield* dbQuery(() =>
             db
               .insert(likes)
               .values({
@@ -596,10 +596,10 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               })
               .onConflictDoNothing()
               .returning(),
-          ).pipe(Effect.orDie);
-          const reactions = yield* Effect.tryPromise(() =>
+          );
+          const reactions = yield* dbQuery(() =>
             commentReactionInfoOne(db, id, currentUser.id),
-          ).pipe(Effect.orDie);
+          );
           // Per-comment reactions stay scoped to the post's room, not
           // broadcast feed-wide (see ReactionEvent in Realtime.ts). Only emit
           // on an actual new reaction, not a redundant repeat.
@@ -630,7 +630,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
           const comment = yield* getCommentOr404(db, id);
-          const deleted = yield* Effect.tryPromise(() =>
+          const deleted = yield* dbQuery(() =>
             db
               .delete(likes)
               .where(
@@ -641,10 +641,10 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
                 ),
               )
               .returning(),
-          ).pipe(Effect.orDie);
-          const reactions = yield* Effect.tryPromise(() =>
+          );
+          const reactions = yield* dbQuery(() =>
             commentReactionInfoOne(db, id, currentUser.id),
-          ).pipe(Effect.orDie);
+          );
           if (deleted.length > 0) {
             yield* connections.notifyPostRoom(comment.postId, {
               type: "reaction_changed",
@@ -675,19 +675,19 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
                 message: "You can only edit your own comments",
               }),
             );
-          const rows = yield* Effect.tryPromise(() =>
+          const rows = yield* dbQuery(() =>
             db
               .update(comments)
               .set({ content: payload.content, updatedAt: new Date() })
               .where(eq(comments.id, id))
               .returning(),
-          ).pipe(Effect.orDie);
+          );
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
-          const reactions = yield* Effect.tryPromise(() =>
+          const reactions = yield* dbQuery(() =>
             commentReactionInfoOne(db, id, currentUser.id),
-          ).pipe(Effect.orDie);
+          );
           yield* connections.notifyPostRoom(row.postId, {
             type: "comment_changed",
             postId: row.postId,
@@ -706,13 +706,13 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               commentId: row.id,
             },
           );
-          const replyCounts = yield* Effect.tryPromise(async () =>
+          const replyCounts = yield* dbQuery(async () =>
             commentReplyCounts(
               db,
               [row.id],
               await blockedOrMutedUserIds(db, currentUser.id),
             ),
-          ).pipe(Effect.orDie);
+          );
           return toApiComment(
             row,
             yield* loadCommentAuthor(db, row),
@@ -735,9 +735,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           // Deleting a top-level comment cascades to its replies and every
           // like on it (FKs in db/schema.ts) — the client refetches the
           // thread on the event, so no per-row cleanup here.
-          yield* Effect.tryPromise(() =>
-            db.delete(comments).where(eq(comments.id, id)),
-          ).pipe(Effect.orDie);
+          yield* dbQuery(() => db.delete(comments).where(eq(comments.id, id)));
           yield* connections.notifyPostRoom(existing.postId, {
             type: "comment_changed",
             postId: existing.postId,

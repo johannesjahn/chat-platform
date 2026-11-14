@@ -9,7 +9,7 @@ import {
 } from "../Api.ts";
 import { resolveAttachment, resolveAttachments } from "../attachments.ts";
 import { AttachmentStorage } from "../AttachmentStorage.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { messageReactionInfo, messageReactionInfoOne } from "../reactions.ts";
 import { messagePinStarInfo, messagePinStarInfoOne } from "../pinsStars.ts";
 import {
@@ -94,7 +94,7 @@ export const resolveParentPreviews = (
       ...new Set(parentIds.filter((id): id is number => id !== null)),
     ];
     if (ids.length === 0) return new Map<number, ParentMessagePreview>();
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db
         .select({
           id: messages.id,
@@ -109,7 +109,7 @@ export const resolveParentPreviews = (
         .from(messages)
         .innerJoin(users, eq(users.id, messages.senderId))
         .where(inArray(messages.id, ids)),
-    ).pipe(Effect.orDie);
+    );
     const previews = new Map<number, ParentMessagePreview>();
     for (const row of rows) {
       previews.set(row.id, {
@@ -158,16 +158,14 @@ export const buildMessageResponse = (
   Effect.gen(function* () {
     const readers = yield* getReaders(db, row);
     const attachment = yield* resolveAttachment(db, storage, row.attachmentId);
-    const reactions = yield* Effect.tryPromise(() =>
+    const reactions = yield* dbQuery(() =>
       messageReactionInfoOne(db, row.id, userId),
-    ).pipe(Effect.orDie);
+    );
     const parentMessage = yield* resolveParentPreview(db, row.parentMessageId);
     const pinStar =
       pinnedOverride !== undefined && starredOverride !== undefined
         ? { pinned: pinnedOverride, starred: starredOverride }
-        : yield* Effect.tryPromise(() =>
-            messagePinStarInfoOne(db, row.id, userId),
-          ).pipe(Effect.orDie);
+        : yield* dbQuery(() => messagePinStarInfoOne(db, row.id, userId));
     return toApiMessage(
       row,
       readers,
@@ -201,12 +199,12 @@ const hydrateMessages = (
       storage,
       rows.map((r) => r.attachmentId),
     );
-    const reactionsByMessage = yield* Effect.tryPromise(() =>
+    const reactionsByMessage = yield* dbQuery(() =>
       messageReactionInfo(db, ids, userId),
-    ).pipe(Effect.orDie);
-    const pinStarByMessage = yield* Effect.tryPromise(() =>
+    );
+    const pinStarByMessage = yield* dbQuery(() =>
       messagePinStarInfo(db, ids, userId),
-    ).pipe(Effect.orDie);
+    );
     const parentPreviews = yield* resolveParentPreviews(
       db,
       rows.map((r) => r.parentMessageId),
@@ -242,9 +240,9 @@ export const buildMessagesInOrder = (
 ): Effect.Effect<Message[]> =>
   Effect.gen(function* () {
     if (messageIds.length === 0) return [];
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db.select().from(messages).where(inArray(messages.id, messageIds)),
-    ).pipe(Effect.orDie);
+    );
     const byId = new Map(rows.map((r) => [r.id, r]));
     const ordered = messageIds
       .map((id) => byId.get(id))
@@ -259,14 +257,14 @@ export const getLastMessage = (
   userId: number,
 ): Effect.Effect<Message | null> =>
   Effect.gen(function* () {
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db
         .select()
         .from(messages)
         .where(eq(messages.chatId, chatId))
         .orderBy(desc(messages.id))
         .limit(1),
-    ).pipe(Effect.orDie);
+    );
     const row = rows[0];
     if (!row) return null;
     return yield* buildMessageResponse(db, storage, row, userId);
@@ -295,7 +293,7 @@ export const getReadersForMessages = (
     if (rows.length === 0) return byMessage;
     const chatIds = [...new Set(rows.map((r) => r.chatId))];
     const oldest = Math.min(...rows.map((r) => r.id));
-    const watermarks = yield* Effect.tryPromise(() =>
+    const watermarks = yield* dbQuery(() =>
       db
         .select({
           chatId: chatParticipants.chatId,
@@ -311,7 +309,7 @@ export const getReadersForMessages = (
           ),
         )
         .orderBy(chatParticipants.userId),
-    ).pipe(Effect.orDie);
+    );
     for (const row of rows) {
       byMessage.set(
         row.id,
@@ -345,7 +343,7 @@ export const getLastMessagesForChats = (
     // per-chat `ORDER BY id DESC LIMIT 1` is one backward step down the
     // `(chat_id, id)` index; a `max(id) … GROUP BY chat_id` instead reads
     // every message in every chat (issue #659).
-    const latest = yield* Effect.tryPromise(() =>
+    const latest = yield* dbQuery(() =>
       db
         .select({
           // Spelled out with an alias: in a single-table select Drizzle
@@ -360,35 +358,35 @@ export const getLastMessagesForChats = (
         })
         .from(chats)
         .where(inArray(chats.id, chatIds)),
-    ).pipe(Effect.orDie);
+    );
     const lastIds = latest
       .map((r) => r.lastId)
       .filter((id): id is number => id !== null);
     if (lastIds.length === 0) return byChat;
 
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db.select().from(messages).where(inArray(messages.id, lastIds)),
-    ).pipe(Effect.orDie);
+    );
     const readersByMessage = yield* getReadersForMessages(db, rows);
     const attachmentsByRow = yield* resolveAttachments(
       db,
       storage,
       rows.map((r) => r.attachmentId),
     );
-    const reactionsByMessage = yield* Effect.tryPromise(() =>
+    const reactionsByMessage = yield* dbQuery(() =>
       messageReactionInfo(
         db,
         rows.map((r) => r.id),
         userId,
       ),
-    ).pipe(Effect.orDie);
-    const pinStarByMessage = yield* Effect.tryPromise(() =>
+    );
+    const pinStarByMessage = yield* dbQuery(() =>
       messagePinStarInfo(
         db,
         rows.map((r) => r.id),
         userId,
       ),
-    ).pipe(Effect.orDie);
+    );
     const parentPreviews = yield* resolveParentPreviews(
       db,
       rows.map((r) => r.parentMessageId),

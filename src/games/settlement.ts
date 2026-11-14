@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, isNull, ne, or } from "drizzle-orm";
 import { Effect } from "effect";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { gameLobbies, gameResults } from "../db/schema.ts";
 import { guessAccuracy, placeOf } from "./drawing/scoring.ts";
 import {
@@ -33,17 +33,14 @@ export const buildLobby = (
 // The player holding `game`'s all-time best score right now (earliest to
 // reach it on a tie), or null before anyone has finished a race.
 export const currentRecordHolder = (db: DrizzleDb, game: string) =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select({ userId: gameResults.userId, score: gameResults.score })
       .from(gameResults)
       .where(eq(gameResults.game, game))
       .orderBy(desc(gameResults.score), asc(gameResults.id))
       .limit(1),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows[0] ?? null),
-  );
+  ).pipe(Effect.map((rows) => rows[0] ?? null));
 
 // Tells the holder of `game`'s all-time best (as it stood before `results`
 // were recorded) that they've lost it, if one of `results` took it from
@@ -137,7 +134,7 @@ export const settleIfOver = (deps: NotificationDeps, snapshot: LobbySnapshot) =>
     if (!results) return;
 
     const record = yield* currentRecordHolder(db, lobby.game);
-    const settled = yield* Effect.tryPromise(() =>
+    const settled = yield* dbQuery(() =>
       db.transaction(async (tx) => {
         const claimed = await tx
           .update(gameLobbies)
@@ -157,7 +154,7 @@ export const settleIfOver = (deps: NotificationDeps, snapshot: LobbySnapshot) =>
         if (results.length > 0) await tx.insert(gameResults).values(results);
         return true;
       }),
-    ).pipe(Effect.orDie);
+    );
     if (settled) {
       yield* notifyRecordBroken(deps, lobby.game, lobby.id, record, results);
     }

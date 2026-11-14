@@ -37,6 +37,7 @@ import {
   type LobbySnapshot,
 } from "./lobbyStore.ts";
 import { buildLobby } from "./settlement.ts";
+import { dbQuery } from "../Db.ts";
 
 // A started Sketchy game's state, or a 400 for anything else — the common
 // preamble of every Sketchy submission.
@@ -140,7 +141,7 @@ export const drawingHandlers = ({ db, connections }: GamesDeps) =>
         if (unknown !== undefined) {
           return yield* invalid(`Unknown theme pack: ${unknown}`);
         }
-        const updated = yield* Effect.tryPromise(() =>
+        const updated = yield* dbQuery(() =>
           db
             .update(gameLobbies)
             .set({
@@ -158,7 +159,7 @@ export const drawingHandlers = ({ db, connections }: GamesDeps) =>
               and(eq(gameLobbies.id, id), eq(gameLobbies.status, "waiting")),
             )
             .returning({ id: gameLobbies.id }),
-        ).pipe(Effect.orDie);
+        );
         if (updated.length === 0) {
           return yield* invalid(
             "Settings can only be changed before the game starts",
@@ -180,7 +181,7 @@ export const drawingHandlers = ({ db, connections }: GamesDeps) =>
           (row) => row.turn === stage.turn && row.artistId === currentUser.id,
         );
         if (!mine) return yield* invalid("You have nothing to draw");
-        const saved = yield* Effect.tryPromise(() =>
+        const saved = yield* dbQuery(() =>
           db
             .update(gameDrawings)
             .set({
@@ -194,7 +195,7 @@ export const drawingHandlers = ({ db, connections }: GamesDeps) =>
               ),
             )
             .returning({ id: gameDrawings.id }),
-        ).pipe(Effect.orDie);
+        );
         if (saved.length === 0) {
           return yield* invalid("You already submitted your drawing");
         }
@@ -229,7 +230,7 @@ export const drawingHandlers = ({ db, connections }: GamesDeps) =>
         }
         // Stamped with the instant the stage was checked against, so the
         // timeline sees it land inside the stage (see `stageEnd`).
-        const inserted = yield* Effect.tryPromise(() =>
+        const inserted = yield* dbQuery(() =>
           db
             .insert(gameBluffs)
             .values({
@@ -241,12 +242,12 @@ export const drawingHandlers = ({ db, connections }: GamesDeps) =>
             })
             .onConflictDoNothing()
             .returning({ id: gameBluffs.id }),
-        ).pipe(Effect.orDie);
+        );
         // Lost a race with a double-submit (this author already has a
         // bluff here) or with an identical bluff from someone else — the
         // two unique constraints `onConflictDoNothing` can hit.
         if (inserted.length === 0) {
-          const own = yield* Effect.tryPromise(() =>
+          const own = yield* dbQuery(() =>
             db
               .select({ id: gameBluffs.id })
               .from(gameBluffs)
@@ -257,7 +258,7 @@ export const drawingHandlers = ({ db, connections }: GamesDeps) =>
                 ),
               )
               .limit(1),
-          ).pipe(Effect.orDie);
+          );
           return yield* invalid(
             own.length > 0
               ? "You already wrote a bluff for this one"
@@ -286,7 +287,7 @@ export const drawingHandlers = ({ db, connections }: GamesDeps) =>
         if (choice.kind === "bluff" && choice.authorId === currentUser.id) {
           return yield* invalid("You can't vote for your own bluff");
         }
-        const inserted = yield* Effect.tryPromise(() =>
+        const inserted = yield* dbQuery(() =>
           db
             .insert(gameVotes)
             .values({
@@ -297,7 +298,7 @@ export const drawingHandlers = ({ db, connections }: GamesDeps) =>
             })
             .onConflictDoNothing()
             .returning({ id: gameVotes.id }),
-        ).pipe(Effect.orDie);
+        );
         if (inserted.length === 0) {
           return yield* invalid("You already voted on this one");
         }

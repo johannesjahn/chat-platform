@@ -27,7 +27,7 @@ import {
 import { resolveAttachments } from "../attachments.ts";
 import { CurrentUser } from "../Auth.ts";
 import { blockedOrMutedUserIds } from "../blocks.ts";
-import { type DrizzleDb } from "../Db.ts";
+import { type DrizzleDb, dbQuery } from "../Db.ts";
 
 import { postReactionInfo } from "../reactions.ts";
 import { containsPattern } from "../search.ts";
@@ -130,7 +130,7 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
           );
 
         const pattern = containsPattern(q);
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .select({
               id: users.id,
@@ -158,15 +158,15 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
             )
             .orderBy(users.username)
             .limit(USER_SEARCH_RESULTS_LIMIT),
-        ).pipe(Effect.orDie);
+        );
         return rows.map(toPublicUser);
       }),
     listContacts: () =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           contactsOf(db, currentUser.id, MAX_CONTACTS),
-        ).pipe(Effect.orDie);
+        );
         return rows.map(toPublicUser);
       }),
     lookupUsersByUsername: ({ query: { usernames } }) =>
@@ -191,7 +191,7 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
           );
         if (names.length === 0) return [];
 
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .select(publicUserColumns)
             .from(users)
@@ -200,14 +200,14 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
             // index lookup rather than a scan.
             .where(inArray(sql`lower(${users.username})`, names))
             .orderBy(users.username),
-        ).pipe(Effect.orDie);
+        );
         // Names with no account are simply missing from the result — the
         // client renders those mentions as plain text.
         return rows.map(toPublicUser);
       }),
     getUser: ({ params: { id } }) =>
       Effect.gen(function* () {
-        const rows = yield* Effect.tryPromise(() =>
+        const rows = yield* dbQuery(() =>
           db
             .select({
               id: users.id,
@@ -226,7 +226,7 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
             .from(users)
             .where(eq(users.id, id))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         if (!rows[0])
           return yield* Effect.fail(
             new NotFound({ message: `User ${id} not found` }),
@@ -238,13 +238,13 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
         const currentUser = yield* CurrentUser;
         const limit = urlParams.limit ?? DEFAULT_POSTS_LIMIT;
 
-        const targetRows = yield* Effect.tryPromise(() =>
+        const targetRows = yield* dbQuery(() =>
           db
             .select({ id: users.id })
             .from(users)
             .where(eq(users.id, id))
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         if (!targetRows[0])
           return yield* Effect.fail(
             new NotFound({ message: `User ${id} not found` }),
@@ -264,7 +264,7 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
         // `totalCount` below is the one place this endpoint does pay for a
         // dedicated `COUNT(*)`, since it's scoped to a single author and
         // backed by `posts_author_id_idx` rather than scanning all posts.
-        const fetched = yield* Effect.tryPromise(() =>
+        const fetched = yield* dbQuery(() =>
           db
             .select()
             .from(posts)
@@ -276,7 +276,7 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
             )
             .orderBy(desc(posts.id))
             .limit(limit + 1),
-        ).pipe(Effect.orDie);
+        );
         const hasMore = fetched.length > limit;
         const page = fetched.slice(0, limit);
         const lastRow = page[page.length - 1];
@@ -287,31 +287,31 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
         const authored = yield* withAuthors(db, page);
         const rows = authored.map((a) => a.row);
 
-        const reactionInfo = yield* Effect.tryPromise(() =>
+        const reactionInfo = yield* dbQuery(() =>
           postReactionInfo(
             db,
             rows.map((r) => r.id),
             currentUser.id,
           ),
-        ).pipe(Effect.orDie);
-        const commentCounts = yield* Effect.tryPromise(async () =>
+        );
+        const commentCounts = yield* dbQuery(async () =>
           postCommentCounts(
             db,
             rows.map((r) => r.id),
             await blockedOrMutedUserIds(db, currentUser.id),
           ),
-        ).pipe(Effect.orDie);
+        );
         const attachments = yield* resolveAttachments(
           db,
           storage,
           rows.map((r) => r.attachmentId),
         );
-        const totalRows = yield* Effect.tryPromise(() =>
+        const totalRows = yield* dbQuery(() =>
           db
             .select({ total: count() })
             .from(posts)
             .where(eq(posts.authorId, id)),
-        ).pipe(Effect.orDie);
+        );
 
         return {
           posts: authored.map(({ row: r, author }) =>

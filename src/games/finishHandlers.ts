@@ -24,6 +24,7 @@ import {
   currentRecordHolder,
   notifyRecordBroken,
 } from "./settlement.ts";
+import { dbQuery } from "../Db.ts";
 
 // A finish that left the client just before `endsAt` can land a moment
 // after it; this much network slack is still credited.
@@ -90,7 +91,7 @@ export const finishHandlers = ({ db, connections }: GamesDeps) =>
         // Guarded on "not finished yet" and on the round still being the
         // one this finish was timed against — a rematch landing in between
         // must not have this credited to the fresh round.
-        const recorded = yield* Effect.tryPromise(() =>
+        const recorded = yield* dbQuery(() =>
           db
             .update(gameLobbyPlayers)
             .set({
@@ -107,7 +108,7 @@ export const finishHandlers = ({ db, connections }: GamesDeps) =>
               ),
             )
             .returning({ id: gameLobbyPlayers.id }),
-        ).pipe(Effect.orDie);
+        );
         if (recorded.length === 0) {
           return yield* Effect.fail(
             new InvalidGameRequest({ message: "You already finished" }),
@@ -118,7 +119,7 @@ export const finishHandlers = ({ db, connections }: GamesDeps) =>
         // grows with arrival order and "how many finished faster" is the
         // place. Two finishes landing in the very same instant can share
         // a place — a tie is the honest outcome there anyway.
-        const [faster] = yield* Effect.tryPromise(() =>
+        const [faster] = yield* dbQuery(() =>
           db
             .select({ count: sql<number>`cast(count(*) as int)` })
             .from(gameLobbyPlayers)
@@ -128,16 +129,16 @@ export const finishHandlers = ({ db, connections }: GamesDeps) =>
                 lt(gameLobbyPlayers.durationMs, durationMs),
               ),
             ),
-        ).pipe(Effect.orDie);
+        );
         const place = (faster?.count ?? 0) + 1;
-        yield* Effect.tryPromise(() =>
+        yield* dbQuery(() =>
           db
             .update(gameLobbyPlayers)
             .set({ place })
             .where(eq(gameLobbyPlayers.id, recorded[0]!.id)),
-        ).pipe(Effect.orDie);
+        );
         const record = yield* currentRecordHolder(db, lobby.game);
-        yield* Effect.tryPromise(() =>
+        yield* dbQuery(() =>
           db.insert(gameResults).values({
             game: lobby.game,
             userId: currentUser.id,
@@ -149,7 +150,7 @@ export const finishHandlers = ({ db, connections }: GamesDeps) =>
             place,
             playerCount: players.length,
           }),
-        ).pipe(Effect.orDie);
+        );
         yield* notifyRecordBroken({ db, connections }, lobby.game, id, record, [
           { userId: currentUser.id, score: result.score },
         ]);
@@ -191,7 +192,7 @@ export const finishHandlers = ({ db, connections }: GamesDeps) =>
 
         // Guarded like a race finish: once, and only for the round this
         // game was scored against.
-        const recorded = yield* Effect.tryPromise(() =>
+        const recorded = yield* dbQuery(() =>
           db
             .update(gameLobbyPlayers)
             .set({
@@ -209,7 +210,7 @@ export const finishHandlers = ({ db, connections }: GamesDeps) =>
               ),
             )
             .returning({ id: gameLobbyPlayers.id }),
-        ).pipe(Effect.orDie);
+        );
         if (recorded.length === 0) {
           return yield* invalid("You already finished");
         }

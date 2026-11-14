@@ -18,6 +18,15 @@ export type DrizzleDb = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 export class Db extends Context.Service<Db, DrizzleDb>()("Db") {}
 
+// Runs one database call (a query builder, a transaction, a `Promise.all` of
+// them) as an Effect. A database failure is a defect, not a typed error —
+// there's nothing a handler could do about it but surface a 500 — so it dies,
+// exactly like the `Effect.tryPromise(...).pipe(Effect.orDie)` this replaces
+// (issue #811). Every query goes through here, which leaves one place to add
+// query spans or metrics.
+export const dbQuery = <A>(run: () => PromiseLike<A>): Effect.Effect<A> =>
+  Effect.tryPromise(run).pipe(Effect.orDie);
+
 // PGlite ships contrib extensions as separate WASM bundles that have to be
 // registered when the instance is created — `CREATE EXTENSION pg_trgm` in
 // migration 0023 fails on an instance that wasn't told about it. A real

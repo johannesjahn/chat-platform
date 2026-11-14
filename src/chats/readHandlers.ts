@@ -17,6 +17,7 @@ import {
   notifyChatUpdated,
 } from "./chatState.ts";
 import { getUnreadTotal } from "./unread.ts";
+import { dbQuery } from "../Db.ts";
 
 export const readHandlers = ({ db, storage, connections }: ChatsDeps) =>
   ({
@@ -31,7 +32,7 @@ export const readHandlers = ({ db, storage, connections }: ChatsDeps) =>
         const chatRow = yield* getChatOr404(db, id);
         yield* requireParticipant(db, id, currentUser.id);
 
-        const target = yield* Effect.tryPromise(() =>
+        const target = yield* dbQuery(() =>
           db
             .select({ id: messages.id })
             .from(messages)
@@ -39,7 +40,7 @@ export const readHandlers = ({ db, storage, connections }: ChatsDeps) =>
               and(eq(messages.chatId, id), eq(messages.id, payload.messageId)),
             )
             .limit(1),
-        ).pipe(Effect.orDie);
+        );
         if (!target[0])
           return yield* Effect.fail(
             new NotFound({
@@ -59,7 +60,7 @@ export const readHandlers = ({ db, storage, connections }: ChatsDeps) =>
         // `previous` self-join returns the watermark it replaced, which
         // bounds the newly read range below.
         const previous = alias(chatParticipants, "previous");
-        const advanced = yield* Effect.tryPromise(() =>
+        const advanced = yield* dbQuery(() =>
           db
             .update(chatParticipants)
             .set({ lastReadMessageId: payload.messageId })
@@ -73,7 +74,7 @@ export const readHandlers = ({ db, storage, connections }: ChatsDeps) =>
               ),
             )
             .returning({ previous: previous.lastReadMessageId }),
-        ).pipe(Effect.orDie);
+        );
 
         // Only messages from others past the old watermark are newly read,
         // so the work is bounded by what was unread, not the history
@@ -87,15 +88,15 @@ export const readHandlers = ({ db, storage, connections }: ChatsDeps) =>
             gt(messages.id, advanced[0].previous ?? 0),
             lte(messages.id, payload.messageId),
           );
-          const counted = yield* Effect.tryPromise(() =>
+          const counted = yield* dbQuery(() =>
             db.select({ total: count() }).from(messages).where(newlyReadRange),
-          ).pipe(Effect.orDie);
+          );
           newlyRead = counted[0]?.total ?? 0;
           // Expand phase: keep `message_reads` written for replicas still
           // on the previous release, which read receipts from it. One
           // INSERT … SELECT, so there's no bind-parameter limit to hit.
           if (newlyRead > 0) {
-            yield* Effect.tryPromise(() =>
+            yield* dbQuery(() =>
               db.execute(sql`
                   INSERT INTO ${messageReads} (message_id, user_id, read_at)
                   SELECT ${messages.id}, ${currentUser.id}, now()
@@ -103,7 +104,7 @@ export const readHandlers = ({ db, storage, connections }: ChatsDeps) =>
                   WHERE ${newlyReadRange}
                   ON CONFLICT DO NOTHING
                 `),
-            ).pipe(Effect.orDie);
+            );
           }
         }
 
