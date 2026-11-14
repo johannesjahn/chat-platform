@@ -1,19 +1,8 @@
 import { HttpApiBuilder } from "effect/http-api";
-import {
-  and,
-  count,
-  desc,
-  eq,
-  inArray,
-  lt,
-  notExists,
-  notInArray,
-} from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { and, desc, eq, lt, notInArray } from "drizzle-orm";
 import { Effect, Metric } from "effect";
 import {
   type Attachment,
-  type AuthorSummary,
   ChatApi,
   DEFAULT_POSTS_LIMIT,
   Forbidden,
@@ -27,95 +16,23 @@ import {
 } from "./attachments.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
-import { loadAuthor, loadAuthors } from "./authors.ts";
+import { loadAuthor } from "./authors.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
-import { Db, type DrizzleDb } from "./Db.ts";
+import { Db, type DrizzleDb, dbQuery } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { notifyMentions } from "./notifications.ts";
-import { postReactionInfo, type ReactionSummary } from "./reactions.ts";
+import { postReactionInfo } from "./reactions.ts";
 import { RealtimeConnections } from "./Realtime.ts";
-import { comments, type DbPost, posts } from "./db/schema.ts";
-
-const NO_REACTIONS: ReactionSummary[] = [];
-
-// A post's caption (issue #765) only counts on an "attachment" post: an edit
-// by a replica that predates captions can turn a captioned attachment into a
-// text post without clearing the column, and that leftover never shows.
-const captionOf = (row: {
-  readonly contentType: string;
-  readonly caption: string | null;
-}): string | null => (row.contentType === "attachment" ? row.caption : null);
-
-// `author` is the post's embedded byline (issue #750), resolved by the caller
-// in one batch per response — see authors.ts.
-export const toApiPost = (
-  row: typeof posts.$inferSelect,
-  author: AuthorSummary,
-  reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
-  attachment: Attachment | null = null,
-  commentCount = 0,
-) => ({
-  id: row.id,
-  authorId: row.authorId,
-  author,
-  contentType: row.contentType,
-  content: row.content,
-  attachment,
-  caption: captionOf(row),
-  createdAt: row.createdAt.getTime(),
-  updatedAt: row.updatedAt.getTime(),
-  reactions: [...reactions],
-  commentCount,
-});
-
-// Total comments (top-level *and* replies) per post for a batch of ids, in one
-// grouped COUNT over `comments` — mirrors `postReactionInfo`'s shape/rationale
-// (computed on read, not stored — see reactions.ts and the `commentCount`
-// comment on `Post` in Api.ts). The `comments_post_id_idx` (postId, id) index
-// keeps a page's worth cheap. Ids with no comments are simply absent from the
-// map; callers default them to 0.
-//
-// `hiddenAuthorIds` (the viewer's `blockedOrMutedUserIds`, issue #661) makes
-// the count match what the thread endpoints show that viewer: a hidden
-// author's comments and replies aren't counted, nor are other people's replies
-// under a hidden author's top-level comment, since that comment — the only way
-// to reach them — is hidden too.
-export const postCommentCounts = async (
-  db: DrizzleDb,
-  postIds: ReadonlyArray<number>,
-  hiddenAuthorIds: ReadonlyArray<number> = [],
-): Promise<Map<number, number>> => {
-  const result = new Map<number, number>();
-  if (postIds.length === 0) return result;
-  const parent = alias(comments, "parent");
-  const rows = await db
-    .select({ postId: comments.postId, total: count() })
-    .from(comments)
-    .where(
-      and(
-        inArray(comments.postId, [...postIds]),
-        hiddenAuthorIds.length > 0
-          ? and(
-              notInArray(comments.authorId, [...hiddenAuthorIds]),
-              notExists(
-                db
-                  .select({ id: parent.id })
-                  .from(parent)
-                  .where(
-                    and(
-                      eq(parent.id, comments.parentCommentId),
-                      inArray(parent.authorId, [...hiddenAuthorIds]),
-                    ),
-                  ),
-              ),
-            )
-          : undefined,
-      ),
-    )
-    .groupBy(comments.postId);
-  for (const row of rows) result.set(row.postId, Number(row.total));
-  return result;
-};
+import { type DbPost, posts } from "./db/schema.ts";
+import {
+  NO_REACTIONS,
+  captionOf,
+  decodePostsCursor,
+  encodePostsCursor,
+  postCommentCounts,
+  toApiPost,
+  withAuthors,
+} from "./posts.ts";
 
 // Admins can edit/delete any post; everyone else only their own.
 const canModify = (
@@ -134,25 +51,11 @@ const mentionText = (row: {
 }): string | undefined =>
   row.contentType === "text" ? row.content : (captionOf(row) ?? undefined);
 
-// Keyset cursor for `listPosts` over its `id desc` sort — see
-// `PostsPageQuery` in Api.ts for why this is a cursor rather than an offset.
-// Posts are never reordered by edits, so the last row's id alone is enough
-// (no tie-breaker column needed, unlike `listChats`'s cursor). Exported —
-// `listUserPosts` in UsersHandler.ts shares the same cursor format since it
-// sorts posts the same way, just pre-filtered to one author.
-export const encodePostsCursor = (id: number): string =>
-  Buffer.from(String(id)).toString("base64url");
-
-export const decodePostsCursor = (cursor: string): number | null => {
-  const id = Number(Buffer.from(cursor, "base64url").toString());
-  return Number.isInteger(id) ? id : null;
-};
-
 const getPostOr404 = (db: DrizzleDb, id: number) =>
   Effect.gen(function* () {
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db.select().from(posts).where(eq(posts.id, id)).limit(1),
-    ).pipe(Effect.orDie);
+    );
     const row = rows[0];
     if (!row)
       return yield* Effect.fail(
@@ -170,21 +73,6 @@ const loadPostAuthor = (db: DrizzleDb, row: DbPost) =>
     () => new NotFound({ message: `Post ${row.id} not found` }),
   );
 
-// Every post in `rows` paired with its embedded author, fetched in a single
-// batch; a row whose author is already gone is dropped (see authors.ts).
-export const withAuthors = (db: DrizzleDb, rows: ReadonlyArray<DbPost>) =>
-  loadAuthors(
-    db,
-    rows.map((r) => r.authorId),
-  ).pipe(
-    Effect.map((authors) =>
-      rows.flatMap((row) => {
-        const author = authors.get(row.authorId);
-        return author ? [{ row, author }] : [];
-      }),
-    ),
-  );
-
 // The full API view of a stored post as `viewerId` sees it — its reactions,
 // comment count (hiding authors the viewer blocked/muted) and attachment.
 const buildPostResponse = (
@@ -195,16 +83,16 @@ const buildPostResponse = (
 ) =>
   Effect.gen(function* () {
     const author = yield* loadPostAuthor(db, row);
-    const reactions = yield* Effect.tryPromise(() =>
+    const reactions = yield* dbQuery(() =>
       postReactionInfo(db, [row.id], viewerId),
-    ).pipe(Effect.orDie);
-    const commentCounts = yield* Effect.tryPromise(async () =>
+    );
+    const commentCounts = yield* dbQuery(async () =>
       postCommentCounts(
         db,
         [row.id],
         await blockedOrMutedUserIds(db, viewerId),
       ),
-    ).pipe(Effect.orDie);
+    );
     const attachments = yield* resolveAttachments(db, storage, [
       row.attachmentId,
     ]);
@@ -226,16 +114,13 @@ const findPostByClientId = (
   authorId: number,
   clientId: string,
 ): Effect.Effect<DbPost | undefined> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     db
       .select()
       .from(posts)
       .where(and(eq(posts.authorId, authorId), eq(posts.clientId, clientId)))
       .limit(1),
-  ).pipe(
-    Effect.orDie,
-    Effect.map((rows) => rows[0]),
-  );
+  ).pipe(Effect.map((rows) => rows[0]));
 
 export const PostsHandlerLive = HttpApiBuilder.group(
   ChatApi,
@@ -271,15 +156,15 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           // distinguish them. Kept as a `NOT IN` filter alongside the keyset
           // cursor rather than post-filtering the page, so a page never comes
           // back short after excluding a blocked author's posts.
-          const hiddenAuthorIds = yield* Effect.tryPromise(() =>
+          const hiddenAuthorIds = yield* dbQuery(() =>
             blockedOrMutedUserIds(db, currentUser.id),
-          ).pipe(Effect.orDie);
+          );
 
           // Fetch one row past `limit` instead of firing a separate
           // `COUNT(*)` — whether that extra row came back is all
           // `nextCursor` needs, and unlike a full-table count this stays
           // cheap no matter how large `posts` grows (issue #51).
-          const fetched = yield* Effect.tryPromise(() =>
+          const fetched = yield* dbQuery(() =>
             db
               .select()
               .from(posts)
@@ -293,7 +178,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               )
               .orderBy(desc(posts.id))
               .limit(limit + 1),
-          ).pipe(Effect.orDie);
+          );
           const hasMore = fetched.length > limit;
           const page = fetched.slice(0, limit);
           const lastRow = page[page.length - 1];
@@ -301,20 +186,20 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             hasMore && lastRow ? encodePostsCursor(lastRow.id) : null;
           const authored = yield* withAuthors(db, page);
           const rows = authored.map((a) => a.row);
-          const reactionInfo = yield* Effect.tryPromise(() =>
+          const reactionInfo = yield* dbQuery(() =>
             postReactionInfo(
               db,
               rows.map((r) => r.id),
               currentUser.id,
             ),
-          ).pipe(Effect.orDie);
-          const commentCounts = yield* Effect.tryPromise(() =>
+          );
+          const commentCounts = yield* dbQuery(() =>
             postCommentCounts(
               db,
               rows.map((r) => r.id),
               hiddenAuthorIds,
             ),
-          ).pipe(Effect.orDie);
+          );
           const attachments = yield* resolveAttachments(
             db,
             storage,
@@ -378,7 +263,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           // calls can land a millisecond apart, and a freshly created post's
           // createdAt/updatedAt should be identical, not just close.
           const now = new Date();
-          const rows = yield* Effect.tryPromise(() =>
+          const rows = yield* dbQuery(() =>
             db
               .insert(posts)
               .values({
@@ -393,7 +278,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               })
               .onConflictDoNothing()
               .returning(),
-          ).pipe(Effect.orDie);
+          );
           const row = rows[0];
           if (!row && payload.clientId !== undefined) {
             // Lost a race with a concurrent create of the same key.
@@ -458,7 +343,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             );
           }
 
-          const rows = yield* Effect.tryPromise(() =>
+          const rows = yield* dbQuery(() =>
             db
               .update(posts)
               .set({
@@ -477,23 +362,23 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               })
               .where(eq(posts.id, id))
               .returning(),
-          ).pipe(Effect.orDie);
+          );
           const row = rows[0];
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
           // Editing a post's content leaves its reactions and comments
           // untouched — reflect the existing state in the response rather than
           // resetting it.
-          const reactions = yield* Effect.tryPromise(() =>
+          const reactions = yield* dbQuery(() =>
             postReactionInfo(db, [row.id], currentUser.id),
-          ).pipe(Effect.orDie);
-          const commentCounts = yield* Effect.tryPromise(async () =>
+          );
+          const commentCounts = yield* dbQuery(async () =>
             postCommentCounts(
               db,
               [row.id],
               await blockedOrMutedUserIds(db, currentUser.id),
             ),
-          ).pipe(Effect.orDie);
+          );
           yield* connections.broadcastAll({
             type: "post_changed",
             postId: row.id,
@@ -533,9 +418,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               }),
             );
 
-          yield* Effect.tryPromise(() =>
-            db.delete(posts).where(eq(posts.id, id)),
-          ).pipe(Effect.orDie);
+          yield* dbQuery(() => db.delete(posts).where(eq(posts.id, id)));
           yield* connections.broadcastAll({
             type: "post_changed",
             postId: id,

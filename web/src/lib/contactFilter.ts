@@ -5,8 +5,9 @@ type User = components["schemas"]["User"];
 // `contacts` narrowed to those whose username or display name contains
 // `query` (case-insensitive), keeping their recency order — the same
 // "fragment of either name" matching the directory search does server-side
-// (`searchUsers` in src/UsersHandler.ts). A blank query keeps everyone.
-// Kept apart from contacts.ts so its unit test doesn't load the API client.
+// (`searchUsers` in src/users/directoryHandlers.ts). A blank query keeps
+// everyone. Kept apart from contacts.ts so its unit test doesn't load the API
+// client.
 export function filterContacts<
   T extends Pick<User, "username" | "displayName">,
 >(contacts: readonly T[], query: string): T[] {

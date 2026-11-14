@@ -62,8 +62,8 @@ export const hashIp = (ip: string): string => {
 // Per-request holder for the authenticated username, logged by
 // redactedLogger. A mutable box rather than a plain value because the logger
 // wraps the whole request: authentication runs further in (Auth.ts's
-// middleware, UsersHandler.ts's login/refresh) and only scopes services to
-// what it wraps, so the logger couldn't see a value provided there — it can
+// middleware, users/authHandlers.ts's login/refresh) and only scopes services
+// to what it wraps, so the logger couldn't see a value provided there — it can
 // see a write into the box it provided itself. The default box (outside any
 // request) just absorbs writes.
 export const LogUser = Context.Reference<{ username: string | undefined }>(

@@ -171,7 +171,7 @@ would leave a pure substring hit unhighlighted.
 **Contacts below the 3-character floor.** User search needs 3 characters
 (issue #48) so the directory can't be browsed. Below that, New chat, `/users`
 and the palette's People section suggest `GET /users/contacts` (`contactsOf`
-in [`src/UsersHandler.ts`](src/UsersHandler.ts), issue #764), filtered
+in [`src/users/directoryHandlers.ts`](src/users/directoryHandlers.ts), issue #764), filtered
 client-side by `filterContacts` ([`web/src/lib/contactFilter.ts`](web/src/lib/contactFilter.ts)).
 It must only ever return people the caller already shares an **accepted**
 chat with (pending message requests on either side don't count), minus
@@ -207,8 +207,10 @@ the migration all read as having signed up when it ran.
 ## Games (arcade)
 
 Multiplayer games live under `/games` in the frontend, backed by the `games`
-group in [`src/Api.ts`](src/Api.ts) and
-[`src/GamesHandler.ts`](src/GamesHandler.ts). The first game is a typing race;
+group in [`src/api/games.ts`](src/api/games.ts) and
+[`src/GamesHandler.ts`](src/GamesHandler.ts) (handlers in `src/games/*Handlers.ts`,
+lobby loading in `lobbyStore.ts`, settling in `settlement.ts`). The first game
+is a typing race;
 everything else is shared plumbing keyed by a game slug (`GameId`):
 
 - **Lobbies are rows, phases are derived.** `game_lobbies`/`game_lobby_players`
@@ -232,7 +234,7 @@ everything else is shared plumbing keyed by a game slug (`GameId`):
   scored, rate-limited per connection (see `makeIncomingHandler` in
   [`src/RealtimeSocket.ts`](src/RealtimeSocket.ts)).
 
-**Adding a game:** add its slug to `GameId` (Api.ts); add a `GameRules`
+**Adding a game:** add its slug to `GameId` (api/games.ts); add a `GameRules`
 module next to [`src/games/typing.ts`](src/games/typing.ts) and register it in
 `GAME_RULES` ([`src/games/rules.ts`](src/games/rules.ts)) — a `"race"` (every
 finish scored as it lands) or its own kind, with its seat bounds; add its
@@ -276,7 +278,8 @@ A Drawful-style party game: everyone draws a secret prompt, then each drawing
 takes a turn in the spotlight — bluff (write a fake title), vote (find the
 real one), reveal. Server logic is in
 [`src/games/drawing/`](src/games/drawing/), kept as pure modules (`timeline`,
-`ballot`, `scoring`, `view`, `prompts`) that GamesHandler.ts feeds rows into;
+`ballot`, `scoring`, `view`, `prompts`) that `src/games/drawingHandlers.ts`
+and `lobbyStore.ts` feed rows into;
 the client is `web/src/components/games/drawing/`. Load-bearing rules:
 
 - **Stages are derived, like phases.** `buildTimeline` lays the game out from
@@ -356,11 +359,49 @@ fails on a call anywhere else in `src/`. Load-bearing:
 A new video or audio MIME type in `ALLOWED_ATTACHMENT_MIME_TYPES` needs its demuxer
 and decoders checked in `MediaInput.ts`.
 
+## Handler layout
+
+The big groups — `chats`, `users`, `games` — are split by area (issue #811):
+`src/ChatsHandler.ts`, `src/UsersHandler.ts` and `src/GamesHandler.ts` only
+resolve the services and combine per-area handler maps from
+[`src/chats/`](src/chats/), [`src/users/`](src/users/) and
+[`src/games/`](src/games/) with `handlers.handleAll`, which fails to typecheck
+if an endpoint is left unhandled. Each `*Handlers.ts` module returns its slice
+`satisfies GroupHandlers<"group">` ([`src/handlerKit.ts`](src/handlerKit.ts),
+aliased per group in its `handlerKit.ts` next to the group's `*Deps`), which
+keeps the request parameters typed.
+
+- **Put a new endpoint in the area it belongs to**, and a helper next to its
+  only caller until a second area needs it; then it moves to that group's
+  shared modules. For chats: `sendPath.ts` (the one send path —
+  `insertMessage`, `directChatBlocked`, `publishNewMessage`), `access.ts` (404
+  lookups and participation/role checks), `chatState.ts` (participants,
+  `version`, `buildChat`, and `publishChatChange` — bump + publish with no
+  `change`, the tail of every mutation but a send or a read receipt),
+  `messageViews.ts` (the `Message` view) and `unread.ts`. For users: `userViews.ts` and `credentials.ts`. For games:
+  `lobbyStore.ts` and `settlement.ts`.
+- **Handler modules never import each other.** Code another group needs lives
+  in a library module: `enforceRateLimit` (RateLimiter.ts), avatar helpers
+  (avatars.ts), `enforceUploadQuota` (attachments.ts), the `Post` view
+  (posts.ts), the `User` view (users/userViews.ts). Helper modules never import
+  handler modules.
+- **Database calls go through `dbQuery`** ([`src/Db.ts`](src/Db.ts)): it runs
+  one query/transaction thunk and dies on failure, the same as the
+  `Effect.tryPromise(...).pipe(Effect.orDie)` it replaced — one place to add
+  query spans or metrics. Code that deliberately keeps a database failure as a
+  typed error (the best-effort writes in `notifications.ts`) keeps its
+  `Effect.tryPromise`.
+- **API schemas are split by area too**: `src/api/<area>.ts` holds that area's
+  schemas, errors and endpoint group; `src/Api.ts` re-exports them all and
+  assembles `ChatApi`, so code keeps importing from `Api.ts`. The `api/`
+  modules build schemas at load time, so they must not import each other in
+  a cycle: shared pieces go in `api/common.ts` (and errors in `api/errors.ts`).
+
 ## Forwarding messages
 
 `POST /chats/:id/messages/:messageId/forward` (issue #601) posts a copy of a
 message into up to `MAX_FORWARD_TARGETS` chats — `forwardMessage` in
-[`src/ChatsHandler.ts`](src/ChatsHandler.ts), picked from
+[`src/chats/forwardHandlers.ts`](src/chats/forwardHandlers.ts), picked from
 [`ForwardDialog`](web/src/components/chat/ForwardDialog.tsx). Load-bearing:
 
 - **A forward is a new message owned by the forwarder**, built through the
@@ -392,7 +433,7 @@ message into up to `MAX_FORWARD_TARGETS` chats — `forwardMessage` in
 Being put in a group by someone you share no chat with makes it a _message
 request_ for you (issue #785): `chat_participants.request_pending` and
 `added_by` (migration `0038`), decided by `strangersTo` in
-[`src/ChatsHandler.ts`](src/ChatsHandler.ts), accepted with
+[`src/chats/membershipHandlers.ts`](src/chats/membershipHandlers.ts), accepted with
 `POST /chats/:id/accept`, declined with the existing `/leave`. Load-bearing:
 
 - **Per participant, not per chat.** The same group can be a request for one
@@ -413,7 +454,11 @@ request_ for you (issue #785): `chat_participants.request_pending` and
   goes through `requireAcceptedParticipant` (403); a forward into a request
   is that target's `unavailable`; `markRead` is a silent no-op, so viewing a
   request sends no receipt. Reading, private stars, forwarding _out_, leave
-  and accept stay open. A new chat write must use the same guard.
+  and accept stay open. A new chat write must use the same guard: chat
+  handlers start with `loadChatAs(db, id, currentUser, access)` (or
+  `loadGroupChatAs`, chats/access.ts), whose required `access` —
+  `"participant"`, `"accepted"`, `"manager"` or `"owner"` — makes the choice
+  explicit.
 - **`request_pending` defaults to `false` in the database**, like
   `users.created_at`, so old replicas' inserts and pre-migration rows read as
   accepted.
@@ -431,7 +476,7 @@ Posts and messages carry an optional `caption` next to an attachment (issue
   before captions — never repurpose it as the caption.
 - **`caption` only counts when `content_type = 'attachment'`.** An old
   replica can re-type a row and leave the column behind, so every reader goes
-  through `captionOf` (PostsHandler.ts) / `messageCaption` (ChatsHandler.ts),
+  through `captionOf` (posts.ts) / `messageCaption` (chats/messageViews.ts),
   and the search arms restrict on content type themselves.
 - **Edits: omitted keeps, `null` clears**, so a client that predates captions
   never wipes one. Sending a `caption` on a non-attachment is a 400.
@@ -509,7 +554,14 @@ bar, the immersive chat shell and the phone menu stay exactly as they were.
   restoration with a `data-scroll-restoration-id` that's unique per mount and
   renamed on every scroll (issue #614), so no remembered offset ever matches
   it — any new code that scrolls the thread must call
-  `renameForScrollRestoration` too.
+  `renameForScrollRestoration` too. Its pieces sit beside it in
+  `components/chat/` (issue #811): `useThreadScroll` (that scroll ownership,
+  paging older history, jump-to-message — and `renameForScrollRestoration`),
+  `useMarkReadWhileVisible`, `pendingMessages.ts` + `PendingMessageList`
+  (the outbox wiring), `ConversationHeader` and `ThreadMessages`; a bubble's
+  hooks and action group are in `components/chat/bubble/`, the group
+  settings' sections in `components/chat/group/`. Role checks the UI mirrors
+  from the server go through `web/src/lib/chatRoles.ts`.
 - **Chat details panel.** At `xl`+ the chats layout grows an optional third
   pane, [`ChatDetailsPanel`](web/src/components/chat/ChatDetailsPanel.tsx)
   (issue #563), toggled from the conversation header and remembered per
@@ -659,7 +711,7 @@ open) underpins all three; don't remove it. Request counts are pinned by
 
 In-app notifications (issue #317) — the header bell and the `/notifications`
 inbox — are backed by the `notifications` table (migration `0027`) and the
-`notifications` group in [`src/Api.ts`](src/Api.ts), read by
+`notifications` group in [`src/api/notifications.ts`](src/api/notifications.ts), read by
 [`src/NotificationsHandler.ts`](src/NotificationsHandler.ts). Rows are written
 by the handler that performed the action, always through `createNotifications`
 in [`src/notifications.ts`](src/notifications.ts), which owns the suppression
@@ -687,7 +739,7 @@ your all-time #1 spot on a game's leaderboard.
   (via `GET /comments/:id`), an invite's lobby, or a record's leaderboard.
   Modified clicks and Enter still navigate; ↑/↓ move the preview.
 
-To add a notification type: add it to `NotificationType` (Api.ts), call
+To add a notification type: add it to `NotificationType` (api/notifications.ts), call
 `createNotifications` from the handler that causes it, give it a sentence and
 icon in `web/src/components/NotificationRow.tsx` / `NOTIFICATION_ICONS`
 (`web/src/components/notificationIcons.ts`), a target in
@@ -830,10 +882,11 @@ run it (`bun test ./src`) after touching any endpoint signature.
 
 effect's `Schema.isMinLength(n)` documents a string as `minLength:
 Math.ceil(n / 2)` (JSON Schema counts code points, `string.length` UTF-16
-units), which halved every documented floor (issue #761). In `src/Api.ts`
-use the local `isMinLength` wrapper instead, which documents the enforced
-bound; `src/openapi.test.ts` fails on a direct `Schema.isMinLength(` call and
-checks the spec's `minLength`/`maxLength` against the `MIN_*`/`MAX_*`
+units), which halved every documented floor (issue #761). In the API schemas
+(`src/Api.ts` and `src/api/`) use the `isMinLength` wrapper from
+`api/common.ts` instead, which documents the enforced bound;
+`src/openapi.test.ts` fails on a direct `Schema.isMinLength(` call in any of
+them and checks the spec's `minLength`/`maxLength` against the `MIN_*`/`MAX_*`
 constants.
 
 ## CI

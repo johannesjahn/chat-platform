@@ -1,5 +1,7 @@
 import { RedisClient } from "bun";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Metric } from "effect";
+import { TooManyRequests } from "./Api.ts";
+import { rateLimitRejectionsTotal } from "./Metrics.ts";
 
 // Result of attempting to consume one unit from a fixed-window rate-limit
 // bucket identified by some key (an IP, an account, ...).
@@ -164,3 +166,43 @@ export const RedisRateLimiterLive = Layer.sync(RateLimiter, () => {
 export const RateLimiterLive = process.env.REDIS_URL
   ? RedisRateLimiterLive
   : InMemoryRateLimiterLive;
+
+// Consumes `key` from the rate limiter and fails with TooManyRequests if the
+// caller has exceeded `limit` calls within `windowSeconds`. The failure
+// message is deliberately generic — it must never reveal which bucket (IP
+// vs. account) tripped, so it can't be used to enumerate accounts. On a
+// rejection, `rate_limit_rejections_total` is labeled only by the bucket
+// *kind* (the part of `key` before its first ":", e.g. "login"/"register") —
+// never by the IP/account/user id the rest of `key` encodes.
+// Exported — shared with chats/chatHandlers.ts's group-avatar upload, which
+// needs the same per-account bucketing/rejection-metric behavior.
+export const enforceRateLimit = (
+  limiter: RateLimiter["Service"],
+  key: string,
+  limit: number,
+  windowSeconds: number,
+): Effect.Effect<void, TooManyRequests> =>
+  Effect.flatMap(limiter.consume(key, limit, windowSeconds), (result) =>
+    rejectIfLimited(key, result),
+  );
+
+const rejectIfLimited = (
+  key: string,
+  result: RateLimitResult,
+): Effect.Effect<void, TooManyRequests> =>
+  Effect.gen(function* () {
+    if (!result.allowed) {
+      yield* Metric.update(
+        Metric.withAttributes(rateLimitRejectionsTotal, {
+          limiter: key.split(":")[0] ?? key,
+        }),
+        1,
+      );
+      return yield* Effect.fail(
+        new TooManyRequests({
+          message: "Too many requests. Please try again later.",
+          retryAfterSeconds: result.retryAfterSeconds,
+        }),
+      );
+    }
+  });

@@ -53,12 +53,12 @@ export type ChatChange =
     };
 
 // Pushed to every user who had access to a chat the moment it's deleted
-// (see `deleteChat`/`leaveChat` in ChatsHandler.ts) — a dedicated event
-// rather than a `chat_updated` with a bumped version because there's no
-// surviving row to bump: the chat, its participants, and its messages are
-// already gone by the time this is published. Clients drop it from any
-// cached list/detail view unconditionally, without going through the
-// version staleness check `chat_updated` uses (issue #66).
+// (see `deleteChat`/`leaveChat` in chats/membershipHandlers.ts) — a
+// dedicated event rather than a `chat_updated` with a bumped version because
+// there's no surviving row to bump: the chat, its participants, and its
+// messages are already gone by the time this is published. Clients drop it
+// from any cached list/detail view unconditionally, without going through
+// the version staleness check `chat_updated` uses (issue #66).
 export type ChatDeletedEvent = {
   readonly type: "chat_deleted";
   readonly chatId: number;
@@ -110,7 +110,7 @@ export type CommentEvent = {
 // never `reactedByMe`, which is inherently per-viewer and can't be baked into
 // one broadcast payload shared by every recipient (each client's own reaction
 // state is reconciled from its own mutation response instead — see
-// EngagementHandler.ts/ChatsHandler.ts).
+// EngagementHandler.ts/chats/messageHandlers.ts).
 export type ReactionEvent = {
   readonly type: "reaction_changed";
   readonly targetType: "post" | "comment" | "message";
@@ -160,7 +160,7 @@ export type MessagePinEvent = {
 };
 
 // Pushed to a chat's other participants while `userId` is composing a
-// message in it (see `POST /chats/:id/typing` in ChatsHandler.ts). Purely
+// message in it (see `sendTyping` in chats/messageHandlers.ts). Purely
 // transient — the server keeps no "is typing" state at all, so there's no
 // corresponding "stopped typing" event; a client that stops receiving fresh
 // pushes for a given chat/user pair is expected to expire the indicator
@@ -174,11 +174,11 @@ export type TypingEvent = {
 };
 
 // Pushed whenever someone sets/clears/updates their custom status (issue
-// #218, see `updateStatus` in UsersHandler.ts) — to the same audience as
-// `PresenceEvent` (their contacts and their own tabs, via `notifyContacts`).
-// Anyone else sees the new status the next time they fetch the user.
-// Carries the full, already-expiry-resolved state (see `effectiveStatus` in
-// UsersHandler.ts) so a client never needs a follow-up fetch to render it.
+// #218, see `updateStatus` in users/profileHandlers.ts) — to the same audience
+// as `PresenceEvent` (their contacts and their own tabs, via `notifyContacts`).
+// Anyone else sees the new status the next time they fetch the user. Carries
+// the full, already-expiry-resolved state (see `effectiveStatus` in
+// users/userViews.ts) so a client never needs a follow-up fetch to render it.
 export type StatusEvent = {
   readonly type: "status_changed";
   readonly userId: number;
@@ -222,7 +222,7 @@ export type GameProgressEvent = {
 };
 
 // Pushed to a game lobby's room whenever someone says something in its chat
-// (see `postGameChat` in GamesHandler.ts). Id-only — clients refetch
+// (see `postGameChat` in games/lobbyChatHandlers.ts). Id-only — clients refetch
 // `GET /games/lobbies/:id/chat`, which also drops authors they've blocked.
 export type GameChatEvent = {
   readonly type: "game_chat";

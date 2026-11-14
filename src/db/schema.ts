@@ -62,7 +62,7 @@ export const users = pgTable(
     // Custom status (issue #218) — a short message plus an optional emoji,
     // e.g. "In a meeting" 📅, with an optional auto-expiry. All three are
     // null when unset. A status past `statusExpiresAt` is treated as unset
-    // everywhere a user is read (see `effectiveStatus` in UsersHandler.ts)
+    // everywhere a user is read (see `effectiveStatus` in users/userViews.ts)
     // rather than needing a background job to null the columns out.
     statusText: text("status_text"),
     statusEmoji: text("status_emoji"),
@@ -74,7 +74,7 @@ export const users = pgTable(
     // never read or write it.
     bio: text("bio"),
     // Running total of `attachments.size` over the user's uploads, so the
-    // upload quota check (`enforceUploadQuota` in AttachmentsHandler.ts) is a
+    // upload quota check (`enforceUploadQuota` in attachments.ts) is a
     // single-row read instead of a `SUM` over every attachment the user ever
     // uploaded (issue #326). The app never writes it: a trigger on
     // `attachments` (migration 0033) adjusts it on every insert, delete and
@@ -320,11 +320,11 @@ export const chats = pgTable("chats", {
     .$defaultFn(() => new Date()),
   // Monotonically incremented on every participant-visible change to this
   // chat (message sent/edited/deleted, read receipts advancing, rename,
-  // participants added) — see `bumpChatVersion` in ChatsHandler.ts. Carried
-  // on the `chat_updated` realtime event and in the `Chat` API response so
-  // clients can tell exactly when they've missed an event (the version they
-  // observe jumps by more than one) instead of only being able to guess from
-  // a dropped/delayed socket message (issue #55).
+  // participants added) — see `bumpChatVersion` in chats/chatState.ts.
+  // Carried on the `chat_updated` realtime event and in the `Chat` API
+  // response so clients can tell exactly when they've missed an event (the
+  // version they observe jumps by more than one) instead of only being able
+  // to guess from a dropped/delayed socket message (issue #55).
   version: integer("version").notNull().default(1),
   // Uploaded-and-cropped group avatar (only set for `type: "group"` chats),
   // stored and served exactly like an uploaded user avatar (issue #269/#289)
@@ -364,9 +364,9 @@ export const chatParticipants = pgTable(
     // chats leave every participant at the "member" default since there's
     // nothing to manage. Kept in sync with `chats.createdBy` at every point
     // that reassigns ownership (transferOwnership, and the automatic
-    // reassignment in `departParticipant` — see ChatsHandler.ts) so exactly
-    // one participant holds "owner" whenever the chat has a non-null
-    // `createdBy`.
+    // reassignment in `departParticipant` — see chats/membershipHandlers.ts)
+    // so exactly one participant holds "owner" whenever the chat has a
+    // non-null `createdBy`.
     role: text("role", { enum: ["owner", "admin", "member"] })
       .notNull()
       .default("member"),
@@ -384,10 +384,10 @@ export const chatParticipants = pgTable(
     // a group by someone they shared no (accepted) chat with, until they
     // accept. A pending row is kept out of the participant's chat list and
     // unread counts, and out of presence in both directions — see
-    // `isMessageRequestFor` in ChatsHandler.ts — and out of message search,
-    // with every write others would see (sends, forwards in, reactions,
-    // pins, typing, edits, read receipts) refused until accepted (issue
-    // #808, `requireAcceptedParticipant`). A database default (not an
+    // `isMessageRequestFor` in chats/chatState.ts — and out of message
+    // search, with every write others would see (sends, forwards in,
+    // reactions, pins, typing, edits, read receipts) refused until accepted
+    // (issue #808, `requireAcceptedParticipant`). A database default (not an
     // app-side one) for the same rollout reason as `users.created_at`: old
     // replicas insert participants without the column, and those must read
     // as accepted, which is how every row predating the migration reads.
@@ -436,13 +436,14 @@ export const messages = pgTable(
     caption: text("caption"),
     // Threaded/quoted replies (issue #217) — null for a normal message, set to
     // the id of the message this one is replying to. Validated at create time
-    // (see ChatsHandler.ts) to reference a message in the *same* chat. The
-    // `AnyPgColumn` return annotation is required for this self-referencing FK
-    // (same as `comments.parentCommentId`), without which the column type
-    // would be inferred circularly. `set null` (not cascade): deleting a
-    // message that others replied to should leave those replies in place — the
-    // quoted preview just falls back to "message unavailable" client-side —
-    // rather than silently removing every reply along with it.
+    // (`createMessage` in chats/messageHandlers.ts) to reference a message in
+    // the *same* chat. The `AnyPgColumn` return annotation is required for
+    // this self-referencing FK (same as `comments.parentCommentId`), without
+    // which the column type would be inferred circularly. `set null` (not
+    // cascade): deleting a message that others replied to should leave those
+    // replies in place — the quoted preview just falls back to "message
+    // unavailable" client-side — rather than silently removing every reply
+    // along with it.
     parentMessageId: integer("parent_message_id").references(
       (): AnyPgColumn => messages.id,
       { onDelete: "set null" },
@@ -713,7 +714,8 @@ export type NewDbLike = typeof likes.$inferInsert;
 // only ever has the code on hand. An invite is valid to redeem while
 // `revokedAt` is null, `expiresAt` is null or in the future, and (if
 // `maxUses` is set) `useCount < maxUses` — all enforced in the application
-// layer at redemption time (see ChatsHandler.ts), not by constraints here.
+// layer at redemption time (`joinChatViaInvite` in chats/inviteHandlers.ts),
+// not by constraints here.
 export const chatInvites = pgTable(
   "chat_invites",
   {
@@ -756,16 +758,16 @@ export type NewDbChatInvite = typeof chatInvites.$inferInsert;
 //     blocker's feed, suppresses their chat notifications, *and* prevents
 //     either party from sending a message in a direct chat between them (the
 //     block is symmetric for messaging — see `directBlockExists` in
-//     src/blocks.ts and `createMessage` in ChatsHandler.ts).
+//     src/blocks.ts and `directChatBlocked` in chats/sendPath.ts).
 //   - "mute" is the softer action: it likewise hides the target's posts and
 //     suppresses their chat notifications for the muter, but never blocks
 //     messaging — a muted user can still DM you, you just aren't pinged.
 // A given pair is either blocked *or* muted, never both at once — the unique
 // constraint below means re-issuing the other action on the same target
 // upgrades/downgrades the existing row rather than stacking a second one (see
-// `setBlock` in UsersHandler.ts). Both FKs cascade: deleting either account
-// takes the relationship rows it's party to (in either direction) with it. A
-// row is only ever created by the blocker themselves, so there's no
+// `setBlock` in users/blockHandlers.ts). Both FKs cascade: deleting either
+// account takes the relationship rows it's party to (in either direction) with
+// it. A row is only ever created by the blocker themselves, so there's no
 // notion/audit of "who muted whom" beyond the two ids here.
 export const userBlocks = pgTable(
   "user_blocks",
@@ -795,8 +797,8 @@ export const userBlocks = pgTable(
     // first) can't answer, so it gets its own index.
     index("user_blocks_blocked_id_idx").on(table.blockedId),
     // A user can't block or mute themselves — enforced in the API layer too
-    // (see `setBlock` in UsersHandler.ts), but pinned down here so a bad row
-    // can never exist regardless of how it's written.
+    // (see `setBlock` in users/blockHandlers.ts), but pinned down here so a bad
+    // row can never exist regardless of how it's written.
     check("user_blocks_no_self", sql`${table.blockerId} <> ${table.blockedId}`),
   ],
 );
@@ -812,7 +814,7 @@ export type NewDbUserBlock = typeof userBlocks.$inferInsert;
 // or "started" (a race was kicked off at `startsAt`). The finer-grained
 // phase clients render (countdown → racing → finished) is derived from
 // `startsAt`/`endsAt` and the players' results at read time (see
-// `lobbyPhase` in GamesHandler.ts) rather than written by a timer, so it's
+// `lobbyPhase` in games/lobbyStore.ts) rather than written by a timer, so it's
 // correct on every replica without any instance having to own a lobby.
 export const gameLobbies = pgTable(
   "game_lobbies",
@@ -920,11 +922,11 @@ export type ReflexPlayerDetail = {
   readonly rounds: ReadonlyArray<ReflexRoundResult>;
 };
 
-// A lobby's chat (see `listGameChat`/`postGameChat` in GamesHandler.ts):
-// players and spectators talking between rounds. Scratch space tied to the
-// lobby — it goes when the lobby does — and never part of any score. Games
-// whose play hides secrets (Sketchy's prompts) close it while a game is
-// running (see `chatDuringPlay` in src/games/rules.ts).
+// A lobby's chat (see `listGameChat`/`postGameChat` in
+// games/lobbyChatHandlers.ts): players and spectators talking between rounds.
+// Scratch space tied to the lobby — it goes when the lobby does — and never
+// part of any score. Games whose play hides secrets (Sketchy's prompts) close
+// it while a game is running (see `chatDuringPlay` in src/games/rules.ts).
 export const gameLobbyMessages = pgTable(
   "game_lobby_messages",
   {

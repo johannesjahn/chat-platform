@@ -108,7 +108,7 @@ export const websocketConnectionsTotal = Metric.counter(
 
 // Labeled by `limiter` (e.g. "global"/"register"/"login"/"refresh"/
 // "change-password"/"engagement" — the bucket *kind*, not which specific IP
-// or account tripped it: see enforceRateLimit in UsersHandler.ts, which
+// or account tripped it: see enforceRateLimit in RateLimiter.ts, which
 // derives this from the part of its rate-limit key before the first ":").
 // A 429 would otherwise be invisible in httpRequestsTotal, indistinguishable
 // from any other status.

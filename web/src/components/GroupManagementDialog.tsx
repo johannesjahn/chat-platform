@@ -4,19 +4,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import {
   Check,
-  Copy,
-  Crown,
   ImageUp,
-  Link2,
   Loader2,
   LogOut,
   Pencil,
-  Search,
-  Shield,
-  ShieldOff,
   Trash2,
-  UserMinus,
-  UserPlus,
   Users,
   X,
 } from "lucide-react";
@@ -24,34 +16,22 @@ import { Avatar } from "@/components/Avatar";
 import { AvatarCropDialog } from "@/components/AvatarCropDialog";
 import { Button } from "@/components/ui/button";
 import { DetailsSection as Section } from "@/components/chat/DetailsSection";
-import { Collapse } from "@/components/ui/collapse";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
-import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { formatBytes } from "@/lib/attachments";
-import { $api, MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
-import type { Session } from "@/lib/api";
+import { $api, type Session } from "@/lib/api";
 import {
   isAllowedAvatarFile,
   MAX_AVATAR_UPLOAD_SIZE_BYTES,
   uploadChatAvatar,
 } from "@/lib/avatar";
-import {
-  MAX_GROUP_PARTICIPANTS,
-  chatDetailQueryKey,
-  chatsListQueryKey,
-  type Chat,
-} from "@/lib/chats";
+import { chatDetailQueryKey, chatsListQueryKey, type Chat } from "@/lib/chats";
+import { canManageChat, canManageChatRoles, chatRoleOf } from "@/lib/chatRoles";
 import { errorMessage } from "@/lib/errors";
-import { useUserStatus } from "@/lib/status";
-import { useDebouncedValue } from "@/lib/useDebouncedValue";
-import {
-  userAvatarName,
-  userHandle,
-  userLabel,
-  userLabelWithHandle,
-} from "@/lib/users";
-import { cn } from "@/lib/utils";
+import { userLabel } from "@/lib/users";
+import { AddParticipantsPanel } from "@/components/chat/group/AddParticipantsPanel";
+import { InviteLinksSection } from "@/components/chat/group/InviteLinksSection";
+import { ParticipantRow } from "@/components/chat/group/ParticipantRow";
 
 type GroupManagementDialogProps = {
   chat: Chat;
@@ -217,7 +197,6 @@ export function GroupSettingsSections({
 
   const updateChat = $api.useMutation("put", "/chats/{id}");
   const deleteChatAvatar = $api.useMutation("delete", "/chats/{id}/avatar");
-  const addParticipants = $api.useMutation("post", "/chats/{id}/participants");
   const removeParticipant = $api.useMutation(
     "delete",
     "/chats/{id}/participants/{userId}",
@@ -230,58 +209,17 @@ export function GroupSettingsSections({
     "patch",
     "/chats/{id}/participants/{userId}/role",
   );
-  const createInvite = $api.useMutation("post", "/chats/{id}/invites");
-  const revokeInvite = $api.useMutation(
-    "delete",
-    "/chats/{id}/invites/{inviteId}",
-  );
-  const {
-    data: invites,
-    isLoading: invitesLoading,
-    refetch: refetchInvites,
-  } = $api.useQuery("get", "/chats/{id}/invites", {
-    params: { path: { id: String(chatId) } },
-  });
 
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
-  const [addingParticipants, setAddingParticipants] = useState(false);
-  const [addParticipantsSearch, setAddParticipantsSearch] = useState("");
-  const [selectedToAdd, setSelectedToAdd] = useState<number[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [copiedInviteId, setCopiedInviteId] = useState<number | null>(null);
   const [avatarCropFile, setAvatarCropFile] = useState<File | null>(null);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
-  // Captured once on mount so the render stays pure — good enough for showing
-  // whether an invite has lapsed; it refreshes each time the dialog reopens
-  // (or the panel opens on another chat).
-  const [now] = useState(() => Date.now());
 
-  const addParticipantsQuery = useDebouncedValue(
-    addParticipantsSearch.trim(),
-    300,
-  );
-  const addParticipantsSearchReady =
-    addParticipantsQuery.length >= MIN_USER_SEARCH_QUERY_LENGTH;
-  const { data: userSearchResults, isLoading: userSearchLoading } =
-    $api.useQuery(
-      "get",
-      "/users/search",
-      { params: { query: { q: addParticipantsQuery } } },
-      { enabled: addingParticipants && addParticipantsSearchReady },
-    );
-
-  const myRole = chat.participants.find(
-    (p) => p.userId === currentUser.id,
-  )?.role;
-  const canManage =
-    myRole === "owner" || myRole === "admin" || currentUser.role === "admin";
-  const canManageRoles = myRole === "owner" || currentUser.role === "admin";
+  const myRole = chatRoleOf(chat, currentUser.id);
+  const canManage = canManageChat(chat, currentUser);
+  const canManageRoles = canManageChatRoles(chat, currentUser);
   const canClaimOwnership = chat.createdBy === null;
-  const canAddMore = chat.participants.length < MAX_GROUP_PARTICIPANTS;
-  const candidatesToAdd = (userSearchResults ?? []).filter(
-    (u) => !chat.participants.some((p) => p.userId === u.id),
-  );
 
   async function invalidateChat() {
     await queryClient.invalidateQueries({
@@ -314,23 +252,6 @@ export function GroupSettingsSections({
       });
       await invalidateChat();
       await queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleAddParticipants() {
-    if (selectedToAdd.length === 0) return;
-    setActionError(null);
-    try {
-      await addParticipants.mutateAsync({
-        params: { path: { id: String(chatId) } },
-        body: { participantIds: selectedToAdd },
-      });
-      await invalidateChat();
-      setSelectedToAdd([]);
-      setAddingParticipants(false);
-      setAddParticipantsSearch("");
     } catch (err) {
       setActionError(errorMessage(err));
     }
@@ -392,45 +313,6 @@ export function GroupSettingsSections({
     }
   }
 
-  async function handleCreateInvite() {
-    setActionError(null);
-    try {
-      await createInvite.mutateAsync({
-        params: { path: { id: String(chatId) } },
-        body: {},
-      });
-      await refetchInvites();
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleRevokeInvite(inviteId: number) {
-    setActionError(null);
-    try {
-      await revokeInvite.mutateAsync({
-        params: { path: { id: String(chatId), inviteId: String(inviteId) } },
-      });
-      await refetchInvites();
-    } catch (err) {
-      setActionError(errorMessage(err));
-    }
-  }
-
-  async function handleCopyInviteLink(inviteId: number, code: string) {
-    const url = `${window.location.origin}/chats/join/${code}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopiedInviteId(inviteId);
-      setTimeout(
-        () => setCopiedInviteId((prev) => (prev === inviteId ? null : prev)),
-        2000,
-      );
-    } catch {
-      setActionError("Couldn't copy the link — copy it manually.");
-    }
-  }
-
   async function handleLeave() {
     const ok = await confirm({
       title: "Leave this chat?",
@@ -472,7 +354,6 @@ export function GroupSettingsSections({
   }
 
   const title = chat.title ?? "Group chat";
-  const activeInvites = (invites ?? []).filter((i) => i.revokedAt === null);
 
   return (
     <>
@@ -677,193 +558,20 @@ export function GroupSettingsSections({
           })}
         </ul>
 
-        {canManage && (
-          <div className="mt-1">
-            {canAddMore ? (
-              <Button
-                variant="outline"
-                className="w-full"
-                aria-label="Add participants"
-                onClick={() => {
-                  setAddingParticipants((v) => !v);
-                  setAddParticipantsSearch("");
-                  setSelectedToAdd([]);
-                }}
-              >
-                <UserPlus className="size-4" />
-                {addingParticipants ? "Cancel" : "Add people"}
-              </Button>
-            ) : (
-              <p className="text-center text-xs text-muted-foreground">
-                This group is full ({MAX_GROUP_PARTICIPANTS} members).
-              </p>
-            )}
-
-            <Collapse open={addingParticipants && canAddMore}>
-              <div className="mt-3 flex flex-col gap-2 rounded-xl border border-border bg-background/60 p-3">
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    autoFocus
-                    value={addParticipantsSearch}
-                    onChange={(e) => setAddParticipantsSearch(e.target.value)}
-                    placeholder="Search users to add…"
-                    className="pl-9"
-                  />
-                </div>
-                {!addParticipantsSearchReady ? (
-                  <p className="text-xs text-muted-foreground">
-                    Type at least {MIN_USER_SEARCH_QUERY_LENGTH} characters to
-                    search.
-                  </p>
-                ) : userSearchLoading ? (
-                  <p className="text-xs text-muted-foreground">Searching…</p>
-                ) : candidatesToAdd.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    No matching users to add.
-                  </p>
-                ) : (
-                  <div className="flex max-h-44 flex-wrap gap-1.5 overflow-y-auto">
-                    {candidatesToAdd.map((u) => {
-                      const isSelected = selectedToAdd.includes(u.id);
-                      return (
-                        <button
-                          key={u.id}
-                          type="button"
-                          onClick={() =>
-                            setSelectedToAdd((prev) =>
-                              isSelected
-                                ? prev.filter((id) => id !== u.id)
-                                : [...prev, u.id],
-                            )
-                          }
-                          className={cn(
-                            "rounded-full border px-3 py-1.5 text-xs transition-colors duration-200 motion-safe:hover:scale-[1.03]",
-                            isSelected
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-border bg-background/60 hover:border-primary/40",
-                          )}
-                        >
-                          {userLabel(u)}
-                          {userHandle(u) && (
-                            <span
-                              className={cn(
-                                "ml-1",
-                                !isSelected && "text-muted-foreground",
-                              )}
-                            >
-                              {userHandle(u)}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                <Button
-                  className="self-end"
-                  disabled={
-                    selectedToAdd.length === 0 || addParticipants.isPending
-                  }
-                  onClick={() => void handleAddParticipants()}
-                >
-                  {addParticipants.isPending && (
-                    <Loader2 className="size-4 animate-spin" />
-                  )}
-                  Add {selectedToAdd.length || ""}
-                </Button>
-              </div>
-            </Collapse>
-          </div>
-        )}
+        <AddParticipantsPanel
+          chat={chat}
+          canManage={canManage}
+          onError={setActionError}
+          onAdded={invalidateChat}
+        />
       </Section>
 
       {/* Invite links */}
-      {canManage && (
-        <Section
-          index={3}
-          icon={<Link2 className="size-4" />}
-          title="Invite links"
-          description="Anyone with an active link can join this chat — revoke a link to cut off access."
-        >
-          <div className="flex flex-col gap-2">
-            {invitesLoading ? (
-              <p className="text-xs text-muted-foreground">Loading…</p>
-            ) : activeInvites.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-                No active invite links yet.
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-1.5">
-                {activeInvites.map((invite) => {
-                  const expired =
-                    invite.expiresAt !== null && invite.expiresAt <= now;
-                  const usedUp =
-                    invite.maxUses !== null &&
-                    invite.useCount >= invite.maxUses;
-                  return (
-                    <li
-                      key={invite.id}
-                      className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/60 px-3 py-2"
-                    >
-                      <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
-                        {invite.code.slice(0, 12)}…
-                        {(expired || usedUp) && (
-                          <span className="ml-1 text-destructive">
-                            ({expired ? "expired" : "used up"})
-                          </span>
-                        )}
-                        {invite.maxUses !== null &&
-                          ` · ${invite.useCount}/${invite.maxUses} used`}
-                      </span>
-                      <span className="flex shrink-0 items-center gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-8"
-                          aria-label="Copy invite link"
-                          onClick={() =>
-                            void handleCopyInviteLink(invite.id, invite.code)
-                          }
-                        >
-                          {copiedInviteId === invite.id ? (
-                            <Check className="size-4 text-green-600" />
-                          ) : (
-                            <Copy className="size-4" />
-                          )}
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="size-8 text-destructive hover:text-destructive"
-                          aria-label="Revoke invite link"
-                          disabled={revokeInvite.isPending}
-                          onClick={() => void handleRevokeInvite(invite.id)}
-                        >
-                          <X className="size-4" />
-                        </Button>
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            <Button
-              variant="outline"
-              className="w-full"
-              disabled={createInvite.isPending}
-              onClick={() => void handleCreateInvite()}
-            >
-              {createInvite.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Link2 className="size-4" />
-              )}
-              Create invite link
-            </Button>
-          </div>
-        </Section>
-      )}
+      <InviteLinksSection
+        chatId={chatId}
+        canManage={canManage}
+        onError={setActionError}
+      />
 
       {/* Danger zone */}
       <Section
@@ -905,159 +613,4 @@ export function GroupSettingsSections({
       </Section>
     </>
   );
-}
-
-type ParticipantRowProps = {
-  participant: Chat["participants"][number];
-  index: number;
-  isOwner: boolean;
-  isSelf: boolean;
-  label: string;
-  canRemove: boolean;
-  canManageRoles: boolean;
-  canClaimOwnership: boolean;
-  updateRolePending: boolean;
-  transferOwnershipPending: boolean;
-  removePending: boolean;
-  onUpdateRole: (userId: number, role: "admin" | "member") => void;
-  onTransferOwnership: (userId: number, label: string) => void;
-  onRemove: (userId: number, label: string) => void;
-};
-
-// Split out from the plain `.map()` body it used to be so `useUserStatus`
-// (a hook) has a stable per-participant component instance to attach to —
-// calling a hook a variable number of times inside a single `.map()`
-// callback in the parent's own render would violate the rules of hooks
-// whenever the member count changes (someone joins/leaves) between renders.
-function ParticipantRow({
-  participant: p,
-  index: i,
-  isOwner,
-  isSelf,
-  label,
-  canRemove,
-  canManageRoles,
-  canClaimOwnership,
-  updateRolePending,
-  transferOwnershipPending,
-  removePending,
-  onUpdateRole,
-  onTransferOwnership,
-  onRemove,
-}: ParticipantRowProps) {
-  const status = useUserStatus(p.userId, p);
-  // Buttons and their confirm dialogs name exactly who they act on: display
-  // names aren't unique (issue #526).
-  const actionLabel = userLabelWithHandle(p);
-
-  return (
-    <li
-      className="flex items-center gap-3 rounded-xl border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-accent/30 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1"
-      style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
-    >
-      <Avatar
-        name={userAvatarName(p)}
-        avatarUrl={p.avatarUrl}
-        avatarVariants={p.avatarVariants}
-        size="md"
-      />
-      <div className="flex min-w-0 flex-1 flex-col leading-tight">
-        <span className="truncate text-sm font-medium">
-          {label}
-          {userHandle(p) && (
-            <span className="ml-1.5 font-normal text-muted-foreground">
-              {userHandle(p)}
-            </span>
-          )}
-          {isSelf && <span className="text-muted-foreground"> (you)</span>}
-        </span>
-        <RoleBadge isOwner={isOwner} role={p.role} />
-        <UserStatusBadge
-          status={status}
-          className="text-xs text-muted-foreground"
-        />
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {canManageRoles && !isOwner && !isSelf && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8 px-2 text-xs"
-            aria-label={
-              p.role === "admin"
-                ? `Remove admin from ${actionLabel}`
-                : `Make ${actionLabel} an admin`
-            }
-            disabled={updateRolePending}
-            onClick={() =>
-              onUpdateRole(p.userId, p.role === "admin" ? "member" : "admin")
-            }
-          >
-            {p.role === "admin" ? (
-              <>
-                <ShieldOff className="size-3.5" />
-                <span className="hidden @[26rem]:inline">Unadmin</span>
-              </>
-            ) : (
-              <>
-                <Shield className="size-3.5" />
-                <span className="hidden @[26rem]:inline">Make admin</span>
-              </>
-            )}
-          </Button>
-        )}
-        {(canManageRoles || canClaimOwnership) && !isOwner && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8 px-2 text-xs"
-            aria-label={`Make ${actionLabel} the owner`}
-            disabled={transferOwnershipPending}
-            onClick={() => onTransferOwnership(p.userId, actionLabel)}
-          >
-            <Crown className="size-3.5" />
-            <span className="hidden @[26rem]:inline">Make owner</span>
-          </Button>
-        )}
-        {canRemove && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-8 text-destructive hover:text-destructive"
-            aria-label={`Remove ${actionLabel}`}
-            disabled={removePending}
-            onClick={() => onRemove(p.userId, actionLabel)}
-          >
-            <UserMinus className="size-4" />
-          </Button>
-        )}
-      </div>
-    </li>
-  );
-}
-
-function RoleBadge({
-  isOwner,
-  role,
-}: {
-  isOwner: boolean;
-  role: Chat["participants"][number]["role"];
-}) {
-  if (isOwner) {
-    return (
-      <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500">
-        <Crown className="size-3" />
-        Owner
-      </span>
-    );
-  }
-  if (role === "admin") {
-    return (
-      <span className="flex items-center gap-1 text-xs text-primary">
-        <Shield className="size-3" />
-        Admin
-      </span>
-    );
-  }
-  return <span className="text-xs text-muted-foreground">Member</span>;
 }

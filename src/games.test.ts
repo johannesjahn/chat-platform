@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { ChatApi, MAX_GAME_LOBBY_PLAYERS } from "./Api.ts";
 import { Db } from "./Db.ts";
-import { lobbyPhase } from "./GamesHandler.ts";
+
 import {
   gameLobbies,
   gameLobbyMessages,
@@ -14,6 +14,7 @@ import {
 } from "./db/schema.ts";
 import { MAX_PLAUSIBLE_WPM, TYPING_COUNTDOWN_MS } from "./games/typing.ts";
 import { makeTestRun } from "./testApi.ts";
+import { lobbyPhase } from "./games/lobbyStore.ts";
 
 // Same shape as admin.test.ts's harness: `effect` also gets `Db` directly,
 // sharing the API layer's in-memory instance, so a test can fast-forward a

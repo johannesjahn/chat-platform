@@ -40,7 +40,7 @@ import {
   substringTokens,
   toPrefixTsQuery,
 } from "./search.ts";
-import { effectiveStatus, toAvatarVariants } from "./UsersHandler.ts";
+
 import {
   chatParticipants,
   chats,
@@ -49,6 +49,8 @@ import {
   posts,
   users,
 } from "./db/schema.ts";
+import { toAvatarVariants } from "./avatars.ts";
+import { effectiveStatus } from "./users/userViews.ts";
 
 // The Postgres text-search config, inlined as a SQL literal rather than a bound
 // parameter: it's a fixed, server-controlled constant (never user input), and
@@ -181,7 +183,7 @@ const searchableText = (row: {
 
 // The `users` columns every joined-in author/sender selects, folded into the
 // API's `User` shape by `toSearchUser`. Mirrors `publicUserColumns` in
-// UsersHandler.ts (not exported from there — this is the search projection,
+// users/userViews.ts (not exported from there — this is the search projection,
 // and keeping it local lets it be aliased into a join without coupling the two
 // handlers' column lists).
 const userColumns = {

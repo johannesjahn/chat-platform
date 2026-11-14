@@ -1,7 +1,7 @@
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
 import type { DrawingStroke } from "../../Api.ts";
-import type { DrizzleDb } from "../../Db.ts";
+import { dbQuery, type DrizzleDb } from "../../Db.ts";
 import { gameBluffs, gameDrawings, gameVotes } from "../../db/schema.ts";
 import {
   EMPTY_GAME_ROWS,
@@ -38,7 +38,7 @@ export const loadDrawingRows = (
 
     const [drawings, bluffs, votes] = yield* Effect.all(
       [
-        Effect.tryPromise(() =>
+        dbQuery(() =>
           db
             .select({
               id: gameDrawings.id,
@@ -57,7 +57,7 @@ export const loadDrawingRows = (
             .where(inArray(gameDrawings.lobbyId, ids))
             .orderBy(asc(gameDrawings.id)),
         ),
-        Effect.tryPromise(() =>
+        dbQuery(() =>
           db
             .select({
               id: gameBluffs.id,
@@ -72,7 +72,7 @@ export const loadDrawingRows = (
             .where(inArray(gameDrawings.lobbyId, ids))
             .orderBy(asc(gameBluffs.id)),
         ),
-        Effect.tryPromise(() =>
+        dbQuery(() =>
           db
             .select({
               lobbyId: gameDrawings.lobbyId,
@@ -88,7 +88,7 @@ export const loadDrawingRows = (
         ),
       ],
       { concurrency: "unbounded" },
-    ).pipe(Effect.orDie);
+    );
 
     const entry = (lobbyId: number): RowsBuilder => {
       let rows = byLobby.get(lobbyId);

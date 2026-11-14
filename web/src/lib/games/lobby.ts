@@ -246,8 +246,8 @@ export function useFinishRace(lobbyId: number, game: GameId) {
 }
 
 // The phase as of right now on the server's clock. The server derives the
-// same thing at read time (see `lobbyPhase` in src/GamesHandler.ts) but only
-// when asked — this keeps countdown → racing → finished moving on screen
+// same thing at read time (see `lobbyPhase` in src/games/lobbyStore.ts) but
+// only when asked — this keeps countdown → racing → finished moving on screen
 // between fetches.
 export function livePhase(lobby: GameLobby, now: number): GameLobbyPhase {
   if (lobby.phase === "waiting" || !lobby.startsAt || !lobby.endsAt) {

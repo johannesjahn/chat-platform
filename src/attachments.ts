@@ -1,11 +1,11 @@
 import { eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
-import { type Attachment, NotFound } from "./Api.ts";
+import { type Attachment, AttachmentQuotaExceeded, NotFound } from "./Api.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
-import type { DrizzleDb } from "./Db.ts";
-import { attachments, type DbAttachment } from "./db/schema.ts";
+import { dbQuery, type DrizzleDb } from "./Db.ts";
+import { attachments, type DbAttachment, users } from "./db/schema.ts";
 
-// Shared by ChatsHandler and PostsHandler — both messages and posts attach
+// Shared by src/chats/ and PostsHandler — both messages and posts attach
 // (at most) one row from the same `attachments` table (see db/schema.ts),
 // so the "look up the row, mint a fresh presigned URL" logic lives here
 // once rather than twice.
@@ -38,13 +38,13 @@ export const resolveAttachment = (
 ): Effect.Effect<Attachment | null> =>
   Effect.gen(function* () {
     if (attachmentId === null) return null;
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db
         .select()
         .from(attachments)
         .where(eq(attachments.id, attachmentId))
         .limit(1),
-    ).pipe(Effect.orDie);
+    );
     const row = rows[0];
     if (!row) return null;
     return toApiAttachment(row, storage.presignGetUrl(row.storageKey));
@@ -65,9 +65,9 @@ export const resolveAttachments = (
       ...new Set(attachmentIds.filter((id): id is number => id !== null)),
     ];
     if (ids.length === 0) return result;
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db.select().from(attachments).where(inArray(attachments.id, ids)),
-    ).pipe(Effect.orDie);
+    );
     for (const row of rows) {
       result.set(
         row.id,
@@ -88,17 +88,52 @@ export const getOwnedAttachmentOr404 = (
   uploaderId: number,
 ): Effect.Effect<DbAttachment, NotFound> =>
   Effect.gen(function* () {
-    const rows = yield* Effect.tryPromise(() =>
+    const rows = yield* dbQuery(() =>
       db
         .select()
         .from(attachments)
         .where(eq(attachments.id, attachmentId))
         .limit(1),
-    ).pipe(Effect.orDie);
+    );
     const row = rows[0];
     if (!row || row.uploaderId !== uploaderId)
       return yield* Effect.fail(
         new NotFound({ message: `Attachment ${attachmentId} not found` }),
       );
     return row;
+  });
+
+// Bounds total storage a single user can accumulate across every upload —
+// unlike AttachmentsHandler.ts's enforceUploadLimit (velocity: uploads per
+// minute) or MAX_ATTACHMENT_SIZE_BYTES (one file's size), nothing previously
+// bounded how much a user could pile up over time by uploading steadily
+// rather than in a burst (issue #256).
+export const ATTACHMENT_QUOTA_MAX_BYTES = 500 * 1024 * 1024; // 500MB per user
+
+// Exported for forwarding (chats/forwardHandlers.ts, issue #601): a forwarded
+// attachment is copied into a new upload owned by the forwarder, which
+// counts toward their quota like any other.
+export const enforceUploadQuota = (
+  db: DrizzleDb,
+  userId: number,
+  incomingSize: number,
+) =>
+  Effect.gen(function* () {
+    // A single-row read of the running total a trigger on `attachments`
+    // keeps up to date (migration 0033), rather than re-summing every
+    // attachment the user has ever kept (issue #326).
+    const rows = yield* dbQuery(() =>
+      db
+        .select({ storageUsedBytes: users.storageUsedBytes })
+        .from(users)
+        .where(eq(users.id, userId)),
+    );
+    const currentTotal = rows[0]?.storageUsedBytes ?? 0;
+    if (currentTotal + incomingSize > ATTACHMENT_QUOTA_MAX_BYTES) {
+      return yield* Effect.fail(
+        new AttachmentQuotaExceeded({
+          message: `Storage quota exceeded: uploads are capped at ${ATTACHMENT_QUOTA_MAX_BYTES} bytes per user`,
+        }),
+      );
+    }
   });

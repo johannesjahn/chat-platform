@@ -1,3 +1,5 @@
+import { Effect } from "effect";
+import type { AttachmentStorage } from "./AttachmentStorage.ts";
 import { OUTPUT_CONTENT_TYPE } from "./ImageProcessing.ts";
 
 // Uploaded avatars (issue #269) migrated out of inline base64 `users` columns
@@ -47,8 +49,8 @@ export const avatarUrlForToken = (token: string): string =>
 // Folds the three stored avatar tokens into the API's `avatarVariants` shape,
 // turning each into the long-cache proxy URL that serves it (see
 // avatarUrlForToken / AvatarRoute.ts). Shared by every handler that returns a
-// user's avatar — UsersHandler.ts (re-exported from there for ChatsHandler.ts
-// and SearchHandler.ts) and authors.ts.
+// user's avatar — UsersHandler.ts (re-exported from there for src/chats/ and
+// SearchHandler.ts) and authors.ts.
 export const toAvatarVariants = (row: {
   avatarSmallKey: string | null;
   avatarMediumKey: string | null;
@@ -61,3 +63,20 @@ export const toAvatarVariants = (row: {
         large: avatarUrlForToken(row.avatarLargeKey),
       }
     : null;
+
+// Best-effort removal of an old avatar's variant objects once the row has
+// stopped pointing at them (a re-upload, a clear via updateProfile, or account
+// deletion). Best-effort — an orphaned object is a harmless storage leak, not
+// a correctness problem, so a delete failure must never fail the user-facing
+// write. `null` tokens (no prior uploaded avatar) are skipped. Exported —
+// shared with chats/chatHandlers.ts's group-avatar upload/clear, which sweeps a
+// chat's old avatar objects the same way.
+export const deleteAvatarObjects = (
+  storage: AttachmentStorage["Service"],
+  tokens: ReadonlyArray<string | null>,
+): Effect.Effect<void> =>
+  Effect.forEach(
+    tokens.filter((token): token is string => token !== null),
+    (token) => storage.delete(avatarStorageKey(token)).pipe(Effect.ignore),
+    { discard: true },
+  );

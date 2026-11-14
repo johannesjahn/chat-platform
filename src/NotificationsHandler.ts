@@ -22,11 +22,12 @@ import {
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
-import { Db, type DrizzleDb } from "./Db.ts";
+import { Db, type DrizzleDb, dbQuery } from "./Db.ts";
 import { comments, notifications, posts, users } from "./db/schema.ts";
 import { notifyInboxChanged } from "./notifications.ts";
 import { RealtimeConnections } from "./Realtime.ts";
-import { publicUserColumns, toPublicUser } from "./UsersHandler.ts";
+
+import { publicUserColumns, toPublicUser } from "./users/userViews.ts";
 
 // Read side of the notification inbox (issue #317). Rows are written by the
 // handlers whose actions cause them — see src/notifications.ts.
@@ -64,13 +65,13 @@ const visibleTo = async (db: DrizzleDb, userId: number): Promise<SQL> => {
 };
 
 const unreadCount = (db: DrizzleDb, userId: number) =>
-  Effect.tryPromise(async () => {
+  dbQuery(async () => {
     const [row] = await db
       .select({ total: count() })
       .from(notifications)
       .where(and(await visibleTo(db, userId), isNull(notifications.readAt)));
     return Number(row?.total ?? 0);
-  }).pipe(Effect.orDie);
+  });
 
 const actors = alias(users, "actor");
 
@@ -97,7 +98,7 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
 
           // One past `limit` to derive `nextCursor` without a COUNT, same
           // trick as the other keyset-paginated lists.
-          const fetched = yield* Effect.tryPromise(async () => {
+          const fetched = yield* dbQuery(async () => {
             const visible = await visibleTo(db, currentUser.id);
             return db
               .select({
@@ -139,7 +140,7 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
               )
               .orderBy(desc(notifications.id))
               .limit(limit + 1);
-          }).pipe(Effect.orDie);
+          });
 
           const hasMore = fetched.length > limit;
           const rows = fetched.slice(0, limit);
@@ -184,7 +185,7 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
       .handle("markAllNotificationsRead", () =>
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
-          const updated = yield* Effect.tryPromise(() =>
+          const updated = yield* dbQuery(() =>
             db
               .update(notifications)
               .set({ readAt: new Date() })
@@ -195,7 +196,7 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
                 ),
               )
               .returning({ id: notifications.id }),
-          ).pipe(Effect.orDie);
+          );
           // The caller's other tabs clear their badge too.
           if (updated.length > 0)
             yield* notifyInboxChanged(connections, [currentUser.id]);
@@ -205,7 +206,7 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
       .handle("markNotificationRead", ({ params: { id } }) =>
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
-          const existing = yield* Effect.tryPromise(() =>
+          const existing = yield* dbQuery(() =>
             db
               .select({ readAt: notifications.readAt })
               .from(notifications)
@@ -216,18 +217,18 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
                 ),
               )
               .limit(1),
-          ).pipe(Effect.orDie);
+          );
           if (!existing[0])
             return yield* Effect.fail(
               new NotFound({ message: `Notification ${id} not found` }),
             );
           if (existing[0].readAt === null) {
-            yield* Effect.tryPromise(() =>
+            yield* dbQuery(() =>
               db
                 .update(notifications)
                 .set({ readAt: new Date() })
                 .where(eq(notifications.id, id)),
-            ).pipe(Effect.orDie);
+            );
             yield* notifyInboxChanged(connections, [currentUser.id]);
           }
           return { count: yield* unreadCount(db, currentUser.id) };

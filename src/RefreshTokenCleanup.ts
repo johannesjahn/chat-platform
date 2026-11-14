@@ -1,6 +1,6 @@
 import { lt } from "drizzle-orm";
 import { Duration, Effect, Layer, Schedule } from "effect";
-import { Db } from "./Db.ts";
+import { Db, dbQuery } from "./Db.ts";
 import { refreshTokens } from "./db/schema.ts";
 
 // An expired refresh token is already rejected by Jwt.verifyRefreshToken's
@@ -11,9 +11,9 @@ import { refreshTokens } from "./db/schema.ts";
 export const cleanupExpiredRefreshTokens: Effect.Effect<void, never, Db> =
   Effect.gen(function* () {
     const db = yield* Db;
-    yield* Effect.tryPromise(() =>
+    yield* dbQuery(() =>
       db.delete(refreshTokens).where(lt(refreshTokens.expiresAt, new Date())),
-    ).pipe(Effect.orDie);
+    );
   });
 
 const CLEANUP_INTERVAL = Duration.hours(1);

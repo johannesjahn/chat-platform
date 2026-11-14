@@ -1,6 +1,6 @@
 import { gte } from "drizzle-orm";
 import { Duration, Effect, Layer, Metric, Schedule } from "effect";
-import { Db, type DrizzleDb } from "./Db.ts";
+import { Db, type DrizzleDb, dbQuery } from "./Db.ts";
 import { activeUsers } from "./Metrics.ts";
 import { comments, likes, messages, posts } from "./db/schema.ts";
 
@@ -24,7 +24,7 @@ const countActiveUsersSince = (
   db: DrizzleDb,
   since: Date,
 ): Effect.Effect<number> =>
-  Effect.tryPromise(() =>
+  dbQuery(() =>
     Promise.all([
       db
         .selectDistinct({ userId: posts.authorId })
@@ -52,7 +52,6 @@ const countActiveUsersSince = (
       for (const row of senders) active.add(row.userId);
       return active.size;
     }),
-    Effect.orDie,
   );
 
 // Recomputes every window's distinct-active-user count and sets the
