@@ -5,10 +5,11 @@ import { HttpApiClient } from "effect/http-api";
 import { Effect } from "effect";
 import sharp from "sharp";
 import { type Attachment, ChatApi, MAX_FORWARD_TARGETS } from "./Api.ts";
-import { ATTACHMENT_QUOTA_MAX_BYTES } from "./AttachmentsHandler.ts";
+
 import { Db } from "./Db.ts";
 import { attachments, messages, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
+import { ATTACHMENT_QUOTA_MAX_BYTES } from "./attachments.ts";
 
 // Forwarding chat messages (issue #601).
 

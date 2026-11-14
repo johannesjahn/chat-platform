@@ -91,7 +91,7 @@ export const substringTokens = (q: string): string[] => {
 
 // Escapes LIKE/ILIKE wildcard characters in user-supplied search text so a
 // query containing "%" or "_" is matched literally instead of as a wildcard.
-// Shared with UsersHandler.ts's `searchUsers`.
+// Shared with users/directoryHandlers.ts's `searchUsers`.
 export const escapeLikePattern = (value: string): string =>
   value.replace(/[\\%_]/g, (char) => `\\${char}`);
 

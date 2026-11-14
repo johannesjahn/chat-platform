@@ -12,7 +12,7 @@ import { AttachmentStorage } from "../AttachmentStorage.ts";
 import { CurrentUser } from "../Auth.ts";
 import { type DrizzleDb } from "../Db.ts";
 import { serializableTransaction } from "../serializableTransaction.ts";
-import { deleteAvatarObjects } from "../UsersHandler.ts";
+
 import { chatParticipants, chats, type DbChat } from "../db/schema.ts";
 import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
 import {
@@ -32,6 +32,7 @@ import {
   notifyChatUpdated,
 } from "./chatState.ts";
 import { newestMessageIdIn } from "./unread.ts";
+import { deleteAvatarObjects } from "../avatars.ts";
 
 // Message requests (issue #785). A participant added to a group by someone
 // they share no chat with — one they're in for real, not another pending

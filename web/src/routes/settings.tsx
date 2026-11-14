@@ -295,7 +295,7 @@ function BrowserNotificationsCard() {
 }
 
 // Options for how long a newly-set status stays visible before it's treated
-// as unset (see `effectiveStatus` in src/UsersHandler.ts) — a native
+// as unset (see `effectiveStatus` in src/users/userViews.ts) — a native
 // `<select>`'s value is always a string, so "never" stands in for "no
 // `expiresInMinutes`" rather than using an empty string (which HTML selects
 // otherwise use as their fallback/placeholder value).
@@ -669,8 +669,8 @@ function EditProfileCard() {
               });
               setSession({ ...session, user: updated });
               // A full-replace `updateProfile` always clears any uploaded
-              // avatar server-side (see UsersHandler.ts) — reflect that here
-              // rather than leaving a stale preview.
+              // avatar server-side (see src/users/profileHandlers.ts) — reflect
+              // that here rather than leaving a stale preview.
               setAvatarVariants(updated.avatarVariants);
               await queryClient.invalidateQueries({ queryKey: usersQueryKey });
               await queryClient.invalidateQueries({

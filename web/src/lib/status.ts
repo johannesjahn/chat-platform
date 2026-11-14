@@ -35,8 +35,8 @@ function subscribe(listener: () => void): () => void {
 // True when `status` has anything worth rendering — false for a fully-unset
 // status, and for one whose `statusExpiresAt` has already passed (the server
 // resolves this at read time too, see `effectiveStatus` in
-// src/UsersHandler.ts, but a status fetched or pushed *before* its expiry can
-// still be sitting in a client's cache/store after it elapses while the tab
+// src/users/userViews.ts, but a status fetched or pushed *before* its expiry
+// can still be sitting in a client's cache/store after it elapses while the tab
 // stays open).
 export function isStatusVisible(
   status: UserStatus | null | undefined,

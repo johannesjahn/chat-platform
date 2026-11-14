@@ -8,10 +8,12 @@ import {
 import { AttachmentStorage } from "../AttachmentStorage.ts";
 import { type DrizzleDb } from "../Db.ts";
 import { type ChatChange, RealtimeConnections } from "../Realtime.ts";
-import { effectiveStatus, toAvatarVariants } from "../UsersHandler.ts";
+
 import { chatParticipants, chats, users, type DbChat } from "../db/schema.ts";
 import { getLastMessage } from "./messageViews.ts";
 import { getUnreadCount } from "./unread.ts";
+import { toAvatarVariants } from "../avatars.ts";
+import { effectiveStatus } from "../users/userViews.ts";
 
 // Chat rows as clients see them: participants, the per-chat `version` and
 // its `chat_updated` publish, and the full `Chat` view (`buildChat`).

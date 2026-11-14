@@ -13,7 +13,7 @@ import {
   CreatePostBody,
   MAX_ATTACHMENT_SIZE_BYTES,
 } from "./Api.ts";
-import { ATTACHMENT_QUOTA_MAX_BYTES } from "./AttachmentsHandler.ts";
+
 import {
   AttachmentStorage,
   InMemoryAttachmentStorageLive,
@@ -21,6 +21,7 @@ import {
 import { Db } from "./Db.ts";
 import { attachments, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
+import { ATTACHMENT_QUOTA_MAX_BYTES } from "./attachments.ts";
 
 process.env.JWT_SECRET ??= "test-secret";
 

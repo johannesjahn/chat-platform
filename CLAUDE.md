@@ -171,7 +171,7 @@ would leave a pure substring hit unhighlighted.
 **Contacts below the 3-character floor.** User search needs 3 characters
 (issue #48) so the directory can't be browsed. Below that, New chat, `/users`
 and the palette's People section suggest `GET /users/contacts` (`contactsOf`
-in [`src/UsersHandler.ts`](src/UsersHandler.ts), issue #764), filtered
+in [`src/users/directoryHandlers.ts`](src/users/directoryHandlers.ts), issue #764), filtered
 client-side by `filterContacts` ([`web/src/lib/contactFilter.ts`](web/src/lib/contactFilter.ts)).
 It must only ever return people the caller already shares an **accepted**
 chat with (pending message requests on either side don't count), minus
@@ -208,7 +208,9 @@ the migration all read as having signed up when it ran.
 
 Multiplayer games live under `/games` in the frontend, backed by the `games`
 group in [`src/Api.ts`](src/Api.ts) and
-[`src/GamesHandler.ts`](src/GamesHandler.ts). The first game is a typing race;
+[`src/GamesHandler.ts`](src/GamesHandler.ts) (handlers in `src/games/*Handlers.ts`,
+lobby loading in `lobbyStore.ts`, settling in `settlement.ts`). The first game
+is a typing race;
 everything else is shared plumbing keyed by a game slug (`GameId`):
 
 - **Lobbies are rows, phases are derived.** `game_lobbies`/`game_lobby_players`
@@ -276,7 +278,8 @@ A Drawful-style party game: everyone draws a secret prompt, then each drawing
 takes a turn in the spotlight — bluff (write a fake title), vote (find the
 real one), reveal. Server logic is in
 [`src/games/drawing/`](src/games/drawing/), kept as pure modules (`timeline`,
-`ballot`, `scoring`, `view`, `prompts`) that GamesHandler.ts feeds rows into;
+`ballot`, `scoring`, `view`, `prompts`) that `src/games/drawingHandlers.ts`
+and `lobbyStore.ts` feed rows into;
 the client is `web/src/components/games/drawing/`. Load-bearing rules:
 
 - **Stages are derived, like phases.** `buildTimeline` lays the game out from
@@ -356,20 +359,31 @@ fails on a call anywhere else in `src/`. Load-bearing:
 A new video or audio MIME type in `ALLOWED_ATTACHMENT_MIME_TYPES` needs its demuxer
 and decoders checked in `MediaInput.ts`.
 
-## Chats handler layout
+## Handler layout
 
-The `chats` group is split by area under [`src/chats/`](src/chats/) (issue
-#811); [`src/ChatsHandler.ts`](src/ChatsHandler.ts) only resolves the services
-and combines the areas with `handlers.handleAll`, which fails to typecheck if
-an endpoint is left unhandled. Each `*Handlers.ts` module returns its slice of
-handlers `satisfies ChatsHandlers` ([`handlerKit.ts`](src/chats/handlerKit.ts)),
-which keeps the request parameters typed. Put a new endpoint in the area it
-belongs to, and a helper next to its only caller until a second area needs it;
-then it moves to one of the shared modules: `sendPath.ts` (the one send path —
-`insertMessage`, `directChatBlocked`, `publishNewMessage`), `access.ts`
-(404 lookups and participation/role checks), `chatState.ts` (participants,
-`version`, `buildChat`), `messageViews.ts` (the `Message` view) or `unread.ts`.
-Helper modules never import handler modules.
+The big groups — `chats`, `users`, `games` — are split by area (issue #811):
+`src/ChatsHandler.ts`, `src/UsersHandler.ts` and `src/GamesHandler.ts` only
+resolve the services and combine per-area handler maps from
+[`src/chats/`](src/chats/), [`src/users/`](src/users/) and
+[`src/games/`](src/games/) with `handlers.handleAll`, which fails to typecheck
+if an endpoint is left unhandled. Each `*Handlers.ts` module returns its slice
+`satisfies GroupHandlers<"group">` ([`src/handlerKit.ts`](src/handlerKit.ts),
+aliased per group in its `handlerKit.ts` next to the group's `*Deps`), which
+keeps the request parameters typed.
+
+- **Put a new endpoint in the area it belongs to**, and a helper next to its
+  only caller until a second area needs it; then it moves to that group's
+  shared modules. For chats: `sendPath.ts` (the one send path —
+  `insertMessage`, `directChatBlocked`, `publishNewMessage`), `access.ts` (404
+  lookups and participation/role checks), `chatState.ts` (participants,
+  `version`, `buildChat`), `messageViews.ts` (the `Message` view) and
+  `unread.ts`. For users: `userViews.ts` and `credentials.ts`. For games:
+  `lobbyStore.ts` and `settlement.ts`.
+- **Handler modules never import each other.** Code another group needs lives
+  in a library module: `enforceRateLimit` (RateLimiter.ts), avatar helpers
+  (avatars.ts), `enforceUploadQuota` (attachments.ts), the `Post` view
+  (posts.ts), the `User` view (users/userViews.ts). Helper modules never import
+  handler modules.
 
 ## Forwarding messages
 
@@ -446,7 +460,7 @@ Posts and messages carry an optional `caption` next to an attachment (issue
   before captions — never repurpose it as the caption.
 - **`caption` only counts when `content_type = 'attachment'`.** An old
   replica can re-type a row and leave the column behind, so every reader goes
-  through `captionOf` (PostsHandler.ts) / `messageCaption` (chats/messageViews.ts),
+  through `captionOf` (posts.ts) / `messageCaption` (chats/messageViews.ts),
   and the search arms restrict on content type themselves.
 - **Edits: omitted keeps, `null` clears**, so a client that predates captions
   never wipes one. Sending a `caption` on a non-attachment is a 400.

@@ -32,11 +32,11 @@ export const TEST_PASSWORD = __ENV.TEST_PASSWORD || "LoadTest-12345";
 // Registers `username` if it doesn't already exist, otherwise logs it in —
 // either way returns {id, username, accessToken}. Idempotent across runs on
 // purpose: /users/register is capped per source IP at 10 attempts a minute
-// and 50 an hour (see UsersHandler.ts), which a k6 run driving from a single machine would
-// blow through immediately if every run tried to create fresh accounts. By
-// registering once and logging in on every later run against the same
-// backend, only the very first run against a given target spends any of
-// that budget — see scripts/loadtest/README.md.
+// and 50 an hour (see src/users/authHandlers.ts), which a k6 run driving from a
+// single machine would blow through immediately if every run tried to create
+// fresh accounts. By registering once and logging in on every later run against
+// the same backend, only the very first run against a given target spends any
+// of that budget — see scripts/loadtest/README.md.
 export function loginOrRegister(username) {
   const registerRes = http.post(
     `${BASE_URL}/users/register`,

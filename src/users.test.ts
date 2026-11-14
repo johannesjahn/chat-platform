@@ -734,10 +734,10 @@ test('register is rate-limited per IP, incrementing rate_limit_rejections_total{
     Effect.gen(function* () {
       const c = yield* makeClient;
       const before = yield* rateLimitRejectionCount("register");
-      // REGISTER_BURST_MAX_ATTEMPTS_PER_IP = 10 per minute (UsersHandler.ts).
-      // Every call in this in-process test harness resolves to the same
-      // "unknown" IP (no real socket/remoteAddress), so they all land in one
-      // bucket.
+      // REGISTER_BURST_MAX_ATTEMPTS_PER_IP = 10 per minute
+      // (users/authHandlers.ts). Every call in this in-process test harness
+      // resolves to the same "unknown" IP (no real socket/remoteAddress), so
+      // they all land in one bucket.
       for (let i = 0; i < 10; i++) {
         yield* c.users.register({
           payload: { username: `ratelimited-${i}`, password: "pw-testpass" },
@@ -1410,7 +1410,7 @@ test("changePassword is rate-limited per account after repeated wrong attempts",
         payload: { username: "wendy", password: "pw-wendy" },
       });
       const authed = yield* makeAuthedClient(accessToken);
-      // CHANGE_PASSWORD_MAX_ATTEMPTS_PER_ACCOUNT is 5 (UsersHandler.ts).
+      // CHANGE_PASSWORD_MAX_ATTEMPTS_PER_ACCOUNT is 5 (users/authHandlers.ts).
       for (let i = 0; i < 5; i++) {
         yield* authed.users
           .changePassword({
@@ -2059,7 +2059,8 @@ test("deleteAccount is rate-limited per account after repeated wrong attempts", 
         payload: { username: "percy", password: "pw-percy12" },
       });
       const authed = yield* makeAuthedClient(accessToken);
-      // DELETE_ACCOUNT_MAX_ATTEMPTS_PER_ACCOUNT is 5 (UsersHandler.ts).
+      // DELETE_ACCOUNT_MAX_ATTEMPTS_PER_ACCOUNT is 5
+      // (users/accountHandlers.ts).
       for (let i = 0; i < 5; i++) {
         yield* authed.users
           .deleteAccount({ payload: { password: "wrong-pw" } })

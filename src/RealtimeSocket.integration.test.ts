@@ -245,11 +245,11 @@ test("a chat event reaches only the chat's participants, and a post event reache
 
 test("a comment event reaches only sockets subscribed to that post's room", async () => {
   // Only two fresh registrations here on purpose: registration is rate-limited
-  // per IP (REGISTER_MAX_ATTEMPTS_PER_IP in UsersHandler.ts) and the first
-  // test in this file already spent several against this shared server's one
-  // client IP. The post's author doubles as the "bystander": their own socket
-  // never subscribes to the room, so it stands in for any connected user who
-  // doesn't have the comment section open.
+  // per IP (REGISTER_MAX_ATTEMPTS_PER_IP in users/authHandlers.ts) and the
+  // first test in this file already spent several against this shared server's
+  // one client IP. The post's author doubles as the "bystander": their own
+  // socket never subscribes to the room, so it stands in for any connected user
+  // who doesn't have the comment section open.
   const author = await registerAndLogin(`cauthor_${Date.now()}`);
   const viewer = await registerAndLogin(`cviewer_${Date.now()}`);
 

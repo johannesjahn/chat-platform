@@ -26,7 +26,8 @@ import { Db, type DrizzleDb } from "./Db.ts";
 import { comments, notifications, posts, users } from "./db/schema.ts";
 import { notifyInboxChanged } from "./notifications.ts";
 import { RealtimeConnections } from "./Realtime.ts";
-import { publicUserColumns, toPublicUser } from "./UsersHandler.ts";
+
+import { publicUserColumns, toPublicUser } from "./users/userViews.ts";
 
 // Read side of the notification inbox (issue #317). Rows are written by the
 // handlers whose actions cause them — see src/notifications.ts.

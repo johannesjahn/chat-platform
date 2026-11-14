@@ -10,15 +10,16 @@ import {
   NotFound,
 } from "../Api.ts";
 import { CurrentUser } from "../Auth.ts";
-import { avatarStorageKey, generateAvatarToken } from "../avatars.ts";
+import {
+  avatarStorageKey,
+  generateAvatarToken,
+  deleteAvatarObjects,
+  toAvatarVariants,
+} from "../avatars.ts";
 import { processAvatar } from "../ImageProcessing.ts";
 import { withMediaProcessingPermit } from "../MediaProcessingLimit.ts";
 import { serializableTransaction } from "../serializableTransaction.ts";
-import {
-  deleteAvatarObjects,
-  enforceRateLimit,
-  toAvatarVariants,
-} from "../UsersHandler.ts";
+
 import { chatParticipants, chats } from "../db/schema.ts";
 import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
 import {
@@ -37,10 +38,11 @@ import {
 } from "./chatState.ts";
 import { getLastMessagesForChats } from "./messageViews.ts";
 import { getUnreadCountsForChats, hasUnreadFor } from "./unread.ts";
+import { enforceRateLimit } from "../RateLimiter.ts";
 
 // Mirrors AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT/AVATAR_UPLOAD_WINDOW_SECONDS
-// in UsersHandler.ts — same rationale (real image-decoding/resizing work, a
-// rare deliberate action) applies to a group's avatar.
+// in users/profileHandlers.ts — same rationale (real image-decoding/resizing
+// work, a rare deliberate action) applies to a group's avatar.
 const CHAT_AVATAR_UPLOAD_MAX_ATTEMPTS_PER_ACCOUNT = 10;
 
 const CHAT_AVATAR_UPLOAD_WINDOW_SECONDS = 60 * 60;
@@ -338,9 +340,9 @@ export const chatHandlers = ({
         yield* requireChatManager(db, currentUser, existing);
 
         // Bucketed by the uploading account rather than the chat, mirroring
-        // `uploadAvatar` in UsersHandler.ts — a caller who manages several
-        // groups shares one budget across all of them instead of getting a
-        // fresh one per chat.
+        // `uploadAvatar` in users/profileHandlers.ts — a caller who manages
+        // several groups shares one budget across all of them instead of
+        // getting a fresh one per chat.
         yield* enforceRateLimit(
           limiter,
           `chat-avatar-upload:account:${currentUser.id}`,
@@ -383,8 +385,8 @@ export const chatHandlers = ({
 
         // Mint a fresh token per variant and push the processed bytes to
         // object storage before touching the row — same ordering rationale
-        // as `uploadAvatar` in UsersHandler.ts (a failed upload leaves at
-        // most a few orphaned objects rather than a row pointing at bytes
+        // as `uploadAvatar` in users/profileHandlers.ts (a failed upload leaves
+        // at most a few orphaned objects rather than a row pointing at bytes
         // that never landed).
         const smallToken = generateAvatarToken();
         const mediumToken = generateAvatarToken();

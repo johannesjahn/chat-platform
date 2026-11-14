@@ -8,8 +8,8 @@ import {
   isAllowedImageUrl,
   type Message,
 } from "../Api.ts";
-import { toApiAttachment } from "../attachments.ts";
-import { enforceUploadQuota } from "../AttachmentsHandler.ts";
+import { toApiAttachment, enforceUploadQuota } from "../attachments.ts";
+
 import { CurrentUser } from "../Auth.ts";
 import { type DrizzleDb } from "../Db.ts";
 import { chargeGlobalRequests } from "../GlobalRateLimit.ts";

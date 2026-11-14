@@ -140,8 +140,8 @@ export const User = Schema.Struct({
   // Custom status (issue #218) — a short message plus an optional emoji, with
   // an optional auto-expiry. Null when unset. `statusExpiresAt` (epoch ms) in
   // the past is already resolved to a fully-null status server-side (see
-  // `effectiveStatus` in UsersHandler.ts), so a client never has to separately
-  // check whether to still show it.
+  // `effectiveStatus` in users/userViews.ts), so a client never has to
+  // separately check whether to still show it.
   statusText: Schema.NullOr(Schema.String),
   statusEmoji: Schema.NullOr(Schema.String),
   statusExpiresAt: Schema.NullOr(Schema.Finite),
@@ -547,7 +547,7 @@ export class AttachmentTooLarge extends Schema.TaggedError<AttachmentTooLarge>()
 ) {}
 
 // Raised when an upload would push a user's total stored-attachment bytes
-// past ATTACHMENT_QUOTA_MAX_BYTES (see AttachmentsHandler.ts) — bounds total
+// past ATTACHMENT_QUOTA_MAX_BYTES (see attachments.ts) — bounds total
 // storage per user, distinct from AttachmentTooLarge (one file's size) and
 // the upload rate limiter (uploads per minute), neither of which caps how
 // much a user can accumulate over time (issue #256).
@@ -1526,8 +1526,8 @@ const UsersGroup = HttpApiGroup.make("users")
   .add(
     // Uploads and stores a square-cropped avatar (issue #269), overwriting
     // any existing uploaded avatar and clearing `avatarUrl` — the two are
-    // mutually exclusive (see UsersHandler.ts). `updateProfile` above is the
-    // inverse: setting `avatarUrl` (or clearing it) always clears an
+    // mutually exclusive (see users/profileHandlers.ts). `updateProfile` above
+    // is the inverse: setting `avatarUrl` (or clearing it) always clears an
     // uploaded avatar back to unset.
     HttpApiEndpoint.post("uploadAvatar", "/users/me/avatar", {
       payload: UploadAvatarBody,
@@ -2737,7 +2737,7 @@ export type GameId = typeof GameId.Type;
 export const MAX_GAME_LOBBY_PLAYERS = 6;
 
 // The phase a lobby is in *right now*, derived at read time from what the
-// host did and the clock (see `lobbyPhase` in GamesHandler.ts):
+// host did and the clock (see `lobbyPhase` in games/lobbyStore.ts):
 //  - "waiting":   gathering players; the host can start.
 //  - "countdown": started, `startsAt` still in the future — the passage is
 //                 revealed so racers can read ahead, but typing is locked.

@@ -174,11 +174,11 @@ export type TypingEvent = {
 };
 
 // Pushed whenever someone sets/clears/updates their custom status (issue
-// #218, see `updateStatus` in UsersHandler.ts) — to the same audience as
-// `PresenceEvent` (their contacts and their own tabs, via `notifyContacts`).
-// Anyone else sees the new status the next time they fetch the user.
-// Carries the full, already-expiry-resolved state (see `effectiveStatus` in
-// UsersHandler.ts) so a client never needs a follow-up fetch to render it.
+// #218, see `updateStatus` in users/profileHandlers.ts) — to the same audience
+// as `PresenceEvent` (their contacts and their own tabs, via `notifyContacts`).
+// Anyone else sees the new status the next time they fetch the user. Carries
+// the full, already-expiry-resolved state (see `effectiveStatus` in
+// users/userViews.ts) so a client never needs a follow-up fetch to render it.
 export type StatusEvent = {
   readonly type: "status_changed";
   readonly userId: number;
@@ -222,7 +222,7 @@ export type GameProgressEvent = {
 };
 
 // Pushed to a game lobby's room whenever someone says something in its chat
-// (see `postGameChat` in GamesHandler.ts). Id-only — clients refetch
+// (see `postGameChat` in games/lobbyChatHandlers.ts). Id-only — clients refetch
 // `GET /games/lobbies/:id/chat`, which also drops authors they've blocked.
 export type GameChatEvent = {
   readonly type: "game_chat";

@@ -1,10 +1,9 @@
 import { HttpApiBuilder } from "effect/http-api";
-import type { BunFile } from "bun";
+import { type BunFile } from "bun";
 import { eq } from "drizzle-orm";
 import { Effect, Metric } from "effect";
 import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
-  AttachmentQuotaExceeded,
   AttachmentTooLarge,
   ChatApi,
   MAX_ATTACHMENT_SIZE_BYTES,
@@ -12,21 +11,26 @@ import {
   UnsupportedAttachmentType,
 } from "./Api.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
-import { getOwnedAttachmentOr404, toApiAttachment } from "./attachments.ts";
+import {
+  getOwnedAttachmentOr404,
+  toApiAttachment,
+  enforceUploadQuota,
+} from "./attachments.ts";
 import { processAudio } from "./AudioProcessing.ts";
 import { CurrentUser } from "./Auth.ts";
-import { Db, type DrizzleDb } from "./Db.ts";
+import { Db } from "./Db.ts";
 import { processImage } from "./ImageProcessing.ts";
 import { withMediaProcessingPermit } from "./MediaProcessingLimit.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import { RateLimiter } from "./RateLimiter.ts";
-import { attachments, users } from "./db/schema.ts";
+import { attachments } from "./db/schema.ts";
 import { processVideo } from "./VideoProcessing.ts";
 
 // Uploads are heavier than a typical write (disk I/O, a bucket round trip),
 // so — like EngagementHandler's write limiter — this bounds a scripted flood
 // separately from (and more tightly than) the global per-IP limiter.
 const UPLOAD_MAX_PER_USER = 20;
+
 const UPLOAD_WINDOW_SECONDS = 60;
 
 const enforceUploadLimit = (limiter: RateLimiter["Service"], userId: number) =>
@@ -52,46 +56,12 @@ const enforceUploadLimit = (limiter: RateLimiter["Service"], userId: number) =>
     }
   });
 
-// Bounds total storage a single user can accumulate across every upload —
-// unlike enforceUploadLimit above (velocity: uploads per minute) or
-// MAX_ATTACHMENT_SIZE_BYTES (one file's size), nothing previously bounded
-// how much a user could pile up over time by uploading steadily rather than
-// in a burst (issue #256).
-export const ATTACHMENT_QUOTA_MAX_BYTES = 500 * 1024 * 1024; // 500MB per user
-
-// Exported for forwarding (chats/forwardHandlers.ts, issue #601): a forwarded
-// attachment is copied into a new upload owned by the forwarder, which
-// counts toward their quota like any other.
-export const enforceUploadQuota = (
-  db: DrizzleDb,
-  userId: number,
-  incomingSize: number,
-) =>
-  Effect.gen(function* () {
-    // A single-row read of the running total a trigger on `attachments`
-    // keeps up to date (migration 0033), rather than re-summing every
-    // attachment the user has ever kept (issue #326).
-    const rows = yield* Effect.tryPromise(() =>
-      db
-        .select({ storageUsedBytes: users.storageUsedBytes })
-        .from(users)
-        .where(eq(users.id, userId)),
-    ).pipe(Effect.orDie);
-    const currentTotal = rows[0]?.storageUsedBytes ?? 0;
-    if (currentTotal + incomingSize > ATTACHMENT_QUOTA_MAX_BYTES) {
-      return yield* Effect.fail(
-        new AttachmentQuotaExceeded({
-          message: `Storage quota exceeded: uploads are capped at ${ATTACHMENT_QUOTA_MAX_BYTES} bytes per user`,
-        }),
-      );
-    }
-  });
-
 // ffmpeg's failure could be either of these, and a file in an off-list format
 // (FLAC, raw AAC, MPEG-4 Part 2, ...) is perfectly valid, so neither message calls
 // the file invalid. Lists what MediaInput.ts lets through.
 const UNSUPPORTED_VIDEO_MESSAGE =
   "This video format isn't supported, or the file is damaged. Use MP4 or WebM with H.264, HEVC, VP8, VP9 or AV1 video.";
+
 const UNSUPPORTED_AUDIO_MESSAGE =
   "This audio format isn't supported, or the file is damaged. Use MP3, Ogg, WAV, WebM or M4A with AAC, Opus, Vorbis, MP3 or PCM audio.";
 
