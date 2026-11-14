@@ -221,9 +221,37 @@
       matchUpdateTypes: ["major"],
       enabled: false,
     },
+
+    // values.yaml's postgres.image.tag is also postgres.upgradeImage's tag,
+    // and the official postgres image publishes a release before
+    // pgautoupgrade does. Bumped off the official image, the chart got
+    // 18.7-alpine while pgautoupgrade had no such tag, and the
+    // postgres-upgrade init container sat in ImagePullBackOff, taking the
+    // whole deployment down. The custom manager below tracks the tag
+    // against pgautoupgrade instead; this turns off the helm-values copy.
+    {
+      matchManagers: ["helm-values"],
+      matchFileNames: ["k8s/chat-platform/values.yaml"],
+      matchPackageNames: ["postgres"],
+      enabled: false,
+    },
   ],
 
   customManagers: [
+    // postgres.image.tag in the chart, looked up against
+    // pgautoupgrade/pgautoupgrade (see the disabled helm-values rule
+    // above). A tag pgautoupgrade has published is one the official image
+    // already has, so both images can always be pulled.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^k8s/chat-platform/values\\.yaml$/"],
+      matchStrings: [
+        'repository: postgres\\n(?:\\s*#.*\\n)*\\s*tag: "(?<currentValue>[^"]+)"',
+      ],
+      depNameTemplate: "pgautoupgrade/pgautoupgrade",
+      datasourceTemplate: "docker",
+    },
+
     // Tracks the Dockerfile's FFMPEG_VERSION, the only copy of the version
     // (ci.yml's unit job reads it from there). Reads the Debian archive
     // directly: an earlier manager on the repology datasource was dropped
