@@ -63,7 +63,7 @@ Two independent suites:
 
 ### Backend — `bun test ./src`
 
-Bun's built-in test runner. [src/users.test.ts](src/users.test.ts) exercises the
+Bun's built-in test runner. The tests in [src/users/](src/users/) exercise the
 Effect `HttpApi` in-process (no network): every test gets a **fresh in-memory
 PGlite** database (real Postgres semantics, no server to run) with the
 Drizzle migrations applied and a deterministic `JWT_SECRET`, so tests are
