@@ -780,7 +780,8 @@ regenerated from scratch.
   thing but is a documented Bun no-op (every test silently gets the 5000ms
   default regardless — see the comment in `bunfig.toml`), so the flag on the
   CLI/script is the only thing actually raising it. Tests in
-  [src/users.test.ts](src/users.test.ts) drive the
+  [src/users/](src/users/) (one test file per area, like the
+  handlers, with helpers in `testKit.ts`) drive the
   Effect `HttpApi` through an in-process web handler, with a deterministic
   `JWT_SECRET`. No server or network, fully isolated per test. Each test
   file that calls `makeTestDbAccessor()` (see [src/testDb.ts](src/testDb.ts))

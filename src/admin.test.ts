@@ -340,7 +340,7 @@ test("getAdminStats reports healthy dependencies and this process's runtime coun
 
       // Process-wide registry shared with whichever other test files land in
       // the same `--parallel` worker, so these are bounds, not exact values
-      // (same reasoning as users.test.ts's metric assertions).
+      // (same reasoning as users/testKit.ts's metric helpers).
       expect(health.requestsTotal).toBeGreaterThanOrEqual(0);
       expect(health.serverErrorsTotal).toBeGreaterThanOrEqual(0);
       expect(health.errorRate).toBeGreaterThanOrEqual(0);
