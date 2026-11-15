@@ -283,6 +283,46 @@ data:
               "legendFormat": "{{ "{{" }}event{{ "}}" }} {{ "{{" }}outcome{{ "}}" }}"
             }
           ]
+        },
+        {
+          "id": 17,
+          "type": "row",
+          "title": "Database by route",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 43, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
+          "id": 18,
+          "type": "timeseries",
+          "title": "DB time per second by route (top 10)",
+          "description": "Seconds spent in database calls per second of wall time, by the route template of the request they ran for. \"none\" is work outside a request (background jobs, PubSub deliveries).",
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 0, "y": 44, "w": 12, "h": 9 },
+          "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+              "expr": "topk(10, sum(rate(db_query_duration_seconds_sum[5m])) by (method, route))",
+              "legendFormat": "{{ "{{" }}method{{ "}}" }} {{ "{{" }}route{{ "}}" }}"
+            }
+          ]
+        },
+        {
+          "id": 19,
+          "type": "timeseries",
+          "title": "DB call p95 by route (top 10)",
+          "description": "95th-percentile duration of a single database call, by the route template of the request it ran for.",
+          "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+          "gridPos": { "x": 12, "y": 44, "w": 12, "h": 9 },
+          "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "datasource": { "type": "victoriametrics-metrics-datasource", "uid": "${datasource}" },
+              "expr": "topk(10, histogram_quantile(0.95, sum(rate(db_query_duration_seconds_bucket[5m])) by (le, method, route)))",
+              "legendFormat": "{{ "{{" }}method{{ "}}" }} {{ "{{" }}route{{ "}}" }}"
+            }
+          ]
         }
       ]
     }

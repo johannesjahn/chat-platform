@@ -42,15 +42,23 @@ const fakeDb = (errors: ReadonlyArray<unknown>) => {
 };
 
 // Module-level metrics, shared with other test files in the same worker,
-// so the tests below assert deltas.
+// so the tests below assert deltas. Outside a request, the route labels
+// read "none".
+const NO_ROUTE = { method: "none", route: "none" } as const;
 const dbMetrics = () =>
   Effect.runSync(
     Effect.all({
       aborted: Metric.value(
-        Metric.withAttributes(dbQueryDurationSeconds, { outcome: "aborted" }),
+        Metric.withAttributes(dbQueryDurationSeconds, {
+          ...NO_ROUTE,
+          outcome: "aborted",
+        }),
       ).pipe(Effect.map((state) => state.count)),
       success: Metric.value(
-        Metric.withAttributes(dbQueryDurationSeconds, { outcome: "success" }),
+        Metric.withAttributes(dbQueryDurationSeconds, {
+          ...NO_ROUTE,
+          outcome: "success",
+        }),
       ).pipe(Effect.map((state) => state.count)),
       errors: Metric.value(dbQueryErrorsTotal).pipe(
         Effect.map((state) => state.count),
