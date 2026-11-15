@@ -171,6 +171,9 @@ bun scripts/loadtest/sim/simulate.ts --users 10000 --targets <targets> --server-
   `generate_series`; the simulator mints access tokens with `JWT_SECRET`.
   100k users take ~2 minutes; going through `/users/register` would take
   hours of argon2 and trip its per-IP limit.
+- **Local backends only.** `--targets` must be loopback `http://` URLs. The
+  simulator mints valid tokens for the seeded accounts and generates heavy
+  load, so it refuses anything that could be a shared deployment.
 - **One IP per user.** Backends run with `TRUST_PROXY=loopback` and each
   user sends its own `X-Forwarded-For`, so per-IP limits apply per user as
   they would behind the ingress.

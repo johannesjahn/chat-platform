@@ -11,6 +11,7 @@
 // and over --workers processes (one Bun process tops out well before the
 // backend does). Each user gets its own X-Forwarded-For address, so the
 // backend must run with TRUST_PROXY=loopback, as it would behind an ingress.
+// Targets must be local (loopback) backends — see parseTargets.
 // Access tokens are minted locally with JWT_SECRET (same secret as the
 // backend) for the seeded users sim1..simN.
 //
@@ -23,7 +24,8 @@ import { cpus } from "os";
 type Config = {
   users: number;
   population: number;
-  targets: string[];
+  // Ports of local backends — see parseTargets.
+  targetPorts: number[];
   duration: number;
   ramp: number;
   workers: number;
@@ -60,6 +62,29 @@ const DEFAULT_ACTION_RATES_PER_MIN = {
   notifications: 0.1,
 } as const;
 type Action = keyof typeof DEFAULT_ACTION_RATES_PER_MIN;
+
+// Local backends only. The simulator mints valid tokens for the seeded
+// accounts and generates heavy load, so it must never end up pointed at a
+// shared deployment (see ../README.md). --targets may only name loopback
+// http URLs, and requests are rebuilt from this constant host plus the port.
+const LOOPBACK = "http://127.0.0.1";
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const parseTargets = (list: string): number[] =>
+  list.split(",").map((target) => {
+    const url = new URL(target);
+    const port = Number(url.port || 80);
+    if (
+      url.protocol !== "http:" ||
+      !LOOPBACK_HOSTS.has(url.hostname) ||
+      (url.pathname !== "/" && url.pathname !== "") ||
+      !Number.isInteger(port)
+    ) {
+      throw new Error(
+        `--targets must be loopback http URLs like http://127.0.0.1:3100 (got ${target})`,
+      );
+    }
+    return port;
+  });
 
 // ---------------------------------------------------------------- histogram
 // Log-bucketed (5% wide) so per-worker histograms merge exactly.
@@ -618,7 +643,7 @@ async function runWorker(config: Config, userIds: number[]) {
     userIds.map((id, i) =>
       simulateUser(
         id,
-        config.targets[id % config.targets.length]!,
+        `${LOOPBACK}:${config.targetPorts[id % config.targetPorts.length]!}`,
         (i / userIds.length) * config.ramp * 1000 + Math.random() * 50,
       ),
     ),
@@ -835,7 +860,7 @@ if (argv.includes("--worker")) {
   const config: Config = {
     users,
     population: Number(flag("population", String(users))),
-    targets: flag("targets", "http://127.0.0.1:3000").split(","),
+    targetPorts: parseTargets(flag("targets", "http://127.0.0.1:3000")),
     duration: Number(flag("duration", "120")),
     ramp: Number(flag("ramp", "30")),
     workers: Number(
@@ -862,7 +887,7 @@ if (argv.includes("--worker")) {
     throw new Error("JWT_SECRET is required (same as the backend's)");
   console.log(
     `[sim] ${config.users} users (of ${config.population}) x${config.rateMultiplier} rate -> ` +
-      `${config.targets.join(", ")} | ${config.workers} workers, ${cpus().length} cpus | ` +
+      `${config.targetPorts.map((port) => `${LOOPBACK}:${port}`).join(", ")} | ${config.workers} workers, ${cpus().length} cpus | ` +
       `ramp ${config.ramp}s + ${config.duration}s` +
       (config.feedRefetch ? "" : " | no feed refetch") +
       (Object.keys(config.rates).length
