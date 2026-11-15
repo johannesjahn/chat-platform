@@ -138,6 +138,57 @@ output](https://grafana.com/docs/k6/latest/results-output/real-time/prometheus-r
 k6 run --out experimental-prometheus-rw scripts/loadtest/http-crud.js
 ```
 
+## `sim/` — realistic-user simulator
+
+The two k6 scripts above hammer endpoints; they don't behave like users.
+[`sim/simulate.ts`](sim/simulate.ts) does: every simulated user holds a real
+`/ws` socket, runs a Poisson mix of chat/feed actions (per-minute rates in
+`DEFAULT_ACTION_RATES_PER_MIN`), and **reacts to pushed events the way the
+web client does** (`realtimeSocket.ts`/`chatSync.ts`/`postSync.ts`: a new
+post fetches the feed's newest page, a message to a chat not on screen
+refetches the badge and list, every socket open self-heals...). At scale those
+event-triggered requests are most of the load. Findings from the first runs
+are in [`sim/RESULTS.md`](sim/RESULTS.md).
+
+```bash
+# Throwaway Postgres (with pg_stat_statements) + Redis
+docker run -d --name lt-pg -e POSTGRES_USER=lt -e POSTGRES_PASSWORD=lt -e POSTGRES_DB=lt \
+  -p 127.0.0.1:55432:5432 --cpus=4 --memory=4g --shm-size=1g postgres:18-alpine \
+  -c max_connections=200 -c shared_buffers=1GB -c shared_preload_libraries=pg_stat_statements
+docker run -d --name lt-redis -p 127.0.0.1:56379:6379 redis:8.10.3-alpine
+export DATABASE_URL=postgres://lt:lt@127.0.0.1:55432/lt REDIS_URL=redis://127.0.0.1:56379 \
+  JWT_SECRET=loadtest-secret-loadtest-secret-loadtest-secret-0123
+bun run db:migrate && docker exec lt-pg psql -U lt -d lt -c "create extension pg_stat_statements"
+
+bun scripts/loadtest/sim/seed.ts --users 10000      # wipes the DB, seeds sim1..sim10000
+scripts/loadtest/sim/servers.sh 4                    # 4 backends on :3100-3103, prints pids/targets
+bun scripts/loadtest/sim/simulate.ts --users 10000 --targets <targets> --server-pids <pids> \
+  --ramp 60 --duration 120 --out /tmp/10k.json
+```
+
+- **Seeding, not registering.** `seed.ts` writes users, a social graph (8
+  direct chats + 2 groups of 10 each), message history and posts with
+  `generate_series`; the simulator mints access tokens with `JWT_SECRET`.
+  100k users take ~2 minutes; going through `/users/register` would take
+  hours of argon2 and trip its per-IP limit.
+- **One IP per user.** Backends run with `TRUST_PROXY=loopback` and each
+  user sends its own `X-Forwarded-For`, so per-IP limits apply per user as
+  they would behind the ingress.
+- **An ingress stand-in.** Each worker sends through a bounded pool of
+  keep-alive connections (`--inflight`, default 128), and latency includes
+  time queued there, as it would at the ingress. Without it, a burst opens
+  hundreds of TCP connections at once and macOS's 128-deep accept backlog
+  resets them, which is a test artifact.
+- **Knobs.** `--rate-multiplier N` makes each socket act like N users, to
+  put more users' request load on the backend than one machine has sockets
+  for (it does not scale fan-out). `--no-feed-refetch` and
+  `--rates reactPost=0,createPost=0` switch off the paths that grow
+  quadratically, to see what breaks next.
+- **Trust the generator first.** `genLag99` (the generator's event-loop
+  lag) must stay in single-digit ms; above that, the numbers are the load
+  generator's. `bun --preload ./scripts/loadtest/sim/loop-lag.ts src/main.ts`
+  logs a backend's own loop lag the same way.
+
 ## What's not here yet
 
 Per issue #195's suggested prioritization, the rolling-deploy scenario
