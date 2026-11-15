@@ -66,16 +66,24 @@ export function AttachmentUploadField({
     setUploading(true);
     setProgress(0);
     setPendingFilename(file.name);
+    // A file picked while another is still uploading replaces it.
+    uploadRef.current?.abort();
     const upload = uploadAttachment(file, setProgress);
     uploadRef.current = upload;
+    // Only the latest upload may touch state: one that was replaced or
+    // abandoned settles later, and would otherwise attach its file, show its
+    // "Upload cancelled" or clear the newer upload's spinner.
+    const isCurrent = () => uploadRef.current === upload;
     upload.promise
       .then((result) => {
-        onUploaded(result);
+        if (isCurrent()) onUploaded(result);
       })
       .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "Upload failed");
+        if (isCurrent())
+          setError(err instanceof Error ? err.message : "Upload failed");
       })
       .finally(() => {
+        if (!isCurrent()) return;
         setUploading(false);
         uploadRef.current = null;
       });
@@ -95,7 +103,18 @@ export function AttachmentUploadField({
   // An upload still running when the field goes away (the composer backed
   // out of the mode, or a newly dropped file replaced this one) is
   // abandoned, so it can't land later and attach itself to the next message.
-  useEffect(() => () => uploadRef.current?.abort(), []);
+  // Forgetting the consumed file too means that if the field mounts again,
+  // the caller's file is uploaded again rather than left aborted. In
+  // development that always happens: StrictMode mounts every effect twice,
+  // and without this the first pass's abort was all the file ever got.
+  useEffect(
+    () => () => {
+      uploadRef.current?.abort();
+      uploadRef.current = null;
+      consumedFileRef.current = null;
+    },
+    [],
+  );
 
   function handleFiles(files: FileList | null) {
     const file = files?.[0];
@@ -103,8 +122,9 @@ export function AttachmentUploadField({
   }
 
   function cancelUpload() {
+    // Still the current upload until its promise settles, which shows
+    // "Upload cancelled" as before.
     uploadRef.current?.abort();
-    uploadRef.current = null;
     setUploading(false);
     setPendingFilename(null);
   }

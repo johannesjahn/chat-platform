@@ -915,10 +915,12 @@ thresholds, and uploads the `coverage-report` artifact — see Testing above),
 **e2e** (Playwright, against build-web's uploaded build — see Testing
 above; the build can't be made inside the Playwright container, where
 TanStack Start's prerender can't reach its preview server, so build-web also
-runs for backend-only PRs), **e2e-dev** (only `accessibility.spec.ts`, on the
-Vite dev server: React's development-only `console.error`s — duplicate keys,
-invalid DOM nesting — don't exist in the production build, and that spec
-renders every main page on every layout), and **e2e-stress** (PRs only,
+runs for backend-only PRs), **e2e-dev** (only `accessibility.spec.ts` and
+`attachment-captions.spec.ts`, on the Vite dev server: React's
+development-only `console.error`s — duplicate keys, invalid DOM nesting —
+don't exist in the production build, and that spec renders every main page on
+every layout; StrictMode's double-mounted effects don't either, and the
+captions spec uploads through a mount effect), and **e2e-stress** (PRs only,
 against the build: re-runs just the
 `web/e2e/**/*.spec.ts` files the PR adds or edits with `--repeat-each=5`,
 `--retries=0` and every core busy, to catch timing flakes that pass a single

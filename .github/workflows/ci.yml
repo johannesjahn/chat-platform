@@ -739,7 +739,10 @@ jobs:
   # renders every main page, in both themes and all three layouts, so running
   # it on the dev server (the default `E2E_TARGET`) is a cheap sweep for them;
   # everything else runs once, against the build. It also keeps the local
-  # default from rotting unnoticed.
+  # default from rotting unnoticed. attachment-captions.spec.ts rides along
+  # for StrictMode, which only exists in development and mounts every effect
+  # twice: it uploads a file through AttachmentUploadField's mount effect,
+  # whose cleanup once aborted that upload for good on the dev server only.
   e2e-dev:
     name: E2E dev-server checks
     needs: changes
@@ -760,7 +763,7 @@ jobs:
           web: true
 
       - name: Run Playwright tests on the dev server
-        run: bun run test:e2e e2e/accessibility.spec.ts
+        run: bun run test:e2e e2e/accessibility.spec.ts e2e/attachment-captions.spec.ts
         working-directory: web
 
       - name: Upload Playwright traces
