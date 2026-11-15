@@ -509,7 +509,13 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
     queryKey,
     enabled: enabled && chatId != null,
     refetchOnMount: refetchUnlessWarmed,
-    queryFn: async (): Promise<ChatMessagesPage> => {
+    // Every fetch below takes the query's `signal`. A run React Query has
+    // cancelled — a `loadEarlier` superseding a socket refetch, or the other
+    // way round — would otherwise still finish and write its cursors over
+    // the newer run's, e.g. moving the oldest cursor back past a page that's
+    // already on screen, so the next `loadEarlier` prepended it again.
+    // Aborted, its fetch throws before any cursor is touched.
+    queryFn: async ({ signal }): Promise<ChatMessagesPage> => {
       const id = chatId!;
       const isLoadEarlierFetch = isLoadEarlierFetchRef.current;
       isLoadEarlierFetchRef.current = false;
@@ -527,10 +533,14 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       const hasWindowThisMount = newestCursorRef.current != null;
 
       if (isLoadEarlierFetch && prev && oldestCursorRef.current) {
-        const page = await fetchMessagesPage(id, {
-          before: oldestCursorRef.current,
-          limit: MESSAGES_PAGE_SIZE,
-        });
+        const page = await fetchMessagesPage(
+          id,
+          {
+            before: oldestCursorRef.current,
+            limit: MESSAGES_PAGE_SIZE,
+          },
+          signal,
+        );
         oldestCursorRef.current = page.earliestCursor;
         return {
           messages: [...page.messages, ...prev.messages],
@@ -540,20 +550,28 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       }
 
       if (prev && newestCursorRef.current) {
-        const page = await fetchMessagesPage(id, {
-          after: newestCursorRef.current,
-          limit: MESSAGES_MAX_LIMIT,
-        });
+        const page = await fetchMessagesPage(
+          id,
+          {
+            after: newestCursorRef.current,
+            limit: MESSAGES_MAX_LIMIT,
+          },
+          signal,
+        );
         // Nothing newer, yet the chat changed: an edit, a delete or a read
         // receipt on a message already loaded (issue #658), none of which
         // an `after` page can carry — so re-read the window itself.
         if (page.messages.length === 0) {
-          const fresh = await fetchMessagesPage(id, {
-            limit: Math.min(
-              Math.max(prev.messages.length, MESSAGES_PAGE_SIZE),
-              MESSAGES_MAX_LIMIT,
-            ),
-          });
+          const fresh = await fetchMessagesPage(
+            id,
+            {
+              limit: Math.min(
+                Math.max(prev.messages.length, MESSAGES_PAGE_SIZE),
+                MESSAGES_MAX_LIMIT,
+              ),
+            },
+            signal,
+          );
           return replaceNewestWindow(prev, fresh);
         }
         // `newestCursorRef` isn't advanced by `appendSentMessage` (it has no
@@ -589,7 +607,7 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       const limit = hasWindowThisMount
         ? MESSAGES_MAX_LIMIT
         : MESSAGES_PAGE_SIZE;
-      const page = await fetchMessagesPage(id, { limit });
+      const page = await fetchMessagesPage(id, { limit }, signal);
       oldestCursorRef.current = page.earliestCursor;
       newestCursorRef.current = page.latestCursor;
       return {
