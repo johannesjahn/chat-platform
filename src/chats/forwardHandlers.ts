@@ -11,7 +11,7 @@ import {
 import { toApiAttachment, enforceUploadQuota } from "../attachments.ts";
 
 import { CurrentUser } from "../Auth.ts";
-import { type DrizzleDb, dbQuery } from "../Db.ts";
+import { type DrizzleDb, dbQuery, timedDbCall } from "../Db.ts";
 import { chargeGlobalRequests } from "../GlobalRateLimit.ts";
 import { contentCreatedTotal } from "../Metrics.ts";
 import {
@@ -382,34 +382,37 @@ export const forwardHandlers = ({
             // Thrown inside the transaction to roll the attachment row
             // back when the message insert hit an idempotency conflict.
             const duplicate = Symbol("duplicate");
-            const outcome = yield* Effect.tryPromise({
-              try: () =>
-                db.transaction(async (tx) => {
-                  const attachmentRows = await tx
-                    .insert(attachments)
-                    .values({
-                      uploaderId: currentUser.id,
-                      filename: original.filename,
-                      mimeType: original.mimeType,
-                      size: original.size,
-                      storageKey,
-                      width: original.width,
-                      height: original.height,
-                      blurhash: original.blurhash,
-                      waveform: original.waveform,
-                      durationMs: original.durationMs,
-                    })
-                    .returning();
-                  const attachmentRow = attachmentRows[0]!;
-                  const messageRow = await insertMessage(tx, {
-                    ...values,
-                    attachmentId: attachmentRow.id,
-                  });
-                  if (!messageRow) throw duplicate;
-                  return { attachmentRow, messageRow };
-                }),
-              catch: (cause) => cause,
-            }).pipe(
+            const outcome = yield* timedDbCall(
+              Effect.tryPromise({
+                try: () =>
+                  db.transaction(async (tx) => {
+                    const attachmentRows = await tx
+                      .insert(attachments)
+                      .values({
+                        uploaderId: currentUser.id,
+                        filename: original.filename,
+                        mimeType: original.mimeType,
+                        size: original.size,
+                        storageKey,
+                        width: original.width,
+                        height: original.height,
+                        blurhash: original.blurhash,
+                        waveform: original.waveform,
+                        durationMs: original.durationMs,
+                      })
+                      .returning();
+                    const attachmentRow = attachmentRows[0]!;
+                    const messageRow = await insertMessage(tx, {
+                      ...values,
+                      attachmentId: attachmentRow.id,
+                    });
+                    if (!messageRow) throw duplicate;
+                    return { attachmentRow, messageRow };
+                  }),
+                catch: (cause) => cause,
+              }),
+              (cause) => cause === duplicate,
+            ).pipe(
               Effect.tapError(() => discardObject),
               Effect.catch((cause) =>
                 cause === duplicate ? Effect.succeed(null) : Effect.die(cause),

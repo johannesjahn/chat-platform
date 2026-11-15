@@ -6,7 +6,7 @@ import {
   type NotificationType,
 } from "./Api.ts";
 import { recipientsMutingSender } from "./blocks.ts";
-import type { DrizzleDb } from "./Db.ts";
+import { type DrizzleDb, timedDbCall } from "./Db.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { notifications, users } from "./db/schema.ts";
 
@@ -94,22 +94,26 @@ export const createNotifications = (
 ) =>
   Effect.gen(function* () {
     if (inputs.length === 0) return;
-    const kept = yield* Effect.tryPromise(() => filterRecipients(db, inputs));
+    const kept = yield* timedDbCall(
+      Effect.tryPromise(() => filterRecipients(db, inputs)),
+    );
     if (kept.length === 0) return;
     const now = new Date();
-    yield* Effect.tryPromise(() =>
-      db.insert(notifications).values(
-        kept.map((input) => ({
-          userId: input.userId,
-          actorId: input.actorId,
-          type: input.type,
-          postId: input.postId ?? null,
-          commentId: input.commentId ?? null,
-          emoji: input.emoji ?? null,
-          game: input.game ?? null,
-          lobbyId: input.lobbyId ?? null,
-          createdAt: now,
-        })),
+    yield* timedDbCall(
+      Effect.tryPromise(() =>
+        db.insert(notifications).values(
+          kept.map((input) => ({
+            userId: input.userId,
+            actorId: input.actorId,
+            type: input.type,
+            postId: input.postId ?? null,
+            commentId: input.commentId ?? null,
+            emoji: input.emoji ?? null,
+            game: input.game ?? null,
+            lobbyId: input.lobbyId ?? null,
+            createdAt: now,
+          })),
+        ),
       ),
     );
     yield* notifyInboxChanged(
@@ -137,23 +141,25 @@ export const retractReactionNotification = (
   },
 ) =>
   Effect.gen(function* () {
-    const deleted = yield* Effect.tryPromise(() =>
-      db
-        .delete(notifications)
-        .where(
-          and(
-            eq(notifications.type, "reaction"),
-            eq(notifications.actorId, target.actorId),
-            eq(notifications.emoji, target.emoji),
-            target.commentId !== undefined
-              ? eq(notifications.commentId, target.commentId)
-              : and(
-                  eq(notifications.postId, target.postId ?? -1),
-                  isNull(notifications.commentId),
-                ),
-          ),
-        )
-        .returning({ userId: notifications.userId }),
+    const deleted = yield* timedDbCall(
+      Effect.tryPromise(() =>
+        db
+          .delete(notifications)
+          .where(
+            and(
+              eq(notifications.type, "reaction"),
+              eq(notifications.actorId, target.actorId),
+              eq(notifications.emoji, target.emoji),
+              target.commentId !== undefined
+                ? eq(notifications.commentId, target.commentId)
+                : and(
+                    eq(notifications.postId, target.postId ?? -1),
+                    isNull(notifications.commentId),
+                  ),
+            ),
+          )
+          .returning({ userId: notifications.userId }),
+      ),
     );
     yield* notifyInboxChanged(
       connections,
@@ -223,14 +229,16 @@ export const notifyMentions = (
 ) =>
   Effect.gen(function* () {
     const { db } = deps;
-    const mentioned = yield* Effect.tryPromise(() =>
-      resolveMentionedUserIds(db, args.content),
+    const mentioned = yield* timedDbCall(
+      Effect.tryPromise(() => resolveMentionedUserIds(db, args.content)),
     );
     if (mentioned.length === 0) return;
     const skip = new Set(args.exclude ?? []);
     if (args.previousContent !== undefined) {
-      const before = yield* Effect.tryPromise(() =>
-        resolveMentionedUserIds(db, args.previousContent!),
+      const before = yield* timedDbCall(
+        Effect.tryPromise(() =>
+          resolveMentionedUserIds(db, args.previousContent!),
+        ),
       );
       for (const id of before) skip.add(id);
     }

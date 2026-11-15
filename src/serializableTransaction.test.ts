@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Exit } from "effect";
+import { Effect, Exit, Metric } from "effect";
 import type { DrizzleDb } from "./Db.ts";
+import { dbQueryDurationSeconds, dbQueryErrorsTotal } from "./Metrics.ts";
 import {
   isRetryableAbort,
   SERIALIZABLE_MAX_RETRIES,
@@ -39,6 +40,23 @@ const fakeDb = (errors: ReadonlyArray<unknown>) => {
   } as unknown as DrizzleDb;
   return { db, calls };
 };
+
+// Module-level metrics, shared with other test files in the same worker,
+// so the tests below assert deltas.
+const dbMetrics = () =>
+  Effect.runSync(
+    Effect.all({
+      aborted: Metric.value(
+        Metric.withAttributes(dbQueryDurationSeconds, { outcome: "aborted" }),
+      ).pipe(Effect.map((state) => state.count)),
+      success: Metric.value(
+        Metric.withAttributes(dbQueryDurationSeconds, { outcome: "success" }),
+      ).pipe(Effect.map((state) => state.count)),
+      errors: Metric.value(dbQueryErrorsTotal).pipe(
+        Effect.map((state) => state.count),
+      ),
+    }),
+  );
 
 describe("isRetryableAbort", () => {
   test("finds the SQLSTATE through wrapping, in either field", () => {
@@ -113,5 +131,38 @@ describe("serializableTransaction", () => {
     );
     expect(Exit.hasDies(exit)).toBe(true);
     expect(calls).toHaveLength(1);
+  });
+
+  test("times each attempt, a retried abort as aborted, without counting an error", async () => {
+    const { db } = fakeDb([
+      bunSerializationFailure(),
+      bunSerializationFailure(),
+    ]);
+    const before = dbMetrics();
+    await Effect.runPromise(serializableTransaction(db, async () => 42));
+    const after = dbMetrics();
+    expect(after.aborted).toBe(before.aborted + 2);
+    expect(after.success).toBe(before.success + 1);
+    expect(after.errors).toBe(before.errors);
+  });
+
+  test("counts an abort that outlasts the retries as one error", async () => {
+    const { db } = fakeDb(
+      Array.from({ length: SERIALIZABLE_MAX_RETRIES + 5 }, () =>
+        bunSerializationFailure(),
+      ),
+    );
+    const before = dbMetrics();
+    await Effect.runPromiseExit(serializableTransaction(db, async () => 42));
+    const after = dbMetrics();
+    expect(after.aborted).toBe(before.aborted + SERIALIZABLE_MAX_RETRIES + 1);
+    expect(after.errors).toBe(before.errors + 1);
+  });
+
+  test("counts any other failure as one error", async () => {
+    const { db } = fakeDb([new Error("connection reset")]);
+    const before = dbMetrics();
+    await Effect.runPromiseExit(serializableTransaction(db, async () => 42));
+    expect(dbMetrics().errors).toBe(before.errors + 1);
   });
 });

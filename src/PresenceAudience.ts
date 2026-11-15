@@ -1,7 +1,7 @@
 import { and, eq, ne, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Effect, Layer } from "effect";
-import { Db } from "./Db.ts";
+import { Db, timedDbCall } from "./Db.ts";
 import { chatParticipants, userBlocks } from "./db/schema.ts";
 
 // Who gets to see a user's presence (online/offline) and custom status
@@ -38,41 +38,43 @@ export const PresenceAudienceLive = Layer.effect(
     // Self-join on chat_participants: `chat_participants_user_id_idx` finds
     // the user's chats, the (chatId, userId) unique index their co-members.
     const contactsOf: PresenceAudience["Service"]["contactsOf"] = (userId) =>
-      Effect.tryPromise(() =>
-        db
-          .selectDistinct({ userId: others.userId })
-          .from(chatParticipants)
-          .innerJoin(others, eq(others.chatId, chatParticipants.chatId))
-          .where(
-            and(
-              eq(chatParticipants.userId, userId),
-              ne(others.userId, userId),
-              // A pending message request (issue #785) introduces nobody,
-              // either way round, until it's accepted.
-              eq(chatParticipants.requestPending, false),
-              eq(others.requestPending, false),
-              notExists(
-                db
-                  .select({ one: sql`1` })
-                  .from(userBlocks)
-                  .where(
-                    and(
-                      eq(userBlocks.type, "block"),
-                      or(
-                        and(
-                          eq(userBlocks.blockerId, userId),
-                          eq(userBlocks.blockedId, others.userId),
-                        ),
-                        and(
-                          eq(userBlocks.blockerId, others.userId),
-                          eq(userBlocks.blockedId, userId),
+      timedDbCall(
+        Effect.tryPromise(() =>
+          db
+            .selectDistinct({ userId: others.userId })
+            .from(chatParticipants)
+            .innerJoin(others, eq(others.chatId, chatParticipants.chatId))
+            .where(
+              and(
+                eq(chatParticipants.userId, userId),
+                ne(others.userId, userId),
+                // A pending message request (issue #785) introduces nobody,
+                // either way round, until it's accepted.
+                eq(chatParticipants.requestPending, false),
+                eq(others.requestPending, false),
+                notExists(
+                  db
+                    .select({ one: sql`1` })
+                    .from(userBlocks)
+                    .where(
+                      and(
+                        eq(userBlocks.type, "block"),
+                        or(
+                          and(
+                            eq(userBlocks.blockerId, userId),
+                            eq(userBlocks.blockedId, others.userId),
+                          ),
+                          and(
+                            eq(userBlocks.blockerId, others.userId),
+                            eq(userBlocks.blockedId, userId),
+                          ),
                         ),
                       ),
                     ),
-                  ),
+                ),
               ),
             ),
-          ),
+        ),
       ).pipe(
         Effect.map((rows) => rows.map((row) => row.userId)),
         // Best-effort like the push itself (see Realtime.ts): a failed
