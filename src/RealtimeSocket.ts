@@ -205,6 +205,11 @@ export const makeIncomingHandler = (
         yield* connections.subscribePost(message.postId, write);
       } else if (message.type === "unsubscribe_post_comments") {
         yield* connections.unsubscribePost(message.postId, write);
+      } else if (message.type === "watch_post") {
+        // A card showing the post (issue #828; see `watchPost`).
+        yield* connections.watchPost(message.postId, write);
+      } else if (message.type === "unwatch_post") {
+        yield* connections.unwatchPost(message.postId, write);
       }
     });
 };

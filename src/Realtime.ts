@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Metric } from "effect";
+import { Context, Duration, Effect, Layer, Metric, Schedule } from "effect";
 import {
   websocketConnectionsActive,
   websocketConnectionsTotal,
@@ -70,12 +70,48 @@ export type ChatDeletedEvent = {
 //
 // `change` says which of the three happened, so a client can act on just the
 // one post instead of refetching every feed page it has loaded (issue #662):
-// patch a post it has cached, drop a deleted one without a request, and only
-// look for something new on a "created".
+// patch a post it has cached, drop a deleted one without a request.
+//
+// Sent only to the sockets showing that post (`notifyPostViewers`: cards
+// that `watch_post` it, plus its open comment sections), never broadcast
+// (issue #828): sent to everyone, each post was one frame per online user,
+// O(online²) cluster-wide. A new post isn't sent this way at all: it reaches
+// feed viewers as a coalesced `feed_head` instead. "created" stays in the
+// type for clients that predate that.
 export type PostEvent = {
   readonly type: "post_changed";
   readonly postId: number;
   readonly change: "created" | "updated" | "deleted";
+};
+
+// Tells sockets in the feed room (`FEED_ROOM`) that posts newer than what they
+// have may exist (issue #827): the ids announced since the last one, at most
+// one event per `FeedHeadInterval` per instance however many posts land. The
+// client shows a "new posts" pill and fetches only when it's used — fetching
+// on every new post was one feed request per online user per post. Ids, not
+// a count: the client drops ones it already has (its own post), and the
+// server's blocked/muted filter only applies once it fetches.
+export type FeedHeadEvent = {
+  readonly type: "feed_head";
+  readonly postIds: ReadonlyArray<number>;
+};
+
+// The latest reaction counts of the posts a socket is showing (issue #828).
+// On a chronological feed the newest posts are on nearly every viewer's
+// screen, so even a frame per reaction to just their viewers grows with
+// users × reactions. Each instance instead keeps the latest counts per post
+// and, once per `PostReactionsInterval`, sends each socket one frame covering
+// every changed post it watches: frames scale with viewers, not reactions.
+// Counts only, never `reactedByMe` (see ReactionEvent).
+export type PostReactionsEvent = {
+  readonly type: "post_reactions";
+  readonly posts: ReadonlyArray<{
+    readonly postId: number;
+    readonly reactions: ReadonlyArray<{
+      readonly emoji: string;
+      readonly count: number;
+    }>;
+  }>;
 };
 
 // Pushed when a comment or reply on a post is created, edited, or deleted.
@@ -94,11 +130,11 @@ export type CommentEvent = {
 
 // Pushed when a reaction on a post, a comment/reply, or a chat message is
 // added or removed (issue #216 extended this to messages; issue #215 widened
-// it from the original binary "like", issue #67). A reaction on a *post*
-// goes out feed-wide (via `broadcastAll`, like `post_changed`) — reaction
-// counts are low-volume and relevant to anyone viewing the feed. A reaction
-// on a *comment* is scoped to that post's room (`notifyPostRoom`) instead, to
-// avoid flooding the whole feed with per-comment activity. A reaction on a
+// it from the original binary "like", issue #67). A reaction on a *post* is
+// no longer sent as this event: it went out feed-wide, O(online²) — every
+// reaction a frame to every user (issue #828) — and is now batched into
+// `post_reactions` instead. A reaction on a *comment* is scoped to that
+// post's comment room (`notifyPostRoom`). A reaction on a
 // *message* is scoped to the message's chat participants (`notifyUsers`,
 // like `chat_updated`) — chat messages are private to their participants,
 // unlike posts/comments. `chatId` is only ever set for a message reaction; it
@@ -257,6 +293,8 @@ export type RealtimeEvent =
   | ChatEvent
   | ChatDeletedEvent
   | PostEvent
+  | FeedHeadEvent
+  | PostReactionsEvent
   | CommentEvent
   | ReactionEvent
   | MessagePinEvent
@@ -285,8 +323,8 @@ export const SESSION_REVOKED_CLOSE_CODE = 4401;
 // Tracks which users currently have a live `/ws` connection, so:
 //  - chat mutations can notify only the participants of the affected chat
 //    (`notifyUsers`);
-//  - post mutations can notify every connected user, since the feed is
-//    public to any signed-in user (`broadcastAll`).
+//  - post mutations can notify the sockets showing that post
+//    (`notifyPostRoom`), and new posts the feed's viewers (`announcePost`).
 export class RealtimeConnections extends Context.Service<
   RealtimeConnections,
   {
@@ -301,6 +339,10 @@ export class RealtimeConnections extends Context.Service<
       userIds: Iterable<number>,
       event: RealtimeEvent,
     ) => Effect.Effect<void>;
+    // Every connected socket on every instance. Only for rare, genuinely
+    // global events — never per item (a post, a reaction, a comment): those
+    // happen in proportion to the number of users, so sending each to every
+    // user is O(online²) (issue #828).
     readonly broadcastAll: (event: RealtimeEvent) => Effect.Effect<void>;
     // Closes every `/ws` connection `userId` has open, on every instance —
     // called wherever their token_version is bumped (log out everywhere,
@@ -339,6 +381,27 @@ export class RealtimeConnections extends Context.Service<
     readonly notifyPostRoom: (
       postId: number,
       event: RealtimeEvent,
+    ) => Effect.Effect<void>;
+    // A connection showing a post (a card) rather than its comments (issue
+    // #828). Watchers get the post's own changes — `notifyPostViewers` and
+    // `post_reactions` — but not its comment traffic, which only open
+    // comment sections need. Local bookkeeping, like `subscribePost`.
+    readonly watchPost: (postId: number, write: Writer) => Effect.Effect<void>;
+    readonly unwatchPost: (
+      postId: number,
+      write: Writer,
+    ) => Effect.Effect<void>;
+    // `event` to every socket showing `postId` — its watchers and its
+    // comment room — on any instance. For a post's own edit or deletion.
+    readonly notifyPostViewers: (
+      postId: number,
+      event: RealtimeEvent,
+    ) => Effect.Effect<void>;
+    // A post's new reaction counts, batched into its viewers' next
+    // `post_reactions` frame on every instance (see PostReactionsEvent).
+    readonly announcePostReactions: (
+      postId: number,
+      reactions: PostReactionsEvent["posts"][number]["reactions"],
     ) => Effect.Effect<void>;
     // Ids of `userId`'s contacts with a live `/ws` connection *anywhere*
     // right now (PresenceStore answers the "anywhere" part — correctly
@@ -383,15 +446,42 @@ export class RealtimeConnections extends Context.Service<
       room: string,
       event: RealtimeEvent,
     ) => Effect.Effect<void>;
+    // A new post: feed viewers on every instance hear about it in their
+    // next coalesced `feed_head` (see `FeedHeadEvent`).
+    readonly announcePost: (postId: number) => Effect.Effect<void>;
   }
 >()("RealtimeConnections") {}
 
 // Room names a client may subscribe to over `/ws`. An allowlist rather than
 // "any string", so a client can't grow the room map without bound with
-// made-up names. Games are the only room users today; the game segment is a
-// lowercase slug so a new game (see GAMES in Api.ts) needs no change here.
+// made-up names. The feed (see `FeedHeadEvent`) and the games; the game
+// segment is a lowercase slug so a new game (see GAMES in Api.ts) needs no
+// change here.
 const ROOM_NAME_PATTERN =
-  /^(game-hub:[a-z][a-z0-9-]{0,31}|game-lobby:\d{1,10})$/;
+  /^(feed|game-hub:[a-z][a-z0-9-]{0,31}|game-lobby:\d{1,10})$/;
+
+// The room a client joins while it shows the feed, for `feed_head`.
+export const FEED_ROOM = "feed";
+
+// How often an instance may tell its feed viewers about new posts. Each
+// tick sends at most one `feed_head`, so feed traffic is one frame per
+// viewer per interval, not one per viewer per post. A reference so tests
+// can shorten it.
+export const FeedHeadInterval = Context.Reference<Duration.Duration>(
+  "chat-platform/Realtime/FeedHeadInterval",
+  { defaultValue: () => Duration.seconds(3) },
+);
+
+// How often an instance sends its sockets the posts' latest reaction counts
+// (see PostReactionsEvent). A reference so tests can shorten it.
+export const PostReactionsInterval = Context.Reference<Duration.Duration>(
+  "chat-platform/Realtime/PostReactionsInterval",
+  { defaultValue: () => Duration.seconds(2) },
+);
+
+// The most ids one `feed_head` carries; older ones in a burst are dropped,
+// since the client only needs to know there's something to fetch.
+export const MAX_FEED_HEAD_POST_IDS = 20;
 
 // How many post comment rooms / named rooms one connection may be in at
 // once. A real client is in a handful (the comment sections open on screen;
@@ -399,6 +489,9 @@ const ROOM_NAME_PATTERN =
 // joining millions. Joins past a cap are dropped silently, like any other
 // malformed control message.
 export const MAX_POST_ROOMS_PER_CONNECTION = 200;
+// Cards one connection may watch at once (see `watchPost`) — a long-scrolled
+// feed stays well inside it; joins past it are dropped like the others.
+export const MAX_WATCHED_POSTS_PER_CONNECTION = 200;
 export const MAX_ROOMS_PER_CONNECTION = 32;
 
 export const isValidRoomName = (room: unknown): room is string =>
@@ -431,7 +524,21 @@ type Envelope =
       readonly room: string;
       readonly event: RealtimeEvent;
     }
-  | { readonly scope: "disconnect"; readonly userId: number };
+  | { readonly scope: "disconnect"; readonly userId: number }
+  // A new post, for every instance's next `feed_head` (see `announcePost`).
+  | { readonly scope: "feed_post"; readonly postId: number }
+  // A post's own change, for everyone showing it (see `notifyPostViewers`).
+  | {
+      readonly scope: "post_viewers";
+      readonly postId: number;
+      readonly event: RealtimeEvent;
+    }
+  // A post's latest reaction counts (see `announcePostReactions`).
+  | {
+      readonly scope: "post_reactions";
+      readonly postId: number;
+      readonly reactions: PostReactionsEvent["posts"][number]["reactions"];
+    };
 
 // Registration (`byUser`) stays local to this process — a `/ws` connection
 // only ever lives on the instance that accepted it, and `byUser` exists only
@@ -457,6 +564,8 @@ export const RealtimeConnectionsLive = Layer.effect(
     // like it stays local per-instance — cross-instance fan-out is PubSub's
     // job (see `notifyPostRoom`).
     const byPost = new Map<number, Set<Writer>>();
+    // postId -> local connections showing it as a card (see `watchPost`).
+    const byWatchedPost = new Map<number, Set<Writer>>();
     // room name -> local connection writers subscribed to it (see
     // `subscribeRoom`). Same local-only bookkeeping as `byPost`.
     const byRoom = new Map<string, Set<Writer>>();
@@ -467,12 +576,12 @@ export const RealtimeConnectionsLive = Layer.effect(
     // memberships instead of every room on the instance.
     const joined = new Map<
       Writer,
-      { posts: Set<number>; rooms: Set<string> }
+      { posts: Set<number>; watching: Set<number>; rooms: Set<string> }
     >();
     const joinedBy = (write: Writer) => {
       let entry = joined.get(write);
       if (!entry) {
-        entry = { posts: new Set(), rooms: new Set() };
+        entry = { posts: new Set(), watching: new Set(), rooms: new Set() };
         joined.set(write, entry);
       }
       return entry;
@@ -505,6 +614,25 @@ export const RealtimeConnectionsLive = Layer.effect(
         }
       });
 
+    // Everyone on this instance showing `postId`: its card watchers and its
+    // open comment sections, each connection once.
+    const viewersOf = (postId: number): Set<Writer> =>
+      new Set([
+        ...(byWatchedPost.get(postId) ?? []),
+        ...(byPost.get(postId) ?? []),
+      ]);
+
+    // postId -> latest reaction counts not yet sent (see the ticker below).
+    // Newer counts replace older ones: each carries the full state.
+    const pendingPostReactions = new Map<
+      number,
+      PostReactionsEvent["posts"][number]["reactions"]
+    >();
+
+    // Posts announced since this instance's last `feed_head` (see
+    // `announcePost` and the ticker below), newest last.
+    const pendingFeedPosts: number[] = [];
+
     const deliverLocally = (message: string) =>
       Effect.gen(function* () {
         const envelope = JSON.parse(message) as Envelope;
@@ -535,6 +663,19 @@ export const RealtimeConnectionsLive = Layer.effect(
           return;
         }
 
+        if (envelope.scope === "post_reactions") {
+          pendingPostReactions.set(envelope.postId, envelope.reactions);
+          return;
+        }
+
+        if (envelope.scope === "feed_post") {
+          pendingFeedPosts.push(envelope.postId);
+          if (pendingFeedPosts.length > MAX_FEED_HEAD_POST_IDS) {
+            pendingFeedPosts.shift();
+          }
+          return;
+        }
+
         const payload = JSON.stringify(envelope.event);
 
         if (envelope.scope === "all") {
@@ -548,6 +689,13 @@ export const RealtimeConnectionsLive = Layer.effect(
           const writers = byPost.get(envelope.postId);
           if (!writers) return;
           yield* writeAll(writers, payload, { postId: envelope.postId });
+          return;
+        }
+
+        if (envelope.scope === "post_viewers") {
+          yield* writeAll(viewersOf(envelope.postId), payload, {
+            postId: envelope.postId,
+          });
           return;
         }
 
@@ -569,6 +717,58 @@ export const RealtimeConnectionsLive = Layer.effect(
       });
 
     yield* pubsub.subscribe(CHANNEL, deliverLocally);
+
+    // Flushes `pendingFeedPosts` to this instance's feed viewers, at most
+    // once per interval (see `FeedHeadEvent`). Runs on every instance, each
+    // for its own sockets, off the same `feed_post` envelopes.
+    const flushFeedHead = Effect.gen(function* () {
+      if (pendingFeedPosts.length === 0) return;
+      const postIds = pendingFeedPosts.splice(0);
+      const writers = byRoom.get(FEED_ROOM);
+      if (!writers) return;
+      yield* writeAll(
+        writers,
+        JSON.stringify({ type: "feed_head", postIds } satisfies FeedHeadEvent),
+        { room: FEED_ROOM },
+      );
+    });
+    // Sends each local socket one `post_reactions` frame with every pending
+    // post it shows, then forgets them (see PostReactionsEvent).
+    const flushPostReactions = Effect.gen(function* () {
+      if (pendingPostReactions.size === 0) return;
+      const byWriter = new Map<Writer, PostReactionsEvent["posts"][number][]>();
+      for (const [postId, reactions] of pendingPostReactions) {
+        for (const write of viewersOf(postId)) {
+          const posts = byWriter.get(write) ?? [];
+          posts.push({ postId, reactions });
+          byWriter.set(write, posts);
+        }
+      }
+      pendingPostReactions.clear();
+      for (const [write, posts] of byWriter) {
+        yield* write(
+          JSON.stringify({
+            type: "post_reactions",
+            posts,
+          } satisfies PostReactionsEvent),
+        ).pipe(
+          Effect.catch((error) =>
+            logDroppedWrite({ scope: "post_reactions" }, error),
+          ),
+        );
+      }
+    });
+    const postReactionsInterval = yield* PostReactionsInterval;
+    yield* Effect.forkScoped(
+      flushPostReactions.pipe(
+        Effect.repeat(Schedule.spaced(postReactionsInterval)),
+      ),
+    );
+
+    const feedHeadInterval = yield* FeedHeadInterval;
+    yield* Effect.forkScoped(
+      flushFeedHead.pipe(Effect.repeat(Schedule.spaced(feedHeadInterval))),
+    );
 
     // Best-effort, like the local delivery it replaces: a mutation
     // succeeding shouldn't fail just because the realtime push couldn't be
@@ -660,6 +860,60 @@ export const RealtimeConnectionsLive = Layer.effect(
         set.delete(write);
         if (set.size === 0) byPost.delete(postId);
       });
+
+    const watchPost: RealtimeConnections["Service"]["watchPost"] = (
+      postId,
+      write,
+    ) =>
+      Effect.sync(() => {
+        const mine = joinedBy(write).watching;
+        if (
+          !mine.has(postId) &&
+          mine.size >= MAX_WATCHED_POSTS_PER_CONNECTION
+        ) {
+          return;
+        }
+        mine.add(postId);
+        const set = byWatchedPost.get(postId) ?? new Set();
+        set.add(write);
+        byWatchedPost.set(postId, set);
+      });
+
+    const unwatchPost: RealtimeConnections["Service"]["unwatchPost"] = (
+      postId,
+      write,
+    ) =>
+      Effect.sync(() => {
+        joined.get(write)?.watching.delete(postId);
+        const set = byWatchedPost.get(postId);
+        if (!set) return;
+        set.delete(write);
+        if (set.size === 0) byWatchedPost.delete(postId);
+      });
+
+    const notifyPostViewers: RealtimeConnections["Service"]["notifyPostViewers"] =
+      (postId, event) => {
+        const envelope = {
+          scope: "post_viewers",
+          postId,
+          event,
+        } satisfies Envelope;
+        return pubsub
+          .publish(CHANNEL, JSON.stringify(envelope))
+          .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
+      };
+
+    const announcePostReactions: RealtimeConnections["Service"]["announcePostReactions"] =
+      (postId, reactions) => {
+        const envelope = {
+          scope: "post_reactions",
+          postId,
+          reactions,
+        } satisfies Envelope;
+        return pubsub
+          .publish(CHANNEL, JSON.stringify(envelope))
+          .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
+      };
 
     const notifyRoom: RealtimeConnections["Service"]["notifyRoom"] = (
       room,
@@ -757,6 +1011,12 @@ export const RealtimeConnectionsLive = Layer.effect(
               byPost.delete(postId);
             }
           }
+          for (const postId of mine?.watching ?? []) {
+            const writers = byWatchedPost.get(postId);
+            if (writers?.delete(write) && writers.size === 0) {
+              byWatchedPost.delete(postId);
+            }
+          }
           for (const room of mine?.rooms ?? []) {
             const writers = byRoom.get(room);
             if (writers?.delete(write) && writers.size === 0) {
@@ -845,14 +1105,28 @@ export const RealtimeConnectionsLive = Layer.effect(
           }
         });
 
+    const announcePost: RealtimeConnections["Service"]["announcePost"] = (
+      postId,
+    ) => {
+      const envelope = { scope: "feed_post", postId } satisfies Envelope;
+      return pubsub
+        .publish(CHANNEL, JSON.stringify(envelope))
+        .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
+    };
+
     return {
       register,
       notifyUsers,
       broadcastAll,
+      announcePost,
       disconnectUser,
       notifyContacts,
       subscribePost,
       unsubscribePost,
+      watchPost,
+      unwatchPost,
+      notifyPostViewers,
+      announcePostReactions,
       notifyPostRoom,
       onlineContactIds,
       introduceContacts,

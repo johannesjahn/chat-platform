@@ -86,6 +86,12 @@ const parseTargets = (list: string): number[] =>
     return port;
   });
 
+// The "New posts" pill (current clients; older ones fetched on every new
+// post): the chance a feed viewer taps it on a given announcement, and how
+// long after it they do.
+const FEED_PILL_TAP_PROBABILITY = 0.1;
+const FEED_PILL_TAP_DELAY_MS = [2_000, 20_000] as const;
+
 // ---------------------------------------------------------------- histogram
 // Log-bucketed (5% wide) so per-worker histograms merge exactly.
 const BUCKET_RATIO = Math.log(1.05);
@@ -385,6 +391,39 @@ async function runWorker(config: Config, userIds: number[]) {
     const ownPosts = new Set<number>();
     const pendingEchoes = new Map<number, number[]>(); // chatId -> send start times
 
+    // Mirrors the web client's rooms (issues #827, #828): on the feed it
+    // sits in the `feed` room (for `feed_head`) and watches every post on
+    // screen (for their edits and reaction counts); elsewhere neither.
+    let ws: WebSocket | null = null;
+    let inFeedRoom = false;
+    let pillTapPending = false;
+    const joinedPosts = new Set<number>();
+    const syncRooms = () => {
+      const socket = ws;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      const onFeed = screen === "feed";
+      if (onFeed !== inFeedRoom) {
+        socket.send(
+          JSON.stringify({
+            type: onFeed ? "subscribe_room" : "unsubscribe_room",
+            room: "feed",
+          }),
+        );
+        inFeedRoom = onFeed;
+      }
+      const wanted = new Set(onFeed ? feedPostIds : []);
+      for (const postId of joinedPosts) {
+        if (wanted.has(postId)) continue;
+        socket.send(JSON.stringify({ type: "unwatch_post", postId }));
+        joinedPosts.delete(postId);
+      }
+      for (const postId of wanted) {
+        if (joinedPosts.has(postId)) continue;
+        socket.send(JSON.stringify({ type: "watch_post", postId }));
+        joinedPosts.add(postId);
+      }
+    };
+
     const loadChats = async () => {
       const page = await call("GET /chats", "GET", "/chats");
       if (page?.chats) chatIds = page.chats.map((c) => c.id);
@@ -392,10 +431,12 @@ async function runWorker(config: Config, userIds: number[]) {
     const loadFeed = async () => {
       const page = await call("GET /posts", "GET", "/posts?limit=10");
       if (page?.posts) feedPostIds = page.posts.map((p) => p.id);
+      syncRooms();
     };
     const openConversation = async (chatId: number) => {
       screen = "chats";
       openChat = chatId;
+      syncRooms();
       const [, page] = await Promise.all([
         call("GET /chats/:id", "GET", `/chats/${chatId}`),
         call(
@@ -434,7 +475,6 @@ async function runWorker(config: Config, userIds: number[]) {
     if (screen === "chats" && chatIds.length)
       await openConversation(pick(chatIds));
 
-    let ws: WebSocket | null = null;
     let backoff = 1000;
     const connect = async () => {
       if (Date.now() > deadline) return;
@@ -462,6 +502,10 @@ async function runWorker(config: Config, userIds: number[]) {
         stats.wsConnects++;
         backoff = 1000;
         ping = setInterval(() => socket.send("ping"), 30_000);
+        // A new socket is in no rooms yet.
+        inFeedRoom = false;
+        joinedPosts.clear();
+        syncRooms();
         void selfHeal();
       };
       socket.onmessage = (message) => {
@@ -536,6 +580,28 @@ async function runWorker(config: Config, userIds: number[]) {
         );
         return;
       }
+      if (event.type === "feed_head") {
+        // The "New posts" pill: now and then a viewer taps it, a human
+        // moment later, and only that fetches.
+        if (
+          screen === "feed" &&
+          !pillTapPending &&
+          Math.random() < FEED_PILL_TAP_PROBABILITY
+        ) {
+          pillTapPending = true;
+          const [minDelay, maxDelay] = FEED_PILL_TAP_DELAY_MS;
+          setTimeout(
+            () => {
+              pillTapPending = false;
+              if (screen === "feed" && Date.now() < deadline) {
+                refetch("feed", loadFeed);
+              }
+            },
+            minDelay + Math.random() * (maxDelay - minDelay),
+          );
+        }
+        return;
+      }
       if (event.type === "post_changed") {
         const { postId } = event;
         if (postId === undefined) return;
@@ -605,6 +671,7 @@ async function runWorker(config: Config, userIds: number[]) {
         case "scrollFeed":
           screen = "feed";
           openChat = null;
+          syncRooms();
           await loadFeed();
           return;
         case "reactPost":

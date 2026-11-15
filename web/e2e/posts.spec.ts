@@ -59,7 +59,7 @@ test(
   },
 );
 
-test("a post created by one user appears live in another user's already-open feed", async ({
+test("a post created by one user is announced in another user's already-open feed, and its edit reaches it live", async ({
   browser,
   injectApiUrl,
   signUp,
@@ -75,8 +75,8 @@ test("a post created by one user appears live in another user's already-open fee
   await signUp(pageB);
 
   // B sits on the feed and just leaves it open — no reload from here on, so
-  // anything B sees has to come from the `/ws` push invalidating the feed
-  // query, not a fresh load.
+  // anything B sees has to come from the `/ws` push, not a fresh load. A new
+  // post is announced (a "New posts" pill), not fetched (issue #827).
   await pageB.goto("/");
   await expect(pageB.getByText("No posts yet")).toBeVisible();
 
@@ -85,11 +85,19 @@ test("a post created by one user appears live in another user's already-open fee
   await pageA.getByRole("button", { name: "Post" }).click();
   await expect(pageA).toHaveURL("/");
 
+  const newPosts = pageB.getByRole("button", { name: "New posts" });
+  await expect(newPosts).toBeVisible({ timeout: 10_000 });
   await expect(
     pageB.getByText("Posted while B is watching the feed"),
-  ).toBeVisible({ timeout: 10_000 });
+  ).toHaveCount(0);
+  await newPosts.click();
+  await expect(
+    pageB.getByText("Posted while B is watching the feed"),
+  ).toBeVisible();
+  await expect(newPosts).toHaveCount(0);
 
-  // An edit by A should likewise reach B's open feed live.
+  // An edit by A reaches B's open feed live: B's card is in the post's room
+  // (issue #828).
   const cardOnA = pageA.getByRole("article", { name: `Post by @${usernameA}` });
   await cardOnA.getByRole("link", { name: "Edit post" }).click();
   await pageA.fill("#content", "Edited while B is watching the feed");
@@ -102,6 +110,70 @@ test("a post created by one user appears live in another user's already-open fee
 
   await contextA.close();
   await contextB.close();
+});
+
+test("a reaction reaches the cards showing the post live, and no socket that isn't (issue #828)", async ({
+  browser,
+  injectApiUrl,
+  page,
+  request,
+  apiUrl,
+  createUser,
+  signUp,
+}) => {
+  const author = await createUser();
+  const created = await request.post(`${apiUrl}/posts`, {
+    headers: { Authorization: `Bearer ${author.session.accessToken}` },
+    data: { contentType: "text", content: "React to me" },
+  });
+  expect(created.ok()).toBe(true);
+  const postId = ((await created.json()) as { id: number }).id;
+
+  // A bystander who's signed in but not looking at the post: every frame
+  // their socket receives is recorded.
+  const bystanderContext = await browser.newContext();
+  await injectApiUrl(bystanderContext);
+  const bystander = await bystanderContext.newPage();
+  const bystanderFrames: string[] = [];
+  bystander.on("websocket", (ws) => {
+    if (new URL(ws.url()).pathname !== "/ws") return;
+    ws.on("framereceived", ({ payload }) => {
+      bystanderFrames.push(String(payload));
+    });
+  });
+  await signUp(bystander);
+  await bystander.goto("/notifications");
+
+  // The viewer has the post on screen.
+  await signUp(page);
+  const card = page.getByRole("article", {
+    name: `Post by @${author.username}`,
+  });
+  await expect(card.getByText("React to me")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+
+  const reactor = await createUser();
+  const reacted = await request.post(`${apiUrl}/posts/${postId}/reactions`, {
+    headers: { Authorization: `Bearer ${reactor.session.accessToken}` },
+    data: { emoji: "👍" },
+  });
+  expect(reacted.ok()).toBe(true);
+
+  await expect(
+    card.getByRole("button", { name: "Add 👍 reaction" }),
+  ).toContainText("1", { timeout: 10_000 });
+
+  // Give a wrongly broadcast frame time to have arrived.
+  await bystander.waitForTimeout(1_000);
+  expect(
+    bystanderFrames.some(
+      (frame) =>
+        frame.includes('"reaction_changed"') ||
+        frame.includes('"post_reactions"'),
+    ),
+  ).toBe(false);
+
+  await bystanderContext.close();
 });
 
 test("edit is only available to a post's author, both in the UI and when navigating directly", async ({
@@ -410,7 +482,7 @@ test("switching post type keeps a separate draft per type (issue #524)", async (
   await expect(page.locator("#content")).toHaveValue(url);
 });
 
-test("someone else's post, edit and delete reach a deeply scrolled feed without refetching its pages (issue #662)", async ({
+test("someone else's post, edit and delete reach a deeply scrolled feed without refetching its pages (issues #662, #827)", async ({
   page,
   request,
   apiUrl,
@@ -456,17 +528,23 @@ test("someone else's post, edit and delete reach a deeply scrolled feed without 
     await page.waitForLoadState("networkidle");
   };
 
-  // A new post: one request for the newest page, and every loaded page stays.
+  // A new post: announced with no request at all (issue #827); using the
+  // pill fetches the newest page once, and every loaded page stays.
   const created = await request.post(`${apiUrl}/posts`, {
     headers: auth,
     data: { contentType: "text", content: "Fresh post from someone else" },
   });
   expect(created.ok()).toBe(true);
-  await expect(page.getByText("Fresh post from someone else")).toBeVisible({
-    timeout: 10_000,
-  });
+  const newPosts = page.getByRole("button", { name: "New posts" });
+  await expect(newPosts).toBeVisible({ timeout: 10_000 });
   await settle();
-  expect(listRequests.length + singleRequests.length).toBeLessThanOrEqual(1);
+  expect(listRequests).toEqual([]);
+  expect(singleRequests).toEqual([]);
+  await newPosts.click();
+  await expect(page.getByText("Fresh post from someone else")).toBeVisible();
+  await settle();
+  expect(listRequests.length).toBe(1);
+  expect(singleRequests).toEqual([]);
   await expect(articles).toHaveCount(21);
 
   // An edit of a post in view: refetched alone, patched in place.

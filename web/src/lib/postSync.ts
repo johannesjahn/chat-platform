@@ -34,9 +34,9 @@ export type PostChange = "created" | "updated" | "deleted";
 // - A post we have cached: refetched alone (`GET /posts/:id`) and patched in
 //   wherever it is, or dropped if it's gone by then.
 // - Created (not cached yet): the feed's newest page is fetched once and
-//   folded on top (see `mergeNewestFeedPage`) — fetched rather than
-//   `GET /posts/:id` so the server's blocked/muted-author filter still
-//   applies. An open profile feed of its author gets it on top too.
+//   folded on top (`loadNewestFeedPage`). An open profile feed of its author
+//   gets it on top too. Only a server that predates `feed_head` sends this;
+//   a current one announces new posts coalesced instead (see feedHead.ts).
 // - Updated, but not cached: nothing on screen shows it, nothing to do.
 export async function syncChangedPost(
   queryClient: QueryClient,
@@ -85,7 +85,10 @@ export async function refreshCachedPost(
   }
 }
 
-function isPostCached(queryClient: QueryClient, postId: number): boolean {
+export function isPostCached(
+  queryClient: QueryClient,
+  postId: number,
+): boolean {
   return (
     feedHasPost(
       queryClient.getQueryData<FeedData>(postsFeedQueryKey),
@@ -115,24 +118,34 @@ function removeCachedPost(queryClient: QueryClient, postId: number): void {
   });
 }
 
+// Fetches the feed's newest page and folds it on top of the cached feed,
+// keeping every page already loaded (see `mergeNewestFeedPage`). Fetched
+// rather than `GET /posts/:id` so the server's blocked/muted-author filter
+// still applies. Returns the page, or undefined if there's no cached feed or
+// the request failed.
+export async function loadNewestFeedPage(
+  queryClient: QueryClient,
+): Promise<FeedData["pages"][number] | undefined> {
+  if (!queryClient.getQueryData<FeedData>(postsFeedQueryKey)) return;
+  const { data } = await fetchClient
+    .GET("/posts", {
+      params: { query: { limit: String(INITIAL_POSTS_LIMIT) } },
+    })
+    .catch(() => ({ data: undefined }));
+  if (!data) return;
+  queryClient.setQueryData<FeedData>(postsFeedQueryKey, (cached) =>
+    cached ? mergeNewestFeedPage(cached, data) : cached,
+  );
+  return data;
+}
+
 async function pullNewPost(
   queryClient: QueryClient,
   postId: number,
 ): Promise<void> {
-  let post: Post | undefined;
-  if (queryClient.getQueryData<FeedData>(postsFeedQueryKey)) {
-    const { data } = await fetchClient
-      .GET("/posts", {
-        params: { query: { limit: String(INITIAL_POSTS_LIMIT) } },
-      })
-      .catch(() => ({ data: undefined }));
-    if (data) {
-      queryClient.setQueryData<FeedData>(postsFeedQueryKey, (cached) =>
-        cached ? mergeNewestFeedPage(cached, data) : cached,
-      );
-      post = data.posts.find((p) => p.id === postId);
-    }
-  }
+  let post: Post | undefined = (
+    await loadNewestFeedPage(queryClient)
+  )?.posts.find((p) => p.id === postId);
 
   const profileCached = queryClient
     .getQueriesData<UserPostsData>({ queryKey: userPostsQueryKeyPrefix })

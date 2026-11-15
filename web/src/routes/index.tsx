@@ -14,7 +14,7 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { Loader2, PlusCircle, Sparkles } from "lucide-react";
+import { ArrowUp, Loader2, PlusCircle, Sparkles } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { Avatar } from "@/components/Avatar";
 import { FeedRail } from "@/components/feed/FeedRail";
@@ -28,6 +28,11 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api, type Session } from "@/lib/api";
 import { useSession, useSessionPending } from "@/lib/auth";
 import { errorMessage } from "@/lib/errors";
+import {
+  showNewFeedPosts,
+  useFeedRoom,
+  useNewFeedPostCount,
+} from "@/lib/feedHead";
 import { lazyNamed } from "@/lib/lazy";
 import { DESKTOP_MEDIA_QUERY, useIsDesktop, useMediaQuery } from "@/lib/media";
 import {
@@ -130,6 +135,21 @@ function PostsFeedPage() {
   const posts = data?.pages.flatMap((page) => page.posts) ?? [];
   const pendingPosts = usePendingPosts();
 
+  // New posts by others are announced, not fetched (issue #827): the pill
+  // below loads them when used. See feedHead.ts.
+  useFeedRoom(!!session);
+  const newPostCount = useNewFeedPostCount(queryClient);
+  const [loadingNewPosts, setLoadingNewPosts] = useState(false);
+  async function handleShowNewPosts() {
+    setLoadingNewPosts(true);
+    try {
+      await showNewFeedPosts(queryClient);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } finally {
+      setLoadingNewPosts(false);
+    }
+  }
+
   const deletePost = $api.useMutation("delete", "/posts/{id}");
   const confirm = useConfirm();
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -192,6 +212,24 @@ function PostsFeedPage() {
           <Suspense fallback={<InlineComposerPlaceholder session={session} />}>
             <InlineComposer session={session} />
           </Suspense>
+        )}
+
+        {session && newPostCount > 0 && (
+          <div className="sticky top-[calc(5rem+env(safe-area-inset-top))] z-10 -mb-2 lg:top-6">
+            <Button
+              size="sm"
+              className="animate-pop-open rounded-full shadow-lg"
+              onClick={() => void handleShowNewPosts()}
+              disabled={loadingNewPosts}
+            >
+              {loadingNewPosts ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <ArrowUp className="size-4" />
+              )}
+              New posts
+            </Button>
+          </div>
         )}
 
         {session && pendingPosts.length > 0 && (
