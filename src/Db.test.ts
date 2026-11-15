@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 import { Effect, Exit, Metric } from "effect";
-import { dbQuery, timedDbCall } from "./Db.ts";
+import {
+  DEFAULT_DB_POOL_MAX,
+  dbQuery,
+  parseDbPoolMax,
+  timedDbCall,
+} from "./Db.ts";
 import { dbQueryDurationSeconds, dbQueryErrorsTotal } from "./Metrics.ts";
 
 // Both metrics are module-level and shared with whichever other test files
@@ -73,4 +78,21 @@ test("timedDbCall times each run of the effect it wraps on its own", async () =>
   const call = timedDbCall(Effect.tryPromise(async () => "ok"));
   await Effect.runPromise(Effect.all([call, call, call]));
   expect(callCount("success")).toBe(before + 3);
+});
+
+test("DB_POOL_MAX defaults to Bun.sql's own 10 when unset or blank", () => {
+  expect(parseDbPoolMax(undefined)).toBe(DEFAULT_DB_POOL_MAX);
+  expect(parseDbPoolMax("")).toBe(DEFAULT_DB_POOL_MAX);
+  expect(DEFAULT_DB_POOL_MAX).toBe(10);
+});
+
+test("DB_POOL_MAX takes a positive integer", () => {
+  expect(parseDbPoolMax("4")).toBe(4);
+  expect(parseDbPoolMax("50")).toBe(50);
+});
+
+test("DB_POOL_MAX refuses anything else rather than silently falling back", () => {
+  for (const bad of ["0", "-1", "2.5", "ten", "1e2x"]) {
+    expect(() => parseDbPoolMax(bad)).toThrow("DB_POOL_MAX");
+  }
 });

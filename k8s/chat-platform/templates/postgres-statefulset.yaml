@@ -62,6 +62,13 @@ spec:
       containers:
         - name: postgres
           image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          # The image's entrypoint runs these as `postgres -c ...`.
+          args:
+            - postgres
+            - -c
+            - max_connections={{ .Values.postgres.maxConnections }}
+            - -c
+            - shared_buffers={{ .Values.postgres.sharedBuffers }}
           ports:
             - containerPort: 5432
               name: postgres
