@@ -184,6 +184,31 @@ type SocketEvent = {
   senderId?: number;
 };
 
+// Pushed events are untrusted input: ids end up in request paths, so only
+// integer ids survive, rebuilt as fresh numbers (anything else is dropped).
+const intOrUndefined = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isSafeInteger(value)
+    ? Number(value)
+    : undefined;
+const parseSocketEvent = (data: unknown): SocketEvent | null => {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(String(data));
+  } catch {
+    return null;
+  }
+  if (typeof raw !== "object" || raw === null) return null;
+  const event = raw as Record<string, unknown>;
+  if (typeof event.type !== "string") return null;
+  return {
+    type: event.type,
+    change: typeof event.change === "string" ? event.change : undefined,
+    chatId: intOrUndefined(event.chatId),
+    postId: intOrUndefined(event.postId),
+    senderId: intOrUndefined(event.senderId),
+  };
+};
+
 // ---------------------------------------------------------------- worker
 async function runWorker(config: Config, userIds: number[]) {
   let stats = emptySnapshot();
@@ -439,7 +464,10 @@ async function runWorker(config: Config, userIds: number[]) {
         ping = setInterval(() => socket.send("ping"), 30_000);
         void selfHeal();
       };
-      socket.onmessage = (event) => onEvent(JSON.parse(String(event.data)));
+      socket.onmessage = (message) => {
+        const event = parseSocketEvent(message.data);
+        if (event) onEvent(event);
+      };
       socket.onclose = () => {
         clearInterval(ping);
         if (opened) {
@@ -509,18 +537,17 @@ async function runWorker(config: Config, userIds: number[]) {
         return;
       }
       if (event.type === "post_changed") {
+        const { postId } = event;
+        if (postId === undefined) return;
         if (
           event.change === "created" &&
-          !ownPosts.has(event.postId) &&
+          !ownPosts.has(postId) &&
           config.feedRefetch
         ) {
           refetch("feed", loadFeed); // pullNewPost: feed is cached for everyone
-        } else if (
-          event.change === "updated" &&
-          feedPostIds.includes(event.postId)
-        ) {
-          refetch(`post:${event.postId}`, () =>
-            call("GET /posts/:id", "GET", `/posts/${event.postId}`),
+        } else if (event.change === "updated" && feedPostIds.includes(postId)) {
+          refetch(`post:${postId}`, () =>
+            call("GET /posts/:id", "GET", `/posts/${postId}`),
           );
         }
         return;
