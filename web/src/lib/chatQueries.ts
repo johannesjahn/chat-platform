@@ -121,8 +121,10 @@ export async function fetchMessagesPage(
     | { before: string; limit: number }
     | { after: string; limit: number }
     | { limit: number },
+  signal?: AbortSignal,
 ): Promise<MessagesPageResponse> {
   const { data, error } = await fetchClient.GET("/chats/{id}/messages", {
+    signal,
     params: {
       path: { id: String(chatId) },
       query: {
