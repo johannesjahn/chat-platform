@@ -288,6 +288,13 @@
       "when": 1794801086452,
       "tag": "0040_post_comment_count",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794860894237,
+      "tag": "0041_user_last_active",
+      "breakpoints": true
     }
   ]
 }

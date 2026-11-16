@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "effect/http-api";
 import { count, eq, gte, sql } from "drizzle-orm";
-import { union, type PgColumn, type PgTable } from "drizzle-orm/pg-core";
+import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { Effect, Metric } from "effect";
 import packageJson from "../package.json" with { type: "json" };
 import {
@@ -13,6 +13,7 @@ import {
   type AdminRuntimeHealth,
   type AdminTimelinePoint,
 } from "./Api.ts";
+import { countActiveUsersSince } from "./ActiveUsersMetrics.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db, type DrizzleDb, dbQuery } from "./Db.ts";
 import { PubSub } from "./PubSub.ts";
@@ -95,43 +96,6 @@ const attachmentBytes = (db: DrizzleDb): Effect.Effect<number> =>
       .select({ bytes: INT(sql`coalesce(sum(${attachments.size}), 0)`) })
       .from(attachments),
   ).pipe(Effect.map((rows) => rows[0]?.bytes ?? 0));
-
-// Distinct users who created *any* content in the window — the same
-// definition `active_users{window}` uses (see ActiveUsersMetrics.ts), but
-// computed fresh per request rather than read off that gauge, which only
-// refreshes hourly and would make the dashboard's DAU lag by up to an hour.
-//
-// A `UNION` (not `UNION ALL`) of the four id sets wrapped in a count, so
-// Postgres does the dedup and returns one integer — the id set itself never
-// crosses into the app, which is also what keeps this an aggregate and not
-// a per-user breakdown (see the Api.ts section comment).
-const countActiveUsersSince = (
-  db: DrizzleDb,
-  since: Date,
-): Effect.Effect<number> => {
-  const activeIds = union(
-    db
-      .select({ userId: posts.authorId })
-      .from(posts)
-      .where(gte(posts.createdAt, since)),
-    db
-      .select({ userId: comments.authorId })
-      .from(comments)
-      .where(gte(comments.createdAt, since)),
-    db
-      .select({ userId: likes.userId })
-      .from(likes)
-      .where(gte(likes.createdAt, since)),
-    db
-      .select({ userId: messages.senderId })
-      .from(messages)
-      .where(gte(messages.createdAt, since)),
-  ).as("active_user_ids");
-
-  return dbQuery(() => db.select({ total: count() }).from(activeIds)).pipe(
-    Effect.map((rows) => rows[0]?.total ?? 0),
-  );
-};
 
 // `YYYY-MM-DD` in UTC. `created_at` is a naive `timestamp` column holding
 // UTC instants (drizzle encodes Dates with `toISOString()` — see
@@ -328,11 +292,12 @@ export const AdminHandlerLive = HttpApiBuilder.group(
             totalCount(db, chats),
             totalCount(db, attachments),
             attachmentBytes(db),
-            Effect.all(
-              WINDOWS.map((window) =>
-                countActiveUsersSince(db, new Date(now - window.days * DAY_MS)),
-              ),
-              { concurrency: "unbounded" },
+            // The same definition `active_users{window}` uses, but counted
+            // per request rather than read off that gauge, which only
+            // refreshes hourly.
+            countActiveUsersSince(
+              db,
+              WINDOWS.map((window) => new Date(now - window.days * DAY_MS)),
             ),
             Effect.all(
               {

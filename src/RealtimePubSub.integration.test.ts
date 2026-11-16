@@ -52,6 +52,11 @@ async function waitFor(
   async () => {
     const instanceA = makeInstance();
     const instanceB = makeInstance();
+    // A fresh id per run, like the presence test below: against a
+    // persistent (non-CI) Redis, the last run's presence share and
+    // directory claim for a fixed id outlive its process for a while, and
+    // the user wouldn't come online again.
+    const userId = Date.now() + 1;
 
     try {
       const received: string[] = [];
@@ -64,7 +69,7 @@ async function waitFor(
       await instanceB.runPromise(
         Effect.gen(function* () {
           const connections = yield* RealtimeConnections;
-          yield* connections.register(1, write);
+          yield* connections.register(userId, write);
         }),
       );
 
@@ -75,7 +80,7 @@ async function waitFor(
       // subject is `chat_updated` delivery specifically.
       await waitFor(() => received.length > 0);
       expect(received).toEqual([
-        JSON.stringify({ type: "presence", userId: 1, online: true }),
+        JSON.stringify({ type: "presence", userId, online: true }),
       ]);
       received.length = 0;
 
@@ -83,7 +88,7 @@ async function waitFor(
       await instanceA.runPromise(
         Effect.gen(function* () {
           const connections = yield* RealtimeConnections;
-          yield* connections.notifyUsers([1], {
+          yield* connections.notifyUsers([userId], {
             type: "chat_updated",
             chatId: 1,
             version: 1,

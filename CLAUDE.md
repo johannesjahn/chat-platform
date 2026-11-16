@@ -207,8 +207,13 @@ Two constraints on it are deliberate:
 - **Aggregates only — no per-user breakdown.** No "most active users" panel, no
   per-user series. This is the same GDPR-driven scoping the `active_users` gauge
   and the rest of the domain metrics in [`src/Metrics.ts`](src/Metrics.ts)
-  already follow; `activeUsers` is a `UNION`-then-count so the id set never
-  leaves Postgres.
+  already follow; `activeUsers` is counted in Postgres so the id set never
+  leaves it. Both it and the gauge count `users.last_active_at`
+  (`countActiveUsersSince` in [`src/ActiveUsersMetrics.ts`](src/ActiveUsersMetrics.ts),
+  issue #831), which insert triggers on posts, comments, likes and messages
+  move forward at most every 15 minutes (migration `0041`) — scanning the
+  content tables for distinct authors grew with history. New content
+  types that should count as activity need the trigger too.
 - **The `health` block is _this process's_ counters**, read off the same
   `effect/Metric` registry `/metrics` renders. With more than one replica it
   reflects whichever instance served the request — Prometheus/Grafana stays the

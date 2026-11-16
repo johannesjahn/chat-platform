@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
-import { Effect, Layer, Metric } from "effect";
-import { updateActiveUserGauges } from "./ActiveUsersMetrics.ts";
+import { Duration, Effect, Layer, Metric } from "effect";
+import { eq } from "drizzle-orm";
+import {
+  ACTIVITY_RESOLUTION,
+  updateActiveUserGauges,
+} from "./ActiveUsersMetrics.ts";
 import { Db } from "./Db.ts";
 import { activeUsers } from "./Metrics.ts";
 import { makeTestDbAccessor, resetTestDb } from "./testDb.ts";
@@ -99,5 +103,103 @@ test("updateActiveUserGauges sets active_users{window} to the distinct count of 
       expect(yield* gaugeValue("1d")).toBe(1);
       expect(yield* gaugeValue("7d")).toBe(2);
       expect(yield* gaugeValue("30d")).toBe(3);
+    }),
+  ));
+
+// Issue #831: users.last_active_at, which the counts read, is kept by insert
+// triggers (migration 0041) — moved forward only once it's
+// ACTIVITY_RESOLUTION behind, and never back.
+test("content inserts move last_active_at forward, at most once per ACTIVITY_RESOLUTION and never backwards", () =>
+  run(
+    Effect.gen(function* () {
+      const db = yield* Db;
+      const [user] = yield* Effect.promise(() =>
+        db
+          .insert(users)
+          .values({ username: "talker", passwordHash: "x" })
+          .returning({ id: users.id }),
+      );
+      const [chat] = yield* Effect.promise(() =>
+        db.insert(chats).values({ type: "direct" }).returning({ id: chats.id }),
+      );
+      const lastActive = () =>
+        Effect.promise(() =>
+          db
+            .select({ at: users.lastActiveAt })
+            .from(users)
+            .where(eq(users.id, user!.id)),
+        ).pipe(Effect.map((rows) => rows[0]?.at?.getTime() ?? null));
+      const send = (at: number) =>
+        Effect.promise(() =>
+          db.insert(messages).values({
+            chatId: chat!.id,
+            senderId: user!.id,
+            contentType: "text",
+            content: "hi",
+            createdAt: new Date(at),
+            updatedAt: new Date(at),
+          }),
+        );
+      const resolution = Duration.toMillis(ACTIVITY_RESOLUTION);
+      const start = Date.now() - 5 * resolution;
+
+      expect(yield* lastActive()).toBeNull();
+      yield* send(start);
+      expect(yield* lastActive()).toBe(start);
+      // Within the resolution: nothing is written.
+      yield* send(start + resolution - 1000);
+      expect(yield* lastActive()).toBe(start);
+      // Past it: moved.
+      yield* send(start + 2 * resolution);
+      expect(yield* lastActive()).toBe(start + 2 * resolution);
+      // An older row never moves it back.
+      yield* send(start - 10 * resolution);
+      expect(yield* lastActive()).toBe(start + 2 * resolution);
+
+      // Every content type counts, each through its own author column.
+      const [post] = yield* Effect.promise(() =>
+        db
+          .insert(posts)
+          .values({
+            authorId: user!.id,
+            contentType: "text",
+            content: "hi",
+            createdAt: new Date(start + 4 * resolution),
+            updatedAt: new Date(start + 4 * resolution),
+          })
+          .returning({ id: posts.id }),
+      );
+      expect(yield* lastActive()).toBe(start + 4 * resolution);
+      const [other] = yield* Effect.promise(() =>
+        db
+          .insert(users)
+          .values({ username: "liker", passwordHash: "x" })
+          .returning({ id: users.id }),
+      );
+      const otherActive = () =>
+        Effect.promise(() =>
+          db
+            .select({ at: users.lastActiveAt })
+            .from(users)
+            .where(eq(users.id, other!.id)),
+        ).pipe(Effect.map((rows) => rows[0]?.at?.getTime() ?? null));
+      yield* Effect.promise(() =>
+        db.insert(likes).values({
+          userId: other!.id,
+          postId: post!.id,
+          createdAt: new Date(start),
+        }),
+      );
+      expect(yield* otherActive()).toBe(start);
+      yield* Effect.promise(() =>
+        db.insert(comments).values({
+          postId: post!.id,
+          authorId: other!.id,
+          content: "nice",
+          createdAt: new Date(start + 3 * resolution),
+          updatedAt: new Date(start + 3 * resolution),
+        }),
+      );
+      expect(yield* otherActive()).toBe(start + 3 * resolution);
     }),
   ));

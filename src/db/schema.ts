@@ -99,6 +99,19 @@ export const users = pgTable(
     // that predates this migration reads as having signed up the moment it
     // ran — signup history is only meaningful from this deploy forward.
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    // When this user last created content — a post, comment, like or
+    // message — to within ACTIVITY_RESOLUTION, for the DAU/WAU/MAU counts
+    // (ActiveUsersMetrics.ts, the admin dashboard). Those used to take the
+    // distinct authors of every content table's window, which grows with
+    // history (issue #831); counting this column costs one pass over
+    // `users`. Never set by the app: insert triggers on the four tables
+    // move it forward (migration 0041), so old replicas' inserts count too,
+    // and only once it's ACTIVITY_RESOLUTION behind the new row — most
+    // inserts update nothing. Internal only: no API view exposes it, and it
+    // holds less than the content rows it's derived from, which go with the
+    // account. Null for anyone inactive since before the migration's
+    // 31-day backfill.
+    lastActiveAt: timestamp("last_active_at", { mode: "date" }),
   },
   (table) => [
     // Case-insensitive uniqueness: `Alice` and `alice` must not both be
