@@ -720,7 +720,11 @@ unit-tested, driven from `realtimeSocket.ts`:
   or `read` (`markRead`, the whole receipt range). A read is patched in with
   no request; a new message in a chat on screen (`holdChatInView`) fetches
   only `after=`, and the conversation's mark-read response
-  (`applyMarkedRead`) updates list, detail and unread total. **No `change`,
+  (`applyMarkedRead`) updates list, detail and unread total. Off screen, a
+  new message is counted into the unread badge and — since
+  `message_created` carries the `message` itself, as non-senders see it
+  (no `clientId`) — becomes the listed chat's preview and moves it up, with
+  no request (issue #834, `publishNewMessage` in `chats/sendPath.ts`). **No `change`,
   an unknown one, or a version gap still refetches all three** — keep
   `change` additive and send none for any other mutation. Receipts stay one
   publish to every participant: sending them only to senders would leave the

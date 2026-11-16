@@ -6,6 +6,7 @@ import {
   chatMessagesQueryKey,
   chatsListQueryKey,
   chatsUnreadCountQueryKey,
+  unreadChatsListQueryKey,
 } from "./chatQueryKeys";
 import { classifyChatVersion, recordChatVersion } from "./chatVersions";
 
@@ -23,6 +24,9 @@ import { classifyChatVersion, recordChatVersion } from "./chatVersions";
 //   message: the conversation's own mark-read brings the chat back with
 //   it (`applyMarkedRead`), and its own messages patch the preview
 //   (`applyNewestMessage`), so neither the list nor the chat is refetched;
+// - a new message in a chat that isn't on screen is counted into the unread
+//   badge and made the listed chat's preview from the message the event
+//   carries (issue #834), so that's no request either;
 // - anything else, a missed version, or an event from a server that
 //   predates `change`, refetches all three, as before.
 
@@ -39,6 +43,9 @@ export type ChatUpdatedEvent = {
   change?: string;
   messageId?: number;
   senderId?: number;
+  // On "message_created": the message as a participant other than its
+  // sender sees it — absent from a server that predates it.
+  message?: ChatMessage;
   userId?: number;
   fromMessageId?: number;
   lastReadMessageId?: number;
@@ -151,14 +158,32 @@ export function applyChatUpdated(
     // Off screen (issue #834). This used to refetch the unread total and
     // the chat list for every recipient on every message — the two most
     // requested endpoints under load. Someone else's message is one more
-    // unread, which the badge and the listed chat can count themselves; the
-    // list still needs the new preview and order, which the event doesn't
-    // carry, so it's refetched — but at most once per LIST_REFETCH_WINDOW_MS
-    // while messages keep arriving.
+    // unread, which the badge and the listed chat can count themselves, and
+    // the event carries the message, which is the listed chat's new
+    // preview and puts it back at the top. Only a chat this client has
+    // nothing cached for, or a server that doesn't send the message, still
+    // refetches the lists — at most once per LIST_REFETCH_WINDOW_MS while
+    // messages keep arriving.
     if (event.senderId !== meId && !countUnread(queryClient, chatId)) {
       void queryClient.invalidateQueries({
         queryKey: chatsUnreadCountQueryKey,
       });
+    }
+    const { message } = event;
+    if (
+      message !== undefined &&
+      message.id === event.messageId &&
+      message.chatId === chatId &&
+      placeNewestMessage(queryClient, chatId, message, version)
+    ) {
+      // Patched wherever it's listed. The one list that can *gain* it is
+      // the Unread filter's, for someone else's message.
+      if (
+        event.senderId !== meId &&
+        !listedIn(queryClient, unreadChatsListQueryKey, chatId)
+      )
+        refetchListsSoon(queryClient, "unread");
+      return;
     }
     refetchListsSoon(queryClient);
     void queryClient.invalidateQueries({
@@ -208,26 +233,44 @@ export const LIST_REFETCH_WINDOW_MS = 2_000;
 
 const listRefetches = new WeakMap<
   QueryClient,
-  { at: number; timer: ReturnType<typeof setTimeout> | undefined }
+  {
+    at: number;
+    timer: ReturnType<typeof setTimeout> | undefined;
+    // What the pending refetch covers.
+    lists: "all" | "unread" | undefined;
+  }
 >();
 
-function refetchListsSoon(queryClient: QueryClient): void {
+// `"unread"` refetches only the Unread filter's list (see
+// `applyChatUpdated`), `"all"` every chat list.
+function refetchListsSoon(
+  queryClient: QueryClient,
+  lists: "all" | "unread" = "all",
+): void {
   const state = listRefetches.get(queryClient) ?? {
     at: -Infinity,
     timer: undefined,
+    lists: undefined,
   };
   listRefetches.set(queryClient, state);
+  state.lists = state.lists === "all" ? "all" : lists;
   if (state.timer !== undefined) return;
   const refetch = () => {
+    const which = state.lists;
     state.timer = undefined;
     state.at = Date.now();
-    // Every chat list, but not the unread total that shares their prefix.
-    void queryClient.invalidateQueries({
-      queryKey: chatsListQueryKey,
-      predicate: (query) =>
-        query.queryKey.length !== chatsUnreadCountQueryKey.length ||
-        query.queryKey.at(-1) !== chatsUnreadCountQueryKey.at(-1),
-    });
+    state.lists = undefined;
+    void queryClient.invalidateQueries(
+      which === "unread"
+        ? { queryKey: unreadChatsListQueryKey, exact: true }
+        : {
+            // Chat lists, but not the unread total that shares their prefix.
+            queryKey: chatsListQueryKey,
+            predicate: (query) =>
+              query.queryKey.length !== chatsUnreadCountQueryKey.length ||
+              query.queryKey.at(-1) !== chatsUnreadCountQueryKey.at(-1),
+          },
+    );
   };
   const wait = state.at + LIST_REFETCH_WINDOW_MS - Date.now();
   if (wait <= 0) refetch();
@@ -454,14 +497,7 @@ export function applyNewestMessage(
   chatId: number,
   message: ChatMessage,
 ): void {
-  const advance = (chat: Chat): Chat =>
-    chat.lastMessage && chat.lastMessage.id >= message.id
-      ? chat
-      : {
-          ...chat,
-          lastMessage: message,
-          updatedAt: Math.max(chat.updatedAt, message.createdAt),
-        };
+  const advance = (chat: Chat) => withNewestMessage(chat, message);
   const detail = queryClient.getQueryData<Chat>(chatDetailQueryKey(chatId));
   if (detail) {
     const next = advance(detail);
@@ -483,4 +519,61 @@ export function applyNewestMessage(
   }
   const next = advance(base);
   if (next !== base || !listed) upsertListedChat(queryClient, next);
+}
+
+// `message` as `chat`'s preview, unless the chat already shows a newer one.
+// `version`, when given, is the chat's version as of the message.
+function withNewestMessage(
+  chat: Chat,
+  message: ChatMessage,
+  version?: number,
+): Chat {
+  if (chat.lastMessage && chat.lastMessage.id >= message.id) return chat;
+  return {
+    ...chat,
+    lastMessage: message,
+    updatedAt: Math.max(chat.updatedAt, message.createdAt),
+    version: Math.max(chat.version, version ?? chat.version),
+  };
+}
+
+// A `message_created` event's message for a chat that isn't on screen
+// (issue #834): made the preview of the chat in every cached list it's in,
+// moved to where the main list now sorts it, and into the cached chat. Its
+// unread count has already been counted (`countUnread`). False when nothing
+// here has the chat cached — a chat this client hasn't seen, which only a
+// refetch can bring in.
+function placeNewestMessage(
+  queryClient: QueryClient,
+  chatId: number,
+  message: ChatMessage,
+  version: number,
+): boolean {
+  const detail = queryClient.getQueryData<Chat>(chatDetailQueryKey(chatId));
+  if (detail) {
+    const next = withNewestMessage(detail, message, version);
+    if (next !== detail)
+      queryClient.setQueryData<Chat>(chatDetailQueryKey(chatId), next);
+  }
+  const base = listedIn(queryClient, chatsListQueryKey, chatId) ?? detail;
+  if (!base) return false;
+  upsertListedChat(queryClient, withNewestMessage(base, message, version));
+  return true;
+}
+
+// `chatId`'s entry in a cached chat list under `queryKey` (a prefix: the
+// main list's key matches every list).
+function listedIn(
+  queryClient: QueryClient,
+  queryKey: readonly unknown[],
+  chatId: number,
+): Chat | undefined {
+  for (const [, data] of queryClient.getQueriesData<unknown>({ queryKey })) {
+    if (!isChatsList(data)) continue;
+    const listed = data.pages
+      .flatMap((page) => page.chats)
+      .find((chat) => chat.id === chatId);
+    if (listed) return listed;
+  }
+  return undefined;
 }

@@ -9,6 +9,7 @@ import {
   chatRequestsListQueryKey,
   chatsListQueryKey,
   chatsUnreadCountQueryKey,
+  unreadChatsListQueryKey,
 } from "./chatQueryKeys";
 import { recordChatVersion } from "./chatVersions";
 import {
@@ -414,4 +415,133 @@ test("a burst of messages refetches the lists once at once and once at the end o
     setTimeout(resolve, LIST_REFETCH_WINDOW_MS + 100),
   );
   expect(listRefetches).toBe(2);
+});
+
+// The event carries the message (issue #834), so the list is patched from it
+// rather than refetched.
+const newMessageWithBody = (
+  chatId: number,
+  version: number,
+  senderId = BOB,
+) => {
+  const event = newMessage(chatId, version, senderId);
+  return { ...event, message: message(event.messageId, chatId, senderId) };
+};
+
+test("a message the event carries becomes the listed chat's preview and moves it to the top, with no list refetch", () => {
+  const chatId = nextChatId++;
+  const other = chatOf(nextChatId++, { updatedAt: 5000 });
+  const client = seed(chatId, [other]);
+  client.setQueryData<InfiniteData<ChatsPage>>(unreadChatsListQueryKey, {
+    pages: [{ chats: [other], limit: 20, nextCursor: null }],
+    pageParams: [undefined],
+  });
+  const event = newMessageWithBody(chatId, 2);
+
+  applyChatUpdated(client, event, ME);
+
+  const list = client.getQueryData<InfiniteData<ChatsPage>>(chatsListQueryKey)!;
+  expect(list.pages[0]!.chats.map((c) => c.id)).toEqual([chatId, other.id]);
+  const listed = list.pages[0]!.chats[0]!;
+  expect(listed.lastMessage).toEqual(event.message);
+  expect(listed.updatedAt).toBe(event.message.createdAt);
+  expect(listed.unreadCount).toBe(1);
+  expect(listed.version).toBe(2);
+  const detail = client.getQueryData<Chat>(chatDetailQueryKey(chatId))!;
+  expect(detail.lastMessage).toEqual(event.message);
+  expect(detail.unreadCount).toBe(1);
+  expect(client.getQueryData(chatsUnreadCountQueryKey)).toEqual({
+    count: 5,
+    chats: 3,
+  });
+  expect(invalidated(client, chatId)).toEqual({
+    list: false,
+    detail: false,
+    messages: true,
+  });
+  // The Unread filter's list can't place a chat it doesn't hold, so it's
+  // still refetched (when on screen) — and never the unread total.
+  expect(client.getQueryState(unreadChatsListQueryKey)?.isInvalidated).toBe(
+    true,
+  );
+  expect(client.getQueryState(chatsUnreadCountQueryKey)?.isInvalidated).toBe(
+    false,
+  );
+});
+
+test("a carried message for a chat nothing here has cached refetches the lists", () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  const elsewhere = nextChatId++;
+  recordChatVersion(elsewhere, 1);
+
+  applyChatUpdated(client, newMessageWithBody(elsewhere, 2), ME);
+
+  expect(client.getQueryState(chatsListQueryKey)?.isInvalidated).toBe(true);
+});
+
+test("a carried message older than the chat's preview leaves it alone", () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  const before = listedChat(client, chatId)!.lastMessage;
+  const event = {
+    ...newMessage(chatId, 2),
+    messageId: 2,
+    message: message(2, chatId, BOB),
+  };
+
+  applyChatUpdated(client, event, ME);
+
+  expect(listedChat(client, chatId)?.lastMessage).toEqual(before);
+  expect(client.getQueryState(chatsListQueryKey)?.isInvalidated).toBe(false);
+});
+
+test("a carried message that doesn't match the event is ignored, and the list refetched", () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  const event = { ...newMessageWithBody(chatId, 2), messageId: 99 };
+
+  applyChatUpdated(client, event, ME);
+
+  expect(listedChat(client, chatId)?.lastMessage?.id).toBe(3);
+  expect(client.getQueryState(chatsListQueryKey)?.isInvalidated).toBe(true);
+});
+
+test("our own message from another device, carried, becomes the preview without counting as unread", () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  const event = newMessageWithBody(chatId, 2, ME);
+
+  applyChatUpdated(client, event, ME);
+
+  expect(listedChat(client, chatId)?.lastMessage).toEqual(event.message);
+  expect(listedChat(client, chatId)?.unreadCount).toBe(0);
+  expect(client.getQueryState(chatsListQueryKey)?.isInvalidated).toBe(false);
+});
+
+test("a carried message leaves the requests list alone, and an Unread list that already has the chat", () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  const listOf = (chats: Chat[]): InfiniteData<ChatsPage> => ({
+    pages: [{ chats, limit: 20, nextCursor: null }],
+    pageParams: [undefined],
+  });
+  const unreadChat = chatOf(chatId, { unreadCount: 1 });
+  client.setQueryData(unreadChatsListQueryKey, listOf([unreadChat]));
+  client.setQueryData(chatRequestsListQueryKey, listOf([]));
+  const event = newMessageWithBody(chatId, 2);
+
+  applyChatUpdated(client, event, ME);
+
+  expect(client.getQueryState(unreadChatsListQueryKey)?.isInvalidated).toBe(
+    false,
+  );
+  expect(client.getQueryState(chatRequestsListQueryKey)?.isInvalidated).toBe(
+    false,
+  );
+  // Patched in place instead.
+  const unread = client.getQueryData<InfiniteData<ChatsPage>>(
+    unreadChatsListQueryKey,
+  )!;
+  expect(unread.pages[0]!.chats[0]!.lastMessage).toEqual(event.message);
 });

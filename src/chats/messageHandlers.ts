@@ -302,8 +302,7 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
           1,
         );
 
-        yield* publishNewMessage(db, connections, id, currentUser.id, row.id);
-        return toApiMessage(
+        const message = toApiMessage(
           row,
           [],
           attachment,
@@ -313,6 +312,8 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
           false,
           currentUser.id,
         );
+        yield* publishNewMessage(db, connections, message);
+        return message;
       }),
     sendTyping: ({ params: { id } }) =>
       Effect.gen(function* () {

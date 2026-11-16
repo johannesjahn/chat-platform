@@ -303,26 +303,18 @@ export const forwardHandlers = ({
               }),
               1,
             );
-            yield* publishNewMessage(
-              db,
-              connections,
-              targetId,
+            const message = toApiMessage(
+              row,
+              [],
+              attachment,
+              NO_REACTIONS,
+              null,
+              false,
+              false,
               currentUser.id,
-              row.id,
             );
-            return delivered(
-              targetId,
-              toApiMessage(
-                row,
-                [],
-                attachment,
-                NO_REACTIONS,
-                null,
-                false,
-                false,
-                currentUser.id,
-              ),
-            );
+            yield* publishNewMessage(db, connections, message);
+            return delivered(targetId, message);
           });
 
         // A forwarded attachment gets its own upload, owned by the
