@@ -39,12 +39,11 @@ export const toApiPost = (
   commentCount,
 });
 
-// Total comments (top-level *and* replies) per post for a batch of ids, in one
-// grouped COUNT over `comments` — mirrors `postReactionInfo`'s shape/rationale
-// (computed on read, not stored — see reactions.ts and the `commentCount`
-// comment on `Post` in Api.ts). The `comments_post_id_idx` (postId, id) index
-// keeps a page's worth cheap. Ids with no comments are simply absent from the
-// map; callers default them to 0.
+// Total comments (top-level *and* replies) per post for a batch of ids. Read
+// from the stored `posts.comment_count` (issue #835) unless the viewer hides
+// someone — then counted live, in one grouped COUNT over `comments` using the
+// `comments_post_id_idx` (postId, id) index. Ids with no comments are simply
+// absent from the map; callers default them to 0.
 //
 // `hiddenAuthorIds` (the viewer's `blockedOrMutedUserIds`, issue #661) makes
 // the count match what the thread endpoints show that viewer: a hidden
@@ -58,6 +57,18 @@ export const postCommentCounts = async (
 ): Promise<Map<number, number>> => {
   const result = new Map<number, number>();
   if (postIds.length === 0) return result;
+  // Nobody hidden: the stored count is exactly what the thread shows (issue
+  // #835 — it's kept by a trigger on `comments`, see posts.comment_count).
+  if (hiddenAuthorIds.length === 0) {
+    const stored = await db
+      .select({ id: posts.id, commentCount: posts.commentCount })
+      .from(posts)
+      .where(inArray(posts.id, [...postIds]));
+    for (const row of stored) {
+      if (row.commentCount > 0) result.set(row.id, row.commentCount);
+    }
+    return result;
+  }
   const parent = alias(comments, "parent");
   const rows = await db
     .select({ postId: comments.postId, total: count() })

@@ -281,6 +281,13 @@
       "when": 1794798854624,
       "tag": "0039_scheduled_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794801086452,
+      "tag": "0040_post_comment_count",
+      "breakpoints": true
     }
   ]
 }
