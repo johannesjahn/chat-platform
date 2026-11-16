@@ -4,6 +4,7 @@ import { Effect, Layer, ManagedRuntime } from "effect";
 import { RedisPresenceStoreLive } from "./Presence.ts";
 import { staticPresenceAudience } from "./PresenceAudience.ts";
 import { PubSub, RedisPubSubLive } from "./PubSub.ts";
+import { RedisUserLocatorLive } from "./UserLocator.ts";
 import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
 
 // Everything else touching Realtime.ts runs against InMemoryPubSubLive /
@@ -27,6 +28,7 @@ const makeInstance = (
 ) =>
   ManagedRuntime.make(
     RealtimeConnectionsLive.pipe(
+      Layer.provide(RedisUserLocatorLive),
       Layer.provide(RedisPubSubLive),
       Layer.provide(RedisPresenceStoreLive),
       Layer.provide(staticPresenceAudience(contacts)),

@@ -24,6 +24,7 @@ import { PostsHandlerLive } from "./PostsHandler.ts";
 import { PresenceStoreLive } from "./Presence.ts";
 import { PresenceAudienceLive } from "./PresenceAudience.ts";
 import { PubSubLive } from "./PubSub.ts";
+import { UserLocatorLive } from "./UserLocator.ts";
 import { RateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
@@ -115,6 +116,7 @@ const ServicesLive = Layer.mergeAll(
     Layer.mergeAll(
       DbLive,
       PubSubLive,
+      UserLocatorLive,
       PresenceStoreLive,
       JwtLive,
       RateLimiterLive,

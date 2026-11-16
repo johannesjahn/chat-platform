@@ -11,6 +11,7 @@ import {
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { staticPresenceAudience } from "./PresenceAudience.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
+import { InMemoryUserLocatorLive } from "./UserLocator.ts";
 import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
 import { makeTestRun } from "./testApi.ts";
 
@@ -68,6 +69,7 @@ test("recordHttpMetrics records a request against httpRequestsTotal, labeled by 
 // calls could easily have already nudged off zero).
 test("RealtimeConnections.register/unregister track the websocketConnectionsActive gauge", async () => {
   const TestRealtimeLive = RealtimeConnectionsLive.pipe(
+    Layer.provide(InMemoryUserLocatorLive),
     Layer.provide(InMemoryPubSubLive),
     Layer.provide(InMemoryPresenceStoreLive),
     Layer.provide(staticPresenceAudience([])),
@@ -94,6 +96,7 @@ test("RealtimeConnections.register/unregister track the websocketConnectionsActi
 
 test("RealtimeConnections.register/unregister increment websocket_connections_total, labeled by event", async () => {
   const TestRealtimeLive = RealtimeConnectionsLive.pipe(
+    Layer.provide(InMemoryUserLocatorLive),
     Layer.provide(InMemoryPubSubLive),
     Layer.provide(InMemoryPresenceStoreLive),
     Layer.provide(staticPresenceAudience([])),
