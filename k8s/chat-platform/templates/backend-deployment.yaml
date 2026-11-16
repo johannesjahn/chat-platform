@@ -7,7 +7,11 @@ metadata:
     {{- include "chat-platform.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
+  {{- if not .Values.backend.autoscaling.enabled }}
+  # Left to the HorizontalPodAutoscaler when backend.autoscaling is on, so
+  # a sync doesn't keep resetting what it scaled to.
   replicas: {{ .Values.backend.replicaCount }}
+  {{- end }}
   revisionHistoryLimit: 3
   {{- with .Values.backend.strategy }}
   strategy:

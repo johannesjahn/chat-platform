@@ -165,6 +165,21 @@ backend:
     enabled: true
     maxUnavailable: 1
 
+  # Optional HorizontalPodAutoscaler on CPU (issue #838). Off by default:
+  # this chart's resource budget is sized for a single small node (see the
+  # resources comment above and ../README.md's "Capacity"), where there's
+  # no room to scale into. Each pod runs JavaScript on one thread, so it
+  # saturates at about one core however high its limit — throughput comes
+  # from replicas, which also need database connections (backend.dbPoolMax,
+  # pgbouncer). When on, replicaCount is ignored.
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    # Of the CPU *request*, so it only means something once requests are
+    # sized for real load.
+    targetCPUUtilizationPercentage: 70
+
   # Prefer spreading replicas across nodes. ScheduleAnyway, so a
   # single-node cluster still schedules every replica.
   topologySpread:
