@@ -1,7 +1,12 @@
 import { RedisClient } from "bun";
 import { expect, test } from "bun:test";
-import { Effect, ManagedRuntime } from "effect";
-import { PresenceStore, RedisPresenceStoreLive } from "./Presence.ts";
+import { Duration, Effect, Layer, ManagedRuntime } from "effect";
+import {
+  type PresenceChange,
+  PresenceHeartbeat,
+  PresenceStore,
+  RedisPresenceStoreLive,
+} from "./Presence.ts";
 
 // Same "needs a real Redis" gating as RealtimePubSub.integration.test.ts —
 // these exercise RedisPresenceStoreLive's actual Redis behavior (hash field
@@ -138,6 +143,156 @@ const freshUserId = () => nextUserId++;
       expect(result).toEqual([online]);
     } finally {
       await runtime.dispose();
+    }
+  },
+);
+
+// Issue #837: instances that heartbeat fast and are reaped soon after they
+// stop, so a test can play out a crash in well under a second. Disposing a
+// runtime stands in for a hard kill: its heartbeat stops, but nothing calls
+// `disconnect` for the connections it held.
+const FastHeartbeatLive = Layer.succeed(PresenceHeartbeat, {
+  interval: Duration.millis(50),
+  deadAfter: Duration.millis(300),
+});
+const instance = () =>
+  ManagedRuntime.make(
+    RedisPresenceStoreLive.pipe(Layer.provide(FastHeartbeatLive)),
+  );
+
+const recordChanges = async (runtime: ReturnType<typeof instance>) => {
+  const changes: PresenceChange[] = [];
+  await runtime.runPromise(
+    Effect.gen(function* () {
+      const store = yield* PresenceStore;
+      yield* store.onPresenceChange((batch) =>
+        Effect.sync(() => {
+          changes.push(...batch);
+        }),
+      );
+    }),
+  );
+  return changes;
+};
+
+const waitUntil = async (predicate: () => boolean | Promise<boolean>) => {
+  const deadline = Date.now() + 5_000;
+  while (!(await predicate())) {
+    if (Date.now() > deadline) throw new Error("timed out waiting");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+};
+
+(redisConfigured ? test : test.skip)(
+  "a user whose only connection was on an instance that died goes offline, and another instance says so (issue #837)",
+  async () => {
+    const dead = instance();
+    const survivor = instance();
+    const inspector = new RedisClient(process.env.REDIS_URL);
+    const userId = freshUserId();
+    try {
+      const changes = await recordChanges(survivor);
+      await dead.runPromise(
+        Effect.flatMap(PresenceStore, (store) => store.connect(userId)),
+      );
+      expect(await inspector.hget(KEY, String(userId))).toBe("1");
+
+      await dead.dispose();
+      await waitUntil(() =>
+        changes.some((c) => c.userId === userId && !c.online),
+      );
+      expect(await inspector.hget(KEY, String(userId))).toBeNull();
+    } finally {
+      await survivor.dispose();
+      inspector.close();
+    }
+  },
+);
+
+(redisConfigured ? test : test.skip)(
+  "a user still connected to a live instance stays online when another of their instances dies",
+  async () => {
+    const dead = instance();
+    const survivor = instance();
+    const inspector = new RedisClient(process.env.REDIS_URL);
+    const userId = freshUserId();
+    try {
+      const changes = await recordChanges(survivor);
+      await dead.runPromise(
+        Effect.flatMap(PresenceStore, (store) => store.connect(userId)),
+      );
+      await survivor.runPromise(
+        Effect.flatMap(PresenceStore, (store) => store.connect(userId)),
+      );
+      expect(await inspector.hget(KEY, String(userId))).toBe("2");
+
+      await dead.dispose();
+      await waitUntil(
+        async () => (await inspector.hget(KEY, String(userId))) === "1",
+      );
+      expect(changes.some((c) => c.userId === userId)).toBe(false);
+
+      // And leaving the live instance now really is going offline.
+      const wentOffline = await survivor.runPromise(
+        Effect.flatMap(PresenceStore, (store) => store.disconnect(userId)),
+      );
+      expect(wentOffline).toBe(true);
+    } finally {
+      await survivor.dispose();
+      inspector.close();
+    }
+  },
+);
+
+(redisConfigured ? test : test.skip)(
+  "an instance wrongly taken for dead puts its connections back and reports them online again",
+  async () => {
+    const paused = instance();
+    const inspector = new RedisClient(process.env.REDIS_URL);
+    const userId = freshUserId();
+    try {
+      const pausedChanges = await recordChanges(paused);
+      await paused.runPromise(
+        Effect.flatMap(PresenceStore, (store) => store.connect(userId)),
+      );
+
+      // Do to it what REAP_SCRIPT does to an instance it takes for dead —
+      // as if a long pause had let another instance reap it.
+      const instances = (await inspector.send("ZRANGE", [
+        "chat-platform:presence:instances",
+        "0",
+        "-1",
+      ])) as string[];
+      let reaped = 0;
+      for (const id of instances) {
+        const sharesKey = `chat-platform:presence:instance:${id}`;
+        const share = await inspector.hget(sharesKey, String(userId));
+        if (share === null) continue;
+        await inspector.send("ZREM", ["chat-platform:presence:instances", id]);
+        await inspector.hincrby(KEY, String(userId), -Number(share));
+        await inspector.hdel(KEY, String(userId));
+        await inspector.del(sharesKey);
+        reaped++;
+      }
+      expect(reaped).toBe(1);
+      expect(await inspector.hget(KEY, String(userId))).toBeNull();
+
+      // Its next beat finds itself unregistered and restores its share.
+      await waitUntil(
+        async () => (await inspector.hget(KEY, String(userId))) === "1",
+      );
+      await waitUntil(() =>
+        pausedChanges.some((c) => c.userId === userId && c.online),
+      );
+
+      // Leaving now is an ordinary transition to offline again.
+      const wentOffline = await paused.runPromise(
+        Effect.flatMap(PresenceStore, (store) => store.disconnect(userId)),
+      );
+      expect(wentOffline).toBe(true);
+    } finally {
+      await paused.dispose();
+      inspector.close();
     }
   },
 );
