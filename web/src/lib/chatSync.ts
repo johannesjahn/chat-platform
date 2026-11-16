@@ -148,7 +148,19 @@ export function applyChatUpdated(
     // message read (and that response carries the chat) or, for one of our
     // own, patches the preview from it.
     if (isChatInView(chatId)) return;
-    void queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
+    // Off screen (issue #834). This used to refetch the unread total and
+    // the chat list for every recipient on every message — the two most
+    // requested endpoints under load. Someone else's message is one more
+    // unread, which the badge and the listed chat can count themselves; the
+    // list still needs the new preview and order, which the event doesn't
+    // carry, so it's refetched — but at most once per LIST_REFETCH_WINDOW_MS
+    // while messages keep arriving.
+    if (event.senderId !== meId && !countUnread(queryClient, chatId)) {
+      void queryClient.invalidateQueries({
+        queryKey: chatsUnreadCountQueryKey,
+      });
+    }
+    refetchListsSoon(queryClient);
     void queryClient.invalidateQueries({
       queryKey: chatDetailQueryKey(chatId),
     });
@@ -156,6 +168,70 @@ export function applyChatUpdated(
   }
 
   refetchChat(queryClient, chatId);
+}
+
+// One more unread message from someone else in `chatId`, counted into the
+// cached list entry, the chat and the unread total without a request. Only
+// for a chat in the main list — which holds accepted chats only, the only
+// ones the total counts (message requests don't). False when it couldn't
+// tell, for the caller to refetch the total instead.
+function countUnread(queryClient: QueryClient, chatId: number): boolean {
+  const listed = queryClient
+    .getQueryData<InfiniteData<ChatsPage>>(chatsListQueryKey)
+    ?.pages.flatMap((page) => page.chats)
+    .find((chat) => chat.id === chatId);
+  if (!listed) return false;
+  const total = queryClient.getQueryState<UnreadChatCount>(
+    chatsUnreadCountQueryKey,
+  );
+  if (!total?.data || total.fetchStatus === "fetching") return false;
+
+  const bump = (chat: Chat): Chat => ({
+    ...chat,
+    unreadCount: chat.unreadCount + 1,
+  });
+  patchListedChat(queryClient, chatId, bump);
+  queryClient.setQueryData<Chat>(chatDetailQueryKey(chatId), (chat) =>
+    chat ? bump(chat) : chat,
+  );
+  queryClient.setQueryData<UnreadChatCount>(chatsUnreadCountQueryKey, {
+    count: total.data.count + 1,
+    chats: total.data.chats + (listed.unreadCount === 0 ? 1 : 0),
+  });
+  return true;
+}
+
+// How often the chat lists may be refetched for messages in chats that
+// aren't open: the first in a quiet spell refetches at once, the rest of a
+// burst share one refetch at the end of the window.
+export const LIST_REFETCH_WINDOW_MS = 2_000;
+
+const listRefetches = new WeakMap<
+  QueryClient,
+  { at: number; timer: ReturnType<typeof setTimeout> | undefined }
+>();
+
+function refetchListsSoon(queryClient: QueryClient): void {
+  const state = listRefetches.get(queryClient) ?? {
+    at: -Infinity,
+    timer: undefined,
+  };
+  listRefetches.set(queryClient, state);
+  if (state.timer !== undefined) return;
+  const refetch = () => {
+    state.timer = undefined;
+    state.at = Date.now();
+    // Every chat list, but not the unread total that shares their prefix.
+    void queryClient.invalidateQueries({
+      queryKey: chatsListQueryKey,
+      predicate: (query) =>
+        query.queryKey.length !== chatsUnreadCountQueryKey.length ||
+        query.queryKey.at(-1) !== chatsUnreadCountQueryKey.at(-1),
+    });
+  };
+  const wait = state.at + LIST_REFETCH_WINDOW_MS - Date.now();
+  if (wait <= 0) refetch();
+  else state.timer = setTimeout(refetch, wait);
 }
 
 // --- Patches -----------------------------------------------------------------

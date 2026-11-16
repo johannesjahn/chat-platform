@@ -17,6 +17,7 @@ import {
   applyNewestMessage,
   beginOwnRead,
   holdChatInView,
+  LIST_REFETCH_WINDOW_MS,
 } from "./chatSync";
 
 // Issue #749: what each `chat_updated` makes this client fetch. These pin
@@ -317,4 +318,100 @@ test("our own newest message becomes the preview without a refetch", () => {
     chats: 2,
   });
   expect(invalidated(client, chatId)).toEqual(nothing);
+});
+
+// Issue #834: a message in a chat that isn't open used to refetch the unread
+// total and the list for every recipient.
+const newMessage = (chatId: number, version: number, senderId = BOB) =>
+  ({
+    type: "chat_updated",
+    chatId,
+    version,
+    change: "message_created",
+    messageId: 10 + version,
+    senderId,
+  }) as const;
+
+const listedChat = (client: QueryClient, chatId: number) =>
+  client
+    .getQueryData<InfiniteData<ChatsPage>>(chatsListQueryKey)
+    ?.pages.flatMap((page) => page.chats)
+    .find((chat) => chat.id === chatId);
+
+test("someone else's message in a listed chat is counted into the badge, the list and the chat without refetching the total", () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  applyChatUpdated(client, newMessage(chatId, 2), ME);
+
+  expect(client.getQueryData(chatsUnreadCountQueryKey)).toEqual({
+    count: 5,
+    chats: 3,
+  });
+  expect(client.getQueryState(chatsUnreadCountQueryKey)?.isInvalidated).toBe(
+    false,
+  );
+  expect(listedChat(client, chatId)?.unreadCount).toBe(1);
+  expect(
+    client.getQueryData<Chat>(chatDetailQueryKey(chatId))?.unreadCount,
+  ).toBe(1);
+  // A second one counts again, but the chat was already unread.
+  applyChatUpdated(client, newMessage(chatId, 3), ME);
+  expect(client.getQueryData(chatsUnreadCountQueryKey)).toEqual({
+    count: 6,
+    chats: 3,
+  });
+});
+
+test("a message in a chat the list doesn't have refetches the total instead", () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  const elsewhere = nextChatId++;
+  recordChatVersion(elsewhere, 1);
+  applyChatUpdated(client, newMessage(elsewhere, 2), ME);
+  expect(client.getQueryState(chatsUnreadCountQueryKey)?.isInvalidated).toBe(
+    true,
+  );
+  expect(client.getQueryData(chatsUnreadCountQueryKey)).toEqual({
+    count: 4,
+    chats: 2,
+  });
+});
+
+test("our own message from another device leaves the unread counts alone", () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  applyChatUpdated(client, newMessage(chatId, 2, ME), ME);
+  expect(client.getQueryData(chatsUnreadCountQueryKey)).toEqual({
+    count: 4,
+    chats: 2,
+  });
+  expect(client.getQueryState(chatsUnreadCountQueryKey)?.isInvalidated).toBe(
+    false,
+  );
+  expect(listedChat(client, chatId)?.unreadCount).toBe(0);
+});
+
+test("a burst of messages refetches the lists once at once and once at the end of the window", async () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  let listRefetches = 0;
+  const invalidate = client.invalidateQueries.bind(client);
+  client.invalidateQueries = ((filters, options) => {
+    if (
+      filters?.queryKey === chatsListQueryKey &&
+      filters.predicate !== undefined
+    ) {
+      listRefetches++;
+    }
+    return invalidate(filters, options);
+  }) as typeof client.invalidateQueries;
+
+  for (const version of [2, 3, 4]) {
+    applyChatUpdated(client, newMessage(chatId, version), ME);
+  }
+  expect(listRefetches).toBe(1);
+  await new Promise((resolve) =>
+    setTimeout(resolve, LIST_REFETCH_WINDOW_MS + 100),
+  );
+  expect(listRefetches).toBe(2);
 });
