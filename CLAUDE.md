@@ -121,7 +121,12 @@ This is a two-package repo:
   concurrent migration races — it does _not_ solve schema forward/backward
   compatibility during rolling deploys. Old-code replicas still run briefly
   against the already-migrated schema, so migrations must stay
-  additive/backward-compatible (expand-contract pattern). Realtime (chat/post)
+  additive/backward-compatible (expand-contract pattern). Each process's
+  Bun.sql pool is `DB_POOL_MAX` connections (default 10; issue #830), so
+  replicas × `DB_POOL_MAX` must fit under Postgres's `max_connections`, or
+  run the chart's optional PgBouncer (`pgbouncer.enabled`, transaction mode).
+  PgBouncer's `max_prepared_statements` must stay above 0: Bun.sql uses
+  named prepared statements, which fail without it. Realtime (chat/post)
   events fan out through
   [`src/PubSub.ts`](src/PubSub.ts): an in-memory implementation by default
   (correct for a single process), or Redis Pub/Sub (`Bun.redis`) when

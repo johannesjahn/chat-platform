@@ -1,0 +1,75 @@
+{{- if .Values.pgbouncer.enabled }}
+{{- $fullname := include "chat-platform.fullname" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-pgbouncer
+  labels:
+    {{- include "chat-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pgbouncer
+spec:
+  replicas: {{ .Values.pgbouncer.replicaCount }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "chat-platform.selectorLabels" (dict "Release" .Release "Chart" .Chart "component" "pgbouncer") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "chat-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: pgbouncer
+    spec:
+      containers:
+        - name: pgbouncer
+          image: "{{ .Values.pgbouncer.image.repository }}:{{ .Values.pgbouncer.image.tag }}"
+          ports:
+            - containerPort: 5432
+              name: pgbouncer
+          # The image writes pgbouncer.ini and the auth file from these.
+          env:
+            - name: DB_HOST
+              value: {{ $fullname }}-postgres
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: {{ .Values.postgres.auth.username | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "chat-platform.postgresSecretName" . }}
+                  key: {{ include "chat-platform.postgresSecretKey" . }}
+            - name: DB_NAME
+              value: {{ .Values.postgres.auth.database | quote }}
+            - name: LISTEN_PORT
+              value: "5432"
+            - name: AUTH_TYPE
+              value: scram-sha-256
+            # Transaction mode: a server connection is held only for the
+            # length of a transaction, which is what lets many backend
+            # pools share a few Postgres connections. Nothing in src/
+            # relies on session state across transactions.
+            - name: POOL_MODE
+              value: transaction
+            # Required, not a tuning knob: Bun.sql uses named prepared
+            # statements, and in transaction mode pgbouncer only keeps
+            # them working when it tracks them itself. At 0, queries fail
+            # with `prepared statement "P3" already exists`.
+            - name: MAX_PREPARED_STATEMENTS
+              value: {{ .Values.pgbouncer.maxPreparedStatements | quote }}
+            - name: DEFAULT_POOL_SIZE
+              value: {{ .Values.pgbouncer.defaultPoolSize | quote }}
+            - name: MAX_CLIENT_CONN
+              value: {{ .Values.pgbouncer.maxClientConn | quote }}
+          readinessProbe:
+            tcpSocket:
+              port: pgbouncer
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: pgbouncer
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.pgbouncer.resources | nindent 12 }}
+{{- end }}

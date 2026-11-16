@@ -89,6 +89,21 @@ export const dbQuery = <A>(run: () => PromiseLike<A>): Effect.Effect<A> =>
 export const createPglite = () =>
   PGlite.create(process.env.DB_PATH, { extensions: { pg_trgm } });
 
+// Connections each process's Bun.sql pool may open (issue #830). Bun.sql's
+// own default is 10, which was hard-coded here before; with Postgres's
+// default `max_connections = 100` that capped a deployment at ~9 replicas.
+// Size it so replicas × DB_POOL_MAX stays under the server's (or PgBouncer's)
+// limit. A pool is also each process's ceiling on concurrent queries.
+export const DEFAULT_DB_POOL_MAX = 10;
+export const parseDbPoolMax = (value: string | undefined): number => {
+  if (value === undefined || value.trim() === "") return DEFAULT_DB_POOL_MAX;
+  const max = Number(value);
+  if (!Number.isInteger(max) || max < 1) {
+    throw new Error(`DB_POOL_MAX must be a positive integer, got "${value}"`);
+  }
+  return max;
+};
+
 // `DATABASE_URL`, when set (e.g. by docker-compose, pointing at a real
 // Postgres container), connects over the wire via Bun's native `Bun.sql`
 // client. Left unset — the default for local `bun run dev`/`bun test` — this
@@ -105,7 +120,13 @@ export const DbLive = Layer.effect(
   Db,
   Effect.promise(async (): Promise<DrizzleDb> => {
     if (process.env.DATABASE_URL) {
-      const db = drizzleBunSql(process.env.DATABASE_URL, { schema });
+      const db = drizzleBunSql({
+        connection: {
+          url: process.env.DATABASE_URL,
+          max: parseDbPoolMax(process.env.DB_POOL_MAX),
+        },
+        schema,
+      });
       return db;
     }
     const client = await createPglite();

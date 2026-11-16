@@ -159,22 +159,26 @@ otherwise they come from backend.s3.* (a managed bucket).
 {{/*
 Shared env-var block for connecting to Postgres via DATABASE_URL. Used by
 both the backend Deployment and the migration Job so the connection string
-can't silently drift between the two — see issue #178.
+can't silently drift between the two — see issue #178. Takes
+(dict "ctx" $ "pooled" bool) — see DATABASE_URL below.
 */}}
 {{- define "chat-platform.postgresEnv" -}}
+{{- $ := .ctx -}}
 - name: POSTGRES_USER
-  value: {{ .Values.postgres.auth.username | quote }}
+  value: {{ $.Values.postgres.auth.username | quote }}
 - name: POSTGRES_PASSWORD
   valueFrom:
     secretKeyRef:
-      name: {{ include "chat-platform.postgresSecretName" . }}
-      key: {{ include "chat-platform.postgresSecretKey" . }}
+      name: {{ include "chat-platform.postgresSecretName" $ }}
+      key: {{ include "chat-platform.postgresSecretKey" $ }}
 - name: POSTGRES_DB
-  value: {{ .Values.postgres.auth.database | quote }}
+  value: {{ $.Values.postgres.auth.database | quote }}
 # Composed from the vars above via Kubernetes' `$(VAR)` env
 # substitution (supported for `env[].value`, referencing earlier
 # entries in this same list) — src/Db.ts just wants one
-# connection-string env var.
+# connection-string env var. `pooled` callers (the backend) go through
+# pgbouncer when it's enabled; the migration Job always connects directly,
+# since DDL has no business behind a transaction-mode pooler.
 - name: DATABASE_URL
-  value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "chat-platform.fullname" . }}-postgres:5432/$(POSTGRES_DB)"
+  value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@{{ include "chat-platform.fullname" $ }}-{{ if and .pooled $.Values.pgbouncer.enabled }}pgbouncer{{ else }}postgres{{ end }}:5432/$(POSTGRES_DB)"
 {{- end -}}

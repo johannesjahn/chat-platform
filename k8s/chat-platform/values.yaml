@@ -12,7 +12,7 @@ backend:
     # Build & push the repo-root Dockerfile to a registry this cluster can
     # pull from, then point this at it (e.g. ghcr.io/<you>/chat-platform).
     repository: johannesjahn/chat-platform
-    tag: "0.41.3"
+    tag: "0.41.4"
     pullPolicy: IfNotPresent
 
   replicaCount: 2
@@ -52,6 +52,13 @@ backend:
   # For tighter security, restrict this to the Ingress controller's specific
   # Service ClusterIP or subnet.
   trustProxy: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,loopback"
+
+  # Postgres connections each backend pod's pool may open (DB_POOL_MAX, see
+  # src/Db.ts; issue #830) — also the pod's ceiling on concurrent queries.
+  # Every replica opens up to this many, so keep
+  # replicaCount × dbPoolMax (+ a few for the migration Job and psql)
+  # under postgres.maxConnections, or put pgbouncer in between.
+  dbPoolMax: 10
 
   # S3-compatible object storage for file/media uploads (issue #221) — see
   # src/AttachmentStorage.ts. Ignored when garage.enabled is true (the
@@ -223,6 +230,14 @@ postgres:
     # Empty uses the cluster's default StorageClass.
     storageClassName: ""
 
+  # Server settings passed as `postgres -c ...` (issue #830). The defaults
+  # are Postgres's own. maxConnections must cover every backend pod's pool
+  # (backend.replicaCount × backend.dbPoolMax) plus the migration Job, or —
+  # with pgbouncer enabled — pgbouncer.defaultPoolSize plus those. Raise
+  # sharedBuffers (~25% of the memory limit) along with the resources below.
+  maxConnections: 100
+  sharedBuffers: 128MB
+
   # See backend.resources above for the request/limit sizing rationale.
   resources:
     requests:
@@ -231,6 +246,35 @@ postgres:
     limits:
       cpu: 1000m
       memory: 1Gi
+
+# Optional connection pooler between the backend and Postgres (issue #830).
+# Each backend pod keeps a pool of backend.dbPoolMax connections, so without
+# a pooler replicaCount × dbPoolMax must fit under postgres.maxConnections —
+# ~9 pods at the defaults. With pgbouncer enabled, the pods connect here
+# instead (the migration Job still connects to Postgres directly) and
+# Postgres only sees replicaCount × defaultPoolSize server connections.
+pgbouncer:
+  enabled: false
+  # Each replica has its own pool: Postgres sees up to
+  # replicaCount × defaultPoolSize connections.
+  replicaCount: 1
+  image:
+    repository: edoburu/pgbouncer
+    tag: "v1.26.1-p0"
+  # Server connections per database/user pair, per pgbouncer replica.
+  defaultPoolSize: 20
+  # Client connections accepted — must cover every backend pod's pool
+  # (backend.replicaCount × backend.dbPoolMax).
+  maxClientConn: 1000
+  # Must stay above 0 — see the comment in pgbouncer-deployment.yaml.
+  maxPreparedStatements: 200
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
 
 redis:
   image:

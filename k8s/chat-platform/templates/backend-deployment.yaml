@@ -53,7 +53,9 @@ spec:
               value: {{ .Values.backend.port | quote }}
             - name: WEB_ORIGIN
               value: {{ .Values.backend.webOrigin | quote }}
-            {{- include "chat-platform.postgresEnv" . | nindent 12 }}
+            {{- include "chat-platform.postgresEnv" (dict "ctx" . "pooled" true) | nindent 12 }}
+            - name: DB_POOL_MAX
+              value: {{ .Values.backend.dbPoolMax | quote }}
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
