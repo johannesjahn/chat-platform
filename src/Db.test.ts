@@ -5,16 +5,18 @@ import { dbQueryDurationSeconds, dbQueryErrorsTotal } from "./Metrics.ts";
 
 // Both metrics are module-level and shared with whichever other test files
 // land in the same `bun test --parallel` worker, so these assert deltas.
+// Calls made outside any request carry the "none" route labels.
+const NO_ROUTE = { method: "none", route: "none" } as const;
 const callCount = (outcome: "success" | "failure" | "aborted") =>
   Effect.runSync(
     Metric.value(
-      Metric.withAttributes(dbQueryDurationSeconds, { outcome }),
+      Metric.withAttributes(dbQueryDurationSeconds, { ...NO_ROUTE, outcome }),
     ).pipe(Effect.map((state) => state.count)),
   );
 const durationSum = (outcome: "success") =>
   Effect.runSync(
     Metric.value(
-      Metric.withAttributes(dbQueryDurationSeconds, { outcome }),
+      Metric.withAttributes(dbQueryDurationSeconds, { ...NO_ROUTE, outcome }),
     ).pipe(Effect.map((state) => state.sum)),
   );
 const errorCount = () =>

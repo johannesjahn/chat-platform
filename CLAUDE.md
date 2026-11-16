@@ -388,8 +388,11 @@ keeps the request parameters typed.
 - **Database calls go through `dbQuery`** ([`src/Db.ts`](src/Db.ts)): it runs
   one query/transaction thunk and dies on failure, the same as the
   `Effect.tryPromise(...).pipe(Effect.orDie)` it replaced. It's timed by
-  `timedDbCall`, which records `db_query_duration_seconds` (labeled only by
-  `outcome`: success/failure/aborted) and counts `db_query_errors_total`.
+  `timedDbCall`, which records `db_query_duration_seconds` (labeled by
+  `outcome` — success/failure/aborted — and by the `method` and route
+  _template_ of the request it ran for, read from the router's `RouteContext`,
+  or `"none"` outside a request) and counts `db_query_errors_total`. Never
+  label it with a raw path, a table or a user.
   Code that keeps a database failure as a typed error (the best-effort writes
   in `notifications.ts`, the forward's transaction, `serializableTransaction`)
   wraps its `Effect.tryPromise` in `timedDbCall` directly, passing `isAbort`

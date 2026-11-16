@@ -5,7 +5,8 @@ import { migrate as migratePglite } from "drizzle-orm/pglite/migrator";
 import { drizzle as drizzleBunSql } from "drizzle-orm/bun-sql";
 import { migrate as migrateBunSql } from "drizzle-orm/bun-sql/migrator";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import { Context, Effect, Layer, Metric } from "effect";
+import { HttpRouter } from "effect/http";
+import { Context, Effect, Layer, Metric, Option } from "effect";
 import { dbQueryDurationSeconds, dbQueryErrorsTotal } from "./Metrics.ts";
 import * as schema from "./db/schema.ts";
 
@@ -19,12 +20,32 @@ export type DrizzleDb = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 export class Db extends Context.Service<Db, DrizzleDb>()("Db") {}
 
+// The route a database call runs for, as `method` and `route` labels on
+// `db_query_duration_seconds`: the matched route's *template*
+// (`/chats/:id/messages`), the same one the router reports as `http.route`,
+// so the label set is bounded by the API's routes. Read from the fiber's
+// context, which carries the router's `RouteContext` for everything a
+// handler runs; a call outside any request (background jobs, PubSub
+// deliveries, work forked off a request) is labeled "none".
+const NO_ROUTE = { method: "none", route: "none" } as const;
+const currentRoute = Effect.map(
+  Effect.serviceOption(HttpRouter.RouteContext),
+  Option.match({
+    onNone: () => NO_ROUTE,
+    onSome: ({ route }) => ({
+      method: route.method,
+      route: String(route.path),
+    }),
+  }),
+);
+
 // Times one database call — an Effect wrapping the promise, as built by
-// `dbQuery` — into `db_query_duration_seconds` and counts a failure in
-// `db_query_errors_total` (Metrics.ts). `isAbort` marks errors that are an
-// expected way for the call to end — a serialization failure about to be
-// retried, a transaction rolled back on purpose — which are timed as
-// "aborted" and not counted as errors. The error stays in the error channel.
+// `dbQuery` — into `db_query_duration_seconds`, labeled by its outcome and
+// route (`currentRoute`), and counts a failure in `db_query_errors_total`
+// (Metrics.ts). `isAbort` marks errors that are an expected way for the call
+// to end — a serialization failure about to be retried, a transaction rolled
+// back on purpose — which are timed as "aborted" and not counted as errors.
+// The error stays in the error channel.
 export const timedDbCall = <A, E>(
   call: Effect.Effect<A, E>,
   isAbort: (error: E) => boolean = () => false,
@@ -32,9 +53,11 @@ export const timedDbCall = <A, E>(
   Effect.suspend(() => {
     const start = performance.now();
     const record = (outcome: "success" | "failure" | "aborted") =>
-      Metric.update(
-        Metric.withAttributes(dbQueryDurationSeconds, { outcome }),
-        (performance.now() - start) / 1000,
+      Effect.flatMap(currentRoute, (route) =>
+        Metric.update(
+          Metric.withAttributes(dbQueryDurationSeconds, { ...route, outcome }),
+          (performance.now() - start) / 1000,
+        ),
       ).pipe(
         Effect.andThen(
           outcome === "failure"

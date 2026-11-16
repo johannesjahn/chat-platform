@@ -70,15 +70,17 @@ export const dbQueryErrorsTotal = register(
 );
 
 // Seconds per database call (a query, a `Promise.all` of them, or a whole
-// transaction attempt), labeled only by `outcome` ("success"/"failure"/
-// "aborted", see timedDbCall in Db.ts) — never by table, route or user, so
-// it stays a handful of series. Exponential from 0.5ms up to ~16s: most
-// queries finish in a few milliseconds, well under the HTTP histogram's
-// first bucket.
+// transaction attempt), labeled by `outcome` ("success"/"failure"/"aborted")
+// and by the `method` and route *template* of the request it ran for ("none"
+// outside one) — see timedDbCall in Db.ts. Like http_request_duration_seconds,
+// that keeps it to a bounded set of series: never a raw path, table, or user.
+// Exponential from 0.5ms up to ~16s: most queries finish in a few
+// milliseconds, well under the HTTP histogram's first bucket.
 export const dbQueryDurationSeconds = Metric.histogram(
   "db_query_duration_seconds",
   {
-    description: "Database call duration in seconds, labeled by outcome.",
+    description:
+      "Database call duration in seconds, labeled by outcome and by the method and route template of the request it ran for.",
     boundaries: Metric.exponentialBoundaries({
       start: 0.0005,
       factor: 2,
