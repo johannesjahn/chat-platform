@@ -188,6 +188,8 @@ type SocketEvent = {
   chatId?: number;
   postId?: number;
   senderId?: number;
+  // A `message_created` that carries its message (issue #834).
+  carriesMessage?: boolean;
 };
 
 // Pushed events are untrusted input: ids end up in request paths, so only
@@ -212,6 +214,10 @@ const parseSocketEvent = (data: unknown): SocketEvent | null => {
     chatId: intOrUndefined(event.chatId),
     postId: intOrUndefined(event.postId),
     senderId: intOrUndefined(event.senderId),
+    carriesMessage:
+      typeof event.message === "object" &&
+      event.message !== null &&
+      (event.message as { id?: unknown }).id === event.messageId,
   };
 };
 
@@ -606,14 +612,17 @@ async function runWorker(config: Config, userIds: number[]) {
           }
           // Not in view (issue #834): someone else's message in a listed
           // chat is counted into the badge locally; only a chat the list
-          // doesn't have refetches the total. The list, when on screen,
-          // refetches for the preview at most once per 2s.
-          if (event.senderId !== id && !chatIds.includes(event.chatId ?? -1)) {
+          // doesn't have refetches the total. A carried message is the
+          // listed chat's new preview, patched in place; otherwise the
+          // list, when on screen, refetches at most once per 2s.
+          const listed = chatIds.includes(event.chatId ?? -1);
+          if (event.senderId !== id && !listed) {
             refetch("unread", () =>
               call("GET /chats/unread-count", "GET", "/chats/unread-count"),
             );
           }
-          if (screen === "chats") refetchChatsCoalesced();
+          if (screen === "chats" && !(listed && event.carriesMessage))
+            refetchChatsCoalesced();
           return;
         }
         if (event.change === "read") return; // patched in place / own read

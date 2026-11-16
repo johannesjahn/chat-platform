@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { directBlockExists, recipientsMutingSender } from "../blocks.ts";
 import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { RealtimeConnections } from "../Realtime.ts";
+import type { Message } from "../Api.ts";
 import {
   chatParticipants,
   chats,
@@ -101,30 +102,38 @@ export const findMessageByClientId = (
   ).pipe(Effect.map((rows) => rows[0]));
 
 // Publishes a newly stored message to the chat: reads back the version the
-// insert bumped and nudges every participant. Suppresses the nudge for any
-// participant who has muted or blocked the sender (issue #219: "mute their
-// chat notifications") — the message is still stored and appears when they
-// next open the chat, only the push is withheld. The sender can't mute
+// insert bumped and nudges every participant with the message itself, as
+// anyone but its sender sees it (its `clientId` stays with the sender — see
+// `Message.clientId`), which is what a client needs to update its chat list
+// without refetching it. Suppresses the nudge for any participant who has
+// muted or blocked the sender (issue #219: "mute their chat
+// notifications") — the message is still stored and appears when they next
+// open the chat, only the push is withheld. The sender can't mute
 // themselves (self-block is rejected), so they stay in the notify set.
 export const publishNewMessage = (
   db: DrizzleDb,
   connections: RealtimeConnections["Service"],
-  chatId: number,
-  senderId: number,
-  messageId: number,
+  message: Message,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
+    const { chatId, senderId } = message;
     const version = yield* getChatVersion(db, chatId);
     const participants = yield* getParticipants(db, chatId);
     const recipientIds = participants.map((p) => p.userId);
     const muting = yield* dbQuery(() =>
       recipientsMutingSender(db, senderId, recipientIds),
     );
+    const shared: Message = { ...message, clientId: undefined };
     yield* notifyChatUpdated(
       connections,
       chatId,
       version,
       recipientIds.filter((userId) => !muting.has(userId)),
-      { change: "message_created", messageId, senderId },
+      {
+        change: "message_created",
+        messageId: message.id,
+        senderId,
+        message: shared,
+      },
     );
   });

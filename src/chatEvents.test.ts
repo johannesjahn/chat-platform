@@ -82,8 +82,10 @@ test("a new message tells every participant who sent which message", () =>
       const mark = published.length;
       const message = yield* bob.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi" },
+        payload: { contentType: "text", content: "hi", clientId: "c-1" },
       });
+      const { clientId, ...shared } = message;
+      expect(clientId).toBe("c-1");
 
       expect(chatUpdates(chat.id, mark)).toEqual([
         {
@@ -94,8 +96,39 @@ test("a new message tells every participant who sent which message", () =>
           change: "message_created",
           messageId: message.id,
           senderId: bob.user.id,
+          // The message as anyone but its sender sees it — the clientId
+          // stays with the sender.
+          message: shared,
         },
       ]);
+    }),
+  ));
+
+test("the message an event carries is what the recipient's chat list then shows", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const mark = published.length;
+      yield* bob.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: { contentType: "text", content: "preview me" },
+      });
+      const event = chatUpdates(chat.id, mark)[0];
+
+      // Serialized the same way: the list is what the client would have
+      // refetched, and the event now stands in for it (issue #834).
+      const { chats } = yield* alice.client.chats.listChats({ query: {} });
+      const listed = chats.find((c) => c.id === chat.id);
+      expect(JSON.parse(JSON.stringify(listed?.lastMessage))).toEqual(
+        event?.["message"],
+      );
+      expect(listed?.updatedAt).toBe(
+        (event?.["message"] as { createdAt: number }).createdAt,
+      );
     }),
   ));
 
@@ -132,6 +165,11 @@ test("a forwarded message is announced in its target chat as a new message", () 
         senderId: alice.user.id,
       });
       expect(event?.["messageId"]).toBe(forwarded?.id);
+      expect(event?.["message"]).toMatchObject({
+        id: forwarded?.id,
+        chatId: target.id,
+        content: "pass it on",
+      });
     }),
   ));
 

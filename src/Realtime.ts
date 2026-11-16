@@ -16,6 +16,7 @@ import { PresenceStore } from "./Presence.ts";
 import { PresenceAudience } from "./PresenceAudience.ts";
 import { PubSub } from "./PubSub.ts";
 import { forkClaimRefresher, UserLocator } from "./UserLocator.ts";
+import type { Message } from "./api/chats.ts";
 
 // Pushed to every participant of a chat whenever something in it changes
 // (new message, read receipt, rename, participants added/removed). `version`
@@ -39,7 +40,13 @@ export type ChatEvent = {
 
 // - "message_created": a new message (sent or forwarded) landed. Carries
 //   who sent it, so a client showing the conversation can fetch just the
-//   new message and leave the chat list and chat to its own mark-read.
+//   new message and leave the chat list and chat to its own mark-read —
+//   and the message itself, as any participant but its sender sees it (no
+//   `clientId`), so a client with the chat off screen can make it the
+//   listed chat's preview and move it to the top instead of refetching the
+//   chat list on every message. That refetch was what was left of a
+//   message's fan-out cost under load (issue #834). Optional, like
+//   `change`: without it a client refetches the list as before.
 // - "read": `userId` moved their read watermark from `fromMessageId`
 //   (exclusive) to `lastReadMessageId`. That's everything a read receipt
 //   changes — every message from someone else in that range gains `userId`
@@ -54,6 +61,7 @@ export type ChatChange =
       readonly change: "message_created";
       readonly messageId: number;
       readonly senderId: number;
+      readonly message?: Message;
     }
   | {
       readonly change: "read";

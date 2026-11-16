@@ -208,3 +208,52 @@ test("opening a conversation with unread messages marks it read once", async ({
     requests.filter((r) => r.startsWith(`POST /chats/${chatId}/read`)),
   ).toHaveLength(1);
 });
+
+// Issue #834: a message to a chat that isn't open used to refetch the chat
+// list for every recipient looking at it. The event now carries the message,
+// which becomes the listed chat's preview and moves it to the top.
+test("a message to a chat that isn't open updates the chat list without refetching it", async ({
+  page,
+  request,
+  apiUrl,
+  createUser,
+  signUp,
+}) => {
+  const me = await signUp(page);
+  const bob = await createUser();
+  const carol = await createUser();
+  const chatWith = async (user: TestUser) => {
+    const chat = await request.post(`${apiUrl}/chats/direct`, {
+      headers: auth(me),
+      data: { userId: user.session.user.id },
+    });
+    return ((await chat.json()) as { id: number }).id;
+  };
+  const bobChat = await chatWith(bob);
+  const carolChat = await chatWith(carol);
+  await sendMessage(request, apiUrl, bob, bobChat, "Older from Bob");
+  await sendMessage(request, apiUrl, carol, carolChat, "Newer from Carol");
+
+  const socketUp = new Promise<void>((resolve) =>
+    page.on("websocket", (ws) => ws.once("framereceived", () => resolve())),
+  );
+  await page.goto("/chats");
+  const list =
+    (page.viewportSize()?.width ?? 0) >= 1024
+      ? page.getByRole("complementary", { name: "Conversations" })
+      : page.getByRole("main");
+  const dms = list.getByRole("link", { name: /^@/ });
+  await expect(dms.first()).toContainText(carol.username);
+  await socketUp;
+  await page.waitForTimeout(1_000);
+  const requests = recordApiRequests(page, apiUrl);
+
+  await sendMessage(request, apiUrl, bob, bobChat, "Bob again");
+  await expect(dms.first()).toContainText(bob.username);
+  await expect(dms.first()).toContainText("Bob again");
+  await page.waitForTimeout(2_500);
+
+  console.log(`List viewer requests for one message: ${requests.length}`);
+  console.log(requests.join("\n"));
+  expect(requests).toEqual([]);
+});
