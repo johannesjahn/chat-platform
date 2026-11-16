@@ -55,7 +55,11 @@ export class TokenVersionCache extends Context.Service<
 // miss one is for this pod's Redis subscriber to be disconnected — so the
 // whole cache is dropped whenever it reconnects. The TTL is just a backstop.
 export const TOKEN_VERSION_CACHE_CAPACITY = 100_000;
-export const TOKEN_VERSION_CACHE_TTL = Duration.seconds(60);
+// A reference so tests can shorten it.
+export const TokenVersionCacheTtl = Context.Reference<Duration.Duration>(
+  "chat-platform/Auth/TokenVersionCacheTtl",
+  { defaultValue: () => Duration.seconds(60) },
+);
 
 export const TokenVersionCacheLive = Layer.effect(
   TokenVersionCache,
@@ -64,7 +68,7 @@ export const TokenVersionCacheLive = Layer.effect(
     const pubsub = yield* PubSub;
     const cache = yield* Cache.make({
       capacity: TOKEN_VERSION_CACHE_CAPACITY,
-      timeToLive: TOKEN_VERSION_CACHE_TTL,
+      timeToLive: yield* TokenVersionCacheTtl,
       lookup: (userId: number) =>
         Effect.gen(function* () {
           const rows = yield* dbQuery(() =>

@@ -7,12 +7,16 @@ import {
   HttpServerResponse,
 } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
-import { Effect, Layer } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import { AdminHandlerLive } from "./AdminHandler.ts";
 import { ChatApi } from "./Api.ts";
 import { AttachmentsHandlerLive } from "./AttachmentsHandler.ts";
 import { AttachmentStorageLive } from "./AttachmentStorage.ts";
-import { AuthenticationLive, TokenVersionCacheLive } from "./Auth.ts";
+import {
+  AuthenticationLive,
+  TokenVersionCacheLive,
+  TokenVersionCacheTtl,
+} from "./Auth.ts";
 import { ChatsHandlerLive } from "./ChatsHandler.ts";
 import { Db } from "./Db.ts";
 import { SanitizeDecodeErrorsLive } from "./DecodeErrorSanitizer.ts";
@@ -100,6 +104,8 @@ export interface TestRunOptions {
   >;
   // Called at the start of every run (e.g. to clear state a test records).
   readonly beforeEach?: () => void;
+  // Replaces the token-version cache's TTL (default: production's).
+  readonly tokenVersionCacheTtl?: Duration.Duration;
 }
 
 type TestServices = HttpClient.HttpClient | Db | PubSub;
@@ -150,6 +156,11 @@ export const makeTestRun = (options: TestRunOptions = {}) => {
         Layer.provideMerge(dbLive),
         Layer.provideMerge(pubSubLive),
         Layer.provide(BunHttpServer.layerHttpServices),
+        Layer.provide(
+          options.tokenVersionCacheTtl
+            ? Layer.succeed(TokenVersionCacheTtl, options.tokenVersionCacheTtl)
+            : Layer.empty,
+        ),
       ),
       {
         disableLogger: true,
