@@ -135,6 +135,17 @@ export const websocketConnectionsTotal = Metric.counter(
 // derives this from the part of its rate-limit key before the first ":").
 // A 429 would otherwise be invisible in httpRequestsTotal, indistinguishable
 // from any other status.
+// Labeled by `result` ("hit"/"miss") — every authenticated request checks
+// the token's version against TokenVersionCache (Auth.ts); a miss costs a
+// database lookup (issue #833).
+export const tokenVersionCacheLookupsTotal = Metric.counter(
+  "token_version_cache_lookups_total",
+  {
+    description:
+      "Token-version checks on authenticated requests, labeled by cache result.",
+  },
+);
+
 export const rateLimitRejectionsTotal = Metric.counter(
   "rate_limit_rejections_total",
   { description: "Requests rejected by a rate limiter, labeled by limiter." },

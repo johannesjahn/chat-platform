@@ -252,3 +252,48 @@ async function waitFor(
     }
   },
 );
+
+(redisConfigured ? test : test.skip)(
+  "RedisPubSubLive runs onReconnect listeners after its connection drops (#833)",
+  async () => {
+    const runtime = ManagedRuntime.make(RedisPubSubLive);
+    const admin = new RedisClient(process.env.REDIS_URL);
+    const runId = Date.now();
+    try {
+      let reconnects = 0;
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          const pubsub = yield* PubSub;
+          // Three channels, so this instance's subscriber is the only
+          // connection with `sub=3` (see the test above).
+          for (const n of [1, 2, 3]) {
+            yield* pubsub.subscribe(
+              `chat-platform:pubsub-onreconnect-test:${runId}:${n}`,
+              () => Effect.void,
+            );
+          }
+          yield* pubsub.onReconnect(
+            Effect.sync(() => {
+              reconnects++;
+            }),
+          );
+        }),
+      );
+      const before = reconnects;
+
+      const clientList = (await admin.send("CLIENT", ["LIST"])) as string;
+      const clientId = clientList
+        .split("\n")
+        .find((line) => / sub=3 /.test(line))
+        ?.match(/id=(\d+)/)?.[1];
+      expect(clientId).toBeDefined();
+      await admin.send("CLIENT", ["KILL", "ID", clientId as string]);
+
+      await waitFor(() => reconnects > before);
+      expect(reconnects).toBeGreaterThan(before);
+    } finally {
+      await runtime.dispose();
+      admin.close();
+    }
+  },
+);

@@ -573,8 +573,14 @@ test("refresh is rate-limited per IP after repeated attempts", () =>
     }),
   ));
 
-test("authentication token version check is cached for 5 seconds and respects expiration", () =>
-  run(
+// A short TTL of its own, so the test can watch an entry expire without
+// waiting out production's (see TokenVersionCacheTtl in Auth.ts).
+const runShortTtl = makeTestRun({
+  tokenVersionCacheTtl: Duration.seconds(1),
+});
+
+test("authentication token version check is cached for its TTL and respects expiration", () =>
+  runShortTtl(
     Effect.gen(function* () {
       const c = yield* makeClient;
       yield* c.users.register({
@@ -598,14 +604,14 @@ test("authentication token version check is cached for 5 seconds and respects ex
         db.update(users).set({ tokenVersion: 1 }).where(eq(users.id, user.id)),
       ).pipe(Effect.orDie);
 
-      // 3. Second request: within the cache TTL (5s), it should STILL succeed since cache hasn't expired.
+      // 3. Second request: within the cache TTL, it should STILL succeed since cache hasn't expired.
       const secondResult = yield* authed.users.getUser({
         params: { id: user.id },
       });
       expect(secondResult.username).toBe("cachetest");
 
-      // 4. Sleep for 6 seconds to let the cache entry expire.
-      yield* Effect.sleep(Duration.seconds(6));
+      // 4. Sleep past the TTL to let the cache entry expire.
+      yield* Effect.sleep(Duration.seconds(2));
 
       // 5. Third request: after cache expiration, it must fetch from DB, find the bumped version (1 !== 0), and reject as Unauthorized.
       const thirdResult = yield* authed.users
