@@ -1,8 +1,9 @@
 import { and, eq, isNotNull, lt, notInArray } from "drizzle-orm";
-import { Duration, Effect, Layer, Schedule } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { Db, dbQuery } from "./Db.ts";
 import { attachments, messages, posts } from "./db/schema.ts";
+import { forkTicker, runIfClaimed } from "./scheduledJobs.ts";
 
 // An attachment (issue #221) uploaded via `POST /attachments` but never
 // referenced by a message/post's `attachmentId` (the caller abandoned the
@@ -74,14 +75,16 @@ export const cleanupOrphanedAttachments: Effect.Effect<
 
 const CLEANUP_INTERVAL = Duration.hours(1);
 
-// Runs cleanupOrphanedAttachments once at startup and then every
-// CLEANUP_INTERVAL for as long as the layer stays built, as a background
-// fiber tied to the layer's scope (interrupted on shutdown) — same shape as
+// Runs cleanupOrphanedAttachments once every CLEANUP_INTERVAL across all
+// replicas (issue #831; see scheduledJobs.ts), as a background fiber tied to
+// the layer's scope (interrupted on shutdown) — same shape as
 // RefreshTokenCleanupLive.
 export const AttachmentCleanupLive = Layer.effectDiscard(
-  Effect.forkScoped(
-    cleanupOrphanedAttachments.pipe(
-      Effect.repeat(Schedule.spaced(CLEANUP_INTERVAL)),
+  forkTicker(
+    runIfClaimed(
+      "attachment-cleanup",
+      CLEANUP_INTERVAL,
+      cleanupOrphanedAttachments,
     ),
   ),
 );
