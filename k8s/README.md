@@ -41,6 +41,38 @@ docker build -t ghcr.io/<you>/chat-platform:<tag> .
 docker push ghcr.io/<you>/chat-platform:<tag>
 ```
 
+## Capacity
+
+The defaults are a budget for **one small node** (see the `resources` comment
+in `values.yaml` and [`observability/README.md`](observability/README.md)'s
+"Resource footprint"), not a sizing for real load. The numbers below come
+from the load simulator ([`scripts/loadtest/sim/`](../scripts/loadtest/sim/),
+results in its `RESULTS.md`) — measured on a laptop, so treat them as
+ratios to size from, not guarantees (issue #838).
+
+Per active user (online, using the app): about **0.15 requests/s**, plus one
+open WebSocket.
+
+| Component   | What limits it                                                                                                  | Measured                                                                                                                                                                                     |
+| ----------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| backend pod | One JavaScript thread: a pod saturates at **~1 core** however high its CPU limit. Memory grows with sockets.    | ~1,500–1,900 requests/s per core on the chat-heavy mix (~0.6ms CPU per request). RSS ~300–450MB baseline plus ~60–100KB per socket: ~550–600MB with 2.5k sockets, ~1GB with 10k, under load. |
+| Postgres    | One primary serves everything — adding pods doesn't add database capacity.                                      | ~7.8 statements per request; ~1,600 requests/s per CPU.                                                                                                                                      |
+| connections | Each pod opens up to `backend.dbPoolMax` (default 10); Postgres allows `postgres.maxConnections` (default 100). | ~9 replicas at the defaults — enable `pgbouncer` (or raise both) to go beyond.                                                                                                               |
+| Redis       | Single instance; every pod receives every realtime event.                                                       | Not a bottleneck at 10k users.                                                                                                                                                               |
+
+Rough sizing from those numbers:
+
+| Active users | Requests/s | Backend                                                                  | Postgres    | Connections                                |
+| -----------: | ---------: | ------------------------------------------------------------------------ | ----------- | ------------------------------------------ |
+|        1,000 |       ~150 | the defaults (2 pods)                                                    | the default | fine                                       |
+|       10,000 |     ~1,500 | 2–3 pods at **1 CPU / ~1.5Gi limit** (one pod holds 10k sockets at ~1GB) | ~1–2 CPUs   | fine                                       |
+|      100,000 |    ~15,000 | ~10–12 pods at 1 CPU / ~1.5Gi, or `backend.autoscaling`                  | ~10 CPUs    | needs `pgbouncer` (or `maxConnections` up) |
+
+At the defaults' **512Mi** memory limit a pod has room for roughly 1–2k
+sockets under load before it's OOM-killed — and a killed pod's clients all
+reconnect to the others at once. Raise `backend.resources` (and the node's
+budget) before scaling past that, and give Postgres real resources with it.
+
 ## Installing
 
 ```bash
