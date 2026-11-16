@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
+import { sql } from "drizzle-orm";
 import { Effect } from "effect";
 import { ChatApi } from "./Api.ts";
+import { Db, dbQuery } from "./Db.ts";
+import { SEARCH_RECENT_WINDOW } from "./SearchHandler.ts";
 import { buildSnippet } from "./search.ts";
 import { makeTestRun } from "./testApi.ts";
 
@@ -396,6 +399,97 @@ test("searchPosts paginates newest-match-first with an opaque cursor", () =>
       });
       expect(second.results.map((r) => r.id)).toEqual([created[0]!]);
       expect(second.nextCursor).toBeNull();
+    }),
+  ));
+
+// Issue #829: an arm scans the newest SEARCH_RECENT_WINDOW ids first and
+// reaches older rows through the index only if that didn't fill the page.
+// These put matches on both sides of the window, so both steps — and a page
+// that spans them — have to agree with plain newest-first order.
+const insertFillerPosts = (authorId: number, count: number) =>
+  Effect.gen(function* () {
+    const db = yield* Db;
+    yield* dbQuery(() =>
+      db.execute(
+        sql`insert into posts (author_id, content_type, content, created_at, updated_at)
+            select ${authorId}, 'text', 'filler ' || g, now(), now()
+            from generate_series(1, ${count}) g`,
+      ),
+    );
+  });
+
+test("searchPosts finds matches older than the recent window, newest first across pages (issue #829)", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const old: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const post = yield* alice.client.posts.createPost({
+          payload: { contentType: "text", content: `faded topic ${i}` },
+        });
+        old.push(post.id);
+      }
+      yield* insertFillerPosts(alice.user.id, SEARCH_RECENT_WINDOW + 50);
+      const fresh = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "faded topic again" },
+      });
+
+      // The word branch and the substring branch ("ade" inside "faded").
+      for (const q of ["faded", "ade"]) {
+        const first = yield* alice.client.search.searchPosts({
+          query: { q, limit: 2 },
+        });
+        expect(first.results.map((r) => r.id)).toEqual([fresh.id, old[2]!]);
+        const second = yield* alice.client.search.searchPosts({
+          query: { q, limit: 2, cursor: first.nextCursor! },
+        });
+        expect(second.results.map((r) => r.id)).toEqual([old[1]!, old[0]!]);
+        expect(second.nextCursor).toBeNull();
+      }
+    }),
+  ));
+
+test("searchPosts finds only-old matches when the recent window has none", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const old = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "ancient history" },
+      });
+      yield* insertFillerPosts(alice.user.id, SEARCH_RECENT_WINDOW + 50);
+
+      const page = yield* alice.client.search.searchPosts({
+        query: { q: "ancient" },
+      });
+      expect(page.results.map((r) => r.id)).toEqual([old.id]);
+      expect(page.nextCursor).toBeNull();
+    }),
+  ));
+
+test("searchComments finds a comment older than the recent window", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const post = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "a post" },
+      });
+      const old = yield* alice.client.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "vintage remark" },
+      });
+      const db = yield* Db;
+      yield* dbQuery(() =>
+        db.execute(
+          sql`insert into comments (post_id, author_id, content, created_at, updated_at)
+              select ${post.id}, ${alice.user.id}, 'filler ' || g, now(), now()
+              from generate_series(1, ${SEARCH_RECENT_WINDOW + 50}) g`,
+        ),
+      );
+
+      const page = yield* alice.client.search.searchComments({
+        query: { q: "vintage" },
+      });
+      expect(page.results.map((r) => r.id)).toEqual([old.id]);
     }),
   ));
 

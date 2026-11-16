@@ -12,7 +12,7 @@ import {
   sql,
   type SQL,
 } from "drizzle-orm";
-import type { PgColumn } from "drizzle-orm/pg-core";
+import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import {
   ChatApi,
@@ -134,6 +134,60 @@ const matchingIds = (
   )}) as "matches" order by "id" desc limit ${limit})`;
 };
 
+// How many of the newest ids (below the cursor) an arm scans in id order
+// before switching to its index — see `recentFirstArm`.
+export const SEARCH_RECENT_WINDOW = 1000;
+
+// One union arm for a table searched in id order (posts, comments), in two
+// bounded steps instead of one plan that can degrade with the table (issue
+// #829). Left to itself, the planner serves `ORDER BY id DESC LIMIT n` by
+// walking the primary key backwards and filtering, whenever it expects the
+// term to be common: right for a term that's common *now*, but a term that
+// was common long ago (a topic that has since faded) walks every newer row
+// first — 24ms at 200k posts for a tsquery, 120ms for an ILIKE, growing with
+// the table. Forcing the index instead costs every common term a sort over
+// all its matches (0.06ms → 21ms). So:
+//
+//   1. `recent`: the newest `SEARCH_RECENT_WINDOW` ids below the cursor, in
+//      id order — bounded by the window, and all a recent term ever needs.
+//      The match is wrapped in `is true` so it's a per-row filter there,
+//      never an index condition: left usable, the planner ANDs the id range
+//      with *every* match of a common term (a 21k-entry bitmap to keep 20);
+//   2. older rows only if that didn't fill the page — Postgres evaluates the
+//      `count(*) < limit` guard once and skips the scan entirely otherwise —
+//      through the index: `id + 0` keeps the planner off the primary key,
+//      for both the ordering and the range, so this costs the term's own
+//      matches, never a walk of the table.
+//
+// `where` is the arm's match plus every filter except the cursor, which
+// this applies itself (see `matchingIds` on why filters live in each arm).
+const recentFirstArm = (
+  table: PgTable,
+  id: PgColumn,
+  where: SQL | undefined,
+  after: number | null,
+  limit: number,
+): SQL => {
+  const upper =
+    after !== null
+      ? sql`${after}::int`
+      : sql`(select coalesce(max(${id}), 0) + 1 from ${table})`;
+  const window = sql.raw(String(SEARCH_RECENT_WINDOW));
+  return sql`with "recent" as materialized (
+    select ${id} from ${table}
+    where (${where}) is true and ${id} < ${upper} and ${id} >= ${upper} - ${window}
+    order by ${id} desc limit ${limit}
+  )
+  select "id" from "recent"
+  union all
+  select "id" from (
+    select ${id} from ${table}
+    where ${where} and ${id} + 0 < ${upper} - ${window}
+    order by ${id} + 0 desc limit ${limit}
+  ) as "older"
+  where (select count(*) from "recent") < ${limit}`;
+};
+
 // The generated tsvector columns are deliberately absent from the Drizzle
 // schema (a bare `db.select()` would otherwise materialize them on every hot
 // read — see migration 0017), so they're referenced by raw, fully-qualified
@@ -154,18 +208,28 @@ const captionVector = (caption: PgColumn): SQL =>
 // branch carries its own content-type restriction, matching the partial
 // indexes behind it (migrations 0023 and 0037), so each stays its own
 // index-served union arm (see `matchingIds`).
+//
+// The content types are SQL literals, not bound parameters, on purpose:
+// Bun.sql prepares statements, and once Postgres switches a prepared search to
+// a generic plan, `content_type = $1` can no longer prove a partial index's
+// `WHERE content_type = 'attachment'` — the caption arms then fell back to a
+// parallel sequential scan of the whole table (82ms at 200k posts, issue
+// #829). A literal matches the partial index under any plan.
+const isContentType = (column: PgColumn, type: "text" | "attachment"): SQL =>
+  sql`${column} = ${sql.raw(`'${type}'`)}`;
+
 const contentBranches = (
   table: { contentType: PgColumn; content: PgColumn; caption: PgColumn },
   vector: SQL,
   q: string,
 ): SQL[] => [
   ...matchBranches(vector, table.content, q).map(
-    (branch) => sql`(${and(eq(table.contentType, "text"), branch)})`,
+    (branch) => sql`(${and(isContentType(table.contentType, "text"), branch)})`,
   ),
   ...matchBranches(captionVector(table.caption), table.caption, q).map(
     (branch) =>
       sql`(${and(
-        eq(table.contentType, "attachment"),
+        isContentType(table.contentType, "attachment"),
         isNotNull(table.caption),
         branch,
       )})`,
@@ -396,14 +460,19 @@ const searchPostsPage = (
           posts.id,
           contentBranches(posts, postsVector, q),
           (branch) =>
-            sql`select ${posts.id} from ${posts} where ${and(
-              // Carries its own content-type restriction (see
-              // `contentBranches`): an image URL or an attachment's filename
-              // isn't searchable content.
-              branch,
-              after !== null ? lt(posts.id, after) : undefined,
-              excludeAuthors(posts.authorId, hidden),
-            )} order by ${posts.id} desc limit ${limit + 1}`,
+            recentFirstArm(
+              posts,
+              posts.id,
+              and(
+                // Carries its own content-type restriction (see
+                // `contentBranches`): an image URL or an attachment's
+                // filename isn't searchable content.
+                branch,
+                excludeAuthors(posts.authorId, hidden),
+              ),
+              after,
+              limit + 1,
+            ),
           limit + 1,
         ),
       )
@@ -454,11 +523,13 @@ const searchCommentsPage = (
           comments.id,
           matchBranches(commentsVector, comments.content, q),
           (branch) =>
-            sql`select ${comments.id} from ${comments} where ${and(
-              branch,
-              after !== null ? lt(comments.id, after) : undefined,
-              excludeAuthors(comments.authorId, hidden),
-            )} order by ${comments.id} desc limit ${limit + 1}`,
+            recentFirstArm(
+              comments,
+              comments.id,
+              and(branch, excludeAuthors(comments.authorId, hidden)),
+              after,
+              limit + 1,
+            ),
           limit + 1,
         ),
       )
