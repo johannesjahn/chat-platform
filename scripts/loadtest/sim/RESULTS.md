@@ -20,6 +20,65 @@ vCPUs, but the **ratios and growth rates are what matter**: who is called how
 many times per event, and what grows with what. The generator's own
 event-loop lag stayed under 10 ms in every run quoted here.
 
+## Re-run after the fixes (2026-11-16)
+
+Same machine, setup, seeds and simulator as below, on `main` at v0.41.5 plus
+#862 (chat list patched from `message_created`) and #863 (active users from
+`users.last_active_at`), i.e. with every fix from #850–#863 in. The client
+behaviour the simulator replays is today's: no feed refetch (a "New posts"
+pill), post reactions batched to viewers, unread counts and chat previews
+patched from events.
+
+| Run                            | Sockets | Backends | p50 / p95 (steady) | Throughput | Backend CPU (each) | Postgres | Verdict                                                    |
+| ------------------------------ | ------: | -------: | ------------------ | ---------: | ------------------ | -------: | ---------------------------------------------------------- |
+| 1k, default mix                |   1,000 |        1 | 5 ms / 10 ms       |   ~100 r/s | 0.27               |      5 % | OK (was 600 r/s, 87 % feed refetches)                      |
+| 10k, default mix               |  10,000 |        1 | 3.5 ms / 8 ms      | ~1,000 r/s | 0.6, ~1 GB RSS     |     44 % | **OK** (was a 14 s collapse)                               |
+| 10k, default mix               |  10,000 |        4 | 4 ms / 8.7 ms      | ~1,000 r/s | 0.27–0.29, ~430 MB |     70 % | **OK**, and now spreads across pods (was a 20 s collapse)  |
+| 100k-equivalent¹, default mix  |  10,000 |        4 | 1.0 s / 1.2 s      | ~5,800 r/s | 1.03 (saturated)   |   ~380 % | Pods and Postgres both at their limit; latency is queueing |
+| 100k-equivalent¹, pure chat    |  10,000 |        4 | 0.85 s / 1.0 s     | ~5,700 r/s | 1.04 (saturated)   |   ~360 % | Same; `main` without #862: 1.86 s p50, 22 % `GET /chats`   |
+| 10k, one pod drained (SIGTERM) |  10,000 |        4 | p95 ≤ 11.6 ms      |          — | —                  |        — | No visible blip (was 2.05 s; #836)                         |
+
+¹ As below: the 100k-user database (4.2M messages), 10k sockets at
+`--rate-multiplier 10`. Chat fan-out is per message to its chat's
+participants, so this does reproduce 100k users' chat frames; only global
+events (`feed_head`, presence snapshots) are under-represented.
+
+What the numbers say now:
+
+- **Nothing grows quadratically any more.** Requests are ~0.1/s per online
+  user (1,000 r/s at 10k), linear, and 0 errors / 0 missing echoes in every
+  run. 10k users fit on one pod at 0.6 cores; on four they spread evenly
+  (~1.1 cores in total — the Redis routing costs ~1.7× a single process's
+  CPU, a fixed factor, not a growing one).
+- **At 100k-equivalent both tiers saturate together** at ~5.8k r/s on four
+  pods (~1.45k r/s per pod-core) and a 4-CPU Postgres (~1.5k r/s per CPU,
+  ~9 statements per request). p50 ≈ 1 s is time queued at the ingress
+  stand-in (`queueWait p99` 1.1 s), not slow queries: this is the
+  throughput ceiling of this hardware, not a collapse.
+- **Same hardware, more real work.** Against `main` without #862, the pure
+  chat run spent 1.2k r/s on chat-list refetches and got 141k messages
+  through at p50 1.86 s; with it, 182k messages (+28 %) at p50 0.85 s.
+- **Redis has headroom.** At the 100k-equivalent rate: ~20 % of one core,
+  ~36–53k ops/s, ~6 MB/s out; most of its time is the presence and user
+  directory Lua scripts (`EVAL`, 8 µs/call). Redis is a single point of
+  failure (#832), not a capacity limit, at this scale.
+- **Background jobs are flat.** The active-users count takes 13 ms for all
+  three windows on 4.2M messages (was ~480 ms per window), once per hour
+  cluster-wide (#831).
+
+**100k, projected from these unit costs:** ~10k requests/s, so ~7 cores of
+backend fully busy. At the chart's 500m CPU limit per pod that's ~14 pods
+busy and ~20 with headroom, above the HPA's default `maxReplicas` of 10
+(`backend.autoscaling`, #838): raise the limit to a core (~10 pods) and/or
+`maxReplicas`. Postgres needs ~7 CPUs, far beyond the chart's single 1-CPU
+instance, and 10+ pods × `dbPoolMax` 10 exceed `max_connections` 100, so
+PgBouncer or a higher limit (`postgres.maxConnections`, #851). Memory (10+
+pods × ~600 MB plus Postgres) no longer fits the single 8 Gi node. What's
+left that adding pods can't fix is the single Postgres primary (every send
+is a write) and the single Redis (#832).
+
+The original findings follow, unchanged, for reference.
+
 ## What was measured
 
 | Run                              | Sockets | Backends | p50 / p95 (all requests) | Throughput | Verdict                                             |
