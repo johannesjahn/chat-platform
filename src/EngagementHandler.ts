@@ -344,12 +344,10 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           );
           if (inserted.length > 0) {
             yield* recordContentCreated("reaction");
-            yield* connections.broadcastAll({
-              type: "reaction_changed",
-              targetType: "post",
-              targetId: id,
-              reactions: toReactionCounts(reactions),
-            });
+            yield* connections.announcePostReactions(
+              id,
+              toReactionCounts(reactions),
+            );
             yield* createNotifications({ db, connections }, [
               {
                 userId: post.authorId,
@@ -387,12 +385,10 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           // that isn't there is a no-op and shouldn't fan out a redundant
           // event.
           if (deleted.length > 0) {
-            yield* connections.broadcastAll({
-              type: "reaction_changed",
-              targetType: "post",
-              targetId: id,
-              reactions: toReactionCounts(reactions),
-            });
+            yield* connections.announcePostReactions(
+              id,
+              toReactionCounts(reactions),
+            );
             yield* retractReactionNotification(
               { db, connections },
               {

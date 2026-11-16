@@ -1,9 +1,13 @@
 import { expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { staticPresenceAudience } from "./PresenceAudience.ts";
 import { InMemoryPubSubLive } from "./PubSub.ts";
 import {
+  FEED_ROOM,
+  FeedHeadInterval,
+  MAX_FEED_HEAD_POST_IDS,
+  PostReactionsInterval,
   MAX_POST_ROOMS_PER_CONNECTION,
   MAX_ROOMS_PER_CONNECTION,
   gameHubRoom,
@@ -20,10 +24,23 @@ import { makeIncomingHandler } from "./RealtimeSocket.ts";
 // reasoning for InMemoryPresenceStoreLive (see Presence.ts). Users 1 and 2
 // share a chat, and so see each other's presence/status; users 3 and 4 share
 // a chat with no one (see PresenceAudience.ts).
+const FEED_HEAD_TEST_INTERVAL_MS = 20;
 const TestRealtimeLive = RealtimeConnectionsLive.pipe(
   Layer.provide(InMemoryPubSubLive),
   Layer.provide(InMemoryPresenceStoreLive),
   Layer.provide(staticPresenceAudience([[1, 2]])),
+  Layer.provide(
+    Layer.succeed(
+      FeedHeadInterval,
+      Duration.millis(FEED_HEAD_TEST_INTERVAL_MS),
+    ),
+  ),
+  Layer.provide(
+    Layer.succeed(
+      PostReactionsInterval,
+      Duration.millis(FEED_HEAD_TEST_INTERVAL_MS),
+    ),
+  ),
 );
 
 // A writer that just records every chunk it was asked to send, standing in
@@ -530,32 +547,185 @@ test("unregister removes a socket from every post room it had joined", async () 
   );
 });
 
-test("a reaction on a post still broadcasts feed-wide, not just to the room", async () => {
+const eventsOfType = (received: string[], type: string) =>
+  received
+    .map((chunk) => JSON.parse(chunk) as Record<string, unknown>)
+    .filter((event) => event.type === type);
+
+test("post reactions reach the post's viewers as one batched frame per socket, latest counts winning (issue #828)", async () => {
   await run(
     Effect.gen(function* () {
       const connections = yield* RealtimeConnections;
-      const alice = recordingWriter();
-      const bob = recordingWriter();
-      yield* connections.register(1, alice.write);
-      yield* connections.register(2, bob.write);
-      alice.received.length = 0;
-      bob.received.length = 0;
+      const watcher = recordingWriter();
+      const commenter = recordingWriter();
+      const bystander = recordingWriter();
+      yield* connections.register(1, watcher.write);
+      yield* connections.register(2, commenter.write);
+      yield* connections.register(3, bystander.write);
+      yield* connections.watchPost(5, watcher.write);
+      yield* connections.watchPost(6, watcher.write);
+      yield* connections.subscribePost(5, commenter.write);
+      yield* Effect.sleep(Duration.millis(FEED_HEAD_TEST_INTERVAL_MS / 2));
 
-      yield* connections.broadcastAll({
-        type: "reaction_changed",
-        targetType: "post",
-        targetId: 5,
-        reactions: [{ emoji: "👍", count: 3 }],
+      yield* connections.announcePostReactions(5, [{ emoji: "👍", count: 1 }]);
+      yield* connections.announcePostReactions(5, [{ emoji: "👍", count: 2 }]);
+      yield* connections.announcePostReactions(6, [{ emoji: "😂", count: 1 }]);
+      yield* Effect.sleep(Duration.millis(FEED_HEAD_TEST_INTERVAL_MS * 3));
+
+      expect(eventsOfType(watcher.received, "post_reactions")).toEqual([
+        {
+          type: "post_reactions",
+          posts: [
+            { postId: 5, reactions: [{ emoji: "👍", count: 2 }] },
+            { postId: 6, reactions: [{ emoji: "😂", count: 1 }] },
+          ],
+        },
+      ]);
+      expect(eventsOfType(commenter.received, "post_reactions")).toEqual([
+        {
+          type: "post_reactions",
+          posts: [{ postId: 5, reactions: [{ emoji: "👍", count: 2 }] }],
+        },
+      ]);
+      expect(eventsOfType(bystander.received, "post_reactions")).toEqual([]);
+    }),
+  );
+});
+
+test("a post's own change reaches its watchers and comment room, each socket once", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const both = recordingWriter();
+      const bystander = recordingWriter();
+      yield* connections.register(1, both.write);
+      yield* connections.register(3, bystander.write);
+      yield* connections.watchPost(5, both.write);
+      yield* connections.subscribePost(5, both.write);
+      both.received.length = 0;
+      bystander.received.length = 0;
+
+      const event = {
+        type: "post_changed",
+        postId: 5,
+        change: "updated",
+      } as const;
+      yield* connections.notifyPostViewers(5, event);
+
+      expect(both.received).toEqual([JSON.stringify(event)]);
+      expect(bystander.received).toEqual([]);
+    }),
+  );
+});
+
+test("comment traffic doesn't reach a socket that only shows the post as a card", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const card = recordingWriter();
+      yield* connections.register(1, card.write);
+      yield* connections.watchPost(5, card.write);
+      card.received.length = 0;
+
+      yield* connections.notifyPostRoom(5, {
+        type: "comment_changed",
+        postId: 5,
+        commentId: 1,
       });
 
-      const expected = JSON.stringify({
-        type: "reaction_changed",
-        targetType: "post",
-        targetId: 5,
-        reactions: [{ emoji: "👍", count: 3 }],
+      expect(card.received).toEqual([]);
+    }),
+  );
+});
+
+test("unwatchPost and unregister both stop a card's post events", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const left = recordingWriter();
+      const dropped = recordingWriter();
+      yield* connections.register(1, left.write);
+      const unregister = yield* connections.register(2, dropped.write);
+      yield* connections.watchPost(5, left.write);
+      yield* connections.watchPost(5, dropped.write);
+      yield* connections.unwatchPost(5, left.write);
+      unregister();
+      left.received.length = 0;
+      dropped.received.length = 0;
+
+      yield* connections.notifyPostViewers(5, {
+        type: "post_changed",
+        postId: 5,
+        change: "deleted",
       });
-      expect(alice.received).toEqual([expected]);
-      expect(bob.received).toEqual([expected]);
+
+      expect(left.received).toEqual([]);
+      expect(dropped.received).toEqual([]);
+    }),
+  );
+});
+
+const feedHeads = (received: string[]) =>
+  received
+    .map((chunk) => JSON.parse(chunk) as { type: string; postIds?: number[] })
+    .filter((event) => event.type === "feed_head");
+
+test("new posts reach feed viewers as one coalesced feed_head per interval (issue #827)", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const feedViewer = recordingWriter();
+      const elsewhere = recordingWriter();
+      yield* connections.register(1, feedViewer.write);
+      yield* connections.register(2, elsewhere.write);
+      yield* connections.subscribeRoom(FEED_ROOM, feedViewer.write);
+      // Lands between ticks, so the burst below is announced together.
+      yield* Effect.sleep(Duration.millis(FEED_HEAD_TEST_INTERVAL_MS / 2));
+
+      yield* connections.announcePost(10);
+      yield* connections.announcePost(11);
+      yield* connections.announcePost(12);
+      yield* Effect.sleep(Duration.millis(FEED_HEAD_TEST_INTERVAL_MS * 3));
+
+      expect(feedHeads(feedViewer.received)).toEqual([
+        { type: "feed_head", postIds: [10, 11, 12] },
+      ]);
+      expect(feedHeads(elsewhere.received)).toEqual([]);
+    }),
+  );
+});
+
+test("a quiet interval sends no feed_head", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const feedViewer = recordingWriter();
+      yield* connections.register(1, feedViewer.write);
+      yield* connections.subscribeRoom(FEED_ROOM, feedViewer.write);
+
+      yield* Effect.sleep(Duration.millis(FEED_HEAD_TEST_INTERVAL_MS * 3));
+
+      expect(feedHeads(feedViewer.received)).toEqual([]);
+    }),
+  );
+});
+
+test("a burst bigger than one feed_head keeps only the newest ids", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const feedViewer = recordingWriter();
+      yield* connections.register(1, feedViewer.write);
+      yield* connections.subscribeRoom(FEED_ROOM, feedViewer.write);
+      yield* Effect.sleep(Duration.millis(FEED_HEAD_TEST_INTERVAL_MS / 2));
+
+      const total = MAX_FEED_HEAD_POST_IDS + 5;
+      for (let id = 1; id <= total; id++) yield* connections.announcePost(id);
+      yield* Effect.sleep(Duration.millis(FEED_HEAD_TEST_INTERVAL_MS * 3));
+
+      const ids = feedHeads(feedViewer.received).flatMap((e) => e.postIds!);
+      expect(ids.length).toBeLessThanOrEqual(MAX_FEED_HEAD_POST_IDS);
+      expect(ids.at(-1)).toBe(total);
     }),
   );
 });
@@ -687,7 +857,9 @@ test("unregister sweeps a connection out of every room it had joined", async () 
   );
 });
 
-test("isValidRoomName only admits the games' room shapes", () => {
+test("isValidRoomName only admits the feed and the games' room shapes", () => {
+  expect(isValidRoomName("feed")).toBe(true);
+  expect(isValidRoomName("feeds")).toBe(false);
   expect(isValidRoomName("game-hub:typing")).toBe(true);
   expect(isValidRoomName("game-lobby:42")).toBe(true);
   expect(isValidRoomName("game-lobby:abc")).toBe(false);

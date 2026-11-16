@@ -301,11 +301,9 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             Metric.withAttributes(contentCreatedTotal, { type: "post" }),
             1,
           );
-          yield* connections.broadcastAll({
-            type: "post_changed",
-            postId: row.id,
-            change: "created",
-          });
+          // Coalesced into feed viewers' next `feed_head`, not broadcast
+          // (issue #827; see FeedHeadEvent in Realtime.ts).
+          yield* connections.announcePost(row.id);
           const mentions = mentionText(row);
           if (mentions !== undefined) {
             yield* notifyMentions(
@@ -379,7 +377,8 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               await blockedOrMutedUserIds(db, currentUser.id),
             ),
           );
-          yield* connections.broadcastAll({
+          // Only to the sockets showing the post (issue #828).
+          yield* connections.notifyPostViewers(row.id, {
             type: "post_changed",
             postId: row.id,
             change: "updated",
@@ -419,7 +418,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             );
 
           yield* dbQuery(() => db.delete(posts).where(eq(posts.id, id)));
-          yield* connections.broadcastAll({
+          yield* connections.notifyPostViewers(id, {
             type: "post_changed",
             postId: id,
             change: "deleted",

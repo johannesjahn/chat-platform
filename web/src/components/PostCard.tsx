@@ -33,6 +33,7 @@ import { errorMessage } from "@/lib/errors";
 import { lazyNamed, whenIdle } from "@/lib/lazy";
 import { useExpandableText } from "@/lib/motion";
 import { patchCachedPost, postText } from "@/lib/posts";
+import { usePostRoom } from "@/lib/postRooms";
 import type { ReactionEmoji } from "@/lib/reactions";
 import { authorLabelOf } from "@/lib/users";
 import { cn } from "@/lib/utils";
@@ -140,6 +141,9 @@ export function PostCard({
     clamped,
     toggle: toggleExpanded,
   } = useExpandableText<HTMLParagraphElement>(!isLongText, "line-clamp-6");
+  // In the post's room while shown, so its edits, deletion and reactions
+  // reach this card live — they're no longer sent to everyone (issue #828).
+  usePostRoom(post.id);
   const [showComments, setShowComments] = useState(false);
   useEffect(() => whenIdle(preloadComments), []);
   const [lightboxOpen, setLightboxOpen] = useState(false);

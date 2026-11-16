@@ -28,6 +28,7 @@ import { noteGameReaction } from "./games/reactions";
 import { noteGameProgress, setGameRoomsSocket } from "./games/rooms";
 import { notificationsQueryKeyRoot } from "./notifications";
 import { OWN_POST_SCOPE, ownCommentScope, ownWrites } from "./ownWrites";
+import { noteFeedHead } from "./feedHead";
 import { setRealtimeSocket } from "./postRooms";
 import {
   type PostChange,
@@ -49,6 +50,14 @@ type RealtimeSocketEvent =
       postId: number;
       // Absent from a server that predates it (see PostChange).
       change?: PostChange;
+    }
+  | { type: "feed_head"; postIds: number[] }
+  | {
+      type: "post_reactions";
+      posts: ReadonlyArray<{
+        postId: number;
+        reactions: ReadonlyArray<{ emoji: string; count: number }>;
+      }>;
     }
   | { type: "comment_changed"; postId: number; commentId: number }
   | {
@@ -214,11 +223,13 @@ export function useRealtimeSocket(enabled: boolean): void {
           break;
         }
         case "post_changed":
-          // Goes to every connected client, so it touches only the one
-          // post — at most one request — rather than invalidating every
-          // loaded feed page (issue #662; see syncChangedPost). The echo
-          // of this client's own create is dropped: the create already put
-          // the post in the cache (issue #753; see ownWrites.ts).
+          // Arrives only while a card shows the post (its room — see
+          // usePostRoom, issue #828), and touches only that post — at most
+          // one request — rather than invalidating every loaded feed page
+          // (issue #662; see syncChangedPost). A "created" only comes from a
+          // server that predates `feed_head`; the echo of this client's own
+          // create is dropped: the create already put the post in the cache
+          // (issue #753; see ownWrites.ts).
           if (parsed.change === "updated" || parsed.change === "deleted") {
             void syncChangedPost(queryClient, parsed.postId, parsed.change);
           } else {
@@ -227,6 +238,24 @@ export function useRealtimeSocket(enabled: boolean): void {
               void syncChangedPost(queryClient, postId, change);
             });
           }
+          break;
+        case "post_reactions":
+          // The latest counts of posts this client shows, batched
+          // server-side (issue #828). Patched in like a post's
+          // `reaction_changed`: `reactedByMe` is kept, never trusted from
+          // the event (see mergeReactionCounts).
+          for (const { postId, reactions } of parsed.posts) {
+            patchCachedPost(queryClient, postId, (post) => ({
+              ...post,
+              reactions: mergeReactionCounts(post.reactions, reactions),
+            }));
+          }
+          break;
+        case "feed_head":
+          // New posts while the feed is on screen, coalesced server-side:
+          // remembered for the feed's "new posts" pill, fetched only when
+          // it's used (issue #827; see feedHead.ts).
+          noteFeedHead(queryClient, parsed.postIds);
           break;
         case "comment_changed": {
           // Scoped to this post's room (only arrives while its comment
@@ -252,12 +281,12 @@ export function useRealtimeSocket(enabled: boolean): void {
           break;
         }
         case "reaction_changed":
-          // A post reaction goes out feed-wide, so this lands on *every*
-          // connected client. Patch the affected post's counts in place
-          // from the event's `reactions` (that's exactly why it's on the
-          // wire — see ReactionEvent in src/Realtime.ts) instead of
-          // invalidating the whole feed, which would be an O(users ×
-          // reactions) refetch storm. `reactedByMe` is preserved rather
+          // A post reaction only arrives this way from a server that
+          // predates `post_reactions` (which sent it to *every* client).
+          // Patch the affected post's counts in place from the event's
+          // `reactions` (that's exactly why it's on the wire — see
+          // ReactionEvent in src/Realtime.ts) instead of invalidating the
+          // whole feed. `reactedByMe` is preserved rather
           // than trusted from the event: it doesn't change for a
           // non-actor, and the actor already reconciled it from its own
           // mutation response (see mergeReactionCounts). A comment

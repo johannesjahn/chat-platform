@@ -699,6 +699,21 @@ unit-tested, driven from `realtimeSocket.ts`:
   the rest applied; a failed create applies what it held. Other tabs apply
   the event normally. `comment_changed` invalidates only its post
   (`invalidatePostComments`), never every comment query.
+- **Posts — watchers, batches and `feed_head`** (issues #827, #828).
+  Nothing per post is sent to every socket: each post or reaction going to
+  all U online users is O(U²) cluster-wide, which the load simulation
+  (`scripts/loadtest/sim/`) showed collapsing at 10k users. Every rendered
+  `PostCard` _watches_ its post (`watch_post`, `usePostRoom` in
+  `lib/postRooms.ts`) — separate from a comment section's room, so cards
+  never get comment traffic. A post's edit/delete goes to its viewers
+  (`notifyPostViewers`). Post reactions are batched: each instance keeps the
+  latest counts per post and sends each viewer one `post_reactions` frame
+  per `PostReactionsInterval` — on a chronological feed the newest posts are
+  on everyone's screen, so even per-reaction frames to viewers only grew
+  with users × reactions. A new post is `announcePost`: each instance sends
+  its `feed`-room sockets one coalesced `feed_head` per `FeedHeadInterval`,
+  and the feed shows a "New posts" pill that fetches only when used
+  (`lib/feedHead.ts`). Keep `broadcastAll` for rare, global events.
 - **`staleTime` — [`web/src/lib/realtimeFreshness.ts`](web/src/lib/realtimeFreshness.ts)**
   (issue #752). `realtimeStaleTime(room?)` gives chat lists, unread counts
   and `useGameLobbies` `REALTIME_STALE_TIME_MS` only while the socket (and

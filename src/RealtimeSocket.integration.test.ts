@@ -157,7 +157,7 @@ async function waitFor(
   throw new Error("Condition was not met in time");
 }
 
-test("a chat event reaches only the chat's participants, and a post event reaches every connected user", async () => {
+test("a chat event reaches only the chat's participants, and a new post reaches only feed viewers", async () => {
   const alice = await registerAndLogin(`alice_${Date.now()}`);
   const bob = await registerAndLogin(`bob_${Date.now()}`);
   const carol = await registerAndLogin(`carol_${Date.now()}`);
@@ -213,8 +213,14 @@ test("a chat event reaches only the chat's participants, and a post event reache
     ),
   ).toBe(false);
 
-  // Now Alice creates a post. Unlike chats, posts are public — Carol should
-  // see this even though she has nothing to do with Alice's chat.
+  // Now Alice creates a post. Unlike chats, posts are public — Carol, who
+  // has the feed open (joined the feed room, as the feed page does), hears
+  // about it even though she has nothing to do with Alice's chat. It arrives
+  // as a coalesced `feed_head`, not a per-post broadcast (issue #827).
+  carolSocket.socket.send(
+    JSON.stringify({ type: "subscribe_room", room: "feed" }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 100));
   const postResponse = await fetch(`${apiUrl}/posts`, {
     method: "POST",
     headers: {
@@ -225,19 +231,18 @@ test("a chat event reaches only the chat's participants, and a post event reache
   });
   const post = (await postResponse.json()) as { id: number };
 
-  await waitFor(() =>
-    carolSocket.messages.some(
-      (m) => m.type === "post_changed" && m.postId === post.id,
-    ),
+  const announces = (m: Record<string, unknown>) =>
+    m.type === "feed_head" &&
+    Array.isArray(m.postIds) &&
+    m.postIds.includes(post.id);
+  // Up to one FeedHeadInterval (3s) for the next tick.
+  await waitFor(() => carolSocket.messages.some(announces), 8_000);
+  expect(carolSocket.messages.some(announces)).toBe(true);
+  // Alice isn't on the feed, so nothing about the post reaches her socket.
+  expect(aliceSocket.messages.some(announces)).toBe(false);
+  expect(aliceSocket.messages.some((m) => m.type === "post_changed")).toBe(
+    false,
   );
-  expect(
-    carolSocket.messages.some(
-      (m) =>
-        m.type === "post_changed" &&
-        m.postId === post.id &&
-        m.change === "created",
-    ),
-  ).toBe(true);
 
   aliceSocket.socket.close();
   carolSocket.socket.close();
@@ -307,8 +312,9 @@ test("a comment event reaches only sockets subscribed to that post's room", asyn
     false,
   );
 
-  // A reaction on the post itself, by contrast, still broadcasts feed-wide,
-  // so even the non-subscribed author socket sees it.
+  // A reaction on the post itself reaches the sockets showing the post —
+  // batched into a `post_reactions` frame (issue #828) — and the author's
+  // socket, which shows nothing, doesn't get it.
   await fetch(`${apiUrl}/posts/${post.id}/reactions`, {
     method: "POST",
     headers: {
@@ -317,19 +323,16 @@ test("a comment event reaches only sockets subscribed to that post's room", asyn
     },
     body: JSON.stringify({ emoji: "👍" }),
   });
-  await waitFor(() =>
-    authorSocket.messages.some(
-      (m) =>
-        m.type === "reaction_changed" &&
-        m.targetType === "post" &&
-        m.targetId === post.id,
-    ),
+  const carriesPost = (m: Record<string, unknown>) =>
+    m.type === "post_reactions" &&
+    Array.isArray(m.posts) &&
+    m.posts.some((p: { postId?: number }) => p.postId === post.id);
+  // Up to one PostReactionsInterval (2s) for the next batch.
+  await waitFor(() => viewerSocket.messages.some(carriesPost), 8_000);
+  expect(authorSocket.messages.some(carriesPost)).toBe(false);
+  expect(authorSocket.messages.some((m) => m.type === "reaction_changed")).toBe(
+    false,
   );
-  expect(
-    authorSocket.messages.some(
-      (m) => m.type === "reaction_changed" && m.targetId === post.id,
-    ),
-  ).toBe(true);
 
   authorSocket.socket.close();
   viewerSocket.socket.close();
