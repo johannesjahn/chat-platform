@@ -41,6 +41,14 @@ export class PubSub extends Context.Service<
     // this instance's realtime fan-out path is actually reachable right now,
     // not just configured.
     readonly ping: Effect.Effect<void, unknown>;
+    // Runs `listener` whenever this instance's subscription connection
+    // (re)connects. Messages published while it was down are gone, so state
+    // kept in step by a channel — the auth cache (see Auth.ts) — must be
+    // dropped then rather than trusted (issue #833). May also run on the
+    // first connect, so listeners must be harmless then.
+    readonly onReconnect: (
+      listener: Effect.Effect<void>,
+    ) => Effect.Effect<void>;
   }
 >()("PubSub") {}
 
@@ -84,6 +92,8 @@ export const InMemoryPubSubLive = Layer.sync(PubSub, () => {
     // No external dependency to lose — a single process is always ready to
     // fan out to its own local subscribers.
     ping: Effect.void,
+    // Nothing to reconnect, so nothing is ever missed.
+    onReconnect: () => Effect.void,
   };
 });
 
@@ -104,6 +114,7 @@ export const RedisPubSubLive = Layer.effect(
     // Realtime.ts, `auth:invalidation` from Auth.ts), so this can't be
     // tracked per `subscribe` call (issue #649).
     const subscriptions = new Map<string, Array<(message: string) => void>>();
+    const reconnectListeners: Array<Effect.Effect<void>> = [];
 
     // Bun's `RedisClient` transparently reconnects the underlying connection
     // (`autoReconnect`, on by default) after a drop, but Redis pub/sub
@@ -117,6 +128,7 @@ export const RedisPubSubLive = Layer.effect(
     // that point `subscriptions` is empty, and later ones are covered by
     // the explicit `subscribe` below.
     subscriber.onconnect = () => {
+      for (const listener of reconnectListeners) Effect.runFork(listener);
       for (const [channel, handlers] of subscriptions) {
         Effect.runFork(
           // Bun's client-side listener list isn't cleared across
@@ -205,6 +217,10 @@ export const RedisPubSubLive = Layer.effect(
         );
       },
       ping: Effect.tryPromise(() => publisher.ping()).pipe(Effect.asVoid),
+      onReconnect: (listener: Effect.Effect<void>) =>
+        Effect.sync(() => {
+          reconnectListeners.push(listener);
+        }),
     };
   }),
 );

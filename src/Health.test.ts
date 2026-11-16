@@ -20,6 +20,7 @@ const brokenDbLive = Layer.succeed(Db, {
 const brokenPubSubLive = Layer.succeed(PubSub, {
   publish: () => Effect.void,
   subscribe: () => Effect.void,
+  onReconnect: () => Effect.void,
   ping: Effect.fail(new Error("redis unreachable")),
 });
 

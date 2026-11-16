@@ -26,6 +26,7 @@ const RecordingPubSubLive = Layer.succeed(PubSub, {
       published.push(JSON.parse(message) as Envelope);
     }),
   subscribe: () => Effect.void,
+  onReconnect: () => Effect.void,
   ping: Effect.void,
 });
 
