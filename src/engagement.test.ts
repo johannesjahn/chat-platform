@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
-import { eq } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { Effect, Metric } from "effect";
 import { ChatApi } from "./Api.ts";
 import { Db } from "./Db.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
-import { users } from "./db/schema.ts";
+import { comments, posts, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
 
 const run = makeTestRun();
@@ -416,6 +416,70 @@ test("deleting a top-level comment cascades to its replies in commentCount", () 
         params: { id: post.id },
       });
       expect(afterDelete.commentCount).toBe(0);
+    }),
+  ));
+
+// Issue #835: the count is stored, kept by a trigger on `comments`. These
+// cover the paths app code never sees — cascades — plus the deleted post.
+test("a deleted account's comments come off commentCount on other people's posts", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("rosa");
+      const leaver = yield* registerAndLogin("leaver", "pw-leaver");
+      const leaverClient = yield* makeAuthedClient(leaver.accessToken);
+      yield* authed.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "staying" },
+      });
+      const theirs = yield* leaverClient.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "leaving" },
+      });
+      yield* authed.comments.createReply({
+        params: { id: theirs.id },
+        payload: { content: "a reply under the leaver's comment" },
+      });
+      expect(
+        (yield* authed.posts.getPost({ params: { id: post.id } })).commentCount,
+      ).toBe(3);
+
+      yield* leaverClient.users.deleteAccount({
+        payload: { password: "pw-leaver" },
+      });
+      // Their comment goes, and with it the reply under it.
+      expect(
+        (yield* authed.posts.getPost({ params: { id: post.id } })).commentCount,
+      ).toBe(1);
+    }),
+  ));
+
+test("deleting a post with comments works, and the stored count matches a live count", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("sam");
+      const other = yield* authed.posts.createPost({
+        payload: { contentType: "text", content: "another post" },
+      });
+      for (const id of [post.id, post.id, other.id]) {
+        yield* authed.comments.createComment({
+          params: { id },
+          payload: { content: "hello" },
+        });
+      }
+      yield* authed.posts.deletePost({ params: { id: post.id } });
+
+      const db = yield* Db;
+      const stored = yield* Effect.promise(() =>
+        db.select({ id: posts.id, count: posts.commentCount }).from(posts),
+      );
+      const live = yield* Effect.promise(() =>
+        db
+          .select({ id: comments.postId, count: count() })
+          .from(comments)
+          .groupBy(comments.postId),
+      );
+      expect(stored).toEqual([{ id: other.id, count: 1 }]);
+      expect(live).toEqual([{ id: other.id, count: 1 }]);
     }),
   ));
 

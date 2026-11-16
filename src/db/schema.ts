@@ -224,6 +224,15 @@ export const posts = pgTable(
     // same author returns the stored post instead of inserting another. Null
     // for posts created without one, which are never deduplicated.
     clientId: text("client_id"),
+    // Comments and replies on the post, kept by a database trigger on
+    // `comments` (migration 0040, issue #835) rather than counted on every
+    // feed read. A trigger, not app code, so every path that adds or removes
+    // a comment — cascades from a deleted comment or account included, and
+    // old replicas mid-rollout — keeps it right. The database default covers
+    // old replicas inserting posts without the column. Only the plain total:
+    // a viewer who hid someone still gets a live count (see
+    // `postCommentCounts` in posts.ts).
+    commentCount: integer("comment_count").notNull().default(0),
     createdAt: timestamp("created_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
