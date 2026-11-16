@@ -36,8 +36,21 @@ export class PresenceStore extends Context.Service<
     readonly onlineAmong: (
       userIds: ReadonlyArray<number>,
     ) => Effect.Effect<ReadonlyArray<number>>;
+    // Transitions the store discovers on its own rather than through
+    // `connect`/`disconnect` (issue #837): users whose only connections
+    // were on an instance that died without cleaning up (now offline), and
+    // users of this instance coming back after it was wrongly taken for
+    // dead (online again). The caller pushes the presence events.
+    readonly onPresenceChange: (
+      listener: (changes: ReadonlyArray<PresenceChange>) => Effect.Effect<void>,
+    ) => Effect.Effect<void>;
   }
 >()("PresenceStore") {}
+
+export type PresenceChange = {
+  readonly userId: number;
+  readonly online: boolean;
+};
 
 // Single-process fan-out has nothing "other instances" could mean, so the
 // local count *is* the global count — same reasoning as PubSub.ts's
@@ -71,6 +84,8 @@ export const InMemoryPresenceStoreLive = Layer.sync(PresenceStore, () => {
       }),
     onlineAmong: (userIds) =>
       Effect.sync(() => userIds.filter((userId) => counts.has(userId))),
+    // One process can't outlive its own connections.
+    onPresenceChange: () => Effect.void,
   };
 });
 
@@ -80,30 +95,124 @@ export const InMemoryPresenceStoreLive = Layer.sync(PresenceStore, () => {
 // connect/disconnect at the same moment can't race each other into an
 // inconsistent count the way two independent local counters could.
 const KEY = "chat-platform:presence:counts";
+// Which instances are alive: a sorted set of instance id -> last heartbeat
+// (Redis' own clock, ms), and per instance, its share of every count in
+// KEY (issue #837).
+const REGISTRY_KEY = "chat-platform:presence:instances";
+const INSTANCE_KEY_PREFIX = "chat-platform:presence:instance:";
 
 // Safety net for a hard process kill (SIGKILL — OOM killer, `docker kill`, a
 // spot-instance reclaim): `disconnect` never runs in that case, so nothing
 // would otherwise ever `HDEL` the field this instance incremented, leaking
-// it — and the user showing "online" — forever (issue #102 part 1). Instead,
-// every field an instance is holding a live connection for gets its Redis
-// per-field TTL (`HEXPIRE`, Redis 7.4+) refreshed on a heartbeat (see
-// HEARTBEAT_INTERVAL below) for as long as that instance keeps heartbeating
-// it. A crash just stops the heartbeat, so Redis itself expires the field
-// within one FIELD_TTL_SECONDS window of the last successful refresh — no
-// separate reconciliation job needed to clean it up (issue #102 part 4). A
-// graceful `disconnect` still removes the field immediately via `HDEL`, same
-// as before, so the common case sees no added staleness.
+// it — and the user showing "online" — forever (issue #102 part 1). Every
+// field an instance holds a live connection for gets its per-field TTL
+// (`HEXPIRE`, Redis 7.4+) refreshed on each heartbeat, so a field nobody
+// refreshes expires within FIELD_TTL_SECONDS. A graceful `disconnect` still
+// removes the field immediately via `HDEL`.
 //
-// The TTL is generous relative to the heartbeat interval so a couple of
+// That TTL alone wasn't enough (issue #837): when the user reconnected to
+// another instance, *that* instance refreshed the same field, so the dead
+// instance's +1 lived on — the count never got back to zero, and when the
+// user later left, their contacts never got `online: false`. So each
+// instance also records its own share of every count, and heartbeats into
+// REGISTRY_KEY; any instance's heartbeat reaps the instances that stopped
+// (REAP_SCRIPT): subtracts their shares and reports the users that went
+// offline, for the presence events the dead instance never sent. The field
+// TTL stays as the last resort for when no instance is left to reap.
+//
+// The TTLs are generous relative to the heartbeat interval so a couple of
 // missed beats (a GC pause, a brief Redis hiccup) can't flip a still-live
-// user offline.
+// user offline — and an instance that *was* wrongly reaped re-registers
+// its counts on its next beat (see the heartbeat below).
 const FIELD_TTL_SECONDS = 60;
-const HEARTBEAT_INTERVAL = Duration.seconds(20);
+
+// How often each instance heartbeats, and how long an instance may go
+// without one before another instance reaps it. A reference so tests can
+// shorten both.
+export const PresenceHeartbeat = Context.Reference<{
+  readonly interval: Duration.Duration;
+  readonly deadAfter: Duration.Duration;
+}>("chat-platform/Presence/PresenceHeartbeat", {
+  defaultValue: () => ({
+    interval: Duration.seconds(20),
+    deadAfter: Duration.seconds(60),
+  }),
+});
+
+// KEYS: counts, this instance's shares. ARGV: userId, n, field TTL.
+// Returns the user's new global count.
+const CONNECT_SCRIPT = `
+redis.call("HINCRBY", KEYS[2], ARGV[1], ARGV[2])
+local count = redis.call("HINCRBY", KEYS[1], ARGV[1], ARGV[2])
+redis.call("HEXPIRE", KEYS[1], ARGV[3], "FIELDS", 1, ARGV[1])
+return count
+`;
+
+// KEYS: counts, this instance's shares. ARGV: userId. Returns
+// {held, count}: held is 0 if this instance holds no share for the user (it
+// was reaped meanwhile, so the reaper already took its share off), else the
+// user's new global count follows.
+const DISCONNECT_SCRIPT = `
+local share = tonumber(redis.call("HGET", KEYS[2], ARGV[1]) or "0")
+if share <= 0 then return {0, 0} end
+if share == 1 then
+  redis.call("HDEL", KEYS[2], ARGV[1])
+else
+  redis.call("HINCRBY", KEYS[2], ARGV[1], -1)
+end
+local count = redis.call("HINCRBY", KEYS[1], ARGV[1], -1)
+if count <= 0 then redis.call("HDEL", KEYS[1], ARGV[1]) end
+return {1, count}
+`;
+
+// KEYS: registry, this instance's shares. ARGV: instance id, shares TTL.
+// Returns 1 if the instance wasn't registered (first beat, or reaped).
+const HEARTBEAT_SCRIPT = `
+local t = redis.call("TIME")
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local added = redis.call("ZADD", KEYS[1], now, ARGV[1])
+redis.call("EXPIRE", KEYS[2], ARGV[2])
+return added
+`;
+
+// KEYS: counts, registry. ARGV: dead-after ms, shares key prefix, this
+// instance's id. Reaps every instance whose last heartbeat is older than
+// dead-after: subtracts its shares from the counts and returns the users
+// whose count reached zero. ZREM gates each instance, so of several reapers
+// running at once exactly one handles it. (Touches each dead instance's
+// shares key by name — fine on a single Redis, not on Redis Cluster.)
+const REAP_SCRIPT = `
+local t = redis.call("TIME")
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local offline = {}
+local dead = redis.call("ZRANGEBYSCORE", KEYS[2], "-inf", now - tonumber(ARGV[1]))
+for _, instance in ipairs(dead) do
+  if instance ~= ARGV[3] and redis.call("ZREM", KEYS[2], instance) == 1 then
+    local sharesKey = ARGV[2] .. instance
+    local shares = redis.call("HGETALL", sharesKey)
+    for i = 1, #shares, 2 do
+      local count = redis.call("HINCRBY", KEYS[1], shares[i], -tonumber(shares[i + 1]))
+      if count <= 0 then
+        redis.call("HDEL", KEYS[1], shares[i])
+        table.insert(offline, shares[i])
+      end
+    end
+    redis.call("DEL", sharesKey)
+  end
+end
+return offline
+`;
 
 export const RedisPresenceStoreLive = Layer.effect(
   PresenceStore,
   Effect.gen(function* () {
     const redis = new RedisClient(process.env.REDIS_URL);
+    const heartbeat = yield* PresenceHeartbeat;
+    const instanceId = crypto.randomUUID();
+    const sharesKey = `${INSTANCE_KEY_PREFIX}${instanceId}`;
+    // A day: only a backstop for an instance nobody ever reaps.
+    const SHARES_TTL_SECONDS = 86_400;
+    const deadAfterMs = Duration.toMillis(heartbeat.deadAfter);
 
     // Issue #102 part 2: connect/disconnect/onlineAmong all fail soft
     // (Redis being unreachable must never fail a `/ws` connection), which
@@ -116,44 +225,73 @@ export const RedisPresenceStoreLive = Layer.effect(
 
     // This instance's own view of which users it's currently holding at
     // least one live `/ws` connection for — separate from (but analogous
-    // to) RealtimeConnections' local `byUser` map (see Realtime.ts).
-    // PresenceStore needs its own so the heartbeat below knows which fields
-    // *this* instance is responsible for keeping alive; a second connection
-    // for the same user landing on this instance must not stop the
-    // heartbeat early just because one of its two connections closed.
+    // to) RealtimeConnections' local `byUser` map (see Realtime.ts). The
+    // heartbeat refreshes their fields, and re-registers them if this
+    // instance was reaped.
     const localCounts = new Map<number, number>();
 
-    // Always succeeds (failures are logged and swallowed) — a heartbeat
-    // refresh failing must not fail the `connect` call that triggered it,
-    // nor abort the rest of a heartbeat tick over other users.
-    const refreshTtl = (userId: number): Effect.Effect<void> =>
+    const listeners: Array<
+      (changes: ReadonlyArray<PresenceChange>) => Effect.Effect<void>
+    > = [];
+    const emit = (changes: ReadonlyArray<PresenceChange>) =>
+      changes.length === 0
+        ? Effect.void
+        : Effect.forEach(listeners, (listener) => listener(changes), {
+            discard: true,
+          });
+
+    const evalScript = (
+      script: string,
+      keys: ReadonlyArray<string>,
+      args: ReadonlyArray<string | number>,
+    ) =>
       Effect.tryPromise(() =>
-        redis.hexpire(KEY, FIELD_TTL_SECONDS, "FIELDS", 1, String(userId)),
-      ).pipe(
-        Effect.asVoid,
-        Effect.catch((error) => logFallback("heartbeat", error)),
+        redis.send("EVAL", [
+          script,
+          String(keys.length),
+          ...keys,
+          ...args.map(String),
+        ]),
       );
 
+    const register = evalScript(
+      HEARTBEAT_SCRIPT,
+      [REGISTRY_KEY, sharesKey],
+      [instanceId, SHARES_TTL_SECONDS],
+    ).pipe(Effect.map((added) => Number(added) === 1));
+
+    // Registered before the first connection lands, so its share is never
+    // held by an instance the reaper can't see.
+    yield* register.pipe(
+      Effect.catch((error) =>
+        logFallback("register", error).pipe(Effect.as(false)),
+      ),
+    );
+
     // Best-effort, like the realtime push itself (see Realtime.ts's
-    // notifyUsers/broadcastAll): a `/ws` connection succeeding shouldn't
-    // depend on Redis being reachable, and a transient failure should
-    // conservatively *not* claim a transition happened (suppressing a
-    // presence broadcast) rather than crash connection setup or, worse,
-    // report a wrong transition.
+    // notifyUsers): a `/ws` connection succeeding shouldn't depend on Redis
+    // being reachable, and a transient failure should conservatively *not*
+    // claim a transition happened (suppressing a presence broadcast) rather
+    // than crash connection setup or report a wrong transition.
     const connect: PresenceStore["Service"]["connect"] = (userId) =>
-      Effect.tryPromise(() => redis.hincrby(KEY, String(userId), 1)).pipe(
-        Effect.tap(() => {
-          localCounts.set(userId, (localCounts.get(userId) ?? 0) + 1);
-          return refreshTtl(userId);
-        }),
-        Effect.map((count) => count === 1),
+      evalScript(
+        CONNECT_SCRIPT,
+        [KEY, sharesKey],
+        [userId, 1, FIELD_TTL_SECONDS],
+      ).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            localCounts.set(userId, (localCounts.get(userId) ?? 0) + 1);
+          }),
+        ),
+        Effect.map((count) => Number(count) === 1),
         Effect.catch((error) =>
           logFallback("connect", error).pipe(Effect.as(false)),
         ),
       );
 
     const disconnect: PresenceStore["Service"]["disconnect"] = (userId) =>
-      Effect.tryPromise(() => redis.hincrby(KEY, String(userId), -1)).pipe(
+      evalScript(DISCONNECT_SCRIPT, [KEY, sharesKey], [userId]).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
             const next = (localCounts.get(userId) ?? 1) - 1;
@@ -161,25 +299,11 @@ export const RedisPresenceStoreLive = Layer.effect(
             else localCounts.delete(userId);
           }),
         ),
-        Effect.flatMap((count) => {
-          if (count > 0) return Effect.succeed(false);
-          // Back at (or below) zero — remove the field entirely (its TTL
-          // goes with it) rather than leaving a `0` sitting in the hash
-          // forever.
-          //
-          // Unlike InMemoryPresenceStoreLive, this doesn't special-case a
-          // disconnect with no prior connect (that'd need an extra
-          // round-trip to check first), so a stray call like that would
-          // report `true` here instead of `false`. Harmless in practice: it
-          // can't happen via the real call site (Realtime.ts's `register`
-          // cleanup always pairs with a `connect`), and even if it did, a
-          // spurious "offline" broadcast for a user nothing marked online
-          // is a no-op for anyone consuming it (see web/src/lib/presence.ts,
-          // which only reacts to an actual state change).
-          return Effect.tryPromise(() => redis.hdel(KEY, String(userId))).pipe(
-            Effect.as(true),
-            Effect.orElseSucceed(() => true),
-          );
+        // No share held (this instance was reaped): not a transition it can
+        // vouch for — the reaper already reported it.
+        Effect.map((result) => {
+          const [held, count] = result as [number, number];
+          return Number(held) === 1 && Number(count) <= 0;
         }),
         Effect.catch((error) =>
           logFallback("disconnect", error).pipe(Effect.as(false)),
@@ -203,23 +327,82 @@ export const RedisPresenceStoreLive = Layer.effect(
             ),
           );
 
-    // Background heartbeat: every HEARTBEAT_INTERVAL, refresh the TTL of
-    // every field this instance is still holding a connection for.
-    // `Effect.suspend` defers reading `localCounts` to each tick — building
-    // the array eagerly here would freeze on an empty snapshot taken before
-    // any connection ever registered. Tied to this layer's scope so it's
-    // interrupted on shutdown, same as RefreshTokenCleanupLive
-    // (RefreshTokenCleanup.ts).
-    yield* Effect.forkScoped(
-      Effect.suspend(() =>
-        Effect.forEach([...localCounts.keys()], refreshTtl, {
-          concurrency: "unbounded",
-          discard: true,
-        }),
-      ).pipe(Effect.repeat(Schedule.spaced(HEARTBEAT_INTERVAL))),
+    const refreshTtl = (userId: number): Effect.Effect<void> =>
+      Effect.tryPromise(() =>
+        redis.hexpire(KEY, FIELD_TTL_SECONDS, "FIELDS", 1, String(userId)),
+      ).pipe(
+        Effect.asVoid,
+        Effect.catch((error) => logFallback("heartbeat", error)),
+      );
+
+    // Taken for dead and reaped while still alive (a long pause): put this
+    // instance's connections back, and tell contacts of the users the
+    // reaper had wrongly reported offline.
+    const restore = Effect.suspend(() =>
+      Effect.forEach([...localCounts], ([userId, n]) =>
+        evalScript(
+          CONNECT_SCRIPT,
+          [KEY, sharesKey],
+          [userId, n, FIELD_TTL_SECONDS],
+        ).pipe(
+          Effect.map((count): PresenceChange[] =>
+            Number(count) === n ? [{ userId, online: true }] : [],
+          ),
+          Effect.catch((error) =>
+            logFallback("restore", error).pipe(Effect.as([])),
+          ),
+        ),
+      ).pipe(Effect.flatMap((changes) => emit(changes.flat()))),
     );
 
-    return { connect, disconnect, onlineAmong };
+    const reap = evalScript(
+      REAP_SCRIPT,
+      [KEY, REGISTRY_KEY],
+      [deadAfterMs, INSTANCE_KEY_PREFIX, instanceId],
+    ).pipe(
+      Effect.flatMap((offline) =>
+        emit(
+          (offline as string[]).map((id) => ({
+            userId: Number(id),
+            online: false,
+          })),
+        ),
+      ),
+      Effect.catch((error) => logFallback("reap", error)),
+    );
+
+    // Each beat: re-register (restoring this instance's shares if it had
+    // been reaped), refresh the TTL of every field it holds, then reap
+    // instances that stopped beating. `Effect.suspend` defers reading
+    // `localCounts` to each tick. Tied to this layer's scope so it's
+    // interrupted on shutdown.
+    const beat = Effect.gen(function* () {
+      const wasReaped = yield* register.pipe(
+        Effect.catch((error) =>
+          logFallback("register", error).pipe(Effect.as(false)),
+        ),
+      );
+      if (wasReaped) yield* restore;
+      yield* Effect.forEach([...localCounts.keys()], refreshTtl, {
+        concurrency: "unbounded",
+        discard: true,
+      });
+      yield* reap;
+    });
+    yield* Effect.forkScoped(
+      Effect.suspend(() => beat).pipe(
+        Effect.repeat(Schedule.spaced(heartbeat.interval)),
+      ),
+    );
+
+    const onPresenceChange: PresenceStore["Service"]["onPresenceChange"] = (
+      listener,
+    ) =>
+      Effect.sync(() => {
+        listeners.push(listener);
+      });
+
+    return { connect, disconnect, onlineAmong, onPresenceChange };
   }),
 );
 

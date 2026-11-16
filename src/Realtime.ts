@@ -1114,6 +1114,18 @@ export const RealtimeConnectionsLive = Layer.effect(
         .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
     };
 
+    // Presence the store found out about on its own (issue #837): users
+    // whose connections were all on an instance that died, and users back
+    // after this instance was wrongly reaped.
+    yield* presenceStore.onPresenceChange((changes) =>
+      Effect.forEach(
+        changes,
+        ({ userId, online }) =>
+          notifyContacts(userId, { type: "presence", userId, online }),
+        { discard: true },
+      ),
+    );
+
     return {
       register,
       notifyUsers,
