@@ -83,9 +83,10 @@ export const openSocket = (userId: number) =>
     yield* connections.register(
       userId,
       () => Effect.void,
-      Effect.sync(() => {
-        state.closed++;
-      }),
+      () =>
+        Effect.sync(() => {
+          state.closed++;
+        }),
     );
     return state;
   });

@@ -1,7 +1,7 @@
 import { HttpRouter } from "effect/http";
 import { HttpApiBuilder, HttpApiSwagger } from "effect/http-api";
 import { BunHttpServer, BunRuntime } from "@effect/platform-bun";
-import { Config, Effect, Layer, Metric } from "effect";
+import { Config, Duration, Effect, Layer, Metric } from "effect";
 import { ChatApi } from "./Api.ts";
 import { ActiveUsersMetricsLive } from "./ActiveUsersMetrics.ts";
 import { AdminHandlerLive } from "./AdminHandler.ts";
@@ -26,7 +26,7 @@ import { PresenceAudienceLive } from "./PresenceAudience.ts";
 import { PubSubLive } from "./PubSub.ts";
 import { UserLocatorLive } from "./UserLocator.ts";
 import { RateLimiterLive } from "./RateLimiter.ts";
-import { RealtimeConnectionsLive } from "./Realtime.ts";
+import { RealtimeConnections, RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
 import { RealtimeSocketRouteLive } from "./RealtimeSocket.ts";
 import { redactedLogger } from "./RedactedLogger.ts";
@@ -126,8 +126,30 @@ const ServicesLive = Layer.mergeAll(
   ),
 );
 
+// Graceful shutdown for `/ws` (issue #836). Built after the HTTP server, so
+// on SIGTERM it's released *before* it: first every socket on this instance
+// is closed, spread over WS_DRAIN_SECONDS (see `drain` in Realtime.ts), and
+// only then does the server stop. The chart's preStop sleep has taken the pod
+// out of the Service by then, so the clients reconnect to other replicas, a
+// few at a time. WS_DRAIN_SECONDS plus the preStop sleep must stay under the
+// pod's terminationGracePeriodSeconds.
+const RealtimeDrainLive = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const connections = yield* RealtimeConnections;
+    const seconds = yield* Config.Int("WS_DRAIN_SECONDS").pipe(
+      Config.withDefault(15),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.logInfo("Draining realtime connections").pipe(
+        Effect.annotateLogs({ seconds }),
+        Effect.andThen(connections.drain(Duration.seconds(seconds))),
+      ),
+    );
+  }),
+);
+
 const ServerLive = Layer.mergeAll(
-  HttpServerLive,
+  RealtimeDrainLive.pipe(Layer.provideMerge(HttpServerLive)),
   RefreshTokenCleanupLive,
   AttachmentCleanupLive,
   ActiveUsersMetricsLive,

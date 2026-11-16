@@ -9,7 +9,6 @@ import {
   isValidRoomName,
   RealtimeConnections,
   type RealtimeEvent,
-  SESSION_REVOKED_CLOSE_CODE,
 } from "./Realtime.ts";
 import { allowedOrigins } from "./WebOrigin.ts";
 import { WsTicket } from "./WsTicket.ts";
@@ -255,6 +254,12 @@ const wsHandler = Effect.gen(function* () {
     return tooManyAttempts(userLimit.retryAfterSeconds);
   }
 
+  // Shutting down (issue #836): send the client elsewhere rather than
+  // accept a connection about to be closed again.
+  if (yield* connections.isDraining) {
+    return HttpServerResponse.text("Server restarting", { status: 503 });
+  }
+
   const socket = yield* request.upgrade;
   const writer = yield* socket.writer;
   // One stable function per connection — RealtimeConnections keys its
@@ -263,9 +268,7 @@ const wsHandler = Effect.gen(function* () {
   const unregister = yield* connections.register(
     userId,
     write,
-    writer.write(
-      new Socket.CloseEvent(SESSION_REVOKED_CLOSE_CODE, "Session revoked"),
-    ),
+    (code, reason) => writer.write(new Socket.CloseEvent(code, reason)),
   );
 
   // `register` only pushes a `presence` event for a state *transition* (see

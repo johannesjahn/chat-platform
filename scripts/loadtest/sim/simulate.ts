@@ -321,7 +321,19 @@ async function runWorker(config: Config, userIds: number[]) {
     return "sendMessage";
   };
 
-  async function simulateUser(id: number, base: string, startDelay: number) {
+  async function simulateUser(
+    id: number,
+    firstBase: string,
+    startDelay: number,
+  ) {
+    // Where this user's requests and socket go. Moves to the next target
+    // when the socket closes or can't connect — what an ingress does when a
+    // pod stops (issue #836) — so a drained instance's users land elsewhere.
+    let base = firstBase;
+    const targets = config.targetPorts.map((port) => `${LOOPBACK}:${port}`);
+    const failOver = () => {
+      base = targets[(targets.indexOf(base) + 1) % targets.length]!;
+    };
     await Bun.sleep(startDelay);
     const token = await mintToken(id);
     const ip = `10.${(id >> 16) & 255}.${(id >> 8) & 255}.${id & 255}`;
@@ -395,6 +407,7 @@ async function runWorker(config: Config, userIds: number[]) {
     // sits in the `feed` room (for `feed_head`) and watches every post on
     // screen (for their edits and reaction counts); elsewhere neither.
     let ws: WebSocket | null = null;
+    let lastCloseCode: number | undefined;
     let inFeedRoom = false;
     let pillTapPending = false;
     const joinedPosts = new Set<number>();
@@ -500,6 +513,7 @@ async function runWorker(config: Config, userIds: number[]) {
       );
       if (!ticket?.ticket) {
         stats.wsFailures++;
+        failOver();
         setTimeout(connect, backoff / 2 + Math.random() * (backoff / 2));
         backoff = Math.min(backoff * 2, 15_000);
         return;
@@ -521,14 +535,23 @@ async function runWorker(config: Config, userIds: number[]) {
         inFeedRoom = false;
         joinedPosts.clear();
         syncRooms();
-        void selfHeal();
+        // Like the web client: after a drain close (4503) the self-heal
+        // refetch is spread over 10s (issue #836).
+        if (lastCloseCode === 4503) {
+          setTimeout(() => void selfHeal(), Math.random() * 10_000);
+        } else {
+          void selfHeal();
+        }
+        lastCloseCode = undefined;
       };
       socket.onmessage = (message) => {
         const event = parseSocketEvent(message.data);
         if (event) onEvent(event);
       };
-      socket.onclose = () => {
+      socket.onclose = (event) => {
+        lastCloseCode = event.code;
         clearInterval(ping);
+        failOver();
         if (opened) {
           wsOpen--;
           if (Date.now() < deadline) stats.wsDrops++;
