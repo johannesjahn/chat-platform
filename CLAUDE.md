@@ -156,6 +156,17 @@ Two things about this are load-bearing, not stylistic:
   (content type, keyset cursor, blocked authors, chat participation) must live
   _inside_ each arm; applied outside, it would shrink a page instead of pushing
   it deeper. See `matchingIds` in SearchHandler.ts.
+- Posts and comments arms are **recent-first** (`recentFirstArm`, issue
+  #829): the newest `SEARCH_RECENT_WINDOW` ids are filtered in id order, and
+  older rows are reached through the index only when that didn't fill the
+  page (a one-time `count(*) < limit` guard). Left to itself, the planner
+  serves `ORDER BY id DESC LIMIT n` by walking the primary key whenever a
+  term looks common, so a term that was common only long ago walked every
+  newer row (122ms at 200k posts, growing with the table); forcing the index
+  instead made every common term sort all its matches. Content types in
+  search predicates are **SQL literals**, not parameters: under a prepared
+  statement's generic plan, `content_type = $1` can't prove a partial index
+  applies, and the caption arms fell back to sequential scans.
 - `pg_trgm` is a contrib extension. On a real Postgres the migration's
   `CREATE EXTENSION` is enough (it's a _trusted_ extension since PG13, so no
   superuser), but **PGlite needs the bundle registered when the instance is
