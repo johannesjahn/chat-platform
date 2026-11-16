@@ -97,6 +97,23 @@ export const pubsubSubscribeTotal = Metric.counter("pubsub_subscribe_total", {
   description: "PubSub subscribe attempts, labeled by outcome.",
 });
 
+// Redis outage tolerance (issue #832). 1 while a client's connection is up,
+// 0 while it's down, labeled by which client ("pubsub-publish",
+// "rate-limiter", ...). A dashboard's cluster-wide view of a Redis outage,
+// since /ready deliberately doesn't fail on one (see Health.ts).
+export const redisConnectionUp = Metric.gauge("redis_connection_up", {
+  description:
+    "Whether this instance's Redis connection is up (1) or down (0), labeled by client.",
+});
+
+// Operations that fell back to this instance's own state because Redis
+// couldn't be reached, labeled by component ("rate-limiter", "ws-ticket",
+// "pubsub", "presence", "user-locator").
+export const redisFallbacksTotal = Metric.counter("redis_fallbacks_total", {
+  description:
+    "Operations served from instance-local state because Redis was unreachable, labeled by component.",
+});
+
 // Application-domain activity metrics (issue #196, follow-up to #124's
 // transport-level ones) — every metric below is a count or a distribution
 // with no user id, username, IP, or IP hash ever used as a label or

@@ -77,6 +77,15 @@ pods × ~600 MB plus Postgres) no longer fits the single 8 Gi node. What's
 left that adding pods can't fix is the single Postgres primary (every send
 is a write) and the single Redis (#832).
 
+**Redis outage (#832).** 1k users on two pods, Redis stopped for 30 s
+mid-run (longer than the ~11 s after which Bun's client used to give up for
+good), then started again:
+
+|                    | While Redis is down                            | After it's back                                                |
+| ------------------ | ---------------------------------------------- | -------------------------------------------------------------- |
+| before (`main`)    | every request hangs; 0 r/s; `/ready` times out | **100 % 500s until the pods restart**; `/ready` 503 throughout |
+| with #832's change | 0 errors, p95 10–11 ms; `/ready` 200           | 0 errors; one `resync` per user, spread over 10 s              |
+
 The original findings follow, unchanged, for reference.
 
 ## What was measured

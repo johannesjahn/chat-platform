@@ -1,8 +1,8 @@
 {{- if .Values.backend.metrics.alerts.enabled -}}
 # The #125 starter rule set's backend-specific half (see
 # ../observability/values.yaml's `extraObjects` for the cluster-wide half —
-# crash-looping, node pressure, PVC capacity): readiness failing and a high
-# 5xx rate, both scoped to this release's own backend Deployment. Picked up
+# crash-looping, node pressure, PVC capacity): readiness failing, a high
+# 5xx rate and Redis unreachable, all scoped to this release's own backend. Picked up
 # by ../observability/'s vmalert the same way backend-metrics-servicescrape.yaml
 # is picked up by vmagent — VMRule selection defaults to every namespace.
 apiVersion: operator.victoriametrics.com/v1beta1
@@ -47,4 +47,17 @@ spec:
           annotations:
             summary: "Backend 5xx error rate above 5%"
             description: "The chat-platform backend's 5xx response rate has been above 5% for over 5m (current: {{ "{{" }} $value | humanize {{ "}}" }}%)."
+        - alert: BackendRedisUnreachable
+          # The backend keeps serving without Redis (issue #832; see
+          # src/redisConnection.ts) — rate limits per pod, realtime events
+          # only within a pod — and /ready deliberately doesn't fail on it,
+          # so BackendReadinessFailing never fires for an outage. This does:
+          # some pod's Redis connection (any of its clients) has been down.
+          expr: min by (namespace, pod) (redis_connection_up{namespace="{{ .Release.Namespace }}"}) == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Backend pod {{ "{{" }} $labels.pod {{ "}}" }} can't reach Redis"
+            description: "Backend pod {{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} has had a Redis connection down for over 2m. It's serving degraded: rate limits are per pod, and realtime events don't cross pods."
 {{- end }}

@@ -81,6 +81,9 @@ type RealtimeSocketEvent =
     }
   | { type: "presence"; userId: number; online: boolean }
   | { type: "presence_snapshot"; userIds: number[] }
+  // The server's Redis was unreachable for a while (issue #832), so events
+  // from other instances were lost — see ResyncEvent in src/Realtime.ts.
+  | { type: "resync" }
   | {
       type: "typing";
       chatId: number;
@@ -370,6 +373,10 @@ export function useRealtimeSocket(enabled: boolean): void {
           break;
         case "presence":
           setUserOnline(parsed.userId, parsed.online);
+          break;
+        case "resync":
+          // Already spread out by the server, so at once.
+          selfHeal();
           break;
         case "presence_snapshot":
           // Replaces whatever the previous connection left behind (see

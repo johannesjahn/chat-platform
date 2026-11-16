@@ -78,8 +78,9 @@ spec:
               value: {{ .Values.backend.wsDrainSeconds | quote }}
             {{- include "chat-platform.s3Env" . | nindent 12 }}
           # See src/Health.ts: /health is liveness-only (no dependency
-          # checks), /ready additionally confirms Postgres and Redis are
-          # reachable. The startupProbe holds off the other two until the
+          # checks), /ready additionally confirms Postgres is reachable —
+          # not Redis, which the backend serves without (degraded; issue
+          # #832, alerted on by BackendRedisUnreachable). The startupProbe holds off the other two until the
           # process is listening (up to 60s) instead of guessing a fixed
           # initialDelaySeconds: a slow boot isn't killed by liveness, and a
           # fast one starts taking traffic as soon as it's ready.

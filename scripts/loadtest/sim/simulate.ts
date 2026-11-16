@@ -632,6 +632,11 @@ async function runWorker(config: Config, userIds: number[]) {
         );
         return;
       }
+      if (event.type === "resync") {
+        // The server's Redis came back after an outage (issue #832).
+        void selfHeal();
+        return;
+      }
       if (event.type === "feed_head") {
         // The "New posts" pill: now and then a viewer taps it, a human
         // moment later, and only that fetches.

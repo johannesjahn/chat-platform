@@ -1,7 +1,6 @@
 import { HttpRouter, HttpServerResponse } from "effect/http";
 import { Effect } from "effect";
 import { Db } from "./Db.ts";
-import { PubSub } from "./PubSub.ts";
 import { withLoggerDisabled } from "./RedactedLogger.ts";
 
 // Raw routes (not part of the typed `ChatApi`) — orchestrators (compose
@@ -25,22 +24,26 @@ export const HealthRouteLive = HttpRouter.add(
 );
 
 // Readiness: the process has finished booting (DbLive's migrations, see
-// Db.ts) and can currently reach its dependencies — the DB always, and Redis
-// too when PubSubLive is backed by it (REDIS_URL set; see PubSub.ts). A
-// process that's up but has lost one of these looks healthy at the TCP
-// level and would otherwise keep receiving traffic.
+// Db.ts) and can currently reach the database. A process that's up but has
+// lost it looks healthy at the TCP level and would otherwise keep receiving
+// traffic.
+//
+// Redis is deliberately *not* checked (issue #832). The app serves without
+// it — rate limits, `/ws` tickets, presence and realtime fall back to each
+// instance's own state (see redisConnection.ts) — and an outage hits every
+// pod at once, so failing readiness on it would take them all out of
+// rotation: a degraded service becomes no service. `redis_connection_up`
+// and the admin dashboard's dependency health show the outage instead.
 export const ReadyRouteLive = HttpRouter.add(
   "GET",
   "/ready",
   Effect.gen(function* () {
     const db = yield* Db;
-    const pubsub = yield* PubSub;
-    const checks = yield* Effect.all(
-      [Effect.tryPromise(() => db.execute("select 1")), pubsub.ping],
-      { concurrency: "unbounded" },
-    ).pipe(Effect.result);
+    const check = yield* Effect.tryPromise(() => db.execute("select 1")).pipe(
+      Effect.result,
+    );
 
-    return checks._tag === "Success"
+    return check._tag === "Success"
       ? HttpServerResponse.text("ok")
       : HttpServerResponse.text("not ready", { status: 503 });
   }).pipe(withLoggerDisabled),

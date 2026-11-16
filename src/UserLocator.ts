@@ -1,5 +1,5 @@
-import { RedisClient } from "bun";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
+import { redisFallback, supervisedRedis } from "./redisConnection.ts";
 
 // Which app instances hold at least one live `/ws` connection for a user
 // (issue #832). Every realtime event used to be published on one shared
@@ -33,6 +33,12 @@ export class UserLocator extends Context.Service<
     readonly locate: (
       userIds: ReadonlyArray<number>,
     ) => Effect.Effect<Map<string, number[]> | null>;
+    // Runs `listener` whenever the directory becomes reachable again after
+    // an outage (issue #832): claims made or released meanwhile never
+    // reached it, so the caller re-asserts what it holds.
+    readonly onReconnect: (
+      listener: Effect.Effect<void>,
+    ) => Effect.Effect<void>;
   }
 >()("UserLocator") {}
 
@@ -55,6 +61,8 @@ export const makeInMemoryUserLocator = (): UserLocator["Service"] => {
         if (set?.size === 0) byUser.delete(userId);
       }),
     refresh: () => Effect.void,
+    // Nothing to lose.
+    onReconnect: () => Effect.void,
     locate: (userIds) =>
       Effect.sync(() => {
         const located = new Map<string, number[]>();
@@ -102,79 +110,89 @@ end
 return 0
 `;
 
-export const RedisUserLocatorLive = Layer.sync(UserLocator, () => {
-  const redis = new RedisClient(process.env.REDIS_URL);
-  const logFailure = (operation: string, error: unknown) =>
-    Effect.logWarning("UserLocator: Redis operation failed").pipe(
-      Effect.annotateLogs({ operation, error: String(error) }),
-    );
+export const RedisUserLocatorLive = Layer.effect(
+  UserLocator,
+  Effect.gen(function* () {
+    const supervised = supervisedRedis("user-locator");
+    yield* Effect.promise(() => supervised.ready);
+    const redis = supervised.client;
+    const logFailure = (operation: string, error: unknown) =>
+      redisFallback(supervised, "user-locator", operation, error);
 
-  const refresh: UserLocator["Service"]["refresh"] = (userIds, instanceId) =>
-    userIds.length === 0
-      ? Effect.void
-      : Effect.tryPromise(() =>
+    const refresh: UserLocator["Service"]["refresh"] = (userIds, instanceId) =>
+      userIds.length === 0
+        ? Effect.void
+        : Effect.tryPromise(() =>
+            redis.send("EVAL", [
+              REFRESH_SCRIPT,
+              String(userIds.length),
+              ...userIds.map(userKey),
+              instanceId,
+              String(CLAIM_TTL_SECONDS),
+            ]),
+          ).pipe(
+            Effect.asVoid,
+            Effect.catch((error) => logFailure("refresh", error)),
+          );
+
+    return {
+      claim: (userId, instanceId) => refresh([userId], instanceId),
+      release: (userId, instanceId) =>
+        Effect.tryPromise(() => redis.srem(userKey(userId), instanceId)).pipe(
+          Effect.asVoid,
+          Effect.catch((error) => logFailure("release", error)),
+        ),
+      refresh,
+      locate: (userIds) => {
+        const unique = [...new Set(userIds)];
+        if (unique.length === 0) return Effect.succeed(new Map());
+        return Effect.tryPromise(() =>
           redis.send("EVAL", [
-            REFRESH_SCRIPT,
-            String(userIds.length),
-            ...userIds.map(userKey),
-            instanceId,
-            String(CLAIM_TTL_SECONDS),
+            LOCATE_SCRIPT,
+            String(unique.length),
+            ...unique.map(userKey),
           ]),
         ).pipe(
-          Effect.asVoid,
-          Effect.catch((error) => logFailure("refresh", error)),
+          Effect.map((sets) => {
+            const located = new Map<string, number[]>();
+            (sets as string[][]).forEach((instances, i) => {
+              for (const instanceId of instances) {
+                const ids = located.get(instanceId) ?? [];
+                ids.push(unique[i]!);
+                located.set(instanceId, ids);
+              }
+            });
+            return located;
+          }),
+          Effect.catch((error) =>
+            logFailure("locate", error).pipe(Effect.as(null)),
+          ),
         );
-
-  return {
-    claim: (userId, instanceId) => refresh([userId], instanceId),
-    release: (userId, instanceId) =>
-      Effect.tryPromise(() => redis.srem(userKey(userId), instanceId)).pipe(
-        Effect.asVoid,
-        Effect.catch((error) => logFailure("release", error)),
-      ),
-    refresh,
-    locate: (userIds) => {
-      const unique = [...new Set(userIds)];
-      if (unique.length === 0) return Effect.succeed(new Map());
-      return Effect.tryPromise(() =>
-        redis.send("EVAL", [
-          LOCATE_SCRIPT,
-          String(unique.length),
-          ...unique.map(userKey),
-        ]),
-      ).pipe(
-        Effect.map((sets) => {
-          const located = new Map<string, number[]>();
-          (sets as string[][]).forEach((instances, i) => {
-            for (const instanceId of instances) {
-              const ids = located.get(instanceId) ?? [];
-              ids.push(unique[i]!);
-              located.set(instanceId, ids);
-            }
-          });
-          return located;
-        }),
-        Effect.catch((error) =>
-          logFailure("locate", error).pipe(Effect.as(null)),
-        ),
-      );
-    },
-  };
-});
+      },
+      onReconnect: (listener) =>
+        Effect.sync(() => supervised.onConnect(listener)),
+    };
+  }),
+);
 
 export const UserLocatorLive = process.env.REDIS_URL
   ? RedisUserLocatorLive
   : InMemoryUserLocatorLive;
 
 // Re-asserts an instance's claims on a fixed beat, for the life of the
-// calling layer's scope (see RealtimeConnectionsLive).
+// calling layer's scope (see RealtimeConnectionsLive), and at once whenever
+// the directory comes back after an outage.
 export const forkClaimRefresher = (
   locator: UserLocator["Service"],
   instanceId: string,
   heldUsers: () => ReadonlyArray<number>,
 ) =>
-  Effect.forkScoped(
-    Effect.suspend(() => locator.refresh(heldUsers(), instanceId)).pipe(
-      Effect.repeat(Schedule.spaced(CLAIM_REFRESH_INTERVAL)),
-    ),
-  );
+  Effect.gen(function* () {
+    const refreshNow = Effect.suspend(() =>
+      locator.refresh(heldUsers(), instanceId),
+    );
+    yield* locator.onReconnect(refreshNow);
+    yield* Effect.forkScoped(
+      refreshNow.pipe(Effect.repeat(Schedule.spaced(CLAIM_REFRESH_INTERVAL))),
+    );
+  });

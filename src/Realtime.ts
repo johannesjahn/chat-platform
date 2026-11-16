@@ -197,6 +197,13 @@ export type PresenceSnapshotEvent = {
   readonly userIds: ReadonlyArray<number>;
 };
 
+// Written by an instance to its own sockets when Redis is reachable again
+// after an outage (issue #832): events between instances were lost
+// meanwhile, so the client refetches what events keep current — the same
+// self-heal it runs on every socket open — and gets a fresh
+// `presence_snapshot` right after. Never published.
+export type ResyncEvent = { readonly type: "resync" };
+
 // Pushed when a message is pinned or unpinned chat-wide (issue #223). Scoped
 // to the chat's participants (`notifyUsers`, like `chat_updated`/a message
 // `reaction_changed`) rather than broadcast, since a chat and its pins are
@@ -318,6 +325,7 @@ export type RealtimeEvent =
   | MessagePinEvent
   | PresenceEvent
   | PresenceSnapshotEvent
+  | ResyncEvent
   | TypingEvent
   | StatusEvent
   | GameLobbyEvent
@@ -510,6 +518,15 @@ export const FeedHeadInterval = Context.Reference<Duration.Duration>(
 export const PostReactionsInterval = Context.Reference<Duration.Duration>(
   "chat-platform/Realtime/PostReactionsInterval",
   { defaultValue: () => Duration.seconds(2) },
+);
+
+// How long after Redis comes back an instance spreads its sockets'
+// `resync`s over (see ResyncEvent), so their refetches and presence
+// snapshots don't all land on the database at once. A reference so tests
+// can shorten it.
+export const ResyncSpread = Context.Reference<Duration.Duration>(
+  "chat-platform/Realtime/ResyncSpread",
+  { defaultValue: () => Duration.seconds(10) },
 );
 
 // The most ids one `feed_head` carries; older ones in a burst are dropped,
@@ -1266,6 +1283,42 @@ export const RealtimeConnectionsLive = Layer.effect(
           { concurrency: "unbounded", discard: true },
         );
       });
+
+    // Redis back after an outage (issue #832; see ResyncEvent): every
+    // socket here missed whatever other instances published meanwhile.
+    // Each user gets a `resync` and a fresh presence snapshot at a random
+    // moment within `ResyncSpread`.
+    const resyncSpread = yield* ResyncSpread;
+    const resyncUser = (userId: number) =>
+      Effect.gen(function* () {
+        const writers = byUser.get(userId);
+        if (!writers) return;
+        yield* writeAll(writers, JSON.stringify({ type: "resync" }), {
+          userId,
+        });
+        const online = yield* onlineContactIds(userId);
+        const snapshot: PresenceSnapshotEvent = {
+          type: "presence_snapshot",
+          userIds: [userId, ...online],
+        };
+        yield* writeAll(byUser.get(userId) ?? [], JSON.stringify(snapshot), {
+          userId,
+        });
+      });
+    yield* pubsub.onReconnect(
+      Effect.suspend(() => {
+        const spreadMs = Duration.toMillis(resyncSpread);
+        return Effect.forEach(
+          [...byUser.keys()],
+          (userId) =>
+            Effect.sleep(Duration.millis(Math.random() * spreadMs)).pipe(
+              Effect.andThen(resyncUser(userId)),
+              Effect.ignore,
+            ),
+          { concurrency: "unbounded", discard: true },
+        );
+      }),
+    );
 
     return {
       register,
