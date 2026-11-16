@@ -424,6 +424,21 @@ async function runWorker(config: Config, userIds: number[]) {
       }
     };
 
+    // Mirrors refetchListsSoon in web/src/lib/chatSync.ts.
+    let chatsRefetchedAt = -Infinity;
+    let chatsRefetchTimer: ReturnType<typeof setTimeout> | undefined;
+    const refetchChatsCoalesced = () => {
+      if (chatsRefetchTimer !== undefined) return;
+      const run = () => {
+        chatsRefetchTimer = undefined;
+        chatsRefetchedAt = Date.now();
+        refetch("chats", loadChats);
+      };
+      const wait = chatsRefetchedAt + 2_000 - Date.now();
+      if (wait <= 0) run();
+      else chatsRefetchTimer = setTimeout(run, wait);
+    };
+
     const loadChats = async () => {
       const page = await call("GET /chats", "GET", "/chats");
       if (page?.chats) chatIds = page.chats.map((c) => c.id);
@@ -566,11 +581,16 @@ async function runWorker(config: Config, userIds: number[]) {
             });
             return;
           }
-          // Not in view: the list (if mounted) and the badge (always) refetch.
-          refetch("unread", () =>
-            call("GET /chats/unread-count", "GET", "/chats/unread-count"),
-          );
-          if (screen === "chats") refetch("chats", loadChats);
+          // Not in view (issue #834): someone else's message in a listed
+          // chat is counted into the badge locally; only a chat the list
+          // doesn't have refetches the total. The list, when on screen,
+          // refetches for the preview at most once per 2s.
+          if (event.senderId !== id && !chatIds.includes(event.chatId ?? -1)) {
+            refetch("unread", () =>
+              call("GET /chats/unread-count", "GET", "/chats/unread-count"),
+            );
+          }
+          if (screen === "chats") refetchChatsCoalesced();
           return;
         }
         if (event.change === "read") return; // patched in place / own read
