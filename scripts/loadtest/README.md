@@ -145,10 +145,11 @@ The two k6 scripts above hammer endpoints; they don't behave like users.
 `/ws` socket, runs a Poisson mix of chat/feed actions (per-minute rates in
 `DEFAULT_ACTION_RATES_PER_MIN`), and **reacts to pushed events the way the
 web client does** (`realtimeSocket.ts`/`chatSync.ts`/`postSync.ts`: a new
-post fetches the feed's newest page, a message to a chat not on screen
-refetches the badge and list, every socket open self-heals...). At scale those
-event-triggered requests are most of the load. Findings from the first runs
-are in [`sim/RESULTS.md`](sim/RESULTS.md).
+message in the open conversation fetches it and marks it read, a feed viewer
+sometimes taps the "New posts" pill, every socket open self-heals...). At
+scale those event-triggered requests were most of the load. Findings from
+the first runs, and a re-run after fixing them, are in
+[`sim/RESULTS.md`](sim/RESULTS.md).
 
 ```bash
 # Throwaway Postgres (with pg_stat_statements) + Redis
