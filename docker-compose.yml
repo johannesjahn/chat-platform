@@ -187,8 +187,9 @@ services:
       garage:
         condition: service_healthy
     # Readiness (see src/Health.ts's `/ready`), not just liveness — confirms
-    # the app can actually reach `db`/`redis` before compose reports it
-    # healthy, matching the Dockerfile's own (liveness-only) HEALTHCHECK.
+    # the app can actually reach `db` before compose reports it healthy
+    # (Redis it can serve without, degraded — issue #832), matching the
+    # Dockerfile's own (liveness-only) HEALTHCHECK.
     healthcheck:
       test:
         [

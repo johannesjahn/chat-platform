@@ -39,7 +39,7 @@ test("GET /health always reports ok, with no dependency checks", async () => {
   );
 });
 
-test("GET /ready reports ok once the DB and PubSub are reachable", async () => {
+test("GET /ready reports ok once the DB is reachable", async () => {
   await run(
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
@@ -60,12 +60,14 @@ test("GET /ready reports 503 when the DB is unreachable", async () => {
   );
 });
 
-test("GET /ready reports 503 when PubSub is unreachable", async () => {
+// Issue #832: the app serves without Redis (see Health.ts), and an outage
+// hits every pod at once, so it must not take them all out of rotation.
+test("GET /ready stays ok when Redis is unreachable", async () => {
   await runWithBrokenPubSub(
     Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
       const response = yield* client.get("http://localhost/ready");
-      expect(response.status).toBe(503);
+      expect(response.status).toBe(200);
     }),
   );
 });

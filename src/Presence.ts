@@ -1,5 +1,5 @@
-import { RedisClient } from "bun";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
+import { redisFallback, supervisedRedis } from "./redisConnection.ts";
 
 // Tracks how many live `/ws` connections each user has *across every app
 // instance* — not just the local one handling a given connect/disconnect.
@@ -203,10 +203,57 @@ end
 return offline
 `;
 
+// KEYS: counts, this instance's shares. ARGV: field TTL, then userId, n
+// pairs — every user this instance holds, with its local connection count.
+// Makes the instance's shares exactly that, moving the global counts by the
+// difference, and returns the transitions it caused as userId, online
+// (1/0) pairs. What puts presence right after Redis was unreachable (issue
+// #832) — connects and disconnects that failed meanwhile never reached it —
+// or after this instance was reaped while alive (its shares are gone, so
+// all of them come back), or after Redis restarted empty.
+const RESYNC_SCRIPT = `
+local want = {}
+for i = 2, #ARGV, 2 do want[ARGV[i]] = tonumber(ARGV[i + 1]) end
+local have = {}
+local held = redis.call("HGETALL", KEYS[2])
+for i = 1, #held, 2 do have[held[i]] = tonumber(held[i + 1]) end
+local changes = {}
+local function adjust(user, delta)
+  if delta == 0 then return end
+  local before = tonumber(redis.call("HGET", KEYS[1], user) or "0")
+  local after = redis.call("HINCRBY", KEYS[1], user, delta)
+  if after <= 0 then
+    redis.call("HDEL", KEYS[1], user)
+  else
+    redis.call("HEXPIRE", KEYS[1], ARGV[1], "FIELDS", 1, user)
+  end
+  if before <= 0 and after > 0 then
+    table.insert(changes, user)
+    table.insert(changes, 1)
+  elseif before > 0 and after <= 0 then
+    table.insert(changes, user)
+    table.insert(changes, 0)
+  end
+end
+for user, n in pairs(have) do
+  if not want[user] then
+    adjust(user, -n)
+    redis.call("HDEL", KEYS[2], user)
+  end
+end
+for user, n in pairs(want) do
+  adjust(user, n - (have[user] or 0))
+  redis.call("HSET", KEYS[2], user, n)
+end
+return changes
+`;
+
 export const RedisPresenceStoreLive = Layer.effect(
   PresenceStore,
   Effect.gen(function* () {
-    const redis = new RedisClient(process.env.REDIS_URL);
+    const supervised = supervisedRedis("presence");
+    yield* Effect.promise(() => supervised.ready);
+    const redis = supervised.client;
     const heartbeat = yield* PresenceHeartbeat;
     const instanceId = crypto.randomUUID();
     const sharesKey = `${INSTANCE_KEY_PREFIX}${instanceId}`;
@@ -219,16 +266,19 @@ export const RedisPresenceStoreLive = Layer.effect(
     // previously meant a Redis blip silently degraded presence with nothing
     // surfacing it. Logging here at least leaves a trail.
     const logFallback = (operation: string, error: unknown) =>
-      Effect.logWarning(
-        "PresenceStore: Redis operation failed, presence update suppressed",
-      ).pipe(Effect.annotateLogs({ operation, error: String(error) }));
+      redisFallback(supervised, "presence", operation, error);
 
     // This instance's own view of which users it's currently holding at
     // least one live `/ws` connection for — separate from (but analogous
-    // to) RealtimeConnections' local `byUser` map (see Realtime.ts). The
-    // heartbeat refreshes their fields, and re-registers them if this
-    // instance was reaped.
+    // to) RealtimeConnections' local `byUser` map (see Realtime.ts). Kept
+    // whether or not Redis took the change, since it's what `resync` puts
+    // back. The heartbeat refreshes their fields.
     const localCounts = new Map<number, number>();
+    const countLocally = (userId: number, delta: number) => {
+      const next = (localCounts.get(userId) ?? 0) + delta;
+      if (next > 0) localCounts.set(userId, next);
+      else localCounts.delete(userId);
+    };
 
     const listeners: Array<
       (changes: ReadonlyArray<PresenceChange>) => Effect.Effect<void>
@@ -274,15 +324,13 @@ export const RedisPresenceStoreLive = Layer.effect(
     // claim a transition happened (suppressing a presence broadcast) rather
     // than crash connection setup or report a wrong transition.
     const connect: PresenceStore["Service"]["connect"] = (userId) =>
-      evalScript(
-        CONNECT_SCRIPT,
-        [KEY, sharesKey],
-        [userId, 1, FIELD_TTL_SECONDS],
-      ).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            localCounts.set(userId, (localCounts.get(userId) ?? 0) + 1);
-          }),
+      Effect.sync(() => countLocally(userId, 1)).pipe(
+        Effect.andThen(
+          evalScript(
+            CONNECT_SCRIPT,
+            [KEY, sharesKey],
+            [userId, 1, FIELD_TTL_SECONDS],
+          ),
         ),
         Effect.map((count) => Number(count) === 1),
         Effect.catch((error) =>
@@ -291,13 +339,9 @@ export const RedisPresenceStoreLive = Layer.effect(
       );
 
     const disconnect: PresenceStore["Service"]["disconnect"] = (userId) =>
-      evalScript(DISCONNECT_SCRIPT, [KEY, sharesKey], [userId]).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            const next = (localCounts.get(userId) ?? 1) - 1;
-            if (next > 0) localCounts.set(userId, next);
-            else localCounts.delete(userId);
-          }),
+      Effect.sync(() => countLocally(userId, -1)).pipe(
+        Effect.andThen(
+          evalScript(DISCONNECT_SCRIPT, [KEY, sharesKey], [userId]),
         ),
         // No share held (this instance was reaped): not a transition it can
         // vouch for — the reaper already reported it.
@@ -335,24 +379,29 @@ export const RedisPresenceStoreLive = Layer.effect(
         Effect.catch((error) => logFallback("heartbeat", error)),
       );
 
-    // Taken for dead and reaped while still alive (a long pause): put this
-    // instance's connections back, and tell contacts of the users the
-    // reaper had wrongly reported offline.
-    const restore = Effect.suspend(() =>
-      Effect.forEach([...localCounts], ([userId, n]) =>
-        evalScript(
-          CONNECT_SCRIPT,
-          [KEY, sharesKey],
-          [userId, n, FIELD_TTL_SECONDS],
-        ).pipe(
-          Effect.map((count): PresenceChange[] =>
-            Number(count) === n ? [{ userId, online: true }] : [],
-          ),
-          Effect.catch((error) =>
-            logFallback("restore", error).pipe(Effect.as([])),
-          ),
-        ),
-      ).pipe(Effect.flatMap((changes) => emit(changes.flat()))),
+    // Makes this instance's shares match `localCounts` and tells contacts
+    // about every transition that caused (see RESYNC_SCRIPT): after being
+    // reaped while alive (a long pause), and whenever Redis comes back.
+    const resync = Effect.suspend(() =>
+      evalScript(
+        RESYNC_SCRIPT,
+        [KEY, sharesKey],
+        [FIELD_TTL_SECONDS, ...[...localCounts].flat()],
+      ),
+    ).pipe(
+      Effect.map((result) => {
+        const flat = result as Array<string | number>;
+        const changes: PresenceChange[] = [];
+        for (let i = 0; i < flat.length; i += 2) {
+          changes.push({
+            userId: Number(flat[i]),
+            online: Number(flat[i + 1]) === 1,
+          });
+        }
+        return changes;
+      }),
+      Effect.flatMap(emit),
+      Effect.catch((error) => logFallback("resync", error)),
     );
 
     const reap = evalScript(
@@ -382,7 +431,7 @@ export const RedisPresenceStoreLive = Layer.effect(
           logFallback("register", error).pipe(Effect.as(false)),
         ),
       );
-      if (wasReaped) yield* restore;
+      if (wasReaped) yield* resync;
       yield* Effect.forEach([...localCounts.keys()], refreshTtl, {
         concurrency: "unbounded",
         discard: true,
@@ -392,6 +441,14 @@ export const RedisPresenceStoreLive = Layer.effect(
     yield* Effect.forkScoped(
       Effect.suspend(() => beat).pipe(
         Effect.repeat(Schedule.spaced(heartbeat.interval)),
+      ),
+    );
+    // Whenever Redis is reachable again: re-register (the reaper may have
+    // taken this instance for dead meanwhile) and resync.
+    supervised.onConnect(
+      register.pipe(
+        Effect.catch((error) => logFallback("register", error)),
+        Effect.andThen(resync),
       ),
     );
 

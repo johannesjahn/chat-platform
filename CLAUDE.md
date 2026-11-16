@@ -769,6 +769,42 @@ open) underpins all three; don't remove it. Request counts are pinned by
 `web/e2e/chat-request-fanout.spec.ts`, `own-writes.spec.ts` and
 `stale-time.spec.ts`.
 
+## Redis outages
+
+Redis is a single instance (rate limits, `/ws` tickets, presence, the user
+directory, cross-instance events), and the app keeps serving without it
+(issue #832) — degraded, then self-correcting once it's back. Before this, a
+Redis blip hung every request (Bun's client queues commands while it
+reconnects) and, past ~11s, failed them for good until the pod restarted.
+Load-bearing:
+
+- **Every Redis client comes from `supervisedRedis`**
+  ([`src/redisConnection.ts`](src/redisConnection.ts)): offline queue off
+  (commands fail at once while down), reconnects forever after Bun gives
+  up, and `onConnect` listeners to put state right. A `new RedisClient(...)`
+  anywhere else brings both failure modes back.
+- **Each component falls back to instance-local state**, through
+  `redisFallback` (counted in `redis_fallbacks_total`, logged only when the
+  connection looked up — an outage logs once per client, not per request):
+  rate limits count per pod; `/ws` tickets become HMAC-signed
+  (`f1.` prefix, key derived from `JWT_SECRET`) so any pod can redeem one,
+  single-use per pod while down; a publish is delivered to the publishing
+  pod's own subscribers; presence keeps `localCounts` as the truth; the
+  directory's `locate` falls back to the shared channel.
+- **Recovery, on every connect:** PubSub resubscribes every channel, then
+  runs `onReconnect` listeners — the auth cache drops (#833), and every
+  local socket gets a `resync` event (the client's reconnect self-heal) and
+  a fresh `presence_snapshot`, spread over `ResyncSpread`. Presence resyncs
+  its whole share (`RESYNC_SCRIPT`); the directory re-asserts its claims.
+- **`/ready` checks only the database.** An outage hits every pod at once;
+  failing readiness on it would take them all out of rotation.
+  `redis_connection_up` (and the chart's `BackendRedisUnreachable` alert)
+  report it instead.
+
+[`src/RedisOutage.integration.test.ts`](src/RedisOutage.integration.test.ts)
+cuts a real Redis through a TCP proxy; `src/redisConnection.test.ts` boots
+without one.
+
 ## Notifications
 
 In-app notifications (issue #317) — the header bell and the `/notifications`

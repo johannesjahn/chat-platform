@@ -1,7 +1,11 @@
-import { RedisClient } from "bun";
 import { Context, Effect, Layer, Metric } from "effect";
 import { TooManyRequests } from "./Api.ts";
 import { rateLimitRejectionsTotal } from "./Metrics.ts";
+import {
+  redisFallback,
+  type SupervisedRedis,
+  supervisedRedis,
+} from "./redisConnection.ts";
 
 // Result of attempting to consume one unit from a fixed-window rate-limit
 // bucket identified by some key (an IP, an account, ...).
@@ -133,33 +137,75 @@ end
 return 0
 `;
 
-export const RedisRateLimiterLive = Layer.sync(RateLimiter, () => {
-  const client = new RedisClient(process.env.REDIS_URL);
+// While Redis can't be reached (issue #832), each instance counts on its
+// own, with the in-memory store above: a limit is then enforced per
+// instance rather than cluster-wide — up to N× as loose with N replicas, for
+// as long as the outage lasts — rather than failing (or, as before, hanging)
+// every request that's rate-limited, which through the global limit is
+// every request.
+export const makeRedisRateLimiter = (
+  redis: SupervisedRedis,
+): RateLimiter["Service"] => {
+  const { client } = redis;
+  const local = makeInMemoryRateLimiter().service;
+  const fallback = <A>(
+    operation: string,
+    viaRedis: () => Promise<A>,
+    locally: Effect.Effect<A>,
+  ): Effect.Effect<A> =>
+    Effect.tryPromise(viaRedis).pipe(
+      Effect.catch((error) =>
+        redisFallback(redis, "rate-limiter", operation, error).pipe(
+          Effect.andThen(locally),
+        ),
+      ),
+    );
 
   return {
     consume: (key, limit, windowSeconds) =>
-      Effect.promise(async () => {
-        const [count, ttl] = (await client.send("EVAL", [
-          CONSUME_SCRIPT,
-          "1",
-          `ratelimit:${key}`,
-          String(windowSeconds),
-        ])) as [number, number];
-        return {
-          allowed: count <= limit,
-          retryAfterSeconds: ttl > 0 ? ttl : windowSeconds,
-        };
-      }),
+      fallback(
+        "consume",
+        async () => {
+          const [count, ttl] = (await client.send("EVAL", [
+            CONSUME_SCRIPT,
+            "1",
+            `ratelimit:${key}`,
+            String(windowSeconds),
+          ])) as [number, number];
+          return {
+            allowed: count <= limit,
+            retryAfterSeconds: ttl > 0 ? ttl : windowSeconds,
+          };
+        },
+        local.consume(key, limit, windowSeconds),
+      ),
     refund: (key) =>
-      Effect.promise(async () => {
-        await client.send("EVAL", [REFUND_SCRIPT, "1", `ratelimit:${key}`]);
-      }),
+      fallback(
+        "refund",
+        async () => {
+          await client.send("EVAL", [REFUND_SCRIPT, "1", `ratelimit:${key}`]);
+        },
+        local.refund(key),
+      ),
     reset: (key) =>
-      Effect.promise(async () => {
-        await client.del(`ratelimit:${key}`);
-      }),
+      fallback(
+        "reset",
+        async () => {
+          await client.del(`ratelimit:${key}`);
+        },
+        local.reset(key),
+      ),
   };
-});
+};
+
+export const RedisRateLimiterLive = Layer.effect(
+  RateLimiter,
+  Effect.gen(function* () {
+    const redis = supervisedRedis("rate-limiter");
+    yield* Effect.promise(() => redis.ready);
+    return makeRedisRateLimiter(redis);
+  }),
+);
 
 // `REDIS_URL` unset — the default for local `bun run dev`/`bun test` — falls
 // back to the in-memory implementation above, same rationale as PubSubLive.
