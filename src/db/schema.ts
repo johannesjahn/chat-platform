@@ -1148,3 +1148,15 @@ export const notifications = pgTable(
 
 export type DbNotification = typeof notifications.$inferSelect;
 export type NewDbNotification = typeof notifications.$inferInsert;
+
+// One row per background job that must run once per interval across every
+// replica, not once per replica (issue #831; see src/scheduledJobs.ts). A
+// replica runs a job only if it moves `last_run_at` forward itself, in one
+// atomic upsert — a lease that needs no session lock, so it also works
+// behind a transaction-mode PgBouncer. `result` lets the replica that ran a
+// job share its output (the active-users counts) with the others.
+export const scheduledJobs = pgTable("scheduled_jobs", {
+  name: text("name").primaryKey(),
+  lastRunAt: timestamp("last_run_at", { mode: "date" }).notNull(),
+  result: jsonb("result"),
+});

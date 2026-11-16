@@ -209,6 +209,20 @@ app-side one, because mid-rollout old replicas insert users without the column �
 see the comment on it in [`src/db/schema.ts`](src/db/schema.ts). Rows predating
 the migration all read as having signed up when it ran.
 
+## Background jobs
+
+The hourly jobs — refresh-token cleanup, orphaned-attachment cleanup and
+the `active_users` gauges — run **once per interval across all replicas**,
+not once per replica (issue #831; [`src/scheduledJobs.ts`](src/scheduledJobs.ts)).
+Each replica ticks every few minutes, but runs a job only if it _claims_ it:
+one atomic upsert on `scheduled_jobs` (migration `0039`) that moves
+`last_run_at` forward only when the interval has passed. It holds no session
+lock, so it also works behind a transaction-mode PgBouncer. The
+`active_users` winner stores its counts in `result` and every replica sets its
+gauge from them — Prometheus scrapes each replica, so one that skipped the
+scan must still report the number. A new periodic job goes through
+`forkTicker(runIfClaimed(name, every, job))`.
+
 ## Games (arcade)
 
 Multiplayer games live under `/games` in the frontend, backed by the `games`

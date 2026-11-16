@@ -1,7 +1,8 @@
 import { lt } from "drizzle-orm";
-import { Duration, Effect, Layer, Schedule } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import { Db, dbQuery } from "./Db.ts";
 import { refreshTokens } from "./db/schema.ts";
+import { forkTicker, runIfClaimed } from "./scheduledJobs.ts";
 
 // An expired refresh token is already rejected by Jwt.verifyRefreshToken's
 // own `exp` check before UsersHandler ever consults the store — so a lapsed
@@ -18,13 +19,15 @@ export const cleanupExpiredRefreshTokens: Effect.Effect<void, never, Db> =
 
 const CLEANUP_INTERVAL = Duration.hours(1);
 
-// Runs cleanupExpiredRefreshTokens once at startup and then every
-// CLEANUP_INTERVAL for as long as the layer stays built, as a background
-// fiber tied to the layer's scope (interrupted on shutdown).
+// Runs cleanupExpiredRefreshTokens once every CLEANUP_INTERVAL across all
+// replicas (issue #831; see scheduledJobs.ts), as a background fiber tied to
+// the layer's scope (interrupted on shutdown).
 export const RefreshTokenCleanupLive = Layer.effectDiscard(
-  Effect.forkScoped(
-    cleanupExpiredRefreshTokens.pipe(
-      Effect.repeat(Schedule.spaced(CLEANUP_INTERVAL)),
+  forkTicker(
+    runIfClaimed(
+      "refresh-token-cleanup",
+      CLEANUP_INTERVAL,
+      cleanupExpiredRefreshTokens,
     ),
   ),
 );
