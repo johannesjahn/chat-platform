@@ -1,11 +1,21 @@
-import { Context, Duration, Effect, Layer, Metric, Schedule } from "effect";
 import {
+  Config,
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Metric,
+  Schedule,
+} from "effect";
+import {
+  realtimeUserEnvelopesTotal,
   websocketConnectionsActive,
   websocketConnectionsTotal,
 } from "./Metrics.ts";
 import { PresenceStore } from "./Presence.ts";
 import { PresenceAudience } from "./PresenceAudience.ts";
 import { PubSub } from "./PubSub.ts";
+import { forkClaimRefresher, UserLocator } from "./UserLocator.ts";
 
 // Pushed to every participant of a chat whenever something in it changes
 // (new message, read receipt, rename, participants added/removed). `version`
@@ -507,6 +517,15 @@ export const gameHubRoom = (game: string): string => `game-hub:${game}`;
 // already carries its own targeting (see Envelope).
 const CHANNEL = "chat-platform:realtime";
 
+// Each instance also listens on its own channel, for events addressed to
+// users it holds (issue #832; see `routeToUsers`).
+const INSTANCE_CHANNEL_PREFIX = "chat-platform:realtime:instance:";
+
+// A routed user event's copy on the shared channel, for instances that
+// predate routing (mid-rollout) and only listen there. It starts with this
+// so current instances can skip it without parsing it.
+const ROUTED_COPY_PREFIX = '{"routed":true,';
+
 type Envelope =
   | {
       readonly scope: "users";
@@ -553,6 +572,15 @@ export const RealtimeConnectionsLive = Layer.effect(
   RealtimeConnections,
   Effect.gen(function* () {
     const pubsub = yield* PubSub;
+    const locator = yield* UserLocator;
+    const instanceId = crypto.randomUUID();
+    const instanceChannel = `${INSTANCE_CHANNEL_PREFIX}${instanceId}`;
+    // Whether routed user events are also copied to the shared channel, for
+    // instances that predate routing. On by default so a rolling deploy
+    // loses nothing; turn off once every instance runs this code.
+    const legacyBroadcast = yield* Config.Boolean(
+      "REALTIME_LEGACY_BROADCAST",
+    ).pipe(Config.withDefault(true));
     const presenceStore = yield* PresenceStore;
     const audience = yield* PresenceAudience;
     const byUser = new Map<number, Set<Writer>>();
@@ -633,17 +661,35 @@ export const RealtimeConnectionsLive = Layer.effect(
     // `announcePost` and the ticker below), newest last.
     const pendingFeedPosts: number[] = [];
 
-    const deliverLocally = (message: string) =>
+    const countUserEnvelope = (
+      channel: "instance" | "shared",
+      outcome: "delivered" | "no_local_recipients" | "skipped_routed_copy",
+    ) =>
+      Metric.update(
+        Metric.withAttributes(realtimeUserEnvelopesTotal, { channel, outcome }),
+        1,
+      );
+
+    const deliverLocally = (
+      message: string,
+      channel: "instance" | "shared" = "shared",
+    ) =>
       Effect.gen(function* () {
         const envelope = JSON.parse(message) as Envelope;
 
         if (envelope.scope === "disconnect") {
           const writers = byUser.get(envelope.userId);
+          yield* countUserEnvelope(
+            channel,
+            writers ? "delivered" : "no_local_recipients",
+          );
           if (!writers) return;
           // Out of delivery right away rather than once the close lands, so
           // nothing more reaches a revoked socket in between. The socket's
-          // own `unregister` still runs when its read loop ends.
+          // own `unregister` still runs when its read loop ends — but finds
+          // the user already gone, so the claim is released here.
           byUser.delete(envelope.userId);
+          yield* locator.release(envelope.userId, instanceId);
           for (const write of writers) {
             const close = closers.get(write);
             if (!close) continue;
@@ -707,16 +753,30 @@ export const RealtimeConnectionsLive = Layer.effect(
         }
 
         const seen = new Set<number>();
+        let delivered = false;
         for (const userId of envelope.userIds) {
           if (seen.has(userId)) continue;
           seen.add(userId);
           const writers = byUser.get(userId);
           if (!writers) continue;
+          delivered = true;
           yield* writeAll(writers, payload, { userId });
         }
+        yield* countUserEnvelope(
+          channel,
+          delivered ? "delivered" : "no_local_recipients",
+        );
       });
 
-    yield* pubsub.subscribe(CHANNEL, deliverLocally);
+    yield* pubsub.subscribe(CHANNEL, (message) =>
+      message.startsWith(ROUTED_COPY_PREFIX)
+        ? countUserEnvelope("shared", "skipped_routed_copy")
+        : deliverLocally(message, "shared"),
+    );
+    yield* pubsub.subscribe(instanceChannel, (message) =>
+      deliverLocally(message, "instance"),
+    );
+    yield* forkClaimRefresher(locator, instanceId, () => [...byUser.keys()]);
 
     // Flushes `pendingFeedPosts` to this instance's feed viewers, at most
     // once per interval (see `FeedHeadEvent`). Runs on every instance, each
@@ -780,19 +840,57 @@ export const RealtimeConnectionsLive = Layer.effect(
         "RealtimeConnections: failed to publish realtime event, delivery dropped",
       ).pipe(Effect.annotateLogs({ envelope, error: String(error) }));
 
+    // Publishes a user-addressed envelope only to the instances holding
+    // those users (issue #832), each copy carrying just that instance's
+    // recipients — an offline user costs no publish at all. If the
+    // directory can't be read, it goes on the shared channel as it always
+    // did, so a Redis hiccup degrades to the old cost, not to lost events.
+    // With `legacyBroadcast`, a marked copy also goes on the shared channel
+    // for instances that predate routing (current ones skip it unparsed).
+    const routeToUsers = (
+      userIds: Iterable<number>,
+      envelopeFor: (ids: ReadonlyArray<number>) => Envelope,
+    ) =>
+      Effect.gen(function* () {
+        const ids = [...new Set(userIds)];
+        if (ids.length === 0) return;
+        const publish = (channel: string, envelope: Envelope, body: string) =>
+          pubsub
+            .publish(channel, body)
+            .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
+        const located = yield* locator.locate(ids);
+        if (located === null) {
+          const envelope = envelopeFor(ids);
+          yield* publish(CHANNEL, envelope, JSON.stringify(envelope));
+          return;
+        }
+        for (const [instance, instanceIds] of located) {
+          const envelope = envelopeFor(instanceIds);
+          yield* publish(
+            `${INSTANCE_CHANNEL_PREFIX}${instance}`,
+            envelope,
+            JSON.stringify(envelope),
+          );
+        }
+        if (legacyBroadcast) {
+          const envelope = envelopeFor(ids);
+          yield* publish(
+            CHANNEL,
+            envelope,
+            `${ROUTED_COPY_PREFIX}${JSON.stringify(envelope).slice(1)}`,
+          );
+        }
+      });
+
     const notifyUsers: RealtimeConnections["Service"]["notifyUsers"] = (
       userIds,
       event,
-    ) => {
-      const envelope = {
+    ) =>
+      routeToUsers(userIds, (ids) => ({
         scope: "users",
-        userIds: [...userIds],
+        userIds: ids,
         event,
-      } satisfies Envelope;
-      return pubsub
-        .publish(CHANNEL, JSON.stringify(envelope))
-        .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
-    };
+      }));
 
     const broadcastAll: RealtimeConnections["Service"]["broadcastAll"] = (
       event,
@@ -805,12 +903,7 @@ export const RealtimeConnectionsLive = Layer.effect(
 
     const disconnectUser: RealtimeConnections["Service"]["disconnectUser"] = (
       userId,
-    ) => {
-      const envelope = { scope: "disconnect", userId } satisfies Envelope;
-      return pubsub
-        .publish(CHANNEL, JSON.stringify(envelope))
-        .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
-    };
+    ) => routeToUsers([userId], () => ({ scope: "disconnect", userId }));
 
     const notifyContacts: RealtimeConnections["Service"]["notifyContacts"] = (
       userId,
@@ -962,6 +1055,9 @@ export const RealtimeConnectionsLive = Layer.effect(
     ) =>
       Effect.gen(function* () {
         const set = byUser.get(userId) ?? new Set();
+        // This instance's first socket for the user: tell the directory, so
+        // events for them are routed here (issue #832).
+        if (set.size === 0) yield* locator.claim(userId, instanceId);
         set.add(write);
         byUser.set(userId, set);
         if (close) closers.set(write, close);
@@ -996,7 +1092,10 @@ export const RealtimeConnectionsLive = Layer.effect(
           const current = byUser.get(userId);
           if (current) {
             current.delete(write);
-            if (current.size === 0) byUser.delete(userId);
+            if (current.size === 0) {
+              byUser.delete(userId);
+              Effect.runFork(locator.release(userId, instanceId));
+            }
           }
           closers.delete(write);
           // Sweep this connection out of every post and named room it had

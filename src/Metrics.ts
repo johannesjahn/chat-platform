@@ -146,6 +146,19 @@ export const tokenVersionCacheLookupsTotal = Metric.counter(
   },
 );
 
+// Envelopes for specific users that reached this instance, labeled by
+// `channel` ("instance": routed to this instance; "shared": the old
+// everyone-gets-everything channel) and `outcome` ("delivered", "no_local_recipients",
+// "skipped_routed_copy"). `no_local_recipients` on the shared channel is the
+// cost issue #832 removes: parsing other instances' events.
+export const realtimeUserEnvelopesTotal = Metric.counter(
+  "realtime_user_envelopes_received_total",
+  {
+    description:
+      "User-addressed realtime envelopes received, by channel and outcome.",
+  },
+);
+
 export const rateLimitRejectionsTotal = Metric.counter(
   "rate_limit_rejections_total",
   { description: "Requests rejected by a rate limiter, labeled by limiter." },

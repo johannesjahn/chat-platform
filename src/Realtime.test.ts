@@ -1,8 +1,13 @@
 import { expect, test } from "bun:test";
-import { Duration, Effect, Layer } from "effect";
+import { ConfigProvider, Duration, Effect, Layer } from "effect";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { staticPresenceAudience } from "./PresenceAudience.ts";
-import { InMemoryPubSubLive } from "./PubSub.ts";
+import { InMemoryPubSubLive, PubSub } from "./PubSub.ts";
+import {
+  InMemoryUserLocatorLive,
+  makeInMemoryUserLocator,
+  UserLocator,
+} from "./UserLocator.ts";
 import {
   FEED_ROOM,
   FeedHeadInterval,
@@ -26,6 +31,7 @@ import { makeIncomingHandler } from "./RealtimeSocket.ts";
 // a chat with no one (see PresenceAudience.ts).
 const FEED_HEAD_TEST_INTERVAL_MS = 20;
 const TestRealtimeLive = RealtimeConnectionsLive.pipe(
+  Layer.provide(InMemoryUserLocatorLive),
   Layer.provide(InMemoryPubSubLive),
   Layer.provide(InMemoryPresenceStoreLive),
   Layer.provide(staticPresenceAudience([[1, 2]])),
@@ -392,6 +398,7 @@ test("introduceContacts tells online newcomers and members about each other", as
     }).pipe(
       Effect.provide(
         RealtimeConnectionsLive.pipe(
+          Layer.provide(InMemoryUserLocatorLive),
           Layer.provide(InMemoryPubSubLive),
           Layer.provide(InMemoryPresenceStoreLive),
           Layer.provide(staticPresenceAudience(pairs)),
@@ -1112,6 +1119,148 @@ test("a failing close doesn't stop the user's other connections from closing", a
 
       yield* connections.disconnectUser(1);
 
+      expect(tab.state.closed).toBe(1);
+    }),
+  );
+});
+
+// Issue #832: two instances sharing one PubSub (spied on) and one directory,
+// as two replicas share Redis.
+const twoInstances = (config: Layer.Layer<never> = Layer.empty) =>
+  Effect.gen(function* () {
+    const base = yield* Effect.service(PubSub).pipe(
+      Effect.provide(InMemoryPubSubLive),
+    );
+    const published: Array<{ channel: string; message: string }> = [];
+    const spy = {
+      ...base,
+      publish: (channel: string, message: string) =>
+        Effect.sync(() => {
+          published.push({ channel, message });
+        }).pipe(Effect.andThen(base.publish(channel, message))),
+    };
+    const locator = makeInMemoryUserLocator();
+    const instance = Effect.service(RealtimeConnections).pipe(
+      Effect.provide(
+        RealtimeConnectionsLive.pipe(
+          Layer.provide(Layer.succeed(PubSub, spy)),
+          Layer.provide(Layer.succeed(UserLocator, locator)),
+          Layer.provide(InMemoryPresenceStoreLive),
+          Layer.provide(staticPresenceAudience([])),
+          Layer.provide(config),
+        ),
+      ),
+    );
+    return { a: yield* instance, b: yield* instance, published };
+  });
+
+const chatEvent = { type: "chat_updated", chatId: 9, version: 1 } as const;
+
+test("a user event is published only to the instances holding its recipients, each with just its own (issue #832)", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const { a, b, published } = yield* twoInstances();
+      const onA = recordingWriter();
+      const onB = recordingWriter();
+      yield* a.register(1, onA.write);
+      yield* b.register(2, onB.write);
+      onA.received.length = 0;
+      onB.received.length = 0;
+      published.length = 0;
+
+      // User 3 is connected nowhere.
+      yield* b.notifyUsers([1, 2, 3], chatEvent);
+
+      expect(onA.received).toEqual([JSON.stringify(chatEvent)]);
+      expect(onB.received).toEqual([JSON.stringify(chatEvent)]);
+      const routed = published
+        .filter((p) => p.channel.startsWith("chat-platform:realtime:instance:"))
+        .map((p) => (JSON.parse(p.message) as { userIds: number[] }).userIds)
+        .sort((x, y) => x[0]! - y[0]!);
+      expect(routed).toEqual([[1], [2]]);
+      // Plus one marked copy for instances that predate routing, which the
+      // current ones skip — hence one delivery each above, not two.
+      const shared = published.filter(
+        (p) => p.channel === "chat-platform:realtime",
+      );
+      expect(shared).toHaveLength(1);
+      expect(shared[0]!.message.startsWith('{"routed":true,')).toBe(true);
+    }),
+  );
+});
+
+test("an event for users connected nowhere publishes nothing to any instance", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const { b, published } = yield* twoInstances();
+      published.length = 0;
+      yield* b.notifyUsers([41, 42], chatEvent);
+      expect(
+        published.filter((p) =>
+          p.channel.startsWith("chat-platform:realtime:instance:"),
+        ),
+      ).toEqual([]);
+    }),
+  );
+});
+
+test("REALTIME_LEGACY_BROADCAST=false drops the shared-channel copy", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const { a, b, published } = yield* twoInstances(
+        ConfigProvider.layer(
+          ConfigProvider.fromUnknown({ REALTIME_LEGACY_BROADCAST: "false" }),
+        ),
+      );
+      const onA = recordingWriter();
+      yield* a.register(1, onA.write);
+      onA.received.length = 0;
+      published.length = 0;
+      yield* b.notifyUsers([1], chatEvent);
+      expect(onA.received).toEqual([JSON.stringify(chatEvent)]);
+      expect(
+        published.filter((p) => p.channel === "chat-platform:realtime"),
+      ).toEqual([]);
+    }),
+  );
+});
+
+test("an event published the old way on the shared channel still reaches the user (mid-rollout)", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const base = yield* Effect.service(PubSub).pipe(
+        Effect.provide(InMemoryPubSubLive),
+      );
+      const connections = yield* Effect.service(RealtimeConnections).pipe(
+        Effect.provide(
+          RealtimeConnectionsLive.pipe(
+            Layer.provide(Layer.succeed(PubSub, base)),
+            Layer.provide(InMemoryUserLocatorLive),
+            Layer.provide(InMemoryPresenceStoreLive),
+            Layer.provide(staticPresenceAudience([])),
+          ),
+        ),
+      );
+      const socket = recordingWriter();
+      yield* connections.register(1, socket.write);
+      socket.received.length = 0;
+      // What an instance that predates routing publishes.
+      yield* base.publish(
+        "chat-platform:realtime",
+        JSON.stringify({ scope: "users", userIds: [1], event: chatEvent }),
+      );
+      expect(socket.received).toEqual([JSON.stringify(chatEvent)]);
+    }),
+  );
+});
+
+test("disconnectUser closes the user's sockets on the instance holding them", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const { a, b } = yield* twoInstances();
+      const tab = closableConnection();
+      yield* a.register(7, tab.write, tab.close);
+      yield* b.disconnectUser(7);
       expect(tab.state.closed).toBe(1);
     }),
   );

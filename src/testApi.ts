@@ -28,6 +28,7 @@ import { PostsHandlerLive } from "./PostsHandler.ts";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { PresenceAudienceLive } from "./PresenceAudience.ts";
 import { InMemoryPubSubLive, PubSub } from "./PubSub.ts";
+import { makeInMemoryUserLocator, UserLocator } from "./UserLocator.ts";
 import { InMemoryRateLimiterLive } from "./RateLimiter.ts";
 import { RealtimeConnectionsLive } from "./Realtime.ts";
 import { RealtimeHandlerLive } from "./RealtimeHandler.ts";
@@ -108,7 +109,7 @@ export interface TestRunOptions {
   readonly tokenVersionCacheTtl?: Duration.Duration;
 }
 
-type TestServices = HttpClient.HttpClient | Db | PubSub;
+type TestServices = HttpClient.HttpClient | Db | PubSub | UserLocator;
 
 export interface TestContext {
   // The raw web handler, for tests that build their own requests.
@@ -140,6 +141,13 @@ export const makeTestRun = (options: TestRunOptions = {}) => {
       ),
     );
     const pubSubLive = Layer.succeed(PubSub, pubSub);
+    // Shared, like the PubSub, by everything in the run — including a
+    // second RealtimeConnections a test builds to stand in for another
+    // replica (see users/testKit.ts's openSocket).
+    const userLocatorLive = Layer.succeed(
+      UserLocator,
+      makeInMemoryUserLocator(),
+    );
 
     const { handler, dispose } = HttpRouter.toWebHandler(
       Layer.mergeAll(
@@ -155,6 +163,7 @@ export const makeTestRun = (options: TestRunOptions = {}) => {
         Layer.provideMerge(ServicesLive),
         Layer.provideMerge(dbLive),
         Layer.provideMerge(pubSubLive),
+        Layer.provideMerge(userLocatorLive),
         Layer.provide(BunHttpServer.layerHttpServices),
         Layer.provide(
           options.tokenVersionCacheTtl
@@ -189,6 +198,7 @@ export const makeTestRun = (options: TestRunOptions = {}) => {
           Effect.provide(TestClientLayer),
           Effect.provide(dbLive),
           Effect.provide(pubSubLive),
+          Effect.provide(userLocatorLive),
         ),
       );
     } finally {

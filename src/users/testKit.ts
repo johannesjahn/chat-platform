@@ -7,6 +7,7 @@ import { authEventsTotal } from "../Metrics.ts";
 import { InMemoryPresenceStoreLive } from "../Presence.ts";
 import { staticPresenceAudience } from "../PresenceAudience.ts";
 import { PubSub } from "../PubSub.ts";
+import { UserLocator } from "../UserLocator.ts";
 import { RealtimeConnections, RealtimeConnectionsLive } from "../Realtime.ts";
 
 // Helpers shared by the users test files (src/users/*.test.ts, split from
@@ -67,10 +68,12 @@ export const decodeClaims = (token: string) => {
 export const openSocket = (userId: number) =>
   Effect.gen(function* () {
     const pubsub = yield* PubSub;
+    const locator = yield* UserLocator;
     const connections = yield* Effect.service(RealtimeConnections).pipe(
       Effect.provide(
         RealtimeConnectionsLive.pipe(
           Layer.provide(Layer.succeed(PubSub, pubsub)),
+          Layer.provide(Layer.succeed(UserLocator, locator)),
           Layer.provide(InMemoryPresenceStoreLive),
           Layer.provide(staticPresenceAudience([])),
         ),
