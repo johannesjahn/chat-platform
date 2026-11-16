@@ -42,6 +42,12 @@ import { mergeReactionCounts } from "./reactions";
 import { setUserStatus } from "./status";
 import { noteTyping } from "./typing";
 
+// The close code a server sends while draining for a restart (issue #836;
+// SERVER_DRAINING_CLOSE_CODE in src/Realtime.ts), and how far the
+// reconnect's self-heal refetch is spread after one.
+const SERVER_DRAINING_CLOSE_CODE = 4503;
+const SELF_HEAL_SPREAD_MS = 10_000;
+
 type RealtimeSocketEvent =
   | ChatUpdatedEvent
   | { type: "chat_deleted"; chatId: number }
@@ -148,6 +154,9 @@ export function useRealtimeSocket(enabled: boolean): void {
   useEffect(() => {
     if (meId === undefined) return;
     const myId = meId;
+    // How the previous socket ended — see the self-heal below.
+    let lastCloseCode: number | undefined;
+    let selfHealTimer: ReturnType<typeof setTimeout> | undefined;
 
     function handleOpen(socket: WebSocket) {
       // From here the queries below are kept current by events, which is
@@ -172,6 +181,25 @@ export function useRealtimeSocket(enabled: boolean): void {
       // what was missed (issue #54). `chat_updated`'s per-chat version
       // check (issue #55) still avoids redundant refetches on top of this
       // for the common case of a single missed push.
+      //
+      // After the server drained this socket for a restart (issue #836),
+      // every one of its clients is reconnecting within the same few
+      // seconds, so the refetch is spread over SELF_HEAL_SPREAD_MS rather
+      // than landing at once on the shared database.
+      clearTimeout(selfHealTimer);
+      const drained = lastCloseCode === SERVER_DRAINING_CLOSE_CODE;
+      lastCloseCode = undefined;
+      if (drained) {
+        selfHealTimer = setTimeout(
+          selfHeal,
+          Math.random() * SELF_HEAL_SPREAD_MS,
+        );
+      } else {
+        selfHeal();
+      }
+    }
+
+    function selfHeal() {
       void queryClient.invalidateQueries({ queryKey: ["chats"] });
       void queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
       void queryClient.invalidateQueries({
@@ -418,7 +446,10 @@ export function useRealtimeSocket(enabled: boolean): void {
         const socket = new WebSocket(realtimeSocketUrl(ticket));
         socket.onopen = () => events.open();
         socket.onmessage = (event) => events.message(event.data);
-        socket.onclose = () => events.close();
+        socket.onclose = (event) => {
+          lastCloseCode = event.code;
+          events.close();
+        };
         return socket;
       },
       onOpen: handleOpen,
@@ -429,6 +460,7 @@ export function useRealtimeSocket(enabled: boolean): void {
     });
 
     return () => {
+      clearTimeout(selfHealTimer);
       stop();
       noteSocketClosed();
       setRealtimeSocket(null);

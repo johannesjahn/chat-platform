@@ -74,6 +74,8 @@ spec:
                   key: {{ include "chat-platform.jwtSecretKey" . }}
             - name: TRUST_PROXY
               value: {{ .Values.backend.trustProxy | quote }}
+            - name: WS_DRAIN_SECONDS
+              value: {{ .Values.backend.wsDrainSeconds | quote }}
             {{- include "chat-platform.s3Env" . | nindent 12 }}
           # See src/Health.ts: /health is liveness-only (no dependency
           # checks), /ready additionally confirms Postgres and Redis are

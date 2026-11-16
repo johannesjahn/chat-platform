@@ -12,7 +12,7 @@ backend:
     # Build & push the repo-root Dockerfile to a registry this cluster can
     # pull from, then point this at it (e.g. ghcr.io/<you>/chat-platform).
     repository: johannesjahn/chat-platform
-    tag: "0.41.4"
+    tag: "0.41.5"
     pullPolicy: IfNotPresent
 
   replicaCount: 2
@@ -194,6 +194,12 @@ backend:
   # propagate before the server starts shutting down. Must stay well under
   # terminationGracePeriodSeconds, which bounds preStop + shutdown together.
   preStopSleepSeconds: 5
+  # After preStop, the backend closes its WebSocket connections itself,
+  # spread over this many seconds, before it stops (issue #836) — so a
+  # restart's reconnects and refetches reach the other replicas a few at a
+  # time instead of all at once. preStopSleepSeconds + wsDrainSeconds (+ a
+  # few seconds to finish shutting down) must fit terminationGracePeriodSeconds.
+  wsDrainSeconds: 15
   terminationGracePeriodSeconds: 30
 
   podAnnotations: {}

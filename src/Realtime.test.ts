@@ -9,6 +9,7 @@ import {
   UserLocator,
 } from "./UserLocator.ts";
 import {
+  SERVER_DRAINING_CLOSE_CODE,
   FEED_ROOM,
   FeedHeadInterval,
   MAX_FEED_HEAD_POST_IDS,
@@ -1022,10 +1023,12 @@ test("game_reaction relays only the fixed emoji, stamped with the sender's id an
 // for a real socket's close (see `register` in Realtime.ts).
 const closableConnection = () => {
   const { write, received } = recordingWriter();
-  const state = { closed: 0 };
-  const close = Effect.sync(() => {
-    state.closed++;
-  });
+  const state = { closed: 0, codes: [] as number[] };
+  const close = (code: number) =>
+    Effect.sync(() => {
+      state.closed++;
+      state.codes.push(code);
+    });
   return { write, received, close, state };
 };
 
@@ -1114,7 +1117,7 @@ test("a failing close doesn't stop the user's other connections from closing", a
       const connections = yield* RealtimeConnections;
       const broken = recordingWriter();
       const tab = closableConnection();
-      yield* connections.register(1, broken.write, Effect.fail("gone"));
+      yield* connections.register(1, broken.write, () => Effect.fail("gone"));
       yield* connections.register(1, tab.write, tab.close);
 
       yield* connections.disconnectUser(1);
@@ -1262,6 +1265,28 @@ test("disconnectUser closes the user's sockets on the instance holding them", as
       yield* a.register(7, tab.write, tab.close);
       yield* b.disconnectUser(7);
       expect(tab.state.closed).toBe(1);
+    }),
+  );
+});
+
+test("drain closes every connection with the draining code within the window, and flags the instance (issue #836)", async () => {
+  await run(
+    Effect.gen(function* () {
+      const connections = yield* RealtimeConnections;
+      const sockets = [1, 2, 3].map(() => closableConnection());
+      for (const [i, socket] of sockets.entries()) {
+        yield* connections.register(i + 1, socket.write, socket.close);
+      }
+      expect(yield* connections.isDraining).toBe(false);
+
+      const startedAt = Date.now();
+      yield* connections.drain(Duration.millis(100));
+
+      expect(yield* connections.isDraining).toBe(true);
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+      for (const socket of sockets) {
+        expect(socket.state.codes).toEqual([SERVER_DRAINING_CLOSE_CODE]);
+      }
     }),
   );
 });

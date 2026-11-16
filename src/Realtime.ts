@@ -322,13 +322,18 @@ export type RealtimeEvent =
 // A connected client's outbound channel — bound to one open `/ws` socket.
 type Writer = (chunk: string) => Effect.Effect<void, unknown>;
 
-// Closes one open `/ws` socket (see `disconnectUser`).
-type Closer = Effect.Effect<void, unknown>;
+// Closes one open `/ws` socket with an application close code (see
+// `disconnectUser` and `drain`).
+type Closer = (code: number, reason: string) => Effect.Effect<void, unknown>;
 
 // The application close code a socket is closed with when its user's
 // sessions were revoked (issue #651). The client reconnects as after any
 // close, by minting a new ticket — which only a still-valid session can.
 export const SESSION_REVOKED_CLOSE_CODE = 4401;
+
+// The close code for a socket closed because this instance is shutting
+// down (issue #836; see `drain`): reconnect, and you'll land elsewhere.
+export const SERVER_DRAINING_CLOSE_CODE = 4503;
 
 // Tracks which users currently have a live `/ws` connection, so:
 //  - chat mutations can notify only the participants of the affected chat
@@ -456,6 +461,16 @@ export class RealtimeConnections extends Context.Service<
       room: string,
       event: RealtimeEvent,
     ) => Effect.Effect<void>;
+    // Shutting down (issue #836): closes every connection on this instance
+    // with SERVER_DRAINING_CLOSE_CODE, each at a random moment within
+    // `window`, and resolves once all have been closed. Every client on a
+    // stopping instance used to be dropped at the same instant, and their
+    // reconnects and refetches all landed on the shared database at once —
+    // one restart slowed the whole cluster. Spread out, a restart costs
+    // what its reconnects cost, over `window`. Also flips `isDraining`.
+    readonly drain: (window: Duration.Duration) => Effect.Effect<void>;
+    // Whether `drain` has started — new `/ws` upgrades are refused then.
+    readonly isDraining: Effect.Effect<boolean>;
     // A new post: feed viewers on every instance hear about it in their
     // next coalesced `feed_head` (see `FeedHeadEvent`).
     readonly announcePost: (postId: number) => Effect.Effect<void>;
@@ -693,7 +708,7 @@ export const RealtimeConnectionsLive = Layer.effect(
           for (const write of writers) {
             const close = closers.get(write);
             if (!close) continue;
-            yield* close.pipe(
+            yield* close(SESSION_REVOKED_CLOSE_CODE, "Session revoked").pipe(
               Effect.catch((error) =>
                 Effect.logWarning(
                   "RealtimeConnections: failed to close a revoked connection",
@@ -1225,6 +1240,25 @@ export const RealtimeConnectionsLive = Layer.effect(
       ),
     );
 
+    let draining = false;
+    const isDraining = Effect.sync(() => draining);
+    const drain: RealtimeConnections["Service"]["drain"] = (window) =>
+      Effect.gen(function* () {
+        draining = true;
+        const windowMs = Duration.toMillis(window);
+        yield* Effect.forEach(
+          [...closers.values()],
+          (close) =>
+            Effect.sleep(Duration.millis(Math.random() * windowMs)).pipe(
+              Effect.andThen(
+                close(SERVER_DRAINING_CLOSE_CODE, "Server restarting"),
+              ),
+              Effect.ignore,
+            ),
+          { concurrency: "unbounded", discard: true },
+        );
+      });
+
     return {
       register,
       notifyUsers,
@@ -1245,6 +1279,8 @@ export const RealtimeConnectionsLive = Layer.effect(
       unsubscribeRoom,
       isInRoom,
       notifyRoom,
+      drain,
+      isDraining,
     };
   }),
 );
