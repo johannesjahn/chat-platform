@@ -801,6 +801,11 @@ Load-bearing:
   local socket gets a `resync` event (the client's reconnect self-heal) and
   a fresh `presence_snapshot`, spread over `ResyncSpread`. Presence resyncs
   its whole share (`RESYNC_SCRIPT`); the directory re-asserts its claims.
+- **Presence counts are bucketed** (`presenceCountsKey`, `userId %
+PRESENCE_BUCKETS`), not one hash; the Lua scripts derive the same key
+  with `BUCKET_KEY_LUA`, so a change to one is a change to both. A change
+  to what the shares count also needs new registry keys (the `v2` in
+  them), or the new instances reap old ones' shares into the wrong place.
 - **`/ready` checks only the database.** An outage hits every pod at once;
   failing readiness on it would take them all out of rotation.
   `redis_connection_up` (and the chart's `BackendRedisUnreachable` alert)

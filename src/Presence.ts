@@ -89,17 +89,40 @@ export const InMemoryPresenceStoreLive = Layer.sync(PresenceStore, () => {
   };
 });
 
-// Real cross-process count via a Redis hash (`userId` field → connection
+// Real cross-process count via Redis hashes (`userId` field → connection
 // count), keeping every instance's view of "is this user online anywhere"
 // consistent. `HINCRBY` is atomic, so two instances handling this user's
 // connect/disconnect at the same moment can't race each other into an
 // inconsistent count the way two independent local counters could.
-const KEY = "chat-platform:presence:counts";
+//
+// The counts are spread over PRESENCE_BUCKETS hashes by `userId` (issue
+// #832): one hash held every user online, a single hot key every connect,
+// disconnect and heartbeat hit, which Redis Cluster can't spread. The
+// bucket is a hash tag (`{n}`), so each bucket keeps one slot. Reads and
+// writes find a user's bucket with `presenceCountsKey`; the Lua scripts
+// that touch arbitrary users compute it with BUCKET_KEY_LUA, which must
+// agree with it.
+const KEY_PREFIX = "chat-platform:presence:counts:";
+export const PRESENCE_BUCKETS = 64;
+export const presenceCountsKey = (userId: number): string =>
+  `${KEY_PREFIX}{${userId % PRESENCE_BUCKETS}}`;
+// Defines `bucketKey(user)` in a script given ARGV[1] = KEY_PREFIX and
+// ARGV[2] = PRESENCE_BUCKETS; the script's own arguments follow from ARGV[3].
+const BUCKET_KEY_LUA = `
+local function bucketKey(user)
+  return ARGV[1] .. "{" .. (tonumber(user) % tonumber(ARGV[2])) .. "}"
+end
+`;
+const bucketArgs = [KEY_PREFIX, PRESENCE_BUCKETS] as const;
 // Which instances are alive: a sorted set of instance id -> last heartbeat
 // (Redis' own clock, ms), and per instance, its share of every count in
-// KEY (issue #837).
-const REGISTRY_KEY = "chat-platform:presence:instances";
-const INSTANCE_KEY_PREFIX = "chat-platform:presence:instance:";
+// the buckets (issue #837). Not the keys instances used before the buckets
+// (`presence:instances`, `presence:instance:<id>`): those shares count the
+// old single hash, so reaping one into the buckets would take a live
+// user's connection off. Mid-rollout the two generations keep apart — each
+// sees only its own users online — and the old keys expire on their own.
+const REGISTRY_KEY = "chat-platform:presence:v2:instances";
+const INSTANCE_KEY_PREFIX = "chat-platform:presence:v2:instance:";
 
 // Safety net for a hard process kill (SIGKILL — OOM killer, `docker kill`, a
 // spot-instance reclaim): `disconnect` never runs in that case, so nothing
@@ -175,25 +198,27 @@ redis.call("EXPIRE", KEYS[2], ARGV[2])
 return added
 `;
 
-// KEYS: counts, registry. ARGV: dead-after ms, shares key prefix, this
-// instance's id. Reaps every instance whose last heartbeat is older than
+// KEYS: registry. ARGV (after the bucket pair): dead-after ms, shares key
+// prefix, this instance's id. Reaps every instance whose last heartbeat is older than
 // dead-after: subtracts its shares from the counts and returns the users
 // whose count reached zero. ZREM gates each instance, so of several reapers
 // running at once exactly one handles it. (Touches each dead instance's
-// shares key by name — fine on a single Redis, not on Redis Cluster.)
-const REAP_SCRIPT = `
+// shares key and the count buckets by name — fine on a single Redis, not
+// on Redis Cluster.)
+const REAP_SCRIPT = `${BUCKET_KEY_LUA}
 local t = redis.call("TIME")
 local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
 local offline = {}
-local dead = redis.call("ZRANGEBYSCORE", KEYS[2], "-inf", now - tonumber(ARGV[1]))
+local dead = redis.call("ZRANGEBYSCORE", KEYS[1], "-inf", now - tonumber(ARGV[3]))
 for _, instance in ipairs(dead) do
-  if instance ~= ARGV[3] and redis.call("ZREM", KEYS[2], instance) == 1 then
-    local sharesKey = ARGV[2] .. instance
+  if instance ~= ARGV[5] and redis.call("ZREM", KEYS[1], instance) == 1 then
+    local sharesKey = ARGV[4] .. instance
     local shares = redis.call("HGETALL", sharesKey)
     for i = 1, #shares, 2 do
-      local count = redis.call("HINCRBY", KEYS[1], shares[i], -tonumber(shares[i + 1]))
+      local key = bucketKey(shares[i])
+      local count = redis.call("HINCRBY", key, shares[i], -tonumber(shares[i + 1]))
       if count <= 0 then
-        redis.call("HDEL", KEYS[1], shares[i])
+        redis.call("HDEL", key, shares[i])
         table.insert(offline, shares[i])
       end
     end
@@ -203,29 +228,30 @@ end
 return offline
 `;
 
-// KEYS: counts, this instance's shares. ARGV: field TTL, then userId, n
-// pairs — every user this instance holds, with its local connection count.
+// KEYS: this instance's shares. ARGV (after the bucket pair): field TTL,
+// then userId, n pairs — every user this instance holds, with its local connection count.
 // Makes the instance's shares exactly that, moving the global counts by the
 // difference, and returns the transitions it caused as userId, online
 // (1/0) pairs. What puts presence right after Redis was unreachable (issue
 // #832) — connects and disconnects that failed meanwhile never reached it —
 // or after this instance was reaped while alive (its shares are gone, so
 // all of them come back), or after Redis restarted empty.
-const RESYNC_SCRIPT = `
+const RESYNC_SCRIPT = `${BUCKET_KEY_LUA}
 local want = {}
-for i = 2, #ARGV, 2 do want[ARGV[i]] = tonumber(ARGV[i + 1]) end
+for i = 4, #ARGV, 2 do want[ARGV[i]] = tonumber(ARGV[i + 1]) end
 local have = {}
-local held = redis.call("HGETALL", KEYS[2])
+local held = redis.call("HGETALL", KEYS[1])
 for i = 1, #held, 2 do have[held[i]] = tonumber(held[i + 1]) end
 local changes = {}
 local function adjust(user, delta)
   if delta == 0 then return end
-  local before = tonumber(redis.call("HGET", KEYS[1], user) or "0")
-  local after = redis.call("HINCRBY", KEYS[1], user, delta)
+  local key = bucketKey(user)
+  local before = tonumber(redis.call("HGET", key, user) or "0")
+  local after = redis.call("HINCRBY", key, user, delta)
   if after <= 0 then
-    redis.call("HDEL", KEYS[1], user)
+    redis.call("HDEL", key, user)
   else
-    redis.call("HEXPIRE", KEYS[1], ARGV[1], "FIELDS", 1, user)
+    redis.call("HEXPIRE", key, ARGV[3], "FIELDS", 1, user)
   end
   if before <= 0 and after > 0 then
     table.insert(changes, user)
@@ -238,12 +264,12 @@ end
 for user, n in pairs(have) do
   if not want[user] then
     adjust(user, -n)
-    redis.call("HDEL", KEYS[2], user)
+    redis.call("HDEL", KEYS[1], user)
   end
 end
 for user, n in pairs(want) do
   adjust(user, n - (have[user] or 0))
-  redis.call("HSET", KEYS[2], user, n)
+  redis.call("HSET", KEYS[1], user, n)
 end
 return changes
 `;
@@ -328,7 +354,7 @@ export const RedisPresenceStoreLive = Layer.effect(
         Effect.andThen(
           evalScript(
             CONNECT_SCRIPT,
-            [KEY, sharesKey],
+            [presenceCountsKey(userId), sharesKey],
             [userId, 1, FIELD_TTL_SECONDS],
           ),
         ),
@@ -341,7 +367,11 @@ export const RedisPresenceStoreLive = Layer.effect(
     const disconnect: PresenceStore["Service"]["disconnect"] = (userId) =>
       Effect.sync(() => countLocally(userId, -1)).pipe(
         Effect.andThen(
-          evalScript(DISCONNECT_SCRIPT, [KEY, sharesKey], [userId]),
+          evalScript(
+            DISCONNECT_SCRIPT,
+            [presenceCountsKey(userId), sharesKey],
+            [userId],
+          ),
         ),
         // No share held (this instance was reaped): not a transition it can
         // vouch for — the reaper already reported it.
@@ -354,16 +384,25 @@ export const RedisPresenceStoreLive = Layer.effect(
         ),
       );
 
-    // One `HMGET` for the whole set; a field only exists while its count is
-    // positive (`disconnect` deletes it at zero), but a stray non-positive
-    // value is treated as offline all the same.
+    // One `HMGET` per bucket the set touches, sent together; a field only
+    // exists while its count is positive (`disconnect` deletes it at zero),
+    // but a stray non-positive value is treated as offline all the same.
     const onlineAmong: PresenceStore["Service"]["onlineAmong"] = (userIds) =>
       userIds.length === 0
         ? Effect.succeed([])
-        : Effect.tryPromise(() => redis.hmget(KEY, userIds.map(String))).pipe(
-            Effect.map((counts) =>
-              userIds.filter((_, i) => Number(counts[i] ?? 0) > 0),
-            ),
+        : Effect.tryPromise(() => {
+            const byBucket = Map.groupBy(new Set(userIds), presenceCountsKey);
+            return Promise.all(
+              [...byBucket].map(async ([key, ids]) => {
+                const counts = await redis.hmget(key, ids.map(String));
+                return ids.filter((_, i) => Number(counts[i] ?? 0) > 0);
+              }),
+            );
+          }).pipe(
+            Effect.map((online) => {
+              const found = new Set(online.flat());
+              return userIds.filter((userId) => found.has(userId));
+            }),
             Effect.catch((error) =>
               logFallback("onlineAmong", error).pipe(
                 Effect.as([] as ReadonlyArray<number>),
@@ -373,7 +412,13 @@ export const RedisPresenceStoreLive = Layer.effect(
 
     const refreshTtl = (userId: number): Effect.Effect<void> =>
       Effect.tryPromise(() =>
-        redis.hexpire(KEY, FIELD_TTL_SECONDS, "FIELDS", 1, String(userId)),
+        redis.hexpire(
+          presenceCountsKey(userId),
+          FIELD_TTL_SECONDS,
+          "FIELDS",
+          1,
+          String(userId),
+        ),
       ).pipe(
         Effect.asVoid,
         Effect.catch((error) => logFallback("heartbeat", error)),
@@ -385,8 +430,8 @@ export const RedisPresenceStoreLive = Layer.effect(
     const resync = Effect.suspend(() =>
       evalScript(
         RESYNC_SCRIPT,
-        [KEY, sharesKey],
-        [FIELD_TTL_SECONDS, ...[...localCounts].flat()],
+        [sharesKey],
+        [...bucketArgs, FIELD_TTL_SECONDS, ...[...localCounts].flat()],
       ),
     ).pipe(
       Effect.map((result) => {
@@ -406,8 +451,8 @@ export const RedisPresenceStoreLive = Layer.effect(
 
     const reap = evalScript(
       REAP_SCRIPT,
-      [KEY, REGISTRY_KEY],
-      [deadAfterMs, INSTANCE_KEY_PREFIX, instanceId],
+      [REGISTRY_KEY],
+      [...bucketArgs, deadAfterMs, INSTANCE_KEY_PREFIX, instanceId],
     ).pipe(
       Effect.flatMap((offline) =>
         emit(
