@@ -188,8 +188,11 @@ backend:
     # percentage of the request — so it means the same thing whatever
     # backend.resources.requests.cpu is, and `autoscaling.enabled: true` is
     # enough on its own. ~60% of the one core a pod can use, so new pods
-    # start well before the existing ones saturate. Needs metrics-server
-    # (bundled with k3s).
+    # start well before the existing ones saturate. Needs metrics-server,
+    # which microk8s doesn't run by default: `microk8s enable
+    # metrics-server` first, or the HPA sits at <unknown> and never scales.
+    # (The observability stack's VictoriaMetrics doesn't serve the
+    # metrics.k8s.io API the HPA reads.)
     targetCPUAverageValue: 600m
 
   # Prefer spreading replicas across nodes. ScheduleAnyway, so a
