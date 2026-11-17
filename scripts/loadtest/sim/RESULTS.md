@@ -20,6 +20,54 @@ vCPUs, but the **ratios and growth rates are what matter**: who is called how
 many times per event, and what grows with what. The generator's own
 event-loop lag stayed under 10 ms in every run quoted here.
 
+## Capacity projection (2026-11-17)
+
+Same machine and setup as below, on `main` at v0.41.5 with #865 (Redis
+outage tolerance) in: the 100k-user database, 4 backends, Postgres capped
+at 4 CPUs. 0 errors and generator lag under 10 ms in every run quoted.
+
+| Run                              | Sockets | Requests/s | p50 / p95       | Backend cores (each) | Postgres | Verdict                       |
+| -------------------------------- | ------: | ---------: | --------------- | -------------------- | -------: | ----------------------------- |
+| 10k, 1× rate                     |  10,000 |     ~1,000 | 3.8 / 7.9 ms    | 0.26                 |     49 % | OK                            |
+| 15k, 1× rate                     |  15,000 |     ~1,500 | 5.1 / 11.6 ms   | 0.42                 |     90 % | OK, still linear              |
+| 40k-equivalent (`× 4`)           |  10,000 |     ~3,700 | 18 / 36 ms      | 0.91                 |    273 % | OK, near the knee             |
+| 60k-equivalent (`× 6`)           |  10,000 |     ~5,200 | 60 / 115–147 ms | 1.03 (saturated)     |    359 % | Saturated; latency is queuing |
+| 10k idle (every action rate `0`) |  10,000 |          0 | —               | 0.03                 |      2 % | Open sockets are nearly free  |
+
+**This rig tops out at ~45–50k concurrent users** (4 single-core pods + a
+4-CPU Postgres, both saturating together). Unit costs:
+
+- ~0.1 requests/s per online user, linear from 10k to 15k real sockets.
+- Backend: ~9–11k users per busy core; RSS ~200 MB plus ~80–120 KB per
+  socket under load (~55 KB idle).
+- Postgres: ~15k users per CPU, ~8.7 statements per request. Top costs are
+  the message insert (14 %) and the `message_reads` insert (7.5 %); search
+  is ~10 % of DB time from under 1 % of requests.
+- Redis: ~20 % of one core even at saturation.
+
+**Projected for the chart**, planning each tier at ~70 % utilisation:
+
+| Setup                                                           | Binds on                                                                 | Max concurrent users |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------: |
+| Chart defaults (2 pods at 500m / 512Mi, 1-CPU Postgres, no HPA) | Pod CPU and the 512Mi limit, about equally                               |                ~6–7k |
+| HPA to `maxReplicas` 10, same sizes                             | The 1-CPU Postgres; 10 pods × `dbPoolMax` 10 also fill `max_connections` |              ~10–15k |
+| ~16 pods at 1 core / 1.5Gi, 16-vCPU Postgres, PgBouncer         | Balanced                                                                 |                ~100k |
+| Beyond                                                          | The single write primary (every send is a write)                         |    ~150–200k ceiling |
+
+Cloud vCPUs are often slower than these cores: budget 1.5–2× the cores per
+tier. Tiers above 15k use `--rate-multiplier`, since one macOS loopback
+client runs out of ephemeral ports (`EADDRNOTAVAIL`) at ~16k sockets;
+idle sockets being nearly free and per-user cost staying linear to 15k real
+sockets is what makes that extrapolation reasonable.
+
+**Two simulator pitfalls found on the way.** Backends used to be picked by
+`id % targets`, so with `--population` 10× `--users` (a stride of 10) only
+2 of 4 backends got any traffic; it's hashed now. And a strided population
+puts no one's chat partners online (the seeded graph links each user to
+ids +1/+7/+31/+101 and 10-wide groups), which silently drops all
+recipient-side load: `chat_updated` events equal sends. Every run above uses
+consecutive users (`--population` = `--users`), as the runs below did.
+
 ## Re-run after the fixes (2026-11-16)
 
 Same machine, setup, seeds and simulator as below, on `main` at v0.41.5 plus
