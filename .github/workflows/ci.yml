@@ -318,6 +318,9 @@ jobs:
           helm lint k8s/chat-platform -f k8s/chat-platform/values-scale.yaml
           helm template k8s/chat-platform -f k8s/chat-platform/values-scale.yaml
 
+      - name: Helm template (external Redis)
+        run: helm template k8s/chat-platform --set redis.enabled=false --set redis.external.host=redis.example.com --set redis.external.tls=true
+
   helmfile:
     name: Observability stack lint & template
     needs: changes

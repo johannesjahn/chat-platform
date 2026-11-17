@@ -818,6 +818,11 @@ PRESENCE_BUCKETS`), not one hash; the Lua scripts derive the same key
   `redis_connection_up` (and the chart's `BackendRedisUnreachable` alert)
   report it instead.
 
+For high availability the chart can use a managed Redis instead of its
+own pod (`redis.enabled: false`, `redis.external.*`). It must stay a single
+endpoint, not Cluster mode: presence's Lua scripts build bucket keys they
+don't declare.
+
 [`src/RedisOutage.integration.test.ts`](src/RedisOutage.integration.test.ts)
 cuts a real Redis through a TCP proxy; `src/redisConnection.test.ts` boots
 without one.

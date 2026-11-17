@@ -66,7 +66,7 @@ spec:
                   name: {{ include "chat-platform.redisSecretName" . }}
                   key: {{ include "chat-platform.redisSecretKey" . }}
             - name: REDIS_URL
-              value: "redis://:$(REDIS_PASSWORD)@{{ $fullname }}-redis:6379"
+              value: {{ include "chat-platform.redisUrl" . | quote }}
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
