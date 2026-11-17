@@ -1,4 +1,4 @@
-import { queryOptions, useQueries } from "@tanstack/react-query";
+import { queryOptions } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
 import { USER_SUMMARY_STALE_TIME_MS } from "./realtimeFreshness";
@@ -66,36 +66,6 @@ export function authorLabelOf(
     handle: userHandle(author),
     avatarName: userAvatarName(author),
   };
-}
-
-// Resolves a set of user ids to { username, displayName } via individual
-// `GET /users/:id` requests (parallel, each independently cached). Posts and
-// comments don't need it — they embed their author (issue #750); it's for
-// the few places that only have an id, like a game's departed players (see
-// lib/games/cast.ts).
-export function useUserSummariesById(
-  ids: readonly number[],
-  enabled: boolean,
-): Map<number, UserSummary> {
-  const uniqueIds = [...new Set(ids)];
-  const results = useQueries({
-    queries: uniqueIds.map((id) => ({
-      ...userSummaryQueryOptions(id),
-      enabled,
-    })),
-  });
-
-  const summaryById = new Map<number, UserSummary>();
-  for (const result of results) {
-    if (result.data)
-      summaryById.set(result.data.id, {
-        username: result.data.username,
-        displayName: result.data.displayName,
-        avatarUrl: result.data.avatarUrl,
-        avatarVariants: result.data.avatarVariants,
-      });
-  }
-  return summaryById;
 }
 
 // One `GET /users/{id}`, keyed like `$api.useQuery("get", "/users/{id}", ...)`
