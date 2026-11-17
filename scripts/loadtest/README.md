@@ -188,6 +188,13 @@ bun scripts/loadtest/sim/simulate.ts --users 10000 --targets <targets> --server-
   for (it does not scale fan-out). `--no-feed-refetch` and
   `--rates reactPost=0,createPost=0` switch off the paths that grow
   quadratically, to see what breaks next.
+- **Keep `--population` equal to `--users`** for realistic fan-out, even on
+  a bigger seeded database. A larger population spreads active users out
+  (every 10th id at 10×), and the seeded graph only links near ids, so no
+  one's chat partners are online and recipient-side load vanishes.
+- **~16k sockets per machine.** macOS has 16,384 ephemeral ports, shared by
+  every loopback connection; past that, connects fail with
+  `EADDRNOTAVAIL`. Use `--rate-multiplier` beyond it.
 - **Trust the generator first.** `genLag99` (the generator's event-loop
   lag) must stay in single-digit ms; above that, the numbers are the load
   generator's. `bun --preload ./scripts/loadtest/sim/loop-lag.ts src/main.ts`

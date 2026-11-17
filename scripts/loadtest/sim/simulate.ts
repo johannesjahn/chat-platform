@@ -794,7 +794,9 @@ async function runWorker(config: Config, userIds: number[]) {
     userIds.map((id, i) =>
       simulateUser(
         id,
-        `${LOOPBACK}:${config.targetPorts[id % config.targetPorts.length]!}`,
+        // Hashed, not `id % n`: ids are strided over the population, so with
+        // a stride sharing a factor with n, `id % n` skips some targets.
+        `${LOOPBACK}:${config.targetPorts[(Math.imul(id, 0x9e3779b1) >>> 16) % config.targetPorts.length]!}`,
         (i / userIds.length) * config.ramp * 1000 + Math.random() * 50,
       ),
     ),
