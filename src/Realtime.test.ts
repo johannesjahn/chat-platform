@@ -21,6 +21,7 @@ import {
   isValidRoomName,
   RealtimeConnections,
   RealtimeConnectionsLive,
+  RoomChannelLinger,
 } from "./Realtime.ts";
 import { makeIncomingHandler } from "./RealtimeSocket.ts";
 
@@ -1135,12 +1136,25 @@ const twoInstances = (config: Layer.Layer<never> = Layer.empty) =>
       Effect.provide(InMemoryPubSubLive),
     );
     const published: Array<{ channel: string; message: string }> = [];
+    // Channels subscribed (+) and unsubscribed (-), in order.
+    const subscriptions: string[] = [];
     const spy = {
       ...base,
       publish: (channel: string, message: string) =>
         Effect.sync(() => {
           published.push({ channel, message });
         }).pipe(Effect.andThen(base.publish(channel, message))),
+      subscribe: (
+        channel: string,
+        onMessage: (message: string) => Effect.Effect<void>,
+      ) =>
+        Effect.sync(() => {
+          subscriptions.push(`+${channel}`);
+        }).pipe(Effect.andThen(base.subscribe(channel, onMessage))),
+      unsubscribe: (channel: string) =>
+        Effect.sync(() => {
+          subscriptions.push(`-${channel}`);
+        }).pipe(Effect.andThen(base.unsubscribe(channel))),
     };
     const locator = makeInMemoryUserLocator();
     const instance = Effect.service(RealtimeConnections).pipe(
@@ -1154,7 +1168,12 @@ const twoInstances = (config: Layer.Layer<never> = Layer.empty) =>
         ),
       ),
     );
-    return { a: yield* instance, b: yield* instance, published };
+    return {
+      a: yield* instance,
+      b: yield* instance,
+      published,
+      subscriptions,
+    };
   });
 
 const chatEvent = { type: "chat_updated", chatId: 9, version: 1 } as const;
@@ -1253,6 +1272,182 @@ test("an event published the old way on the shared channel still reaches the use
         JSON.stringify({ scope: "users", userIds: [1], event: chatEvent }),
       );
       expect(socket.received).toEqual([JSON.stringify(chatEvent)]);
+    }),
+  );
+});
+
+const ROOM_LINGER_MS = 30;
+const shortLinger = Layer.succeed(
+  RoomChannelLinger,
+  Duration.millis(ROOM_LINGER_MS),
+);
+const postChannels = (subscriptions: ReadonlyArray<string>) =>
+  subscriptions.filter((s) => s.includes("chat-platform:realtime:post:"));
+const sleepMs = (ms: number) => Effect.sleep(Duration.millis(ms));
+
+test("a post's events go to its own channel, which only instances showing it listen on (issue #832)", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const { a, b, published, subscriptions } =
+        yield* twoInstances(shortLinger);
+      const card = recordingWriter();
+      const comments = recordingWriter();
+      yield* a.watchPost(5, card.write);
+      yield* a.subscribePost(5, comments.write);
+      published.length = 0;
+
+      const event = {
+        type: "comment_changed",
+        postId: 5,
+        commentId: 1,
+      } as const;
+      yield* b.notifyPostRoom(5, event);
+      yield* b.notifyPostViewers(5, {
+        type: "post_changed",
+        postId: 5,
+        change: "deleted",
+      });
+
+      expect(comments.received).toEqual([
+        JSON.stringify(event),
+        JSON.stringify({ type: "post_changed", postId: 5, change: "deleted" }),
+      ]);
+      expect(card.received).toEqual([
+        JSON.stringify({ type: "post_changed", postId: 5, change: "deleted" }),
+      ]);
+      // One subscription on A for both, none on B, which shows nothing.
+      expect(postChannels(subscriptions)).toEqual([
+        "+chat-platform:realtime:post:5",
+      ]);
+      expect(
+        published
+          .filter((p) => p.channel !== "chat-platform:realtime")
+          .map((p) => p.channel),
+      ).toEqual([
+        "chat-platform:realtime:post:5",
+        "chat-platform:realtime:post:5",
+      ]);
+      // The shared channel only carries the marked copies for instances
+      // that predate post channels.
+      for (const p of published.filter(
+        (p) => p.channel === "chat-platform:realtime",
+      )) {
+        expect(p.message.startsWith('{"routed":true,')).toBe(true);
+      }
+    }),
+  );
+});
+
+test("a room's events reach only the instances with a socket in it", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const { a, b, subscriptions } = yield* twoInstances(
+        Layer.merge(
+          shortLinger,
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({ REALTIME_LEGACY_BROADCAST: "false" }),
+          ),
+        ),
+      );
+      const player = recordingWriter();
+      const room = gameLobbyRoom(3);
+      yield* a.subscribeRoom(room, player.write);
+      const event = { type: "game_lobby_updated", lobbyId: 3 } as const;
+      yield* b.notifyRoom(room, event);
+      expect(player.received).toEqual([JSON.stringify(event)]);
+      expect(
+        subscriptions.filter((s) => s.includes(":realtime:room:")),
+      ).toEqual([`+chat-platform:realtime:room:${room}`]);
+    }),
+  );
+});
+
+test("a post's channel lingers after its last viewer leaves, and a viewer back in time keeps it", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const { a, subscriptions } = yield* twoInstances(shortLinger);
+      const first = recordingWriter();
+      const second = recordingWriter();
+      yield* a.watchPost(5, first.write);
+      yield* a.subscribePost(5, first.write);
+      yield* a.unwatchPost(5, first.write);
+      // Still in its comments: held.
+      yield* sleepMs(ROOM_LINGER_MS * 3);
+      expect(postChannels(subscriptions)).toEqual([
+        "+chat-platform:realtime:post:5",
+      ]);
+
+      yield* a.unsubscribePost(5, first.write);
+      yield* a.watchPost(5, second.write);
+      yield* sleepMs(ROOM_LINGER_MS * 3);
+      expect(postChannels(subscriptions)).toEqual([
+        "+chat-platform:realtime:post:5",
+      ]);
+
+      yield* a.unwatchPost(5, second.write);
+      yield* sleepMs(ROOM_LINGER_MS * 3);
+      expect(postChannels(subscriptions)).toEqual([
+        "+chat-platform:realtime:post:5",
+        "-chat-platform:realtime:post:5",
+      ]);
+
+      // Showing it again listens again.
+      yield* a.watchPost(5, second.write);
+      expect(postChannels(subscriptions)).toEqual([
+        "+chat-platform:realtime:post:5",
+        "-chat-platform:realtime:post:5",
+        "+chat-platform:realtime:post:5",
+      ]);
+    }),
+  );
+});
+
+test("a closed socket releases the post and room channels it held", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const { a, subscriptions } = yield* twoInstances(shortLinger);
+      const socket = recordingWriter();
+      const unregister = yield* a.register(1, socket.write);
+      yield* a.watchPost(5, socket.write);
+      yield* a.subscribeRoom(gameHubRoom("typing"), socket.write);
+      unregister();
+      yield* sleepMs(ROOM_LINGER_MS * 3);
+      expect(subscriptions.filter((s) => s.startsWith("-"))).toEqual([
+        "-chat-platform:realtime:post:5",
+        "-chat-platform:realtime:room:game-hub:typing",
+      ]);
+    }),
+  );
+});
+
+test("a post event published the old way on the shared channel still reaches its viewers (mid-rollout)", async () => {
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const base = yield* Effect.service(PubSub).pipe(
+        Effect.provide(InMemoryPubSubLive),
+      );
+      const connections = yield* Effect.service(RealtimeConnections).pipe(
+        Effect.provide(
+          RealtimeConnectionsLive.pipe(
+            Layer.provide(Layer.succeed(PubSub, base)),
+            Layer.provide(InMemoryUserLocatorLive),
+            Layer.provide(InMemoryPresenceStoreLive),
+            Layer.provide(staticPresenceAudience([])),
+          ),
+        ),
+      );
+      const card = recordingWriter();
+      yield* connections.watchPost(5, card.write);
+      const event = {
+        type: "post_changed",
+        postId: 5,
+        change: "deleted",
+      } as const;
+      yield* base.publish(
+        "chat-platform:realtime",
+        JSON.stringify({ scope: "post_viewers", postId: 5, event }),
+      );
+      expect(card.received).toEqual([JSON.stringify(event)]);
     }),
   );
 });

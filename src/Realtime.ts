@@ -6,6 +6,7 @@ import {
   Layer,
   Metric,
   Schedule,
+  Semaphore,
 } from "effect";
 import {
   realtimeUserEnvelopesTotal,
@@ -554,17 +555,35 @@ export const gameLobbyRoom = (lobbyId: number): string =>
 
 export const gameHubRoom = (game: string): string => `game-hub:${game}`;
 
-// The channel every RealtimeConnectionsLive instance publishes to and
-// subscribes on — one process-wide topic is enough since each message
-// already carries its own targeting (see Envelope).
+// The channel every RealtimeConnectionsLive instance subscribes on, for
+// what every instance needs: `all` broadcasts and new posts (`feed_post`).
+// Each message carries its own targeting (see Envelope).
 const CHANNEL = "chat-platform:realtime";
+
+// A post's and a named room's own channels (issue #832): an instance
+// listens on one only while a local socket shows that post (a card or its
+// comments) or is in that room, so their events reach just the instances
+// with someone there, instead of every instance parsing every one.
+const POST_CHANNEL_PREFIX = "chat-platform:realtime:post:";
+const ROOM_CHANNEL_PREFIX = "chat-platform:realtime:room:";
+const postChannel = (postId: number) => `${POST_CHANNEL_PREFIX}${postId}`;
+const roomChannel = (room: string) => `${ROOM_CHANNEL_PREFIX}${room}`;
+
+// How long an instance keeps listening on a post's or room's channel after
+// its last local socket left — a card scrolled back into view, or a socket
+// reconnecting, doesn't cost an unsubscribe and a subscribe. A reference so
+// tests can shorten it.
+export const RoomChannelLinger = Context.Reference<Duration.Duration>(
+  "chat-platform/Realtime/RoomChannelLinger",
+  { defaultValue: () => Duration.seconds(30) },
+);
 
 // Each instance also listens on its own channel, for events addressed to
 // users it holds (issue #832; see `routeToUsers`).
 const INSTANCE_CHANNEL_PREFIX = "chat-platform:realtime:instance:";
 
-// A routed user event's copy on the shared channel, for instances that
-// predate routing (mid-rollout) and only listen there. It starts with this
+// A routed user, post or room event's copy on the shared channel, for
+// instances that predate routing (mid-rollout) and only listen there. It starts with this
 // so current instances can skip it without parsing it.
 const ROUTED_COPY_PREFIX = '{"routed":true,';
 
@@ -820,6 +839,69 @@ export const RealtimeConnectionsLive = Layer.effect(
     );
     yield* forkClaimRefresher(locator, instanceId, () => [...byUser.keys()]);
 
+    // Listening on post and room channels (see POST_CHANNEL_PREFIX). Held
+    // from the first local socket, released `linger` after the last one
+    // left unless one came back meanwhile. Subscribes and unsubscribes run
+    // one at a time, so a channel released and held again in quick
+    // succession can't have its subscribe overtaken by the unsubscribe.
+    const linger = yield* RoomChannelLinger;
+    const channelLock = Semaphore.makeUnsafe(1);
+    // Channel -> the pending release, if the channel is lingering.
+    const heldChannels = new Map<string, { release?: object }>();
+    const holdChannel = (channel: string) =>
+      Effect.suspend(() => {
+        const held = heldChannels.get(channel);
+        if (held) {
+          held.release = undefined;
+          return Effect.void;
+        }
+        return Semaphore.withPermit(
+          channelLock,
+          Effect.suspend(() => {
+            const again = heldChannels.get(channel);
+            if (again) {
+              again.release = undefined;
+              return Effect.void;
+            }
+            heldChannels.set(channel, {});
+            return pubsub.subscribe(channel, (message) =>
+              deliverLocally(message),
+            );
+          }),
+        );
+      });
+    // Sync, for the socket's cleanup callback (see `register`).
+    const releaseChannel = (channel: string) => {
+      const held = heldChannels.get(channel);
+      if (!held || held.release) return;
+      const release = {};
+      held.release = release;
+      Effect.runFork(
+        Effect.sleep(linger).pipe(
+          Effect.andThen(
+            Semaphore.withPermit(
+              channelLock,
+              Effect.suspend(() => {
+                if (heldChannels.get(channel)?.release !== release) {
+                  return Effect.void;
+                }
+                heldChannels.delete(channel);
+                return pubsub.unsubscribe(channel);
+              }),
+            ),
+          ),
+        ),
+      );
+    };
+    const releasePostIfUnviewed = (postId: number) => {
+      if (!byPost.has(postId) && !byWatchedPost.has(postId)) {
+        releaseChannel(postChannel(postId));
+      }
+    };
+    const releaseRoomIfEmpty = (room: string) => {
+      if (!byRoom.has(room)) releaseChannel(roomChannel(room));
+    };
+
     // Flushes `pendingFeedPosts` to this instance's feed viewers, at most
     // once per interval (see `FeedHeadEvent`). Runs on every instance, each
     // for its own sockets, off the same `feed_post` envelopes.
@@ -881,6 +963,22 @@ export const RealtimeConnectionsLive = Layer.effect(
       Effect.logWarning(
         "RealtimeConnections: failed to publish realtime event, delivery dropped",
       ).pipe(Effect.annotateLogs({ envelope, error: String(error) }));
+
+    // Publishes a post's or room's envelope on its own channel, plus (with
+    // `legacyBroadcast`) a marked copy on the shared channel for instances
+    // that predate those channels — current ones skip it unparsed.
+    const publishToChannel = (channel: string, envelope: Envelope) =>
+      Effect.gen(function* () {
+        const body = JSON.stringify(envelope);
+        yield* pubsub
+          .publish(channel, body)
+          .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
+        if (legacyBroadcast) {
+          yield* pubsub
+            .publish(CHANNEL, `${ROUTED_COPY_PREFIX}${body.slice(1)}`)
+            .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
+        }
+      });
 
     // Publishes a user-addressed envelope only to the instances holding
     // those users (issue #832), each copy carrying just that instance's
@@ -964,24 +1062,23 @@ export const RealtimeConnectionsLive = Layer.effect(
       event,
     ) => {
       const envelope = { scope: "post", postId, event } satisfies Envelope;
-      return pubsub
-        .publish(CHANNEL, JSON.stringify(envelope))
-        .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
+      return publishToChannel(postChannel(postId), envelope);
     };
 
     const subscribePost: RealtimeConnections["Service"]["subscribePost"] = (
       postId,
       write,
     ) =>
-      Effect.sync(() => {
+      Effect.suspend(() => {
         const mine = joinedBy(write).posts;
         if (!mine.has(postId) && mine.size >= MAX_POST_ROOMS_PER_CONNECTION) {
-          return;
+          return Effect.void;
         }
         mine.add(postId);
         const set = byPost.get(postId) ?? new Set();
         set.add(write);
         byPost.set(postId, set);
+        return holdChannel(postChannel(postId));
       });
 
     const unsubscribePost: RealtimeConnections["Service"]["unsubscribePost"] = (
@@ -994,24 +1091,26 @@ export const RealtimeConnectionsLive = Layer.effect(
         if (!set) return;
         set.delete(write);
         if (set.size === 0) byPost.delete(postId);
+        releasePostIfUnviewed(postId);
       });
 
     const watchPost: RealtimeConnections["Service"]["watchPost"] = (
       postId,
       write,
     ) =>
-      Effect.sync(() => {
+      Effect.suspend(() => {
         const mine = joinedBy(write).watching;
         if (
           !mine.has(postId) &&
           mine.size >= MAX_WATCHED_POSTS_PER_CONNECTION
         ) {
-          return;
+          return Effect.void;
         }
         mine.add(postId);
         const set = byWatchedPost.get(postId) ?? new Set();
         set.add(write);
         byWatchedPost.set(postId, set);
+        return holdChannel(postChannel(postId));
       });
 
     const unwatchPost: RealtimeConnections["Service"]["unwatchPost"] = (
@@ -1024,6 +1123,7 @@ export const RealtimeConnectionsLive = Layer.effect(
         if (!set) return;
         set.delete(write);
         if (set.size === 0) byWatchedPost.delete(postId);
+        releasePostIfUnviewed(postId);
       });
 
     const notifyPostViewers: RealtimeConnections["Service"]["notifyPostViewers"] =
@@ -1033,9 +1133,7 @@ export const RealtimeConnectionsLive = Layer.effect(
           postId,
           event,
         } satisfies Envelope;
-        return pubsub
-          .publish(CHANNEL, JSON.stringify(envelope))
-          .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
+        return publishToChannel(postChannel(postId), envelope);
       };
 
     const announcePostReactions: RealtimeConnections["Service"]["announcePostReactions"] =
@@ -1045,9 +1143,7 @@ export const RealtimeConnectionsLive = Layer.effect(
           postId,
           reactions,
         } satisfies Envelope;
-        return pubsub
-          .publish(CHANNEL, JSON.stringify(envelope))
-          .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
+        return publishToChannel(postChannel(postId), envelope);
       };
 
     const notifyRoom: RealtimeConnections["Service"]["notifyRoom"] = (
@@ -1055,22 +1151,23 @@ export const RealtimeConnectionsLive = Layer.effect(
       event,
     ) => {
       const envelope = { scope: "room", room, event } satisfies Envelope;
-      return pubsub
-        .publish(CHANNEL, JSON.stringify(envelope))
-        .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
+      return publishToChannel(roomChannel(room), envelope);
     };
 
     const subscribeRoom: RealtimeConnections["Service"]["subscribeRoom"] = (
       room,
       write,
     ) =>
-      Effect.sync(() => {
+      Effect.suspend(() => {
         const mine = joinedBy(write).rooms;
-        if (!mine.has(room) && mine.size >= MAX_ROOMS_PER_CONNECTION) return;
+        if (!mine.has(room) && mine.size >= MAX_ROOMS_PER_CONNECTION) {
+          return Effect.void;
+        }
         mine.add(room);
         const set = byRoom.get(room) ?? new Set();
         set.add(write);
         byRoom.set(room, set);
+        return holdChannel(roomChannel(room));
       });
 
     const unsubscribeRoom: RealtimeConnections["Service"]["unsubscribeRoom"] = (
@@ -1083,6 +1180,7 @@ export const RealtimeConnectionsLive = Layer.effect(
         if (!set) return;
         set.delete(write);
         if (set.size === 0) byRoom.delete(room);
+        releaseRoomIfEmpty(room);
       });
 
     const isInRoom: RealtimeConnections["Service"]["isInRoom"] = (
@@ -1164,6 +1262,13 @@ export const RealtimeConnectionsLive = Layer.effect(
               byRoom.delete(room);
             }
           }
+          for (const postId of [
+            ...(mine?.posts ?? []),
+            ...(mine?.watching ?? []),
+          ]) {
+            releasePostIfUnviewed(postId);
+          }
+          for (const room of mine?.rooms ?? []) releaseRoomIfEmpty(room);
           Effect.runFork(Metric.modify(websocketConnectionsActive, -1));
           Effect.runFork(
             Metric.update(

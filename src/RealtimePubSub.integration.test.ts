@@ -304,3 +304,55 @@ async function waitFor(
     }
   },
 );
+
+(redisConfigured ? test : test.skip)(
+  "a post's events reach only the instance showing it: just it listens on the post's channel (#832)",
+  async () => {
+    const instanceA = makeInstance();
+    const instanceB = makeInstance();
+    const inspector = new RedisClient(process.env.REDIS_URL);
+    // Fresh per run, so no other run's subscriber is counted.
+    const postId = Date.now();
+    const channel = `chat-platform:realtime:post:${postId}`;
+    const numsub = async () => {
+      const reply = (await inspector.send("PUBSUB", ["NUMSUB", channel])) as [
+        string,
+        number,
+      ];
+      return Number(reply[1]);
+    };
+    try {
+      const received: string[] = [];
+      await instanceA.runPromise(
+        Effect.gen(function* () {
+          const connections = yield* RealtimeConnections;
+          yield* connections.subscribePost(postId, (chunk) =>
+            Effect.sync(() => {
+              received.push(chunk);
+            }),
+          );
+        }),
+      );
+      expect(await numsub()).toBe(1);
+
+      const event = {
+        type: "comment_changed",
+        postId,
+        commentId: 1,
+      } as const;
+      await instanceB.runPromise(
+        Effect.flatMap(RealtimeConnections, (connections) =>
+          connections.notifyPostRoom(postId, event),
+        ),
+      );
+      await waitFor(() => received.length > 0);
+      expect(received).toEqual([JSON.stringify(event)]);
+      // B published it without ever listening.
+      expect(await numsub()).toBe(1);
+    } finally {
+      await instanceA.dispose();
+      await instanceB.dispose();
+      inspector.close();
+    }
+  },
+);

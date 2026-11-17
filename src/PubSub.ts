@@ -37,6 +37,11 @@ export class PubSub extends Context.Service<
       channel: string,
       onMessage: (message: string) => Effect.Effect<void>,
     ) => Effect.Effect<void>;
+    // Drops every handler on `channel` and stops listening to it — for the
+    // per-post and per-room channels (see Realtime.ts), which an instance
+    // only listens to while a local socket is there. Best-effort: a failure
+    // leaves at most messages nobody here is waiting for.
+    readonly unsubscribe: (channel: string) => Effect.Effect<void>;
     // Used by the `/ready` readiness endpoint (see Health.ts) to confirm
     // this instance's realtime fan-out path is actually reachable right now,
     // not just configured.
@@ -90,6 +95,10 @@ export const InMemoryPubSubLive = Layer.sync(PubSub, () => {
           subscribers.set(channel, listeners);
         }),
       ),
+    unsubscribe: (channel) =>
+      Effect.sync(() => {
+        subscribers.delete(channel);
+      }),
     // No external dependency to lose — a single process is always ready to
     // fan out to its own local subscribers.
     ping: Effect.void,
@@ -242,6 +251,19 @@ export const RedisPubSubLive = Layer.effect(
           ),
         );
       },
+      // Off the list first, so a reconnect doesn't bring it back even if
+      // Redis is down now (a fresh connection starts with no channels).
+      unsubscribe: (channel: string) =>
+        Effect.suspend(() => {
+          subscriptions.delete(channel);
+          return Effect.tryPromise(() =>
+            subscriber.client.unsubscribe(channel),
+          );
+        }).pipe(
+          Effect.catch((error) =>
+            redisFallback(subscriber, "pubsub", "unsubscribe", error),
+          ),
+        ),
       ping: Effect.tryPromise(() => publisher.client.ping()).pipe(
         Effect.asVoid,
       ),

@@ -758,6 +758,13 @@ unit-tested, driven from `realtimeSocket.ts`:
   its `feed`-room sockets one coalesced `feed_head` per `FeedHeadInterval`,
   and the feed shows a "New posts" pill that fetches only when used
   (`lib/feedHead.ts`). Keep `broadcastAll` for rare, global events.
+  Across instances, a post's events (comments, viewers, reaction batches)
+  and a named room's go on their own Redis channel, which an instance
+  listens on only while a local socket shows that post or is in that room
+  (`holdChannel`, released `RoomChannelLinger` after the last one leaves;
+  issue #832), and user events go to the instances holding the recipients.
+  Only `all` and `feed_post` still go to every instance; a new scope
+  should get a channel too.
 - **`staleTime` — [`web/src/lib/realtimeFreshness.ts`](web/src/lib/realtimeFreshness.ts)**
   (issue #752). `realtimeStaleTime(room?)` gives chat lists, unread counts
   and `useGameLobbies` `REALTIME_STALE_TIME_MS` only while the socket (and
