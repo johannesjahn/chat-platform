@@ -2,7 +2,11 @@ import { RedisClient, type Socket, type TCPSocketListener } from "bun";
 import { afterAll, expect, test } from "bun:test";
 import net from "node:net";
 import { Duration, Effect, Layer, ManagedRuntime } from "effect";
-import { PresenceHeartbeat, RedisPresenceStoreLive } from "./Presence.ts";
+import {
+  PresenceHeartbeat,
+  presenceCountsKey,
+  RedisPresenceStoreLive,
+} from "./Presence.ts";
 import { staticPresenceAudience } from "./PresenceAudience.ts";
 import { RedisPubSubLive } from "./PubSub.ts";
 import { makeRedisRateLimiter } from "./RateLimiter.ts";
@@ -306,10 +310,7 @@ redisTest(
           }).pipe(Effect.timeout(Duration.seconds(1))),
         );
         expect(
-          await direct!.hget(
-            "chat-platform:presence:counts",
-            String(contactId),
-          ),
+          await direct!.hget(presenceCountsKey(contactId), String(contactId)),
         ).toBeNull();
       } finally {
         proxy!.restore();
@@ -334,7 +335,7 @@ redisTest(
         ),
       ).toBe(true);
       expect(
-        await direct!.hget("chat-platform:presence:counts", String(contactId)),
+        await direct!.hget(presenceCountsKey(contactId), String(contactId)),
       ).toBe("1");
 
       // And its subscription is back: an event published straight to Redis

@@ -5,6 +5,8 @@ import {
   type PresenceChange,
   PresenceHeartbeat,
   PresenceStore,
+  PRESENCE_BUCKETS,
+  presenceCountsKey,
   RedisPresenceStoreLive,
 } from "./Presence.ts";
 
@@ -13,8 +15,6 @@ import {
 // TTLs), which InMemoryPresenceStoreLive has no equivalent of, so they can't
 // run against it.
 const redisConfigured = Boolean(process.env.REDIS_URL);
-
-const KEY = "chat-platform:presence:counts";
 
 // Fresh ids per test, distinct from every other Presence-related test file,
 // so a previous run against a persistent (non-CI) Redis can't leave a stale
@@ -37,7 +37,12 @@ const freshUserId = () => nextUserId++;
         }),
       );
 
-      const [ttl] = await inspector.httl(KEY, "FIELDS", 1, String(userId));
+      const [ttl] = await inspector.httl(
+        presenceCountsKey(userId),
+        "FIELDS",
+        1,
+        String(userId),
+      );
       // A field with no connect would report -2 (missing); one with no TTL
       // (the old HINCRBY-only behavior) would report -1. A positive TTL no
       // greater than the configured window proves `connect` actually armed
@@ -67,7 +72,10 @@ const freshUserId = () => nextUserId++;
         }),
       );
 
-      const exists = await inspector.hexists(KEY, String(userId));
+      const exists = await inspector.hexists(
+        presenceCountsKey(userId),
+        String(userId),
+      );
       expect(exists).toBe(false);
     } finally {
       await runtime.dispose();
@@ -92,7 +100,7 @@ const freshUserId = () => nextUserId++;
       );
 
       const [ttlAfterConnect] = await inspector.httl(
-        KEY,
+        presenceCountsKey(userId),
         "FIELDS",
         1,
         String(userId),
@@ -106,7 +114,7 @@ const freshUserId = () => nextUserId++;
       await new Promise((resolve) => setTimeout(resolve, 22_000));
 
       const [ttlAfterHeartbeat] = await inspector.httl(
-        KEY,
+        presenceCountsKey(userId),
         "FIELDS",
         1,
         String(userId),
@@ -121,7 +129,7 @@ const freshUserId = () => nextUserId++;
 );
 
 (redisConfigured ? test : test.skip)(
-  "onlineAmong answers for just the ids it's asked about, in one round trip",
+  "onlineAmong answers for just the ids it's asked about, across buckets, in the order asked",
   async () => {
     const runtime = ManagedRuntime.make(RedisPresenceStoreLive);
     const online = freshUserId();
@@ -135,12 +143,20 @@ const freshUserId = () => nextUserId++;
           yield* store.connect(online);
           yield* store.connect(gone);
           yield* store.disconnect(gone);
-          const found = yield* store.onlineAmong([offline, online, gone]);
+          yield* store.connect(offline + PRESENCE_BUCKETS);
+          const found = yield* store.onlineAmong([
+            offline,
+            offline + PRESENCE_BUCKETS,
+            online,
+            gone,
+            online,
+          ]);
           yield* store.disconnect(online);
+          yield* store.disconnect(offline + PRESENCE_BUCKETS);
           return found;
         }),
       );
-      expect(result).toEqual([online]);
+      expect(result).toEqual([offline + PRESENCE_BUCKETS, online, online]);
     } finally {
       await runtime.dispose();
     }
@@ -195,13 +211,56 @@ const waitUntil = async (predicate: () => boolean | Promise<boolean>) => {
       await dead.runPromise(
         Effect.flatMap(PresenceStore, (store) => store.connect(userId)),
       );
-      expect(await inspector.hget(KEY, String(userId))).toBe("1");
+      expect(
+        await inspector.hget(presenceCountsKey(userId), String(userId)),
+      ).toBe("1");
 
       await dead.dispose();
       await waitUntil(() =>
         changes.some((c) => c.userId === userId && !c.online),
       );
-      expect(await inspector.hget(KEY, String(userId))).toBeNull();
+      expect(
+        await inspector.hget(presenceCountsKey(userId), String(userId)),
+      ).toBeNull();
+    } finally {
+      await survivor.dispose();
+      inspector.close();
+    }
+  },
+);
+
+(redisConfigured ? test : test.skip)(
+  "counts are spread over more than one key, and a dead instance's users go offline in every bucket (issue #832)",
+  async () => {
+    const dead = instance();
+    const survivor = instance();
+    const inspector = new RedisClient(process.env.REDIS_URL);
+    const users = [freshUserId(), freshUserId(), freshUserId()];
+    try {
+      expect(new Set(users.map(presenceCountsKey)).size).toBe(users.length);
+      const changes = await recordChanges(survivor);
+      await dead.runPromise(
+        Effect.forEach(users, (userId) =>
+          Effect.flatMap(PresenceStore, (store) => store.connect(userId)),
+        ),
+      );
+      for (const userId of users) {
+        expect(
+          await inspector.hget(presenceCountsKey(userId), String(userId)),
+        ).toBe("1");
+      }
+
+      await dead.dispose();
+      await waitUntil(() =>
+        users.every((userId) =>
+          changes.some((c) => c.userId === userId && !c.online),
+        ),
+      );
+      for (const userId of users) {
+        expect(
+          await inspector.hexists(presenceCountsKey(userId), String(userId)),
+        ).toBe(false);
+      }
     } finally {
       await survivor.dispose();
       inspector.close();
@@ -224,11 +283,15 @@ const waitUntil = async (predicate: () => boolean | Promise<boolean>) => {
       await survivor.runPromise(
         Effect.flatMap(PresenceStore, (store) => store.connect(userId)),
       );
-      expect(await inspector.hget(KEY, String(userId))).toBe("2");
+      expect(
+        await inspector.hget(presenceCountsKey(userId), String(userId)),
+      ).toBe("2");
 
       await dead.dispose();
       await waitUntil(
-        async () => (await inspector.hget(KEY, String(userId))) === "1",
+        async () =>
+          (await inspector.hget(presenceCountsKey(userId), String(userId))) ===
+          "1",
       );
       expect(changes.some((c) => c.userId === userId)).toBe(false);
 
@@ -259,27 +322,38 @@ const waitUntil = async (predicate: () => boolean | Promise<boolean>) => {
       // Do to it what REAP_SCRIPT does to an instance it takes for dead —
       // as if a long pause had let another instance reap it.
       const instances = (await inspector.send("ZRANGE", [
-        "chat-platform:presence:instances",
+        "chat-platform:presence:v2:instances",
         "0",
         "-1",
       ])) as string[];
       let reaped = 0;
       for (const id of instances) {
-        const sharesKey = `chat-platform:presence:instance:${id}`;
+        const sharesKey = `chat-platform:presence:v2:instance:${id}`;
         const share = await inspector.hget(sharesKey, String(userId));
         if (share === null) continue;
-        await inspector.send("ZREM", ["chat-platform:presence:instances", id]);
-        await inspector.hincrby(KEY, String(userId), -Number(share));
-        await inspector.hdel(KEY, String(userId));
+        await inspector.send("ZREM", [
+          "chat-platform:presence:v2:instances",
+          id,
+        ]);
+        await inspector.hincrby(
+          presenceCountsKey(userId),
+          String(userId),
+          -Number(share),
+        );
+        await inspector.hdel(presenceCountsKey(userId), String(userId));
         await inspector.del(sharesKey);
         reaped++;
       }
       expect(reaped).toBe(1);
-      expect(await inspector.hget(KEY, String(userId))).toBeNull();
+      expect(
+        await inspector.hget(presenceCountsKey(userId), String(userId)),
+      ).toBeNull();
 
       // Its next beat finds itself unregistered and restores its share.
       await waitUntil(
-        async () => (await inspector.hget(KEY, String(userId))) === "1",
+        async () =>
+          (await inspector.hget(presenceCountsKey(userId), String(userId))) ===
+          "1",
       );
       await waitUntil(() =>
         pausedChanges.some((c) => c.userId === userId && c.online),
