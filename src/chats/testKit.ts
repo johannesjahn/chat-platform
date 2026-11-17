@@ -97,8 +97,11 @@ export const seedMessages = (chatId: number, senderId: number, total: number) =>
     }
   });
 
-export const medianMs = (samples: number[]) =>
-  [...samples].sort((a, b) => a - b)[Math.floor(samples.length / 2)]!;
+// The fastest of `samples`: the steadiest estimate of what a call really
+// costs when the rest of a parallel suite shares the CPU, since contention
+// only ever adds time to a sample. A cost the code itself adds shows in
+// every sample, the fastest included.
+export const fastestMs = (samples: number[]) => Math.min(...samples);
 
 // Finds one emoji's summary in a `reactions` array, or a zero/false default
 // if that emoji has no reactions at all (mirrors the same helper in
