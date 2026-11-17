@@ -16,6 +16,7 @@ const reconnectListeners: Array<Effect.Effect<void>> = [];
 const SilentPubSubLive = Layer.succeed(PubSub, {
   publish: () => Effect.void,
   subscribe: () => Effect.void,
+  unsubscribe: () => Effect.void,
   ping: Effect.void,
   onReconnect: (listener) =>
     Effect.sync(() => {
