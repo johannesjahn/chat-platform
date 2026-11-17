@@ -1,5 +1,6 @@
 import {
   infiniteQueryOptions,
+  type Query,
   type QueryClient,
   useInfiniteQuery,
   useQuery,
@@ -11,6 +12,7 @@ import {
   appendComment,
   commentQueryBelongsToPost,
   patchComment,
+  patchCommentQuery,
   topLevelCommentIds,
 } from "./commentPages";
 import { patchCachedPost } from "./posts";
@@ -119,19 +121,43 @@ export function invalidatePostComments(
   queryClient: QueryClient,
   postId: number,
 ): Promise<void> {
+  return queryClient.invalidateQueries(postCommentQueries(queryClient, postId));
+}
+
+// Applies `update` to comment `commentId` of post `postId` wherever it's
+// cached — in its thread, in a reply thread, or on its own — with no request
+// and without touching any other post's comments. How a comment's
+// `reaction_changed` lands (issue #810).
+export function patchCachedComment(
+  queryClient: QueryClient,
+  postId: number,
+  commentId: number,
+  update: (comment: Comment) => Comment,
+): void {
+  for (const [queryKey, data] of queryClient.getQueriesData(
+    postCommentQueries(queryClient, postId),
+  )) {
+    const patched = patchCommentQuery(queryKey, data, commentId, update);
+    if (patched !== data) queryClient.setQueryData(queryKey, patched);
+  }
+}
+
+// The queries under `commentsQueryKeyRoot` that show part of post `postId`'s
+// comments (see commentQueryBelongsToPost).
+function postCommentQueries(queryClient: QueryClient, postId: number) {
   const topLevelIds = topLevelCommentIds(
     queryClient.getQueryData<CommentsData>(postCommentsQueryKey(postId)),
   );
-  return queryClient.invalidateQueries({
+  return {
     queryKey: commentsQueryKeyRoot,
-    predicate: (query) =>
+    predicate: (query: Query) =>
       commentQueryBelongsToPost(
         query.queryKey,
         query.state.data,
         postId,
         topLevelIds,
       ),
-  });
+  };
 }
 
 // Writes this client's own just-created comment or reply (the mutation

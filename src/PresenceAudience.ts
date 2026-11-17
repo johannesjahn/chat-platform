@@ -1,8 +1,9 @@
-import { and, eq, ne, notExists, or, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Context, Effect, Layer } from "effect";
 import { Db, timedDbCall } from "./Db.ts";
-import { chatParticipants, userBlocks } from "./db/schema.ts";
+import { contactOf } from "./contacts.ts";
+import { chatParticipants } from "./db/schema.ts";
 
 // Who gets to see a user's presence (online/offline) and custom status
 // (issue #660). Both used to be broadcast to every socket in the deployment,
@@ -10,10 +11,8 @@ import { chatParticipants, userBlocks } from "./db/schema.ts";
 // handed one frame per online user — O(online²) across a reconnect wave —
 // and presence reached people who had blocked, or been blocked by, the user.
 //
-// The audience is a user's *contacts*: everyone who shares at least one chat
-// with them, minus anyone on either side of a block (a mute is softer — it
-// never hides presence, same as it never stops messaging; see `userBlocks`
-// in db/schema.ts). It's the set of people who can actually see the user
+// The audience is a user's *contacts* (see contacts.ts): everyone who shares
+// an accepted chat with them, minus anyone on either side of a block. It's the set of people who can actually see the user
 // anywhere presence is rendered — chat lists, conversation headers, the
 // feed's "online now" rail. Both directions of the relationship are the same
 // query, so it serves the push side (whose sockets to notify about `userId`)
@@ -44,36 +43,7 @@ export const PresenceAudienceLive = Layer.effect(
             .selectDistinct({ userId: others.userId })
             .from(chatParticipants)
             .innerJoin(others, eq(others.chatId, chatParticipants.chatId))
-            .where(
-              and(
-                eq(chatParticipants.userId, userId),
-                ne(others.userId, userId),
-                // A pending message request (issue #785) introduces nobody,
-                // either way round, until it's accepted.
-                eq(chatParticipants.requestPending, false),
-                eq(others.requestPending, false),
-                notExists(
-                  db
-                    .select({ one: sql`1` })
-                    .from(userBlocks)
-                    .where(
-                      and(
-                        eq(userBlocks.type, "block"),
-                        or(
-                          and(
-                            eq(userBlocks.blockerId, userId),
-                            eq(userBlocks.blockedId, others.userId),
-                          ),
-                          and(
-                            eq(userBlocks.blockerId, others.userId),
-                            eq(userBlocks.blockedId, userId),
-                          ),
-                        ),
-                      ),
-                    ),
-                ),
-              ),
-            ),
+            .where(contactOf(userId, chatParticipants, others)),
         ),
       ).pipe(
         Effect.map((rows) => rows.map((row) => row.userId)),

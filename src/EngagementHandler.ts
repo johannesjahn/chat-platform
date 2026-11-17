@@ -605,6 +605,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               type: "reaction_changed",
               targetType: "comment",
               targetId: id,
+              postId: comment.postId,
               reactions: toReactionCounts(reactions),
             });
             yield* createNotifications({ db, connections }, [
@@ -646,6 +647,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               type: "reaction_changed",
               targetType: "comment",
               targetId: id,
+              postId: comment.postId,
               reactions: toReactionCounts(reactions),
             });
             yield* retractReactionNotification(

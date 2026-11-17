@@ -85,6 +85,23 @@ export function commentQueryBelongsToPost(
   return false;
 }
 
+// Applies `update` to comment `commentId` in the data of one query under
+// `commentsQueryKeyRoot` — a thread (top-level or replies) or a comment on
+// its own. Returns `data` itself when the comment isn't in it.
+export function patchCommentQuery(
+  queryKey: QueryKey,
+  data: unknown,
+  commentId: number,
+  update: (comment: Comment) => Comment,
+): unknown {
+  if (data === undefined) return data;
+  if (queryKey[1] === "one") {
+    const comment = data as Comment;
+    return comment.id === commentId ? update(comment) : data;
+  }
+  return patchComment(data as CommentsData, commentId, update);
+}
+
 export function topLevelCommentIds(
   data: CommentsData | undefined,
 ): Set<number> {

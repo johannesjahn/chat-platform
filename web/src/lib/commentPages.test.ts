@@ -6,6 +6,7 @@ import {
   appendComment,
   commentQueryBelongsToPost,
   patchComment,
+  patchCommentQuery,
   topLevelCommentIds,
 } from "./commentPages";
 
@@ -75,6 +76,43 @@ describe("patchComment", () => {
     const patched = patchComment(data, 2, (c) => ({ ...c, replyCount: 3 }));
     expect(patched.pages[0]?.comments.map((c) => c.replyCount)).toEqual([0, 3]);
     expect(patchComment(data, 9, (c) => c)).toBe(data);
+  });
+});
+
+describe("patchCommentQuery", () => {
+  const react = (c: Comment): Comment => ({
+    ...c,
+    reactions: [{ emoji: "👍", count: 1, reactedByMe: false }],
+  });
+
+  test("patches the comment in a thread, and leaves a thread without it alone", () => {
+    const data = thread([{ ids: [1, 2], next: null }]);
+    const patched = patchCommentQuery(
+      ["comments", "post", 1],
+      data,
+      2,
+      react,
+    ) as CommentsData;
+    expect(patched.pages[0]!.comments[1]!.reactions).toHaveLength(1);
+    expect(patched.pages[0]!.comments[0]).toBe(data.pages[0]!.comments[0]!);
+    expect(patchCommentQuery(["comments", "replies", 1], data, 3, react)).toBe(
+      data,
+    );
+  });
+
+  test("patches a comment shown on its own only if it's the one", () => {
+    const one = comment(5);
+    expect(
+      (patchCommentQuery(["comments", "one", 5], one, 5, react) as Comment)
+        .reactions,
+    ).toHaveLength(1);
+    expect(patchCommentQuery(["comments", "one", 5], one, 6, react)).toBe(one);
+  });
+
+  test("leaves a query with no data yet alone", () => {
+    expect(
+      patchCommentQuery(["comments", "post", 1], undefined, 1, react),
+    ).toBeUndefined();
   });
 });
 

@@ -7,8 +7,6 @@ import {
   inArray,
   lt,
   max,
-  ne,
-  notExists,
   or,
   sql,
 } from "drizzle-orm";
@@ -27,17 +25,12 @@ import {
 import { resolveAttachments } from "../attachments.ts";
 import { CurrentUser } from "../Auth.ts";
 import { blockedOrMutedUserIds } from "../blocks.ts";
+import { contactOf } from "../contacts.ts";
 import { type DrizzleDb, dbQuery } from "../Db.ts";
 
 import { postReactionInfo } from "../reactions.ts";
 import { containsPattern } from "../search.ts";
-import {
-  chatParticipants,
-  chats,
-  userBlocks,
-  users,
-  posts,
-} from "../db/schema.ts";
+import { chatParticipants, chats, users, posts } from "../db/schema.ts";
 import { type UsersDeps, type UsersHandlers } from "./handlerKit.ts";
 import { publicUserColumns, toPublicUser, toUserProfile } from "./userViews.ts";
 import {
@@ -55,11 +48,9 @@ const USER_SEARCH_RESULTS_LIMIT = 20;
 // A user's contacts, for the suggestions shown before a directory search
 // (issue #764): everyone they share a chat with, ordered by that chat's
 // latest activity (`chats.updated_at`, bumped on every message), newest
-// first. It's the relationship `PresenceAudience` shares presence over —
-// only an *accepted* chat introduces anyone (a pending message request,
-// issue #785, on either side doesn't), and a block in either direction
-// hides the pair from each other (a mute doesn't: it never stops messaging
-// either). Never includes `userId` itself.
+// first. It's the relationship `PresenceAudience` shares presence over
+// (`contactOf` in contacts.ts: accepted chats only, no block either way).
+// Never includes `userId` itself.
 //
 // This must only ever return people `userId` already shares a chat with:
 // it's what lets the client suggest people for a 1–2 character query
@@ -77,34 +68,7 @@ export const contactsOf = (db: DrizzleDb, userId: number, limit: number) =>
       eq(contactParticipants.chatId, chatParticipants.chatId),
     )
     .innerJoin(users, eq(users.id, contactParticipants.userId))
-    .where(
-      and(
-        eq(chatParticipants.userId, userId),
-        ne(contactParticipants.userId, userId),
-        eq(chatParticipants.requestPending, false),
-        eq(contactParticipants.requestPending, false),
-        notExists(
-          db
-            .select({ one: sql`1` })
-            .from(userBlocks)
-            .where(
-              and(
-                eq(userBlocks.type, "block"),
-                or(
-                  and(
-                    eq(userBlocks.blockerId, userId),
-                    eq(userBlocks.blockedId, contactParticipants.userId),
-                  ),
-                  and(
-                    eq(userBlocks.blockerId, contactParticipants.userId),
-                    eq(userBlocks.blockedId, userId),
-                  ),
-                ),
-              ),
-            ),
-        ),
-      ),
-    )
+    .where(contactOf(userId, chatParticipants, contactParticipants))
     // `users.id` is the primary key, so the other selected `users` columns
     // are functionally dependent on it and Postgres accepts them ungrouped.
     .groupBy(users.id)
