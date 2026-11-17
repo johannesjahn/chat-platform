@@ -165,7 +165,8 @@ backend:
     enabled: true
     maxUnavailable: 1
 
-  # Optional HorizontalPodAutoscaler on CPU (issue #838). Off by default:
+  # Optional HorizontalPodAutoscaler on CPU (issue #838; on in
+  # values-scale.yaml, together with resources sized for it). Off by default:
   # this chart's resource budget is sized for a single small node (see the
   # resources comment above and ../README.md's "Capacity"), where there's
   # no room to scale into. Each pod runs JavaScript on one thread, so it

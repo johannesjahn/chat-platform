@@ -1,0 +1,59 @@
+# Overrides for a cluster with room to scale, sized from the load simulator's
+# measurements (issue #838; numbers in ../README.md's "Capacity"). The
+# defaults in values.yaml are a budget for one small node instead. Layer it
+# on top of them:
+#
+#   helm upgrade --install chat-platform k8s/chat-platform \
+#     -f k8s/chat-platform/values-scale.yaml
+#
+# At these sizes, 2–3 backend pods carry ~10k active users. The HPA adds
+# pods up to maxReplicas. Past that, Postgres is the limit (~1,600
+# requests/s per CPU, and adding pods doesn't add any), so raise its
+# resources along with maxReplicas, and turn on pgbouncer once
+# maxReplicas × backend.dbPoolMax no longer fits under maxConnections.
+#
+# Requests total ~3.1 CPUs and ~5.7Gi at minReplicas, before the
+# observability stack; each extra backend pod adds 500m and 768Mi.
+
+backend:
+  # A pod runs JavaScript on one thread, so it saturates at about one core.
+  # Memory is ~300–450MB baseline plus ~60–100KB per socket: ~1GB with 10k
+  # sockets under load, so 1.5Gi keeps a pod well clear of an OOM kill
+  # (which would reconnect all its clients to the others at once).
+  resources:
+    requests:
+      cpu: 500m
+      memory: 768Mi
+    limits:
+      cpu: 1000m
+      memory: 1536Mi
+
+  # Scales on 70% of the 500m request, i.e. ~35% of the core a pod can use,
+  # so new pods start well before the existing ones saturate.
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+
+postgres:
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 4Gi
+  # maxReplicas × backend.dbPoolMax (10 × 10), plus the migration Job and
+  # headroom for psql.
+  maxConnections: 120
+  # ~25% of the memory limit.
+  sharedBuffers: 1GB
+
+redis:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
