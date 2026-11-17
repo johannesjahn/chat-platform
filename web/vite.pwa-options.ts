@@ -142,6 +142,25 @@ export const sharedPwaOptions: Partial<VitePWAOptions> = {
             purgeOnQuotaError: true,
           },
           cacheableResponse: { statuses: [200] },
+          // A chunk the last deploy removed comes back as the SPA fallback —
+          // index.html with a 200 — and cached, it'd answer that URL for the
+          // next 30 days. Neither store an HTML page under an asset's URL nor
+          // serve one an older worker already stored. (Serialized into sw.js,
+          // so these can't reference anything outside themselves.)
+          plugins: [
+            {
+              cacheWillUpdate: async ({ response }) =>
+                response.headers.get("content-type")?.includes("text/html")
+                  ? null
+                  : response,
+              cachedResponseWillBeUsed: async ({ cachedResponse }) =>
+                cachedResponse?.headers
+                  .get("content-type")
+                  ?.includes("text/html")
+                  ? null
+                  : cachedResponse,
+            },
+          ],
         },
       },
     ],

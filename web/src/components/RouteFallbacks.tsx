@@ -4,10 +4,21 @@ import {
   type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { useQueryErrorResetBoundary } from "@tanstack/react-query";
-import { AlertTriangle, Compass, Home, RotateCw } from "lucide-react";
-import { useEffect } from "react";
+import {
+  AlertTriangle,
+  Compass,
+  Home,
+  RefreshCw,
+  RotateCw,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
+import {
+  canReloadAutomatically,
+  isStaleChunkError,
+  reloadIntoLatestBuild,
+} from "@/lib/staleBuild";
 import { usePageTitle } from "@/lib/title";
 
 // The router-wide fallbacks (issue #496), wired up as
@@ -41,7 +52,63 @@ export function NotFoundPage() {
   );
 }
 
-export function RouteErrorPage({ error, reset }: ErrorComponentProps) {
+export function RouteErrorPage(props: ErrorComponentProps) {
+  return isStaleChunkError(props.error) ? (
+    <StaleBuildPage />
+  ) : (
+    <ErrorPage {...props} />
+  );
+}
+
+// The page's code is from a build that's no longer deployed (see
+// lib/staleBuild.ts): move onto the new one by itself, once, and otherwise
+// offer the reload — "Try again" can't help, since Safari keeps a failed
+// import for the rest of the page's life.
+function StaleBuildPage() {
+  const [updating] = useState(
+    () => typeof window !== "undefined" && canReloadAutomatically(),
+  );
+  usePageTitle(updating ? "Updating" : "Something went wrong");
+
+  useEffect(() => {
+    if (updating) reloadIntoLatestBuild();
+  }, [updating]);
+
+  return (
+    <main
+      role="alert"
+      className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center px-4 py-10"
+    >
+      <EmptyState
+        icon={updating ? RefreshCw : AlertTriangle}
+        title={updating ? "Updating the app" : "Something went wrong"}
+        pageHeading
+        description={
+          updating
+            ? "A newer version came out while this page was open. Loading it now…"
+            : "This page didn't finish loading. Reloading usually fixes it."
+        }
+      >
+        {!updating && (
+          <Button
+            onClick={() => reloadIntoLatestBuild({ userInitiated: true })}
+          >
+            <RefreshCw />
+            Reload
+          </Button>
+        )}
+        <Button asChild variant="outline">
+          <Link to="/">
+            <Home />
+            Go to feed
+          </Link>
+        </Button>
+      </EmptyState>
+    </main>
+  );
+}
+
+function ErrorPage({ error, reset }: ErrorComponentProps) {
   const router = useRouter();
   const queryErrorReset = useQueryErrorResetBoundary();
   usePageTitle("Something went wrong");

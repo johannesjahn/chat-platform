@@ -1,11 +1,14 @@
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useChunkLoadFailed } from "@/lib/lazy";
+import { reloadIntoLatestBuild } from "@/lib/staleBuild";
 
 // Shown once a lazily loaded part of the app (the sidebar, the messaging
 // dock, an overlay) has failed to load for good (issue #738) — the page
 // itself keeps working, but only a reload brings that part back. Kept out of
-// the lazy shell pieces itself, so it can't be the thing that failed.
+// the lazy shell pieces itself, so it can't be the thing that failed. The
+// reload goes onto the newest build: a chunk that's missing is usually one
+// the last deploy removed (lib/staleBuild.ts).
 export function ChunkLoadNotice() {
   const failed = useChunkLoadFailed();
 
@@ -22,7 +25,10 @@ export function ChunkLoadNotice() {
         <span className="text-sm text-foreground">
           Part of the app didn&apos;t finish loading.
         </span>
-        <Button size="sm" onClick={() => window.location.reload()}>
+        <Button
+          size="sm"
+          onClick={() => reloadIntoLatestBuild({ userInitiated: true })}
+        >
           <RefreshCw className="size-4" />
           Reload
         </Button>
