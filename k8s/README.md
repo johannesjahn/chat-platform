@@ -68,10 +68,16 @@ Rough sizing from those numbers:
 |       10,000 |     ~1,500 | 2–3 pods at **1 CPU / ~1.5Gi limit** (one pod holds 10k sockets at ~1GB) | ~1–2 CPUs   | fine                                       |
 |      100,000 |    ~15,000 | ~10–12 pods at 1 CPU / ~1.5Gi, or `backend.autoscaling`                  | ~10 CPUs    | needs `pgbouncer` (or `maxConnections` up) |
 
-At the defaults' **512Mi** memory limit a pod has room for roughly 1–2k
+At the defaults' **1Gi** memory limit (1 CPU) a pod has room for roughly 5k
 sockets under load before it's OOM-killed — and a killed pod's clients all
 reconnect to the others at once. Raise `backend.resources` (and the node's
 budget) before scaling past that, and give Postgres real resources with it.
+`backend.autoscaling.enabled: true` alone turns on the HPA: it targets an
+absolute `targetCPUAverageValue` (600m per pod), not a percentage of the
+request, so it behaves the same at any request size. It reads CPU from
+metrics-server, which microk8s only runs as an addon — run
+`microk8s enable metrics-server` once before enabling it, or the HPA's
+target stays `<unknown>` and it never scales.
 [`chat-platform/values-scale.yaml`](chat-platform/values-scale.yaml) does
 both for ~10k active users (1 CPU / 1.5Gi backend pods under the HPA, a
 2–4 CPU Postgres with `maxConnections` to match). Layer it on the defaults

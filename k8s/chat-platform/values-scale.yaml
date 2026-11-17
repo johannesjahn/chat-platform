@@ -28,8 +28,8 @@ backend:
       cpu: 1000m
       memory: 1536Mi
 
-  # Scales on 70% of the 500m request, i.e. ~35% of the core a pod can use,
-  # so new pods start well before the existing ones saturate.
+  # Scales at values.yaml's targetCPUAverageValue (600m, ~60% of the core a
+  # pod can use), so new pods start well before the existing ones saturate.
   autoscaling:
     enabled: true
     minReplicas: 2
