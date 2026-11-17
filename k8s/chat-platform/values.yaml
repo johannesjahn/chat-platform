@@ -35,13 +35,20 @@ backend:
   # ~140% of node RAM against requests of ~42%. Limit stays at ~2x the
   # request for burst headroom. See ../observability/README.md's "Resource
   # footprint" for the whole-node budget.
+  #
+  # The limit is what keeps a pod alive under load (issue #838): memory is
+  # ~300–450MB baseline plus ~60–100KB per socket, so 1Gi holds ~5k sockets
+  # (~0.9GB) without an OOM kill, which would reconnect all of a pod's
+  # clients to the others at once. A pod runs JavaScript on one thread and
+  # can't use more than about one core, so the CPU limit is that core — a
+  # lower one only throttles it.
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
       memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
 
   # Trust client IP headers (X-Forwarded-For, X-Real-IP) from these proxies
   # (issue #172). Set to a comma-separated list of trusted IPs/CIDRs, or
@@ -177,9 +184,13 @@ backend:
     enabled: false
     minReplicas: 2
     maxReplicas: 10
-    # Of the CPU *request*, so it only means something once requests are
-    # sized for real load.
-    targetCPUUtilizationPercentage: 70
+    # Average CPU per pod to scale at, as an absolute amount rather than a
+    # percentage of the request — so it means the same thing whatever
+    # backend.resources.requests.cpu is, and `autoscaling.enabled: true` is
+    # enough on its own. ~60% of the one core a pod can use, so new pods
+    # start well before the existing ones saturate. Needs metrics-server
+    # (bundled with k3s).
+    targetCPUAverageValue: 600m
 
   # Prefer spreading replicas across nodes. ScheduleAnyway, so a
   # single-node cluster still schedules every replica.

@@ -69,9 +69,12 @@ overridden:
   treats them as free). All are given modest requests/limits here.
 
 Rendered totals for this stack plus `../chat-platform/`, on a single node:
-~2.9Gi of memory requests and ~6.3Gi of limits, i.e. ~79% of an 8Gi node
-committed at worst case, leaving headroom for kubelet, system pods, and
-ArgoCD. Requests sit at roughly half of each limit rather than a token
+~3.4Gi of memory requests and ~7.3Gi of limits, i.e. ~91% of an 8Gi node
+committed at worst case. That's tighter than it was: the backend's limit went
+from 512Mi to 1Gi per pod (issue #838) because 512Mi is OOM-killed at ~1–2k
+sockets, and a pod dying under load is the worst case anyway. Limits are
+only reached when the backend is actually that busy, and kubelet, system pods
+and ArgoCD still fit in the requests' headroom. Requests sit at roughly half of each limit rather than a token
 floor — a limit set far above the request is what lets a node accept more
 pods than it can actually feed.
 
