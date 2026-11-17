@@ -299,12 +299,33 @@ pgbouncer:
       memory: 128Mi
 
 redis:
+  # The bundled Redis is a single pod, so it's a single point of failure.
+  # The backend keeps serving without it, degraded (issue #832; see "Redis
+  # outages" in CLAUDE.md), but for high availability set this to false and
+  # point `external` at a managed Redis with automatic failover behind one
+  # endpoint (e.g. ElastiCache with Multi-AZ, Memorystore Standard tier). It
+  # needs Redis 7.4+ (presence uses HEXPIRE) with EVAL and Pub/Sub allowed,
+  # and must not be Cluster mode: presence's Lua scripts touch keys they
+  # don't declare. After a failover the backend reconnects on its own and
+  # resyncs presence, subscriptions and its sockets.
+  enabled: true
+  external:
+    host: ""
+    port: 6379
+    # Connect with rediss:// (TLS), which most managed Redis services require.
+    tls: false
+    # An ACL user. Empty authenticates as the default user.
+    username: ""
+
   image:
     repository: redis
     tag: "8.10.3-alpine"
 
   auth:
-    # Required — see postgres.auth.existingSecret above for why.
+    # Required — see postgres.auth.existingSecret above for why. With
+    # `enabled: false`, the external Redis's password (or the ACL user's).
+    # It's put into REDIS_URL as is, so percent-encode any of / @ : ? # in
+    # it (e.g. / as %2F) when creating the Secret.
     existingSecret: "redis-password"
 
   # Redis here backs realtime Pub/Sub fan-out and rate limiting (see

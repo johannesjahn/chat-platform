@@ -1,3 +1,4 @@
+{{- if .Values.redis.enabled }}
 {{- $fullname := include "chat-platform.fullname" . -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -79,3 +80,4 @@ spec:
           persistentVolumeClaim:
             claimName: {{ $fullname }}-redis
       {{- end }}
+{{- end }}

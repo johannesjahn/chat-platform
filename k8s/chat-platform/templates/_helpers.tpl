@@ -76,6 +76,21 @@ to match the Secret's own name (see values.yaml's redis.auth.existingSecret).
 {{- end -}}
 
 {{/*
+The backend's REDIS_URL: the bundled Redis, or redis.external when
+redis.enabled is false. $(REDIS_PASSWORD) is Kubernetes' env substitution
+of the container's own REDIS_PASSWORD.
+*/}}
+{{- define "chat-platform.redisUrl" -}}
+{{- if .Values.redis.enabled -}}
+redis://:$(REDIS_PASSWORD)@{{ include "chat-platform.fullname" . }}-redis:6379
+{{- else -}}
+{{- $external := .Values.redis.external -}}
+{{- $host := required "redis.external.host is required when redis.enabled is false" $external.host -}}
+{{ if $external.tls }}rediss{{ else }}redis{{ end }}://{{ $external.username }}:$(REDIS_PASSWORD)@{{ $host }}:{{ $external.port }}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Resolved Secret name for the in-cluster Garage (issue #424): data keys
 "access-key"/"secret-key" (the S3 key pair Garage imports on boot and the
 backend signs with) and "rpc-secret" (Garage's cluster RPC secret, which only
