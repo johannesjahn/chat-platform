@@ -6,7 +6,7 @@ import { messageReads } from "../db/schema.ts";
 import { makeTestRun } from "../testApi.ts";
 import {
   buryUnreadDirectChat,
-  medianMs,
+  fastestMs,
   registerAndLogin,
   seedMessages,
 } from "./testKit.ts";
@@ -99,15 +99,18 @@ test(
         expect(read.unreadCount).toBe(0);
         expect(read.lastMessage?.readByUserIds).toEqual([alice.user.id]);
 
-        // Warm up, then sample the two lists alternately and compare medians,
-        // so one GC pause can't fail the test and both see the same load from
-        // the rest of the (parallel) suite — sampled minutes apart, a busy
-        // moment on one side read as a slowdown (issue #811).
+        // Warm up, then sample the two lists alternately, so both see the
+        // same load from the rest of the (parallel) suite — sampled minutes
+        // apart, a busy moment on one side read as a slowdown (issue #811) —
+        // and compare the fastest of each: medians of 7 still failed a few
+        // times a week on CI's shared runners, where a burst of load from
+        // other files can cover most of one side's samples. Locally the two
+        // are within a few percent of each other.
         yield* carol.client.chats.listChats({ query: {} });
         yield* alice.client.chats.listChats({ query: {} });
         const baselineSamples: number[] = [];
         const historySamples: number[] = [];
-        for (let i = 0; i < 7; i++) {
+        for (let i = 0; i < 15; i++) {
           let startedAt = performance.now();
           yield* carol.client.chats.listChats({ query: {} });
           baselineSamples.push(performance.now() - startedAt);
@@ -115,8 +118,8 @@ test(
           yield* alice.client.chats.listChats({ query: {} });
           historySamples.push(performance.now() - startedAt);
         }
-        const baseline = medianMs(baselineSamples);
-        const withHistory = medianMs(historySamples);
+        const baseline = fastestMs(baselineSamples);
+        const withHistory = fastestMs(historySamples);
         // Within ~2× of the baseline; the couple of ms of slack only absorbs
         // timer noise at these ms scales — anti-joining the whole history
         // again costs tens of ms.
