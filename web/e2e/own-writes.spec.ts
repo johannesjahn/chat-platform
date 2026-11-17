@@ -173,3 +173,65 @@ test("a comment on one post doesn't refetch another post's open comments", async
   expect(requests).toContain(`GET /posts/${postA}/comments`);
   expect(requests).not.toContain(`GET /posts/${postB}/comments`);
 });
+
+// Issue #810: a comment reaction used to refetch every open comment section.
+// It names its post now, and its counts are patched in with no request.
+test("a reaction on one post's comment refetches no comments", async ({
+  page,
+  request,
+  apiUrl,
+  createUser,
+  signUp,
+}) => {
+  await signUp(page);
+  const author = await createUser();
+  const as = { Authorization: `Bearer ${author.session.accessToken}` };
+  const posts: number[] = [];
+  const comments: number[] = [];
+  for (const content of ["Post A", "Post B"]) {
+    const post = await request.post(`${apiUrl}/posts`, {
+      headers: as,
+      data: { contentType: "text", content },
+    });
+    const postId = (await post.json()).id as number;
+    const comment = await request.post(`${apiUrl}/posts/${postId}/comments`, {
+      headers: as,
+      data: { content: `A comment on ${content}` },
+    });
+    posts.push(postId);
+    comments.push((await comment.json()).id);
+  }
+  const [postA, postB] = posts;
+
+  const cardA = page.locator(`[data-post-id="${postA}"]`);
+  const cardB = page.locator(`[data-post-id="${postB}"]`);
+  await openSettled(page, "/", cardB);
+  for (const [card, content] of [
+    [cardA, "Post A"],
+    [cardB, "Post B"],
+  ] as const) {
+    await card.getByRole("button", { name: /^Comments/ }).click();
+    await expect(card.getByText(`A comment on ${content}`)).toBeVisible();
+  }
+  await settle(page);
+
+  const requests = recordApiRequests(page, apiUrl);
+  const reacted = await request.post(
+    `${apiUrl}/comments/${comments[0]}/reactions`,
+    { headers: as, data: { emoji: "👍" } },
+  );
+  expect(reacted.ok()).toBe(true);
+  await expect(
+    cardA
+      .getByTestId("comment")
+      .getByRole("button", { name: "Add 👍 reaction" }),
+  ).toBeVisible();
+  await settle(page);
+
+  expect(requests.filter((r) => r.includes("comments"))).toEqual([]);
+  await expect(
+    cardB
+      .getByTestId("comment")
+      .getByRole("button", { name: "Add 👍 reaction" }),
+  ).toHaveCount(0);
+});

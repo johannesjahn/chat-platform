@@ -11,7 +11,11 @@ import {
   chatsListQueryKey,
   patchCachedMessage,
 } from "./chats";
-import { commentsQueryKeyRoot, invalidatePostComments } from "./comments";
+import {
+  commentsQueryKeyRoot,
+  invalidatePostComments,
+  patchCachedComment,
+} from "./comments";
 import {
   patchCachedPost,
   postDetailQueryKeyPrefix,
@@ -71,6 +75,8 @@ type RealtimeSocketEvent =
       targetType: "post" | "comment" | "message";
       targetId: number;
       chatId?: number;
+      // A comment's post. Absent from a server that predates it.
+      postId?: number;
       reactions: ReadonlyArray<{ emoji: string; count: number }>;
     }
   | {
@@ -321,8 +327,9 @@ export function useRealtimeSocket(enabled: boolean): void {
           // than trusted from the event: it doesn't change for a
           // non-actor, and the actor already reconciled it from its own
           // mutation response (see mergeReactionCounts). A comment
-          // reaction arrives scoped to the post room (far lower volume),
-          // so it just refetches the comment queries. A message reaction
+          // reaction arrives scoped to its post's room and names that
+          // `postId`, so it's patched into only that post's cached
+          // comments (issue #810). A message reaction
           // arrives scoped to the message's chat participants and carries
           // `chatId` (see ReactionEvent in src/Realtime.ts), so it's patched
           // in place too, the same way a post reaction is.
@@ -346,7 +353,22 @@ export function useRealtimeSocket(enabled: boolean): void {
                 }),
               );
             }
+          } else if (parsed.postId != null) {
+            patchCachedComment(
+              queryClient,
+              parsed.postId,
+              parsed.targetId,
+              (comment) => ({
+                ...comment,
+                reactions: mergeReactionCounts(
+                  comment.reactions,
+                  parsed.reactions,
+                ),
+              }),
+            );
           } else {
+            // From a server that predates `postId` (issue #810): no way to
+            // tell which post's comments it's about.
             void queryClient.invalidateQueries({
               queryKey: commentsQueryKeyRoot,
             });

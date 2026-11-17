@@ -1,4 +1,5 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import { type SQL, and, eq, inArray, or, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { DrizzleDb } from "./Db.ts";
 import { userBlocks } from "./db/schema.ts";
 
@@ -49,6 +50,19 @@ export const directBlockExists = async (
     .limit(1);
   return rows.length > 0;
 };
+
+// SQL condition: no *block* (a mute doesn't count) in either direction between
+// `userId` and the user in column `other` — `directBlockExists`, negated, for
+// a query that ranges over users. Who counts as a contact (`contactOf` in
+// contacts.ts) is built on it.
+export const notBlockedEitherWay = (userId: number, other: AnyPgColumn): SQL =>
+  sql`not exists (select 1 from ${userBlocks} where ${and(
+    eq(userBlocks.type, "block"),
+    or(
+      and(eq(userBlocks.blockerId, userId), eq(userBlocks.blockedId, other)),
+      and(eq(userBlocks.blockerId, other), eq(userBlocks.blockedId, userId)),
+    ),
+  )})`;
 
 // Of `otherIds`, the subset with a *block* (not a mute) in either direction
 // with `userId` — the batch form of `directBlockExists`. Gates putting

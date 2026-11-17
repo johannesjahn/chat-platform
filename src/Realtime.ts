@@ -152,7 +152,8 @@ export type CommentEvent = {
 // no longer sent as this event: it went out feed-wide, O(online²) — every
 // reaction a frame to every user (issue #828) — and is now batched into
 // `post_reactions` instead. A reaction on a *comment* is scoped to that
-// post's comment room (`notifyPostRoom`). A reaction on a
+// post's comment room (`notifyPostRoom`), and carries that `postId` so the
+// client patches only that post's cached comments (issue #810). A reaction on a
 // *message* is scoped to the message's chat participants (`notifyUsers`,
 // like `chat_updated`) — chat messages are private to their participants,
 // unlike posts/comments. `chatId` is only ever set for a message reaction; it
@@ -170,6 +171,7 @@ export type ReactionEvent = {
   readonly targetType: "post" | "comment" | "message";
   readonly targetId: number;
   readonly chatId?: number;
+  readonly postId?: number;
   readonly reactions: ReadonlyArray<{
     readonly emoji: string;
     readonly count: number;

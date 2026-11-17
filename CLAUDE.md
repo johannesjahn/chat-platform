@@ -192,7 +192,10 @@ client-side by `filterContacts` ([`web/src/lib/contactFilter.ts`](web/src/lib/co
 It must only ever return people the caller already shares an **accepted**
 chat with (pending message requests on either side don't count), minus
 blocks in either direction (mutes stay), newest chat activity first, capped
-at `MAX_CONTACTS`.
+at `MAX_CONTACTS`. That rule is `contactOf` ([`src/contacts.ts`](src/contacts.ts)),
+shared with the presence audience; a block-either-way condition anywhere
+else is `notBlockedEitherWay` in `src/blocks.ts`, never a hand-written
+`user_blocks` subquery (issue #810).
 
 ## Admin dashboard
 
@@ -737,7 +740,9 @@ unit-tested, driven from `realtimeSocket.ts`:
   are held while it's in flight, the one naming the created id is dropped,
   the rest applied; a failed create applies what it held. Other tabs apply
   the event normally. `comment_changed` invalidates only its post
-  (`invalidatePostComments`), never every comment query.
+  (`invalidatePostComments`), never every comment query, and a comment's
+  `reaction_changed` names its `postId` and is patched into only that
+  post's comments (`patchCachedComment`, issue #810).
 - **Posts — watchers, batches and `feed_head`** (issues #827, #828).
   Nothing per post is sent to every socket: each post or reaction going to
   all U online users is O(U²) cluster-wide, which the load simulation

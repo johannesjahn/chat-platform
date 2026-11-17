@@ -284,7 +284,7 @@ test("a comment event reaches only sockets subscribed to that post's room", asyn
   // comment is created, so the room membership is in place first.
   await new Promise((resolve) => setTimeout(resolve, 100));
 
-  await fetch(`${apiUrl}/posts/${post.id}/comments`, {
+  const commentResponse = await fetch(`${apiUrl}/posts/${post.id}/comments`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -292,6 +292,7 @@ test("a comment event reaches only sockets subscribed to that post's room", asyn
     },
     body: JSON.stringify({ content: "first!" }),
   });
+  const comment = (await commentResponse.json()) as { id: number };
 
   // The subscribed viewer sees the scoped comment event.
   await waitFor(() =>
@@ -311,6 +312,29 @@ test("a comment event reaches only sockets subscribed to that post's room", asyn
   expect(authorSocket.messages.some((m) => m.type === "comment_changed")).toBe(
     false,
   );
+
+  // A reaction on the comment goes to the same room, and names its post, so
+  // the client patches only that post's comments (issue #810).
+  await fetch(`${apiUrl}/comments/${comment.id}/reactions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${viewer.accessToken}`,
+    },
+    body: JSON.stringify({ emoji: "👍" }),
+  });
+  await waitFor(() =>
+    viewerSocket.messages.some((m) => m.type === "reaction_changed"),
+  );
+  expect(
+    viewerSocket.messages.find((m) => m.type === "reaction_changed"),
+  ).toEqual({
+    type: "reaction_changed",
+    targetType: "comment",
+    targetId: comment.id,
+    postId: post.id,
+    reactions: [{ emoji: "👍", count: 1 }],
+  });
 
   // A reaction on the post itself reaches the sockets showing the post —
   // batched into a `post_reactions` frame (issue #828) — and the author's
