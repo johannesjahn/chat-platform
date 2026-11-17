@@ -313,6 +313,11 @@ jobs:
       - name: Helm template (default values)
         run: helm template k8s/chat-platform
 
+      - name: Helm lint & template (values-scale.yaml)
+        run: |
+          helm lint k8s/chat-platform -f k8s/chat-platform/values-scale.yaml
+          helm template k8s/chat-platform -f k8s/chat-platform/values-scale.yaml
+
   helmfile:
     name: Observability stack lint & template
     needs: changes

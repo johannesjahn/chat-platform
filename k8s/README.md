@@ -72,6 +72,10 @@ At the defaults' **512Mi** memory limit a pod has room for roughly 1–2k
 sockets under load before it's OOM-killed — and a killed pod's clients all
 reconnect to the others at once. Raise `backend.resources` (and the node's
 budget) before scaling past that, and give Postgres real resources with it.
+[`chat-platform/values-scale.yaml`](chat-platform/values-scale.yaml) does
+both for ~10k active users (1 CPU / 1.5Gi backend pods under the HPA, a
+2–4 CPU Postgres with `maxConnections` to match). Layer it on the defaults
+with `-f k8s/chat-platform/values-scale.yaml`.
 
 ## Installing
 
