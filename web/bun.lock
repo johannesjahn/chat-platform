@@ -6,7 +6,7 @@
       "name": "chat-platform-web",
       "dependencies": {
         "@radix-ui/react-slot": "1.5.0",
-        "@tanstack/query-sync-storage-persister": "5.108.1",
+        "@tanstack/query-sync-storage-persister": "5.108.2",
         "@tanstack/react-query": "5.108.2",
         "@tanstack/react-query-persist-client": "5.108.2",
         "@tanstack/react-router": "1.170.46",
@@ -464,11 +464,11 @@
 
     "@tanstack/history": ["@tanstack/history@1.162.5", "", {}, "sha512-w1+YvwmTkwt5n8yUqEH3IWZ9DsmorCZW/EQ3KYHnqEgIkOZpH54NvW6/Epq3Dzb8H0ifIeYX8PExvrNLIH5FIA=="],
 
-    "@tanstack/query-core": ["@tanstack/query-core@5.108.1", "", {}, "sha512-GBX6Xsc9E+9eVLLxuM7orQNbssQjpruOCbocBYwT78MjxOWT5I+CWdvEo0N+UM6+oCZEKxuSud1oFLvE3OEmIg=="],
+    "@tanstack/query-core": ["@tanstack/query-core@5.108.2", "", {}, "sha512-0l+0xDKqn71hfJBKaAvFP/X7WYM0TbscEk6nK1pHaWQUWUEA+WJD0VlT8wF+HIJANMV9B/DouPWwDnX3w/l9BA=="],
 
-    "@tanstack/query-persist-client-core": ["@tanstack/query-persist-client-core@5.108.1", "", { "dependencies": { "@tanstack/query-core": "5.108.1" } }, "sha512-nbgpHTp+8wnG3mIIqYUELvIx/GHWooDQ9jHzAJcNxcEtapndS2OAxKAKEYk7q2Q8Hb0piBa8NQeUDIEymavR9g=="],
+    "@tanstack/query-persist-client-core": ["@tanstack/query-persist-client-core@5.108.2", "", { "dependencies": { "@tanstack/query-core": "5.108.2" } }, "sha512-IMl2Cmu6aau4mTuHXROVYuDmSAXEdwAjVG3Hsb6KkcW/praiTCSRdBOzoVvBridhrIHkFX3VUSYSVu5xEKap8A=="],
 
-    "@tanstack/query-sync-storage-persister": ["@tanstack/query-sync-storage-persister@5.108.1", "", { "dependencies": { "@tanstack/query-core": "5.108.1", "@tanstack/query-persist-client-core": "5.108.1" } }, "sha512-5b1wItuyfIiruwKvzCJcVbRpnbehO/K7Go2K1PT9SQhTk+zyZ20yvMHeWJHvKpqXybusoEuYqcmiRmfIMU1T0Q=="],
+    "@tanstack/query-sync-storage-persister": ["@tanstack/query-sync-storage-persister@5.108.2", "", { "dependencies": { "@tanstack/query-core": "5.108.2", "@tanstack/query-persist-client-core": "5.108.2" } }, "sha512-L0ksVsT12M/PRx4ei1VSkshH1lK4sC9n3EEG0UG4KbGPsHeL4vYCarIgAFYw35HOooBn8YRsaJI6IUkPf7mtVQ=="],
 
     "@tanstack/react-query": ["@tanstack/react-query@5.108.2", "", { "dependencies": { "@tanstack/query-core": "5.108.2" }, "peerDependencies": { "@types/react": "^18 || ^19", "react": "^18 || ^19" }, "optionalPeers": ["@types/react"] }, "sha512-wV6hEjVGTfh9rvu3uREYW0hgBfS9klDejGelhPY575jD5jg6qbAb1nzT7hR1Q+wemR66ZjtE5p9pAGUwqK8zbg=="],
 
@@ -1348,10 +1348,6 @@
 
     "@tailwindcss/oxide-wasm32-wasi/tslib": ["tslib@2.8.1", "", { "bundled": true }, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
 
-    "@tanstack/react-query/@tanstack/query-core": ["@tanstack/query-core@5.108.2", "", {}, "sha512-0l+0xDKqn71hfJBKaAvFP/X7WYM0TbscEk6nK1pHaWQUWUEA+WJD0VlT8wF+HIJANMV9B/DouPWwDnX3w/l9BA=="],
-
-    "@tanstack/react-query-persist-client/@tanstack/query-persist-client-core": ["@tanstack/query-persist-client-core@5.108.2", "", { "dependencies": { "@tanstack/query-core": "5.108.2" } }, "sha512-IMl2Cmu6aau4mTuHXROVYuDmSAXEdwAjVG3Hsb6KkcW/praiTCSRdBOzoVvBridhrIHkFX3VUSYSVu5xEKap8A=="],
-
     "@tanstack/router-generator/magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 
     "@tanstack/start-plugin-core/source-map": ["source-map@0.7.6", "", {}, "sha512-i5uvt8C3ikiWeNZSVZNWcfZPItFQOsYTUAOkcUPGd8DqDy1uOUikjt5dG+uRlwyvR108Fb9DOd4GvXfT0N2/uQ=="],
@@ -1401,8 +1397,6 @@
     "@sentry/bundler-plugins/glob/minimatch": ["minimatch@10.2.5", "", { "dependencies": { "brace-expansion": "^5.0.5" } }, "sha512-MULkVLfKGYDFYejP07QOurDLLQpcjk7Fw+7jXS2R2czRQzR56yHRveU5NDJEOviH+hETZKSkIk5c+T23GjFUMg=="],
 
     "@sentry/bundler-plugins/magic-string/@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
-
-    "@tanstack/react-query-persist-client/@tanstack/query-persist-client-core/@tanstack/query-core": ["@tanstack/query-core@5.108.2", "", {}, "sha512-0l+0xDKqn71hfJBKaAvFP/X7WYM0TbscEk6nK1pHaWQUWUEA+WJD0VlT8wF+HIJANMV9B/DouPWwDnX3w/l9BA=="],
 
     "@tanstack/router-generator/magic-string/@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
 
