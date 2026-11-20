@@ -393,7 +393,7 @@ jobs:
           --health-timeout 5s
           --health-retries 20
       postgres:
-        image: postgres:18-alpine
+        image: postgres:19-alpine
         env:
           POSTGRES_USER: chat_platform
           POSTGRES_PASSWORD: chat_platform
@@ -457,7 +457,7 @@ jobs:
     # showing up once deployed.
     services:
       postgres:
-        image: postgres:18-alpine
+        image: postgres:19-alpine
         env:
           POSTGRES_USER: chat_platform
           POSTGRES_PASSWORD: chat_platform
