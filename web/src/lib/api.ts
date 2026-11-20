@@ -30,7 +30,13 @@ export const BUILD_API_ORIGIN: string | null = (() => {
   }
 })();
 
-export const fetchClient = createFetchClient<paths>({ baseUrl: API_URL });
+// `fetch` is looked up per request, not captured when the client is created, so
+// a test can stub `globalThis.fetch` even if another test file imported this
+// module first (which file runs first differs between machines).
+export const fetchClient = createFetchClient<paths>({
+  baseUrl: API_URL,
+  fetch: (input) => globalThis.fetch(input),
+});
 
 // The access token is short-lived (15 minutes, see src/Jwt.ts) — decode its
 // `exp` claim (no signature check needed, this is just a client-side timing
