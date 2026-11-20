@@ -18,7 +18,7 @@ concurrency:
 
 env:
   # Single source of truth for the Bun version used across all jobs.
-  BUN_VERSION: 1.4.4
+  BUN_VERSION: 1.4.5
 
 jobs:
   # Decides which of the jobs below a PR actually needs (issue #492): each
@@ -377,7 +377,7 @@ jobs:
     # it with the Dockerfile's — see the "Bun version" group in
     # .github/renovate.json5.
     container:
-      image: oven/bun:1.4.4
+      image: oven/bun:1.4.5
     # Only RealtimePubSub.integration.test.ts uses Redis — it's the one test
     # that proves cross-instance delivery over real Redis Pub/Sub (see
     # src/PubSub.ts). Only chats.postgres.integration.test.ts uses Postgres —
