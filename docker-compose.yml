@@ -32,7 +32,7 @@ services:
     restart: "no"
 
   db:
-    image: postgres:18-alpine
+    image: postgres:19-alpine
     environment:
       POSTGRES_USER: chat_platform
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a long random secret before running docker compose up}
