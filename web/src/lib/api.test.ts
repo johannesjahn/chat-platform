@@ -1,29 +1,9 @@
 /// <reference types="bun" />
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { authStub } from "../../test/authStub";
 
 // The fetch middleware reads and writes the session through ./auth, which
-// needs a browser — stub it with an in-memory one.
-type StoredSession = {
-  user: { id: number; username: string };
-  accessToken: string;
-  refreshToken: string;
-};
-let session: StoredSession | null = null;
-let cleared = 0;
-mock.module("./auth", () => ({
-  getSession: () => session,
-  setSession: (next: StoredSession) => {
-    session = next;
-  },
-  clearSession: () => {
-    session = null;
-    cleared++;
-  },
-  subscribeSession: () => () => {},
-  // Not used here, but module mocks are shared by every file in a run, and
-  // chats.test.ts imports chats.ts, which needs it.
-  useSession: () => session,
-}));
+// needs a browser — test/authStub.ts (a bunfig preload) stands in for it.
 mock.module("./online", () => ({ reportConnectivity: () => {} }));
 
 // openapi-fetch captures `globalThis.fetch` when the client is created, so a
@@ -104,12 +84,12 @@ const OLD = token("old");
 const NEW = token("new");
 
 beforeEach(() => {
-  session = {
+  authStub.session = {
     user: { id: 1, username: "ada" },
     accessToken: OLD,
     refreshToken: "refresh-1",
   };
-  cleared = 0;
+  authStub.cleared = 0;
   requests.length = 0;
 });
 
@@ -141,9 +121,9 @@ describe("a 401 Unauthorized", () => {
     const sent = { contentType: "text", content: "hello" };
     expect(bodies).toEqual([sent, sent]);
     expect(requests.filter(isRefresh)).toHaveLength(1);
-    expect(session?.accessToken).toBe(NEW);
-    expect(session?.refreshToken).toBe("refresh-2");
-    expect(cleared).toBe(0);
+    expect(authStub.session?.accessToken).toBe(NEW);
+    expect(authStub.session?.refreshToken).toBe("refresh-2");
+    expect(authStub.cleared).toBe(0);
   });
 
   test("concurrent rejections share a single refresh", async () => {
@@ -164,7 +144,7 @@ describe("a 401 Unauthorized", () => {
 
     for (const { error } of results) expect(error).toBeUndefined();
     expect(requests.filter(isRefresh)).toHaveLength(1);
-    expect(cleared).toBe(0);
+    expect(authStub.cleared).toBe(0);
   });
 
   test("clears the session when the refresh is rejected", async () => {
@@ -177,7 +157,7 @@ describe("a 401 Unauthorized", () => {
 
     expect(response.status).toBe(401);
     expect(error).toBeDefined();
-    expect(session).toBeNull();
+    expect(authStub.session).toBeNull();
     // Only the original request went out — nothing to replay with.
     expect(requests.filter((r) => !isRefresh(r))).toHaveLength(1);
   });
@@ -192,7 +172,7 @@ describe("a 401 Unauthorized", () => {
 
     expect(response.status).toBe(401);
     expect(requests.filter((r) => !isRefresh(r))).toHaveLength(2);
-    expect(session).toBeNull();
+    expect(authStub.session).toBeNull();
   });
 
   test("keeps the session when the refresh can't reach the server", async () => {
@@ -204,8 +184,8 @@ describe("a 401 Unauthorized", () => {
     const { response } = await fetchClient.GET("/chats");
 
     expect(response.status).toBe(401);
-    expect(session?.accessToken).toBe(OLD);
-    expect(cleared).toBe(0);
+    expect(authStub.session?.accessToken).toBe(OLD);
+    expect(authStub.cleared).toBe(0);
   });
 });
 
@@ -225,12 +205,12 @@ test("a wrong password (401 InvalidCredentials) keeps the session", async () => 
     message: "Incorrect current password",
   } as never);
   expect(requests.filter(isRefresh)).toHaveLength(0);
-  expect(session?.accessToken).toBe(OLD);
-  expect(cleared).toBe(0);
+  expect(authStub.session?.accessToken).toBe(OLD);
+  expect(authStub.cleared).toBe(0);
 });
 
 test("a 401 to a signed-out request is left alone", async () => {
-  session = null;
+  authStub.session = null;
   handler = () => json(401, { _tag: "InvalidCredentials", message: "nope" });
 
   const { response } = await fetchClient.POST("/users/login", {
@@ -239,7 +219,7 @@ test("a 401 to a signed-out request is left alone", async () => {
 
   expect(response.status).toBe(401);
   expect(requests).toHaveLength(1);
-  expect(cleared).toBe(0);
+  expect(authStub.cleared).toBe(0);
 });
 
 // Uploads build their own request outside `fetchClient` (XHR for progress,
@@ -262,13 +242,13 @@ describe("uploads", () => {
     ["an avatar", () => uploadAvatar(png(), crop)],
   ] as const) {
     test(`${name} with an expired token refreshes before sending`, async () => {
-      session!.accessToken = token("old", -60);
+      authStub.session!.accessToken = token("old", -60);
       handler = acceptOnlyNew;
 
       expect(await upload()).toEqual({ id: 9 } as never);
       expect(requests.filter(isRefresh)).toHaveLength(1);
       expect(requests.filter(isUpload).map(bearer)).toEqual([`Bearer ${NEW}`]);
-      expect(session?.accessToken).toBe(NEW);
+      expect(authStub.session?.accessToken).toBe(NEW);
     });
 
     test(`${name} rejected with 401 Unauthorized is refreshed and re-sent`, async () => {
@@ -293,7 +273,7 @@ describe("uploads", () => {
 
       await expect(upload()).rejects.toMatchObject({ status: 401 });
       expect(requests.filter(isUpload)).toHaveLength(2);
-      expect(session).toBeNull();
+      expect(authStub.session).toBeNull();
     });
   }
 
@@ -305,6 +285,6 @@ describe("uploads", () => {
       message: "Too big",
     });
     expect(requests).toHaveLength(1);
-    expect(cleared).toBe(0);
+    expect(authStub.cleared).toBe(0);
   });
 });

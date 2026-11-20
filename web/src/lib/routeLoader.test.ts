@@ -1,20 +1,11 @@
 /// <reference types="bun" />
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { QueryObserver } from "@tanstack/react-query";
+import { authStub } from "../../test/authStub";
 
 // `warmRoute` only runs for a signed-in visitor; outside a browser
-// `getSession` is always null, so it's stubbed per test. Bun's module mocks
-// are shared by every file in a run, so the stub also covers what api.ts
-// imports from ./auth (see api.test.ts), and chats.ts's `useSession` (see
-// chats.test.ts).
-let session: object | null = null;
-mock.module("./auth", () => ({
-  getSession: () => session,
-  setSession: () => {},
-  clearSession: () => {},
-  subscribeSession: () => () => {},
-  useSession: () => session,
-}));
+// `getSession` is always null, so the shared auth stub (test/authStub.ts) is
+// given a session per test.
 
 const { queryClient } = await import("./query");
 const {
@@ -30,7 +21,7 @@ let now: number;
 
 beforeEach(() => {
   queryClient.clear();
-  session = null;
+  authStub.session = null;
   realNow = Date.now;
   now = realNow();
   Date.now = () => now;
@@ -194,7 +185,7 @@ describe("warmRoute", () => {
   });
 
   test("waits for the warm-ups when they're quick", async () => {
-    session = {};
+    authStub.session = {};
     let done = false;
     await warmRoute(() => [
       new Promise<void>((resolve) =>
@@ -208,7 +199,7 @@ describe("warmRoute", () => {
   });
 
   test("gives up waiting after ROUTE_LOADER_WAIT_MS", async () => {
-    session = {};
+    authStub.session = {};
     const started = realNow();
     await warmRoute(() => [new Promise(() => {})]);
     const waited = realNow() - started;
@@ -217,7 +208,7 @@ describe("warmRoute", () => {
   });
 
   test("leaves errors to the page instead of failing the navigation", async () => {
-    session = {};
+    authStub.session = {};
     await expect(
       warmRoute(() => [Promise.reject(new Error("api down"))]),
     ).resolves.toBeUndefined();

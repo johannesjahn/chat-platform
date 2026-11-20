@@ -2,15 +2,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 
-// routeLoader.ts reads the session through ./auth; stubbed the same way as
-// in routeLoader.test.ts (Bun's module mocks are shared across a run).
-mock.module("./auth", () => ({
-  getSession: () => null,
-  setSession: () => {},
-  clearSession: () => {},
-  subscribeSession: () => () => {},
-  useSession: () => null,
-}));
+// routeLoader.ts reads the session through ./auth, which test/authStub.ts
+// (a bunfig preload) stubs for every file; it stays signed out here.
 
 const {
   REALTIME_STALE_TIME_MS,
