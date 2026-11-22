@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ConfigProvider, Duration, Effect, Layer } from "effect";
+import { Duration, Effect, Layer } from "effect";
 import { InMemoryPresenceStoreLive } from "./Presence.ts";
 import { staticPresenceAudience } from "./PresenceAudience.ts";
 import { InMemoryPubSubLive, PubSub } from "./PubSub.ts";
@@ -1171,6 +1171,7 @@ const twoInstances = (config: Layer.Layer<never> = Layer.empty) =>
     return {
       a: yield* instance,
       b: yield* instance,
+      pubsub: base,
       published,
       subscriptions,
     };
@@ -1200,13 +1201,10 @@ test("a user event is published only to the instances holding its recipients, ea
         .map((p) => (JSON.parse(p.message) as { userIds: number[] }).userIds)
         .sort((x, y) => x[0]! - y[0]!);
       expect(routed).toEqual([[1], [2]]);
-      // Plus one marked copy for instances that predate routing, which the
-      // current ones skip — hence one delivery each above, not two.
-      const shared = published.filter(
-        (p) => p.channel === "chat-platform:realtime",
-      );
-      expect(shared).toHaveLength(1);
-      expect(shared[0]!.message.startsWith('{"routed":true,')).toBe(true);
+      // Nothing on the shared channel, which every instance listens on.
+      expect(
+        published.filter((p) => p.channel === "chat-platform:realtime"),
+      ).toEqual([]);
     }),
   );
 });
@@ -1226,23 +1224,19 @@ test("an event for users connected nowhere publishes nothing to any instance", a
   );
 });
 
-test("REALTIME_LEGACY_BROADCAST=false drops the shared-channel copy", async () => {
+test("a routed copy an instance mid-rollout puts on the shared channel is skipped, not delivered twice", async () => {
   await Effect.runPromise(
     Effect.gen(function* () {
-      const { a, b, published } = yield* twoInstances(
-        ConfigProvider.layer(
-          ConfigProvider.fromUnknown({ REALTIME_LEGACY_BROADCAST: "false" }),
-        ),
+      const { a, pubsub } = yield* twoInstances();
+      const socket = recordingWriter();
+      yield* a.register(1, socket.write);
+      socket.received.length = 0;
+      // What 0.41.5–0.41.9 published next to the routed copy.
+      yield* pubsub.publish(
+        "chat-platform:realtime",
+        `{"routed":true,${JSON.stringify({ scope: "users", userIds: [1], event: chatEvent }).slice(1)}`,
       );
-      const onA = recordingWriter();
-      yield* a.register(1, onA.write);
-      onA.received.length = 0;
-      published.length = 0;
-      yield* b.notifyUsers([1], chatEvent);
-      expect(onA.received).toEqual([JSON.stringify(chatEvent)]);
-      expect(
-        published.filter((p) => p.channel === "chat-platform:realtime"),
-      ).toEqual([]);
+      expect(socket.received).toEqual([]);
     }),
   );
 });
@@ -1327,13 +1321,9 @@ test("a post's events go to its own channel, which only instances showing it lis
         "chat-platform:realtime:post:5",
         "chat-platform:realtime:post:5",
       ]);
-      // The shared channel only carries the marked copies for instances
-      // that predate post channels.
-      for (const p of published.filter(
-        (p) => p.channel === "chat-platform:realtime",
-      )) {
-        expect(p.message.startsWith('{"routed":true,')).toBe(true);
-      }
+      expect(
+        published.filter((p) => p.channel === "chat-platform:realtime"),
+      ).toEqual([]);
     }),
   );
 });
@@ -1341,14 +1331,7 @@ test("a post's events go to its own channel, which only instances showing it lis
 test("a room's events reach only the instances with a socket in it", async () => {
   await Effect.runPromise(
     Effect.gen(function* () {
-      const { a, b, subscriptions } = yield* twoInstances(
-        Layer.merge(
-          shortLinger,
-          ConfigProvider.layer(
-            ConfigProvider.fromUnknown({ REALTIME_LEGACY_BROADCAST: "false" }),
-          ),
-        ),
-      );
+      const { a, b, subscriptions } = yield* twoInstances(shortLinger);
       const player = recordingWriter();
       const room = gameLobbyRoom(3);
       yield* a.subscribeRoom(room, player.write);

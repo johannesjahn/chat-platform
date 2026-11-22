@@ -5,6 +5,7 @@ import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { PubSub } from "./PubSub.ts";
 import { makeTestRun } from "./testApi.ts";
+import { UserLocator } from "./UserLocator.ts";
 
 // Who receives which `chat_updated`, and what it says changed (issue #749).
 // A message used to reach every participant as a bare "something changed",
@@ -13,7 +14,9 @@ import { makeTestRun } from "./testApi.ts";
 // say what changed, so a viewer fetches just the new message and patches a
 // receipt in place.
 
-// Every `notifyUsers` envelope published during the current test.
+// Every `notifyUsers` envelope published during the current test. Each test
+// user counts as connected to one instance (see `registerAndLogin`), so each
+// `notifyUsers` is one publish naming all its recipients.
 type Envelope = {
   scope: string;
   userIds?: number[];
@@ -45,6 +48,8 @@ const registerAndLogin = (username: string) =>
     const password = "pw-testpass";
     const c = yield* makeClient;
     const user = yield* c.users.register({ payload: { username, password } });
+    // Online, or `notifyUsers` would have no one to publish to.
+    yield* (yield* UserLocator).claim(user.id, "test-instance");
     const { accessToken } = yield* c.users.login({
       payload: { username, password },
     });

@@ -1,5 +1,4 @@
 import {
-  Config,
   Context,
   Duration,
   Effect,
@@ -582,9 +581,11 @@ export const RoomChannelLinger = Context.Reference<Duration.Duration>(
 // users it holds (issue #832; see `routeToUsers`).
 const INSTANCE_CHANNEL_PREFIX = "chat-platform:realtime:instance:";
 
-// A routed user, post or room event's copy on the shared channel, for
-// instances that predate routing (mid-rollout) and only listen there. It starts with this
-// so current instances can skip it without parsing it.
+// A routed user, post or room event's copy on the shared channel, which
+// 0.41.5–0.41.9 published for instances that predated routing. Nothing
+// publishes one any more, but an instance mid-rollout from those versions
+// still does, so it's skipped unparsed — delivering it would deliver the
+// event twice (it also went to the instance or post channel).
 const ROUTED_COPY_PREFIX = '{"routed":true,';
 
 type Envelope =
@@ -636,12 +637,6 @@ export const RealtimeConnectionsLive = Layer.effect(
     const locator = yield* UserLocator;
     const instanceId = crypto.randomUUID();
     const instanceChannel = `${INSTANCE_CHANNEL_PREFIX}${instanceId}`;
-    // Whether routed user events are also copied to the shared channel, for
-    // instances that predate routing. On by default so a rolling deploy
-    // loses nothing; turn off once every instance runs this code.
-    const legacyBroadcast = yield* Config.Boolean(
-      "REALTIME_LEGACY_BROADCAST",
-    ).pipe(Config.withDefault(true));
     const presenceStore = yield* PresenceStore;
     const audience = yield* PresenceAudience;
     const byUser = new Map<number, Set<Writer>>();
@@ -964,29 +959,17 @@ export const RealtimeConnectionsLive = Layer.effect(
         "RealtimeConnections: failed to publish realtime event, delivery dropped",
       ).pipe(Effect.annotateLogs({ envelope, error: String(error) }));
 
-    // Publishes a post's or room's envelope on its own channel, plus (with
-    // `legacyBroadcast`) a marked copy on the shared channel for instances
-    // that predate those channels — current ones skip it unparsed.
+    // Publishes a post's or room's envelope on its own channel only.
     const publishToChannel = (channel: string, envelope: Envelope) =>
-      Effect.gen(function* () {
-        const body = JSON.stringify(envelope);
-        yield* pubsub
-          .publish(channel, body)
-          .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
-        if (legacyBroadcast) {
-          yield* pubsub
-            .publish(CHANNEL, `${ROUTED_COPY_PREFIX}${body.slice(1)}`)
-            .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
-        }
-      });
+      pubsub
+        .publish(channel, JSON.stringify(envelope))
+        .pipe(Effect.catch((error) => logPublishFailure(envelope, error)));
 
     // Publishes a user-addressed envelope only to the instances holding
     // those users (issue #832), each copy carrying just that instance's
     // recipients — an offline user costs no publish at all. If the
     // directory can't be read, it goes on the shared channel as it always
     // did, so a Redis hiccup degrades to the old cost, not to lost events.
-    // With `legacyBroadcast`, a marked copy also goes on the shared channel
-    // for instances that predate routing (current ones skip it unparsed).
     const routeToUsers = (
       userIds: Iterable<number>,
       envelopeFor: (ids: ReadonlyArray<number>) => Envelope,
@@ -1010,14 +993,6 @@ export const RealtimeConnectionsLive = Layer.effect(
             `${INSTANCE_CHANNEL_PREFIX}${instance}`,
             envelope,
             JSON.stringify(envelope),
-          );
-        }
-        if (legacyBroadcast) {
-          const envelope = envelopeFor(ids);
-          yield* publish(
-            CHANNEL,
-            envelope,
-            `${ROUTED_COPY_PREFIX}${JSON.stringify(envelope).slice(1)}`,
           );
         }
       });
