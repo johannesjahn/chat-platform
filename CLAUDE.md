@@ -121,7 +121,14 @@ This is a two-package repo:
   concurrent migration races — it does _not_ solve schema forward/backward
   compatibility during rolling deploys. Old-code replicas still run briefly
   against the already-migrated schema, so migrations must stay
-  additive/backward-compatible (expand-contract pattern). Each process's
+  additive/backward-compatible (expand-contract pattern).
+  [`src/migrationSafety.test.ts`](src/migrationSafety.test.ts) fails on a
+  migration that drops, renames or retypes a table or column, makes one
+  `NOT NULL` (or adds one without a default), drops a default, or adds a
+  `CHECK`/`UNIQUE` to an existing table. The contract step is a later
+  release's migration, and each statement in it says why it's safe now
+  with `-- migration-safety: allow <rule> (<why>)`. Migrations before
+  `0042` predate the check. Each process's
   Bun.sql pool is `DB_POOL_MAX` connections (default 10; issue #830), so
   replicas × `DB_POOL_MAX` must fit under Postgres's `max_connections`, or
   run the chart's optional PgBouncer (`pgbouncer.enabled`, transaction mode).
