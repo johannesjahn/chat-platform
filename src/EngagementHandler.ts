@@ -6,9 +6,12 @@ import {
   eq,
   gt,
   inArray,
+  isNotNull,
   isNull,
+  notExists,
   notInArray,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Effect, Metric } from "effect";
 import {
   type AuthorSummary,
@@ -37,7 +40,7 @@ import {
 } from "./notifications.ts";
 import { RateLimiter } from "./RateLimiter.ts";
 import { RealtimeConnections } from "./Realtime.ts";
-import { comments, likes, posts } from "./db/schema.ts";
+import { comments, likes, notifications, posts } from "./db/schema.ts";
 
 const NO_REACTIONS: ReactionSummary[] = [];
 
@@ -87,24 +90,30 @@ const enforceEngagementLimit = (
 const recordContentCreated = (type: "comment" | "reaction") =>
   Metric.update(Metric.withAttributes(contentCreatedTotal, { type: type }), 1);
 
-// `author` is the embedded byline (issue #750) — see authors.ts.
+// `author` is the embedded byline (issue #750) — see authors.ts. A deleted
+// placeholder (issue #904) shows only where it sat and how many replies hang
+// off it: no author, content or reactions.
 const toApiComment = (
   row: typeof comments.$inferSelect,
-  author: AuthorSummary,
+  author: AuthorSummary | null,
   reactions: ReadonlyArray<ReactionSummary> = NO_REACTIONS,
   replyCount = 0,
-) => ({
-  id: row.id,
-  postId: row.postId,
-  parentCommentId: row.parentCommentId,
-  authorId: row.authorId,
-  author,
-  content: row.content,
-  createdAt: row.createdAt.getTime(),
-  updatedAt: row.updatedAt.getTime(),
-  reactions: [...reactions],
-  replyCount,
-});
+) => {
+  const deleted = row.deletedAt !== null;
+  return {
+    id: row.id,
+    postId: row.postId,
+    parentCommentId: row.parentCommentId,
+    authorId: deleted ? null : row.authorId,
+    author: deleted ? null : author,
+    deleted,
+    content: deleted ? "" : row.content,
+    createdAt: row.createdAt.getTime(),
+    updatedAt: row.updatedAt.getTime(),
+    reactions: deleted ? [] : [...reactions],
+    replyCount,
+  };
+};
 
 // Reply counts for a page of comments, keyed by parent id, in one grouped
 // query served by `comments_parent_comment_id_idx`. Comments with no
@@ -138,12 +147,15 @@ const commentReplyCounts = async (
 
 // A comment whose author vanished mid-request is being cascade-deleted with
 // them, so it reads as gone (see authors.ts).
+// A deleted placeholder has no author to load.
 const loadCommentAuthor = (db: DrizzleDb, row: typeof comments.$inferSelect) =>
-  loadAuthor(
-    db,
-    row.authorId,
-    () => new NotFound({ message: `Comment ${row.id} not found` }),
-  );
+  row.deletedAt !== null
+    ? Effect.succeed(null)
+    : loadAuthor(
+        db,
+        row.authorId,
+        () => new NotFound({ message: `Comment ${row.id} not found` }),
+      );
 
 // Author or admin — the same ownership rule posts use (see PostsHandler.ts).
 const canModify = (
@@ -214,6 +226,84 @@ const getCommentOr404 = (db: DrizzleDb, id: number) =>
     return row;
   });
 
+// For anything that acts on a comment (replying, reacting, editing,
+// deleting): a deleted placeholder reads as gone. Only reads — the thread,
+// `getComment`, `listReplies` — still see it.
+const getLiveCommentOr404 = (db: DrizzleDb, id: number) =>
+  Effect.gen(function* () {
+    const row = yield* getCommentOr404(db, id);
+    if (row.deletedAt !== null)
+      return yield* Effect.fail(
+        new NotFound({ message: `Comment ${id} not found` }),
+      );
+    return row;
+  });
+
+// Deletes comment `id`, keeping the replies other people wrote under it
+// (issue #904). A top-level comment with replies becomes a placeholder —
+// content blanked, which also keeps it out of search (both match branches
+// read `content`), and its likes and notifications removed as the cascade
+// would have. Otherwise the row goes; and if it was the last reply under a
+// placeholder, the placeholder goes with it.
+//
+// Each path locks the top-level row first. A reply's insert takes a key-share
+// lock on its parent (the FK check), so a reply landing mid-delete either
+// commits before the "any replies left?" check sees it, or waits until the
+// delete is done and then finds a placeholder (kept) or no parent (its
+// insert fails) — never cascaded away unseen.
+const deleteCommentKeepingReplies = (
+  db: DrizzleDb,
+  comment: typeof comments.$inferSelect,
+) =>
+  dbQuery(() =>
+    db.transaction(async (tx) => {
+      const lockRow = (id: number) =>
+        tx
+          .select({ id: comments.id })
+          .from(comments)
+          .where(eq(comments.id, id))
+          .for("update");
+      if (comment.parentCommentId !== null) {
+        await lockRow(comment.parentCommentId);
+        await tx.delete(comments).where(eq(comments.id, comment.id));
+        const sibling = alias(comments, "sibling");
+        await tx
+          .delete(comments)
+          .where(
+            and(
+              eq(comments.id, comment.parentCommentId),
+              isNotNull(comments.deletedAt),
+              notExists(
+                tx
+                  .select({ id: sibling.id })
+                  .from(sibling)
+                  .where(eq(sibling.parentCommentId, comments.id)),
+              ),
+            ),
+          );
+        return;
+      }
+      await lockRow(comment.id);
+      const [reply] = await tx
+        .select({ id: comments.id })
+        .from(comments)
+        .where(eq(comments.parentCommentId, comment.id))
+        .limit(1);
+      if (!reply) {
+        await tx.delete(comments).where(eq(comments.id, comment.id));
+        return;
+      }
+      await tx
+        .update(comments)
+        .set({ deletedAt: new Date(), content: "" })
+        .where(eq(comments.id, comment.id));
+      await tx.delete(likes).where(eq(likes.commentId, comment.id));
+      await tx
+        .delete(notifications)
+        .where(eq(notifications.commentId, comment.id));
+    }),
+  );
+
 // Shared by `listComments` (top-level, filtered on a null parent) and
 // `listReplies` (a comment's children): a keyset page over `comments` in
 // `id asc` order, decorated with per-row like info for the current user.
@@ -268,12 +358,15 @@ const listThread = (
       hasMore && lastRow ? encodeCommentsCursor(lastRow.id) : null;
 
     // Every author on the page in one batch (issue #750); a row whose author
-    // is already gone is dropped (see authors.ts).
+    // is already gone is dropped (see authors.ts). A deleted placeholder
+    // shows no author, so it needs none.
     const authors = yield* loadAuthors(
       db,
-      page.map((r) => r.authorId),
+      page.filter((r) => r.deletedAt === null).map((r) => r.authorId),
     );
-    const rows = page.filter((r) => authors.has(r.authorId));
+    const rows = page.filter(
+      (r) => r.deletedAt !== null || authors.has(r.authorId),
+    );
 
     const reactionInfo = yield* dbQuery(() =>
       commentReactionInfo(
@@ -291,14 +384,19 @@ const listThread = (
     );
 
     return {
-      comments: rows.map((r) =>
-        toApiComment(
-          r,
-          authors.get(r.authorId)!,
-          reactionInfo.get(r.id),
-          replyCounts.get(r.id) ?? 0,
+      // A placeholder all of whose replies this viewer hides is an empty
+      // "Comment deleted", so it's left out. `nextCursor` still comes from
+      // the full page, so paging is unaffected.
+      comments: rows
+        .filter((r) => r.deletedAt === null || replyCounts.has(r.id))
+        .map((r) =>
+          toApiComment(
+            r,
+            authors.get(r.authorId) ?? null,
+            reactionInfo.get(r.id),
+            replyCounts.get(r.id) ?? 0,
+          ),
         ),
-      ),
       limit,
       nextCursor,
     };
@@ -507,7 +605,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
-          const parent = yield* getCommentOr404(db, id);
+          const parent = yield* getLiveCommentOr404(db, id);
           // Depth-2 cap: the target must itself be a top-level comment. A
           // parent that already has its own parent is a reply, and replies
           // can't be replied to (see the `comments` schema comment).
@@ -575,7 +673,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
-          const comment = yield* getCommentOr404(db, id);
+          const comment = yield* getLiveCommentOr404(db, id);
           yield* requireNoBlockWith(
             db,
             currentUser.id,
@@ -626,7 +724,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
-          const comment = yield* getCommentOr404(db, id);
+          const comment = yield* getLiveCommentOr404(db, id);
           const deleted = yield* dbQuery(() =>
             db
               .delete(likes)
@@ -666,7 +764,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
-          const existing = yield* getCommentOr404(db, id);
+          const existing = yield* getLiveCommentOr404(db, id);
           if (!canModify(currentUser, existing))
             return yield* Effect.fail(
               new Forbidden({
@@ -723,17 +821,16 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
-          const existing = yield* getCommentOr404(db, id);
+          const existing = yield* getLiveCommentOr404(db, id);
           if (!canModify(currentUser, existing))
             return yield* Effect.fail(
               new Forbidden({
                 message: "You can only delete your own comments",
               }),
             );
-          // Deleting a top-level comment cascades to its replies and every
-          // like on it (FKs in db/schema.ts) — the client refetches the
-          // thread on the event, so no per-row cleanup here.
-          yield* dbQuery(() => db.delete(comments).where(eq(comments.id, id)));
+          // The client refetches the thread on the event, which shows a
+          // placeholder, or nothing, wherever this comment was.
+          yield* deleteCommentKeepingReplies(db, existing);
           yield* connections.notifyPostRoom(existing.postId, {
             type: "comment_changed",
             postId: existing.postId,

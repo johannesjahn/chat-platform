@@ -302,6 +302,13 @@ export const comments = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
+    // Set when a top-level comment is deleted while it still has replies
+    // (issue #904): the row stays, with its content blanked, as the
+    // "Comment deleted" placeholder those replies hang off, since the
+    // `parent_comment_id` cascade would take other people's replies with it.
+    // It's hard-deleted once its last reply goes. Not counted in
+    // `posts.comment_count` (migration 0042).
+    deletedAt: timestamp("deleted_at", { mode: "date" }),
   },
   (table) => [
     // `listComments` filters + orders by (postId, id) for top-level comments;

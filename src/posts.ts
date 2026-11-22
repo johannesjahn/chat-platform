@@ -1,4 +1,12 @@
-import { and, count, eq, inArray, notExists, notInArray } from "drizzle-orm";
+import {
+  and,
+  count,
+  eq,
+  inArray,
+  isNull,
+  notExists,
+  notInArray,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { type Attachment, type AuthorSummary } from "./Api.ts";
@@ -76,6 +84,9 @@ export const postCommentCounts = async (
     .where(
       and(
         inArray(comments.postId, [...postIds]),
+        // A deleted placeholder (issue #904) isn't a comment; the stored
+        // count leaves it out too.
+        isNull(comments.deletedAt),
         hiddenAuthorIds.length > 0
           ? and(
               notInArray(comments.authorId, [...hiddenAuthorIds]),

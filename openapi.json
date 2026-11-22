@@ -11193,10 +11193,27 @@
             ]
           },
           "authorId": {
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "author": {
-            "$ref": "#/components/schemas/AuthorSummary"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuthorSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deleted": {
+            "type": "boolean"
           },
           "content": {
             "type": "string"
@@ -11223,6 +11240,7 @@
           "parentCommentId",
           "authorId",
           "author",
+          "deleted",
           "content",
           "createdAt",
           "updatedAt",
