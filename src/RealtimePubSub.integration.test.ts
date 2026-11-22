@@ -356,3 +356,83 @@ async function waitFor(
     }
   },
 );
+
+(redisConfigured ? test : test.skip)(
+  "a user event reaches only the instance holding its recipient — nothing on the shared channel or the other instance's (#832)",
+  async () => {
+    const inspector = new RedisClient(process.env.REDIS_URL);
+    const listener = new RedisClient(process.env.REDIS_URL);
+    const instanceChannels = async () =>
+      new Set(
+        (await inspector.send("PUBSUB", [
+          "CHANNELS",
+          "chat-platform:realtime:instance:*",
+        ])) as string[],
+      );
+    // Other tests' instances may still be listening: tell A's and B's own
+    // channels apart by what each one's boot added.
+    const before = await instanceChannels();
+    const instanceA = makeInstance();
+    await instanceA.runPromise(Effect.void);
+    const channelA = [...(await instanceChannels())].find(
+      (c) => !before.has(c),
+    );
+    const instanceB = makeInstance();
+    await instanceB.runPromise(Effect.void);
+    const channelB = [...(await instanceChannels())].find(
+      (c) => !before.has(c) && c !== channelA,
+    );
+    const userId = Date.now() + 7;
+    try {
+      expect(channelA).toBeDefined();
+      expect(channelB).toBeDefined();
+      const received: string[] = [];
+      await instanceB.runPromise(
+        Effect.flatMap(RealtimeConnections, (connections) =>
+          connections.register(userId, (chunk) =>
+            Effect.sync(() => {
+              received.push(chunk);
+            }),
+          ),
+        ),
+      );
+      // `register`'s own presence event (see the first test).
+      await waitFor(() => received.length > 0);
+      received.length = 0;
+
+      const seen: Record<string, number> = {};
+      for (const channel of [
+        "chat-platform:realtime",
+        channelA as string,
+        channelB as string,
+      ]) {
+        seen[channel] = 0;
+        await listener.subscribe(channel, (_message, from) => {
+          seen[from] = (seen[from] ?? 0) + 1;
+        });
+      }
+
+      const event = { type: "chat_updated", chatId: 1, version: 1 } as const;
+      await instanceA.runPromise(
+        Effect.flatMap(RealtimeConnections, (connections) =>
+          // The second user is connected nowhere.
+          connections.notifyUsers([userId, userId + 1], event),
+        ),
+      );
+      await waitFor(() => received.length > 0);
+      // Give a stray copy a moment to arrive too.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(received).toEqual([JSON.stringify(event)]);
+      expect(seen).toEqual({
+        "chat-platform:realtime": 0,
+        [channelA as string]: 0,
+        [channelB as string]: 1,
+      });
+    } finally {
+      await instanceA.dispose();
+      await instanceB.dispose();
+      listener.close();
+      inspector.close();
+    }
+  },
+);
