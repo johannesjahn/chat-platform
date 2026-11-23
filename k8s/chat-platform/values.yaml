@@ -234,7 +234,7 @@ postgres:
     # official image's (see the custom manager in .github/renovate.json5):
     # 18.7 was out upstream before pgautoupgrade had it, and the init
     # container sat in ImagePullBackOff.
-    tag: "18.6-alpine"
+    tag: "18.7-alpine"
 
   # Runs once as an initContainer ahead of the `postgres` container below
   # (see postgres-statefulset.yaml) to pg_upgrade the PVC in place before a
