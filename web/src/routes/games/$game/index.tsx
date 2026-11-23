@@ -46,6 +46,7 @@ function GameHubRoute() {
         <EmptyState
           icon={Swords}
           title="Game not found"
+          pageHeading
           description="That game isn't in the arcade (yet)."
         >
           <Button asChild>

@@ -50,7 +50,7 @@ export function MentionText({
                 // also set that off.
                 onClick={(e) => e.stopPropagation()}
                 className={cn(
-                  "font-medium text-primary hover:underline",
+                  "font-medium text-link hover:underline",
                   className,
                 )}
               >
@@ -75,7 +75,12 @@ export function MentionText({
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
-                  className={cn("text-primary hover:underline", className)}
+                  // Always underlined: on touch there's no hover to find it
+                  // by (issue #898).
+                  className={cn(
+                    "text-link underline decoration-link/40 underline-offset-2 hover:decoration-link",
+                    className,
+                  )}
                 >
                   {linkSegment.text}
                 </a>

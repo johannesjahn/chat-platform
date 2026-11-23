@@ -2,6 +2,7 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { BackButton } from "@/components/BackButton";
 import { PostDetail } from "@/components/PostDetail";
+import { Button } from "@/components/ui/button";
 import { $api } from "@/lib/api";
 import { postCommentsQueryOptions } from "@/lib/comments";
 import { queryClient } from "@/lib/query";
@@ -53,6 +54,11 @@ function PostDetailPage() {
               </Link>
             }
           />
+        }
+        notFoundAction={
+          <Button asChild>
+            <Link to="/">Back to feed</Link>
+          </Button>
         }
         onDeleted={() => router.navigate({ to: "/" })}
       />

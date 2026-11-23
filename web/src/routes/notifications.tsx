@@ -10,6 +10,7 @@ import {
   Loader2,
   MessageSquare,
   PanelRight,
+  SmilePlus,
 } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { FilterRail, type FilterRailItem } from "@/components/FilterRail";
@@ -66,8 +67,9 @@ const FILTERS: ReadonlyArray<FilterRailItem<NotificationFilter>> = [
   { value: "all", label: "All", icon: Inbox },
   { value: "mentions", label: "Mentions", icon: AtSign },
   { value: "comments", label: "Comments", icon: MessageSquare },
-  { value: "reactions", label: "Reactions", icon: Bell },
-  { value: "games", label: "Game invites", icon: Gamepad2 },
+  { value: "reactions", label: "Reactions", icon: SmilePlus },
+  // Invites and leaderboard records alike (issue #898).
+  { value: "games", label: "Games", icon: Gamepad2 },
 ];
 
 function matchesFilter(n: Notification, filter: NotificationFilter): boolean {

@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, MessageCircle, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  Loader2,
+  MessageCircle,
+  Sparkles,
+  UserX,
+} from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { BlockUserControls } from "@/components/BlockUserControls";
 import { DeleteUserButton } from "@/components/DeleteUserButton";
@@ -16,7 +22,7 @@ import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { useStartDirectChat } from "@/lib/directChat";
-import { errorMessage } from "@/lib/errors";
+import { errorMessage, isNotFoundError } from "@/lib/errors";
 import {
   postsFeedQueryKey,
   useUserPosts,
@@ -83,7 +89,9 @@ function UserProfilePage() {
       ? user.displayName
         ? `${user.displayName} (@${user.username})`
         : `@${user.username}`
-      : undefined,
+      : isNotFoundError(error)
+        ? "User not found"
+        : undefined,
   );
 
   const updateUserRole = $api.useMutation("patch", "/users/{id}/role");
@@ -171,6 +179,30 @@ function UserProfilePage() {
     );
   }
 
+  if (!isLoading && (error || !user)) {
+    // The same not-found state as posts, chats and lobbies (issue #898),
+    // never the server's own message ("User 99999 not found").
+    const notFound = isNotFoundError(error);
+    return (
+      <main className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center px-4 py-10">
+        <EmptyState
+          icon={UserX}
+          title={notFound ? "User not found" : "Can't load this profile"}
+          pageHeading
+          description={
+            notFound
+              ? "This account may have been deleted, or the link is wrong."
+              : "Something went wrong reaching the server. Try again in a moment."
+          }
+        >
+          <Button asChild>
+            <Link to="/users">Find people</Link>
+          </Button>
+        </EmptyState>
+      </main>
+    );
+  }
+
   const isSelf = String(session.user.id) === id;
   const canManageRole = session.user.role === "admin" && !isSelf;
 
@@ -183,20 +215,11 @@ function UserProfilePage() {
         Back
       </Button>
 
-      {isLoading ? (
+      {isLoading || !user ? (
         <Card>
           <CardHeader className="flex flex-row items-center gap-4">
             <Skeleton className="size-20 rounded-full" />
             <Skeleton className="h-5 w-32" />
-          </CardHeader>
-        </Card>
-      ) : error || !user ? (
-        <Card>
-          <CardHeader>
-            <h1 className="text-lg font-semibold">User not found</h1>
-            <p className="text-sm text-muted-foreground">
-              {error ? errorMessage(error) : "This user may not exist."}
-            </p>
           </CardHeader>
         </Card>
       ) : (
@@ -229,9 +252,11 @@ function UserProfilePage() {
                   </span>
                 )}
                 <UserStatusBadge status={status} className="text-sm" />
-                <span className="text-sm capitalize text-muted-foreground">
-                  {user.role}
-                </span>
+                {/* Every account is a "User"; only an admin is worth
+                    saying (issue #898). */}
+                {user.role === "admin" && (
+                  <span className="text-sm text-muted-foreground">Admin</span>
+                )}
                 {!postsLoading && (
                   <span className="text-sm text-muted-foreground">
                     {totalPostCount} post{totalPostCount === 1 ? "" : "s"}

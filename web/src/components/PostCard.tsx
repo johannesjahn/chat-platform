@@ -31,6 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { $api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { lazyNamed, whenIdle } from "@/lib/lazy";
+import { isLongText as isLongTextOf, POST_COLLAPSE } from "@/lib/longText";
 import { useExpandableText } from "@/lib/motion";
 import { patchCachedPost, postText } from "@/lib/posts";
 import { usePostRoom } from "@/lib/postRooms";
@@ -99,10 +100,6 @@ export function PostCardSkeleton() {
   );
 }
 
-// Posts longer than this are collapsed behind a "Show more" toggle so a
-// single long text post can't dominate the feed (unless `fullText` is set).
-const COLLAPSE_THRESHOLD = 500;
-
 export function PostCard({
   post,
   showHandle = true,
@@ -135,7 +132,9 @@ export function PostCard({
     (post.contentType === "attachment" && !post.attachment
       ? post.content
       : null);
-  const isLongText = !fullText && (text?.length ?? 0) > COLLAPSE_THRESHOLD;
+  // A long post is collapsed behind "Show more" so it can't dominate the
+  // feed (unless `fullText` is set).
+  const isLongText = !fullText && isLongTextOf(text, POST_COLLAPSE);
   const {
     ref: textRef,
     expanded,

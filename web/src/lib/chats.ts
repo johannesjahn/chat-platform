@@ -79,10 +79,6 @@ export function lastMessagePreview(chat: Chat, currentUserId: number): string {
 export const MAX_MESSAGE_CONTENT_LENGTH = 4_000;
 export const MAX_GROUP_PARTICIPANTS = 20;
 
-// A message bubble longer than this is collapsed behind "Show more", the
-// same idea as PostCard's threshold but shorter — chat bubbles are narrow.
-export const MESSAGE_COLLAPSE_THRESHOLD = 300;
-
 import {
   chatDetailQueryOptions,
   chatsListQueryOptions,
@@ -187,18 +183,30 @@ export function chatViewTransitionNames(chatId: number): {
   };
 }
 
-// Today shows a time, anything older shows a short date — the usual chat-app
-// convention (WhatsApp/Telegram both do this) so the list stays scannable.
-export function formatChatTimestamp(ms: number): string {
+// Today shows a time, yesterday says so, anything older shows a short date —
+// the usual chat-app convention (WhatsApp/Telegram both do this) so the list
+// stays scannable. Like the thread's day separators (`formatDaySeparator`),
+// the date carries its year once it isn't the current one (issue #898), so a
+// chat last active last July doesn't read as this July. `now` is injectable
+// for tests.
+export function formatChatTimestamp(
+  ms: number,
+  now: number = Date.now(),
+): string {
   const date = new Date(ms);
-  const now = new Date();
-  const isToday =
-    date.getDate() === now.getDate() &&
-    date.getMonth() === now.getMonth() &&
-    date.getFullYear() === now.getFullYear();
-  return isToday
-    ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    : date.toLocaleDateString([], { month: "short", day: "numeric" });
+  if (localDayKey(ms) === localDayKey(now))
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (localDayKey(ms) === localDayKey(yesterday.getTime())) return "Yesterday";
+
+  const sameYear = date.getFullYear() === new Date(now).getFullYear();
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
 }
 
 // A stable per-local-day key ("2026-6-26") used to detect when two consecutive

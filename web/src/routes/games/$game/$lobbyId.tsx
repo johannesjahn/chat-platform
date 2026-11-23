@@ -97,6 +97,14 @@ const RESULTS_EXTRAS: Partial<
   reflex: ReflexBreakdown,
 };
 
+// One not-found state for a lobby that never existed and one that has
+// closed (a lobby is deleted once everyone leaves, so the two are the same
+// 404), whichever branch below finds it (issue #898).
+const LOBBY_NOT_FOUND = {
+  title: "Lobby not found",
+  description: "It may have closed when everyone left, or the link is wrong.",
+};
+
 function LobbyRoute() {
   const { game, lobbyId } = Route.useParams();
   const id = Number(lobbyId);
@@ -105,9 +113,10 @@ function LobbyRoute() {
     return (
       <main className="mx-auto w-full max-w-5xl px-4 py-10">
         <EmptyState
-          icon={Swords}
-          title="Lobby not found"
-          description="This lobby doesn't exist."
+          icon={DoorOpen}
+          title={LOBBY_NOT_FOUND.title}
+          pageHeading
+          description={LOBBY_NOT_FOUND.description}
         >
           <Button asChild>
             <Link to="/games">Back to the arcade</Link>
@@ -197,8 +206,8 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
       <GameShell game={game} back={{ game: gameId, label: game.name }}>
         <EmptyState
           icon={DoorOpen}
-          title="This lobby has closed"
-          description="Everyone left, or the link is wrong. Find another game in the lobby browser."
+          title={LOBBY_NOT_FOUND.title}
+          description={LOBBY_NOT_FOUND.description}
         >
           <Button asChild>
             <Link to="/games/$game" params={{ game: gameId }}>

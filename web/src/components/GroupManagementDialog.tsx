@@ -390,7 +390,22 @@ export function GroupSettingsSections({
         }
       >
         <div className="flex items-center gap-4">
-          <Avatar name={title} avatarVariants={chat.avatarVariants} size="xl" />
+          {chat.avatarVariants ? (
+            <Avatar
+              name={title}
+              avatarVariants={chat.avatarVariants}
+              size="xl"
+            />
+          ) : (
+            // The people glyph the chat list, header and feed rail show for
+            // a group without an avatar, not its initials (issue #898).
+            <div
+              aria-hidden
+              className="flex size-20 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground"
+            >
+              <Users className="size-8" />
+            </div>
+          )}
           {canManage && (
             <div className="flex flex-1 flex-col gap-2">
               <input

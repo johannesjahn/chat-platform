@@ -1,8 +1,8 @@
 import {
   AtSign,
-  Bell,
   CornerDownRight,
   MessageSquare,
+  SmilePlus,
   Swords,
   Trophy,
   type LucideIcon,
@@ -15,7 +15,7 @@ import type { Notification } from "@/lib/notifications";
 export const NOTIFICATION_ICONS: Record<Notification["type"], LucideIcon> = {
   comment: MessageSquare,
   reply: CornerDownRight,
-  reaction: Bell,
+  reaction: SmilePlus,
   mention: AtSign,
   game_invite: Swords,
   game_record: Trophy,

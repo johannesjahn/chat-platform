@@ -1,15 +1,10 @@
 import { type ReactNode, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { FileX } from "lucide-react";
 import { CommentsSection } from "@/components/CommentsSection";
+import { EmptyState } from "@/components/EmptyState";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PostCard, PostCardSkeleton } from "@/components/PostCard";
-import {
-  Card,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
@@ -23,19 +18,22 @@ import { usePageTitle, titleExcerpt } from "@/lib/title";
 // — shared by the `/posts/$id` page and the feed's desktop overlay (issue
 // #561), the way `ChatConversation` is shared by the chat page and the docked
 // windows. The caller supplies the frame around it: `heading` is the
-// (visually hidden) title element, `backLink` sits above the post and in the
-// not-found card, and `onDeleted` runs once the post is gone.
+// (visually hidden) title element, `backLink` sits above the post,
+// `notFoundAction` is the not-found state's one primary action, and
+// `onDeleted` runs once the post is gone.
 export function PostDetail({
   id,
   heading: Heading,
   headingId,
   backLink,
+  notFoundAction,
   onDeleted,
 }: {
   id: string;
   heading: "h1" | "h2";
   headingId?: string;
   backLink?: ReactNode;
+  notFoundAction?: ReactNode;
   onDeleted: () => Promise<unknown> | void;
 }) {
   const postId = Number(id);
@@ -92,15 +90,15 @@ export function PostDetail({
 
   if (notFound) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle asChild>
-            <Heading id={headingId}>Post not found</Heading>
-          </CardTitle>
-          <CardDescription>This post may have been deleted.</CardDescription>
-        </CardHeader>
-        {backLink && <CardFooter>{backLink}</CardFooter>}
-      </Card>
+      <EmptyState
+        icon={FileX}
+        title="Post not found"
+        titleAs={Heading}
+        titleId={headingId}
+        description="It may have been deleted, or the link is wrong."
+      >
+        {notFoundAction}
+      </EmptyState>
     );
   }
 
