@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import {
@@ -13,7 +13,12 @@ import { CurrentUser } from "../Auth.ts";
 import { type DrizzleDb, dbQuery } from "../Db.ts";
 import { serializableTransaction } from "../serializableTransaction.ts";
 
-import { chatParticipants, chats, type DbChat } from "../db/schema.ts";
+import {
+  chatInvites,
+  chatParticipants,
+  chats,
+  type DbChat,
+} from "../db/schema.ts";
 import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
 import {
   existingUserIds,
@@ -104,6 +109,28 @@ const deleteChatRow = async (
   );
 };
 
+// An invite link is its creator asking people in, so it stops working once
+// they can't (issue #894): leaving or being removed from the group, or losing
+// the admin role, revokes every active link they made in it — set like a
+// manual revoke, so the owner's list still shows it. Runs in the same
+// transaction as the membership change; `joinChatViaInvite` also rejects a
+// link whose creator is no longer a manager, for anything this misses.
+const revokeInvitesBy = (
+  db: Pick<DrizzleDb, "update">,
+  chatId: number,
+  userId: number,
+) =>
+  db
+    .update(chatInvites)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(chatInvites.chatId, chatId),
+        eq(chatInvites.createdBy, userId),
+        isNull(chatInvites.revokedAt),
+      ),
+    );
+
 // Shared by `leaveChat` and `removeParticipant`: removes `departingUserId`
 // from `chatRow`, then either deletes the chat outright (if that emptied it
 // — `chats`'s cascading FKs, see db/schema.ts, take care of the rest) or, if
@@ -136,6 +163,7 @@ const departParticipant = (
               eq(chatParticipants.userId, departingUserId),
             ),
           );
+        await revokeInvitesBy(tx, chatRow.id, departingUserId);
 
         const remaining = await tx
           .select({
@@ -601,6 +629,7 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
                     eq(chatParticipants.userId, previousOwnerId),
                   ),
                 );
+              await revokeInvitesBy(tx, id, previousOwnerId);
             }
             return updated[0];
           }),
@@ -653,15 +682,19 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
           );
 
         yield* dbQuery(() =>
-          db
-            .update(chatParticipants)
-            .set({ role: payload.role })
-            .where(
-              and(
-                eq(chatParticipants.chatId, id),
-                eq(chatParticipants.userId, userId),
-              ),
-            ),
+          db.transaction(async (tx) => {
+            await tx
+              .update(chatParticipants)
+              .set({ role: payload.role })
+              .where(
+                and(
+                  eq(chatParticipants.chatId, id),
+                  eq(chatParticipants.userId, userId),
+                ),
+              );
+            if (payload.role === "member")
+              await revokeInvitesBy(tx, id, userId);
+          }),
         );
 
         const { version, participants } = yield* publishChatChange(

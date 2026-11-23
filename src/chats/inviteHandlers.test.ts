@@ -5,7 +5,11 @@ import { MAX_GROUP_PARTICIPANTS, MAX_INVITES_PER_CHAT } from "../Api.ts";
 import { Db } from "../Db.ts";
 import { chatInvites } from "../db/schema.ts";
 import { makeTestRun } from "../testApi.ts";
-import { insertDummyUsers, registerAndLogin } from "./testKit.ts";
+import {
+  insertDummyUsers,
+  promoteToAdmin,
+  registerAndLogin,
+} from "./testKit.ts";
 
 const run = makeTestRun();
 
@@ -255,5 +259,166 @@ test("createChatInvite doesn't count revoked/expired invites toward the per-chat
         payload: {},
       });
       expect(afterRevoke.chatId).toBe(chat.id);
+    }),
+  ));
+
+// --- A link stops working once its creator can't invite (issue #894) ---
+
+type Session = Effect.Success<ReturnType<typeof registerAndLogin>>;
+
+// Alice owns a group with Bob (an admin) and Dave; Bob and Alice each made a
+// link.
+const groupWithAdminLinks = Effect.gen(function* () {
+  const alice = yield* registerAndLogin("alice", "pw-testpass");
+  const bob = yield* registerAndLogin("bob", "pw-testpass");
+  const dave = yield* registerAndLogin("dave", "pw-testpass");
+  const chat = yield* alice.client.chats.createGroupChat({
+    payload: { title: "Group", participantIds: [bob.user.id, dave.user.id] },
+  });
+  yield* alice.client.chats.updateParticipantRole({
+    params: { id: chat.id, userId: bob.user.id },
+    payload: { role: "admin" },
+  });
+  const bobsInvite = yield* bob.client.chats.createChatInvite({
+    params: { id: chat.id },
+    payload: {},
+  });
+  const alicesInvite = yield* alice.client.chats.createChatInvite({
+    params: { id: chat.id },
+    payload: {},
+  });
+  return { alice, bob, dave, chat, bobsInvite, alicesInvite };
+});
+
+const joinFails = (who: Session, code: string) =>
+  who.client.chats.joinChatViaInvite({ params: { code } }).pipe(
+    Effect.flip,
+    Effect.map((e) => e.message),
+  );
+
+const revokedAtOf = (alice: Session, chatId: number, inviteId: number) =>
+  alice.client.chats
+    .listChatInvites({ params: { id: chatId } })
+    .pipe(Effect.map((list) => list.find((i) => i.id === inviteId)?.revokedAt));
+
+test("removing an admin revokes their links, so they can't rejoin through one", () =>
+  run(
+    Effect.gen(function* () {
+      const { alice, bob, chat, bobsInvite, alicesInvite } =
+        yield* groupWithAdminLinks;
+
+      yield* alice.client.chats.removeParticipant({
+        params: { id: chat.id, userId: bob.user.id },
+      });
+
+      expect(yield* joinFails(bob, bobsInvite.code)).toBe(
+        "This invite has been revoked",
+      );
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      expect(yield* joinFails(carol, bobsInvite.code)).toBe(
+        "This invite has been revoked",
+      );
+      expect(yield* revokedAtOf(alice, chat.id, bobsInvite.id)).not.toBeNull();
+
+      // A link from a manager who's still in the group keeps working.
+      expect(yield* revokedAtOf(alice, chat.id, alicesInvite.id)).toBeNull();
+      const joined = yield* carol.client.chats.joinChatViaInvite({
+        params: { code: alicesInvite.code },
+      });
+      expect(joined.participants.some((p) => p.userId === carol.user.id)).toBe(
+        true,
+      );
+    }),
+  ));
+
+test("leaving a group revokes the links you made in it", () =>
+  run(
+    Effect.gen(function* () {
+      const { alice, bob, chat, bobsInvite, alicesInvite } =
+        yield* groupWithAdminLinks;
+
+      yield* bob.client.chats.leaveChat({ params: { id: chat.id } });
+
+      expect(yield* joinFails(bob, bobsInvite.code)).toBe(
+        "This invite has been revoked",
+      );
+      expect(yield* revokedAtOf(alice, chat.id, bobsInvite.id)).not.toBeNull();
+      expect(yield* revokedAtOf(alice, chat.id, alicesInvite.id)).toBeNull();
+    }),
+  ));
+
+test("demoting an admin to member revokes their links, and promoting them back doesn't restore them", () =>
+  run(
+    Effect.gen(function* () {
+      const { alice, chat, bob, bobsInvite, alicesInvite } =
+        yield* groupWithAdminLinks;
+
+      yield* alice.client.chats.updateParticipantRole({
+        params: { id: chat.id, userId: bob.user.id },
+        payload: { role: "member" },
+      });
+      yield* alice.client.chats.updateParticipantRole({
+        params: { id: chat.id, userId: bob.user.id },
+        payload: { role: "admin" },
+      });
+
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      expect(yield* joinFails(carol, bobsInvite.code)).toBe(
+        "This invite has been revoked",
+      );
+      expect(yield* revokedAtOf(alice, chat.id, alicesInvite.id)).toBeNull();
+    }),
+  ));
+
+test("handing ownership over revokes the previous owner's links", () =>
+  run(
+    Effect.gen(function* () {
+      const { alice, bob, chat, bobsInvite, alicesInvite } =
+        yield* groupWithAdminLinks;
+
+      // Alice is demoted to member by the transfer.
+      yield* alice.client.chats.transferOwnership({
+        params: { id: chat.id },
+        payload: { userId: bob.user.id },
+      });
+
+      expect(yield* revokedAtOf(bob, chat.id, alicesInvite.id)).not.toBeNull();
+      expect(yield* revokedAtOf(bob, chat.id, bobsInvite.id)).toBeNull();
+    }),
+  ));
+
+test("joinChatViaInvite rejects a link whose creator no longer manages the chat, even if it was never revoked", () =>
+  run(
+    Effect.gen(function* () {
+      const { chat, dave } = yield* groupWithAdminLinks;
+      const db = yield* Db;
+
+      // A link left over from before revocation on departure, made by
+      // someone who's since become a plain member.
+      yield* Effect.promise(() =>
+        db.insert(chatInvites).values({
+          chatId: chat.id,
+          code: "legacy-member-link",
+          createdBy: dave.user.id,
+        }),
+      );
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      expect(yield* joinFails(carol, "legacy-member-link")).toBe(
+        "This invite has been revoked",
+      );
+
+      // A site admin can manage any chat, so their link holds without
+      // being in it.
+      const erin = yield* registerAndLogin("erin", "pw-testpass");
+      const erinAdmin = yield* promoteToAdmin("erin", "pw-testpass");
+      const sitesInvite = yield* erinAdmin.chats.createChatInvite({
+        params: { id: chat.id },
+        payload: {},
+      });
+      expect(sitesInvite.createdBy).toBe(erin.user.id);
+      const joined = yield* carol.client.chats.joinChatViaInvite({
+        params: { code: sitesInvite.code },
+      });
+      expect(joined.id).toBe(chat.id);
     }),
   ));
