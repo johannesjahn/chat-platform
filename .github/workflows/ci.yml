@@ -386,7 +386,7 @@ jobs:
     # (issue #654). Everything else uses the in-memory PubSub and PGlite.
     services:
       redis:
-        image: redis:8.10.3-alpine
+        image: redis:8.12.0-alpine
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 2s
