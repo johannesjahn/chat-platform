@@ -5,13 +5,14 @@ import { useMediaQuery } from "./media";
 // The desktop chat details panel (issue #563): a third pane beside an open
 // conversation at `xl`+, holding what the group settings modal holds plus
 // pinned/starred messages, shared media, and — for a direct chat — the
-// other person. Below `xl` the modal stays.
+// other person. Below `xl` the same contents open as a full-screen sheet
+// from the conversation header (issue #907).
 
 // Tailwind's `xl` (80rem = 1280px at the default root size).
 export const WIDE_DESKTOP_MEDIA_QUERY = "(min-width: 80rem)";
 
 /**
- * Whether chat details show as the side panel rather than the modal: the
+ * Whether chat details show as the side panel rather than the sheet: the
  * two-pane messenger, with room for a third pane.
  */
 export function useChatDetailsAsPanel(): boolean {
