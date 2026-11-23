@@ -283,15 +283,19 @@ html[data-app-shell="immersive"] [data-app-column] {
   min-height: 0;
 }
 
-/* Below `sm`, the conversation is the whole screen and its own header — back
+/* Wherever the phone shell is shown (below `lg`, in either orientation —
+   issue #905), the conversation is the whole screen and its own header — back
    button included — is the only chrome it needs. Reclaiming the site nav's
    row is part of what keeps the thread readable once the on-screen
-   keyboard has taken half the viewport; without it the header, pinned bar and
+   keyboard has taken half the viewport, and on a landscape phone, where
+   there's only ~400px to begin with; without it the header, pinned bar and
    composer fill everything that's left. The chat header picks up
    `env(safe-area-inset-top)` at the same breakpoint, so the status bar still
-   has a background to sit on. */
-@media (width < 40rem) {
-  html[data-app-shell="immersive"] [data-app-nav] {
+   has a background to sit on. The version tag goes too: it would sit on the
+   composer's send button. */
+@media (width < 64rem) {
+  html[data-app-shell="immersive"] [data-app-nav],
+  html[data-app-shell="immersive"] [data-version-tag] {
     display: none;
   }
 }
@@ -355,6 +359,56 @@ html[data-session="in"] [data-session-only="out"] {
   right: 0;
   top: var(--app-offset-top, 0px);
   height: var(--app-height, 100dvh);
+}
+
+/* Fades out whichever edge of a horizontal scroller still has content past
+   it, so a strip whose last item is cut off reads as "scroll for more"
+   (issue #905). Driven by the scroller's own scroll timeline: a strip that
+   fits has no scroll range, so its timeline is inactive, the custom
+   properties keep their 0px initial values, and nothing is masked. Browsers
+   without scroll-driven animations get the plain, unfaded strip. */
+@property --scroll-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --scroll-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes scroll-fade-x {
+  from {
+    --scroll-fade-start: 0px;
+    --scroll-fade-end: 1.5rem;
+  }
+  12% {
+    --scroll-fade-start: 1.5rem;
+  }
+  88% {
+    --scroll-fade-end: 1.5rem;
+  }
+  to {
+    --scroll-fade-start: 1.5rem;
+    --scroll-fade-end: 0px;
+  }
+}
+
+@utility scroll-fade-x {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--scroll-fade-start),
+    #000 calc(100% - var(--scroll-fade-end)),
+    transparent
+  );
+
+  @supports (animation-timeline: scroll()) {
+    animation: scroll-fade-x linear both;
+    animation-timeline: scroll(self inline);
+  }
 }
 
 /* Shimmering skeleton placeholder fill. Kept as a plain utility (rather than

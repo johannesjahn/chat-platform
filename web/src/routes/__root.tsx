@@ -418,12 +418,13 @@ function Nav({
     // its background then fills the area instead of the bar overlapping the
     // links. Resolves to plain `0.75rem` everywhere `env()` is 0.
     //
-    // Below `sm` it's a single row — brand, Chats, the bell, and a menu
-    // button — with search and everything else in the menu panel (issue
-    // #494): the full set wrapped onto three rows there and, pinned, took
-    // about a third of a phone screen. Links that only live in the menu on a
-    // phone are `hidden sm:inline-flex` in the bar rather than rendered twice
-    // visibly, so each has one accessible copy at any width.
+    // It's a single row — brand, Chats, the bell, and a menu button — with
+    // search and everything else in the menu panel (issue #494): the full
+    // set wrapped onto three rows on a phone and, pinned, took about a third
+    // of the screen. That holds at every width below `lg` (issue #905): from
+    // `sm` the bar used to spread everything out, which wrapped onto two rows
+    // on a tablet and, on a landscape phone, squeezed the search box to a
+    // sliver with the account name drawn over it.
     //
     // `data-app-nav` is what the immersive shell hides on phone widths while
     // a conversation is open (see the rules in styles.css, switched on by
@@ -436,7 +437,7 @@ function Nav({
       aria-label="Main"
       className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border bg-card/70 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur sm:px-5 lg:hidden"
     >
-      <div className="flex min-w-0 items-center gap-2 sm:flex-wrap sm:gap-4">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-4">
         <Link
           to="/"
           className="group relative flex items-center gap-2 font-semibold tracking-tight text-foreground"
@@ -469,46 +470,7 @@ function Nav({
             )}
           </Link>
         </Button>
-        <Button
-          asChild
-          variant="ghost"
-          size="sm"
-          className="hidden sm:inline-flex"
-        >
-          <Link to="/users" className="group/nav-icon">
-            <NavIcon icon={Users} />
-            Users
-          </Link>
-        </Button>
-        <Button
-          asChild
-          variant="ghost"
-          size="sm"
-          className="hidden sm:inline-flex"
-        >
-          <Link to="/games" className="group/nav-icon">
-            <NavIcon icon={Gamepad2} />
-            Games
-          </Link>
-        </Button>
-        {/* The dashboard route enforces this server-side too (the endpoint
-            403s a non-admin) — hiding the link just keeps a dead end out of
-            everyone else's nav. */}
-        {session?.user.role === "admin" && (
-          <Button
-            asChild
-            variant="ghost"
-            size="sm"
-            className="hidden sm:inline-flex"
-          >
-            <Link to="/admin" className="group/nav-icon">
-              <NavIcon icon={Gauge} />
-              Admin
-            </Link>
-          </Button>
-        )}
       </div>
-      {session && <HeaderSearch className="hidden sm:block" />}
       <div className="flex items-center gap-2 sm:gap-3">
         {sessionPending ? (
           // The prerendered shell (issue #603): a signed-in reader gets
@@ -518,73 +480,38 @@ function Nav({
             signedOut={<SignedOutNavActions redirect={redirect} />}
           />
         ) : session ? (
-          <>
-            <Link
-              to="/users/$id"
-              params={{ id: String(session.user.id) }}
-              // `link-sweep` draws the underline in from the left rather than
-              // switching it on whole, and retracts it the same way — see
-              // styles.css.
-              className="link-sweep hidden text-sm text-muted-foreground transition-colors hover:text-foreground sm:inline"
-            >
-              {userLabel(session.user)}
+          <Button
+            asChild
+            variant="ghost"
+            size="icon"
+            className="relative"
+            aria-label={
+              unreadNotifications > 0
+                ? `Notifications (${unreadNotifications} unread)`
+                : "Notifications"
+            }
+          >
+            <Link to="/notifications" className="group/nav-icon">
+              <NavIcon icon={Bell} />
+              {unreadNotifications > 0 && (
+                <span
+                  // Re-keyed like the Chats badge so the pop replays on
+                  // every new notification.
+                  key={unreadNotifications}
+                  className="absolute -right-1 -top-1 flex size-4.5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground motion-safe:animate-badge-pop"
+                >
+                  {unreadNotifications > 99 ? "99+" : unreadNotifications}
+                </span>
+              )}
             </Link>
-            <Button
-              asChild
-              variant="ghost"
-              size="icon"
-              className="relative"
-              aria-label={
-                unreadNotifications > 0
-                  ? `Notifications (${unreadNotifications} unread)`
-                  : "Notifications"
-              }
-            >
-              <Link to="/notifications" className="group/nav-icon">
-                <NavIcon icon={Bell} />
-                {unreadNotifications > 0 && (
-                  <span
-                    // Re-keyed like the Chats badge so the pop replays on
-                    // every new notification.
-                    key={unreadNotifications}
-                    className="absolute -right-1 -top-1 flex size-4.5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground motion-safe:animate-badge-pop"
-                  >
-                    {unreadNotifications > 99 ? "99+" : unreadNotifications}
-                  </span>
-                )}
-              </Link>
-            </Button>
-            <Button
-              asChild
-              variant="ghost"
-              size="icon"
-              aria-label="Settings"
-              className="hidden sm:inline-flex"
-            >
-              <Link to="/settings" className="group/nav-icon">
-                <NavIcon icon={Settings} />
-              </Link>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="group/nav-icon hidden sm:inline-flex"
-              onClick={onLogout}
-            >
-              <NavIcon icon={LogOut} />
-              Log out
-            </Button>
-          </>
+          </Button>
         ) : (
           <SignedOutNavActions redirect={redirect} />
         )}
-        {/* Below `sm` the bar is one row with no room to spare (issue
-            #494), so there the toggle lives in the menu panel instead. */}
-        <ThemeToggle className="hidden sm:inline-flex" />
         <Button
           variant="ghost"
           size="icon"
-          className="group/nav-icon sm:hidden"
+          className="group/nav-icon"
           aria-label="Menu"
           aria-expanded={menuOpen}
           // The panel unmounts once closed, so it's only pointed at while
@@ -595,7 +522,7 @@ function Nav({
           <NavIcon icon={menuOpen ? X : Menu} />
         </Button>
       </div>
-      <Collapse open={menuOpen} id={menuId} className="basis-full sm:hidden">
+      <Collapse open={menuOpen} id={menuId} className="basis-full">
         {/* Activating anything in the panel closes it, even when the URL
             doesn't change — the current page's own link, or logging out on
             `/` — which the href check above can't see (issue #545). Clicks
@@ -639,7 +566,8 @@ function Nav({
               </Button>
             </>
           ) : (
-            <Button asChild className="mt-1">
+            // From `sm` the bar has room for Register beside Log in.
+            <Button asChild className="mt-1 sm:hidden">
               <Link to="/register" search={{ redirect }}>
                 Register
               </Link>
@@ -668,17 +596,10 @@ function SignedOutNavActions({ redirect }: { redirect: string | undefined }) {
   );
 }
 
-// Stands in for the signed-in actions — name, bell, settings, log out —
-// at their sizes and breakpoints, so nothing shifts once they render.
+// Stands in for the signed-in actions — the bell — at its size, so nothing
+// shifts once it renders.
 function NavActionsSkeleton() {
-  return (
-    <>
-      <Skeleton className="hidden h-4 w-20 sm:block" />
-      <Skeleton className="size-9" />
-      <Skeleton className="hidden size-9 sm:block" />
-      <Skeleton className="hidden h-8 w-24 sm:block" />
-    </>
-  );
+  return <Skeleton className="size-9" />;
 }
 
 // A full-width row in the phone menu panel.
