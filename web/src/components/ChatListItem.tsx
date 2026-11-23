@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Link } from "@tanstack/react-router";
-import { Forward, ImageIcon, Users } from "lucide-react";
+import { Forward, ImageIcon, Users, UserX } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { PresenceDot } from "@/components/PresenceDot";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -9,6 +9,7 @@ import {
   chatDisplayName,
   chatViewTransitionNames,
   formatChatTimestamp,
+  isDirectChatWithDeletedAccount,
   lastMessageSender,
   lastMessageText,
   type Chat,
@@ -128,7 +129,11 @@ export function ChatListItem({
               className="flex size-11 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground"
               style={{ viewTransitionName: transitionNames.avatar }}
             >
-              <Users className="size-4.5" />
+              {isDirectChatWithDeletedAccount(chat) ? (
+                <UserX className="size-4.5" />
+              ) : (
+                <Users className="size-4.5" />
+              )}
             </div>
           )}
         </div>

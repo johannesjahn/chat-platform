@@ -157,7 +157,7 @@ export const requireAcceptedParticipant = (
 
 // Fails with 403 if any of `otherIds` is on either side of a *block* with
 // `actorId` (issue #757). Group messages aren't gated by blocks (see
-// `directChatBlocked`), so without this a group — which may hold just the
+// `directChatClosed`), so without this a group — which may hold just the
 // two of them — would get around the DM block. Used by `createGroupChat`
 // and `addParticipants` (the actor vs. everyone they're adding) and
 // `joinChatViaInvite` (the joiner vs. the invite's creator). The whole

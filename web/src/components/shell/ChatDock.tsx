@@ -25,6 +25,7 @@ import {
 import {
   chatDisplayName,
   formatChatTimestamp,
+  isDirectChatWithDeletedAccount,
   lastMessagePreview,
   useChatDetail,
   useChatsList,
@@ -268,9 +269,11 @@ function DockedChatWindow({
       ? null
       : chat?.type === "group"
         ? `${chat.participants.length} participants`
-        : online
-          ? "Online"
-          : "Direct message";
+        : chat && isDirectChatWithDeletedAccount(chat)
+          ? "Account deleted"
+          : online
+            ? "Online"
+            : "Direct message";
 
   // Escape closes the window — unless something inside it used the key
   // first (cancelling a reply or an edit, closing a menu).

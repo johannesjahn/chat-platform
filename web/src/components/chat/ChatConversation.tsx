@@ -17,6 +17,7 @@ import { DropOverlay } from "@/components/chat/DropOverlay";
 import { useFileDrop } from "@/components/chat/useFileDrop";
 import { ForwardDialog } from "@/components/chat/ForwardDialog";
 import { forwardToast } from "@/components/chat/forwardToast";
+import { DeletedAccountBar } from "@/components/chat/DeletedAccountBar";
 import { MessageRequestBar } from "@/components/chat/MessageRequestBar";
 import { PendingMessageList } from "@/components/chat/PendingMessageList";
 import {
@@ -53,6 +54,7 @@ import { canManageChat } from "@/lib/chatRoles";
 import {
   chatDetailQueryKey,
   chatDisplayName,
+  isDirectChatWithDeletedAccount,
   type ChatMessage,
   useChatDetail,
   useChatMessages,
@@ -513,9 +515,12 @@ export function ChatConversation({
         )}
     </>
   );
-  // A message request (issue #785) is read-only until it's accepted.
+  // A message request (issue #785) is read-only until it's accepted, and a
+  // direct chat with a deleted account (issue #895) for good.
   const composer = chat?.messageRequest ? (
     <MessageRequestBar chat={chat} />
+  ) : chat && isDirectChatWithDeletedAccount(chat) ? (
+    <DeletedAccountBar />
   ) : (
     <ChatComposer
       ref={composerRef}

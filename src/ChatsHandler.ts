@@ -25,7 +25,7 @@ import { readHandlers } from "./chats/readHandlers.ts";
 // - pinStarHandlers — pins (shared) and stars (private).
 //
 // Shared helpers sit next to them: the single send path (sendPath.ts —
-// `insertMessage`, `directChatBlocked`, `publishNewMessage`, also used by
+// `insertMessage`, `directChatClosed`, `publishNewMessage`, also used by
 // forwarding), participation/permission checks (access.ts), chat rows,
 // versions and the `Chat` view (chatState.ts), the `Message` view
 // (messageViews.ts) and unread counts (unread.ts). `handleAll` fails to

@@ -32,7 +32,8 @@ import {
   toApiMessage,
 } from "./messageViews.ts";
 import {
-  directChatBlocked,
+  DIRECT_CHAT_CLOSED_MESSAGE,
+  directChatClosed,
   findMessageByClientId,
   insertMessage,
   publishNewMessage,
@@ -229,12 +230,10 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
             );
         }
 
-        if (yield* directChatBlocked(db, chatRow, currentUser.id))
+        const closed = yield* directChatClosed(db, chatRow, currentUser.id);
+        if (closed !== null)
           return yield* Effect.fail(
-            new Forbidden({
-              message:
-                "You can't send messages in this chat because of a block",
-            }),
+            new Forbidden({ message: DIRECT_CHAT_CLOSED_MESSAGE[closed] }),
           );
 
         let attachment: Attachment | null = null;

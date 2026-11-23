@@ -22,17 +22,20 @@ import {
 // `createMessage` and every target of `forwardMessage` insert, gate and
 // publish a message through these same helpers — don't fork them.
 
-// In a direct chat, a *block* by either party (not a mere mute) stops
-// messaging in both directions (issue #219). Checked against the other
-// participant only — group chats aren't gated, and a block never applies to
-// yourself. Shared by `createMessage` and each target of `forwardMessage`.
-export const directChatBlocked = (
+// Why a direct chat takes no new messages from `senderId`, if it doesn't.
+// A *block* by either party (not a mere mute) stops messaging in both
+// directions (issue #219) — checked against the other participant only, so
+// group chats aren't gated and a block never applies to yourself. And once
+// the other participant has deleted their account (issue #895) there's
+// nobody left to read it, so the chat is read-only. Shared by
+// `createMessage` and each target of `forwardMessage`.
+export const directChatClosed = (
   db: DrizzleDb,
   chatRow: DbChat,
   senderId: number,
-): Effect.Effect<boolean> =>
+): Effect.Effect<"blocked" | "partner_deleted" | null> =>
   Effect.gen(function* () {
-    if (chatRow.type !== "direct") return false;
+    if (chatRow.type !== "direct") return null;
     const others = yield* dbQuery(() =>
       db
         .select({ userId: chatParticipants.userId })
@@ -46,9 +49,18 @@ export const directChatBlocked = (
         .limit(1),
     );
     const otherId = others[0]?.userId;
-    if (otherId === undefined) return false;
-    return yield* dbQuery(() => directBlockExists(db, senderId, otherId));
+    if (otherId === undefined) return "partner_deleted";
+    return (yield* dbQuery(() => directBlockExists(db, senderId, otherId)))
+      ? "blocked"
+      : null;
   });
+
+// What a sender is told when `directChatClosed` turns them away.
+export const DIRECT_CHAT_CLOSED_MESSAGE = {
+  blocked: "You can't send messages in this chat because of a block",
+  partner_deleted:
+    "You can't send messages in this chat because the account was deleted",
+} as const;
 
 // Inserts a message and bumps its chat's `updatedAt` (which `listChats`
 // sorts by) and `version` as one atomic statement via a writable CTE, rather
