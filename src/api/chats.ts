@@ -10,6 +10,7 @@ import {
   TooManyRequests,
 } from "./errors.ts";
 import {
+  AuthorSummary,
   ReactionBody,
   ReactionState,
   ReactionSummary,
@@ -313,6 +314,24 @@ export const ChatInvite = Schema.Struct({
 }).annotate({ identifier: "ChatInvite" });
 
 export type ChatInvite = typeof ChatInvite.Type;
+
+// What an invite link shows before it's redeemed (issue #899,
+// `GET /chats/invites/:code`): only what joining would show anyway — the
+// group's name, picture and size, and who sent the link. Never the
+// participant list or any message, since the code is what keeps the group
+// private. `alreadyMember` lets the join page offer "Open chat" instead.
+export const ChatInvitePreview = Schema.Struct({
+  chatId: Schema.Finite,
+  title: Schema.NullOr(Schema.String),
+  avatarVariants: Schema.NullOr(AvatarVariants),
+  memberCount: Schema.Finite,
+  alreadyMember: Schema.Boolean,
+  // Null only if the creator's account vanished between the checks and the
+  // lookup.
+  invitedBy: Schema.NullOr(AuthorSummary),
+}).annotate({ identifier: "ChatInvitePreview" });
+
+export type ChatInvitePreview = typeof ChatInvitePreview.Type;
 
 export const CreateMessageBody = Schema.Struct({
   contentType: MessageContentType,
@@ -909,6 +928,19 @@ export const ChatsGroup = HttpApiGroup.make("chats")
       params: ChatInvitePath,
       success: HttpApiSchema.NoContent,
       error: [NotFound, Forbidden],
+    }).middleware(Authentication),
+  )
+  .add(
+    // Looks an invite code up without redeeming it (issue #899) — any
+    // authenticated user. Fails exactly as `joinChatViaInvite` would (same
+    // checks, same messages: unknown, revoked, expired, used up, a block
+    // with its creator, a full group), so a dead link says why before
+    // anyone clicks Join. Rate-limited per account, since guessing codes is
+    // the only way into a group you weren't invited to.
+    HttpApiEndpoint.get("previewChatInvite", "/chats/invites/:code", {
+      params: InviteCodePath,
+      success: ChatInvitePreview,
+      error: [NotFound, Forbidden, InvalidChatRequest, TooManyRequests],
     }).middleware(Authentication),
   )
   .add(

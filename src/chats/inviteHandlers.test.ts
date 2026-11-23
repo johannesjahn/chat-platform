@@ -422,3 +422,224 @@ test("joinChatViaInvite rejects a link whose creator no longer manages the chat,
       expect(joined.id).toBe(chat.id);
     }),
   ));
+
+// --- Previewing an invite before joining (issue #899) ---
+
+const previewFails = (who: Session, code: string) =>
+  who.client.chats.previewChatInvite({ params: { code } }).pipe(Effect.flip);
+
+test("previewChatInvite shows the group's name, picture, size and inviter — and nothing else", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Book club", participantIds: [bob.user.id] },
+      });
+      yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: { contentType: "text", content: "secret-plans-for-friday" },
+      });
+      const invite = yield* alice.client.chats.createChatInvite({
+        params: { id: chat.id },
+        payload: { maxUses: 1 },
+      });
+
+      const preview = yield* carol.client.chats.previewChatInvite({
+        params: { code: invite.code },
+      });
+      expect(preview).toEqual({
+        chatId: chat.id,
+        title: "Book club",
+        avatarVariants: null,
+        memberCount: 2,
+        alreadyMember: false,
+        invitedBy: {
+          id: alice.user.id,
+          username: "alice",
+          displayName: null,
+          avatarUrl: null,
+          avatarVariants: null,
+        },
+      });
+      // No participant list, no messages: bob appears nowhere.
+      const body = JSON.stringify(preview);
+      expect(body).not.toContain("bob");
+      expect(body).not.toContain("secret-plans-for-friday");
+
+      // Looking doesn't redeem — the single use is still there for the join.
+      const invites = yield* alice.client.chats.listChatInvites({
+        params: { id: chat.id },
+      });
+      expect(invites.find((i) => i.id === invite.id)?.useCount).toBe(0);
+      yield* carol.client.chats.joinChatViaInvite({
+        params: { code: invite.code },
+      });
+    }),
+  ));
+
+test("previewChatInvite tells a member they're already in", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [bob.user.id] },
+      });
+      const invite = yield* alice.client.chats.createChatInvite({
+        params: { id: chat.id },
+        payload: {},
+      });
+
+      const preview = yield* bob.client.chats.previewChatInvite({
+        params: { code: invite.code },
+      });
+      expect(preview.alreadyMember).toBe(true);
+      expect(preview.chatId).toBe(chat.id);
+    }),
+  ));
+
+test("previewChatInvite fails for a dead link exactly as joining would", () =>
+  run(
+    Effect.gen(function* () {
+      const { alice, chat, dave, alicesInvite } = yield* groupWithAdminLinks;
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const erin = yield* registerAndLogin("erin", "pw-testpass");
+      const db = yield* Db;
+
+      const expectSameFailure = (
+        code: string,
+        tag: "NotFound" | "InvalidChatRequest" | "Forbidden",
+        message: string,
+      ) =>
+        Effect.gen(function* () {
+          const previewed = yield* previewFails(carol, code);
+          const joined = yield* joinFails(carol, code);
+          expect(previewed._tag).toBe(tag);
+          expect(previewed.message).toBe(message);
+          expect(joined).toBe(message);
+        });
+
+      // Unknown code.
+      yield* expectSameFailure(
+        "does-not-exist",
+        "NotFound",
+        "Invite not found",
+      );
+
+      // Revoked.
+      const revoked = yield* alice.client.chats.createChatInvite({
+        params: { id: chat.id },
+        payload: {},
+      });
+      yield* alice.client.chats.revokeChatInvite({
+        params: { id: chat.id, inviteId: revoked.id },
+      });
+      yield* expectSameFailure(
+        revoked.code,
+        "InvalidChatRequest",
+        "This invite has been revoked",
+      );
+
+      // Made by someone who no longer manages the chat.
+      yield* Effect.promise(() =>
+        db.insert(chatInvites).values({
+          chatId: chat.id,
+          code: "legacy-member-link",
+          createdBy: dave.user.id,
+        }),
+      );
+      yield* expectSameFailure(
+        "legacy-member-link",
+        "InvalidChatRequest",
+        "This invite has been revoked",
+      );
+
+      // Expired.
+      const expiring = yield* alice.client.chats.createChatInvite({
+        params: { id: chat.id },
+        payload: { expiresInHours: 1 },
+      });
+      yield* Effect.promise(() =>
+        db
+          .update(chatInvites)
+          .set({ expiresAt: new Date(Date.now() - 1000) })
+          .where(eq(chatInvites.id, expiring.id)),
+      );
+      yield* expectSameFailure(
+        expiring.code,
+        "InvalidChatRequest",
+        "This invite has expired",
+      );
+
+      // Used up.
+      const singleUse = yield* alice.client.chats.createChatInvite({
+        params: { id: chat.id },
+        payload: { maxUses: 1 },
+      });
+      yield* erin.client.chats.joinChatViaInvite({
+        params: { code: singleUse.code },
+      });
+      yield* expectSameFailure(
+        singleUse.code,
+        "InvalidChatRequest",
+        "This invite has reached its use limit",
+      );
+
+      // A block between the viewer and the link's creator, either way round.
+      yield* carol.client.users.setBlock({
+        params: { id: alice.user.id },
+        payload: { type: "block" },
+      });
+      yield* expectSameFailure(
+        alicesInvite.code,
+        "Forbidden",
+        "You can't join this chat because of a block",
+      );
+    }),
+  ));
+
+test("previewChatInvite says when the group is full", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const others = yield* insertDummyUsers(MAX_GROUP_PARTICIPANTS - 1);
+      const chat = yield* alice.client.chats.createGroupChat({
+        payload: { title: "Group", participantIds: [others[0]!.id] },
+      });
+      yield* alice.client.chats.addParticipants({
+        params: { id: chat.id },
+        payload: { participantIds: others.slice(1).map((o) => o.id) },
+      });
+      const invite = yield* alice.client.chats.createChatInvite({
+        params: { id: chat.id },
+        payload: {},
+      });
+
+      const outsider = yield* registerAndLogin("outsider", "pw-testpass");
+      const full = yield* previewFails(outsider, invite.code);
+      expect(full._tag).toBe("InvalidChatRequest");
+      expect(full.message).toBe(yield* joinFails(outsider, invite.code));
+
+      // A member of the full group still gets the preview.
+      const own = yield* alice.client.chats.previewChatInvite({
+        params: { code: invite.code },
+      });
+      expect(own.memberCount).toBe(MAX_GROUP_PARTICIPANTS);
+      expect(own.alreadyMember).toBe(true);
+    }),
+  ));
+
+test("previewChatInvite is rate-limited per account", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      for (let i = 0; i < 60; i++) yield* previewFails(alice, `guess-${i}`);
+      const limited = yield* previewFails(alice, "guess-60");
+      expect(limited._tag).toBe("TooManyRequests");
+      // Another account has its own budget.
+      expect((yield* previewFails(bob, "guess-0"))._tag).toBe("NotFound");
+    }),
+  ));

@@ -8,6 +8,9 @@ import {
   type ChatInvite,
 } from "../Api.ts";
 import { CurrentUser } from "../Auth.ts";
+import { loadAuthors } from "../authors.ts";
+import { toAvatarVariants } from "../avatars.ts";
+import { enforceRateLimit } from "../RateLimiter.ts";
 import { serializableTransaction } from "../serializableTransaction.ts";
 import {
   chatInvites,
@@ -70,7 +73,53 @@ const creatorStillManages = (
     ),
   );
 
-export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
+const BLOCKED_MESSAGE = "You can't join this chat because of a block";
+const FULL_MESSAGE = `Group chats can have at most ${MAX_GROUP_PARTICIPANTS} participants`;
+
+// Invite previews per account per window (issue #899). The 128-bit random
+// codes are what keep a group private; this caps how fast one account can
+// probe them, with room for a page that refetches.
+const INVITE_PREVIEW_MAX_PER_ACCOUNT = 60;
+const INVITE_PREVIEW_WINDOW_SECONDS = 60;
+
+// The code's invite, if it can still be redeemed — the checks both
+// `previewChatInvite` and `joinChatViaInvite` start with, so a preview
+// fails exactly the way the join would. The join re-checks revocation and
+// the use count inside its transaction; these are the fast path.
+const loadRedeemableInvite = (
+  db: ChatsDeps["db"],
+  code: string,
+): Effect.Effect<DbChatInvite, NotFound | InvalidChatRequest> =>
+  Effect.gen(function* () {
+    const rows = yield* dbQuery(() =>
+      db.select().from(chatInvites).where(eq(chatInvites.code, code)).limit(1),
+    );
+    const invite = rows[0];
+    if (!invite)
+      return yield* Effect.fail(new NotFound({ message: "Invite not found" }));
+    if (invite.revokedAt !== null || !(yield* creatorStillManages(db, invite)))
+      return yield* Effect.fail(
+        new InvalidChatRequest({ message: "This invite has been revoked" }),
+      );
+    if (invite.expiresAt !== null && invite.expiresAt.getTime() <= Date.now())
+      return yield* Effect.fail(
+        new InvalidChatRequest({ message: "This invite has expired" }),
+      );
+    if (invite.maxUses !== null && invite.useCount >= invite.maxUses)
+      return yield* Effect.fail(
+        new InvalidChatRequest({
+          message: "This invite has reached its use limit",
+        }),
+      );
+    return invite;
+  });
+
+export const inviteHandlers = ({
+  db,
+  storage,
+  limiter,
+  connections,
+}: ChatsDeps) =>
   ({
     createChatInvite: ({ params: { id }, payload }) =>
       Effect.gen(function* () {
@@ -174,51 +223,60 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
             }),
           );
       }),
+    previewChatInvite: ({ params: { code } }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUser;
+        yield* enforceRateLimit(
+          limiter,
+          `chat-invite-preview:account:${currentUser.id}`,
+          INVITE_PREVIEW_MAX_PER_ACCOUNT,
+          INVITE_PREVIEW_WINDOW_SECONDS,
+        );
+
+        const invite = yield* loadRedeemableInvite(db, code);
+        const chatRow = yield* getChatOr404(db, invite.chatId);
+        const alreadyMember = yield* isParticipant(
+          db,
+          chatRow.id,
+          currentUser.id,
+        );
+        const memberCount = yield* dbQuery(() =>
+          db
+            .select({ total: count() })
+            .from(chatParticipants)
+            .where(eq(chatParticipants.chatId, chatRow.id)),
+        ).pipe(Effect.map((rows) => rows[0]?.total ?? 0));
+        // The rest of the join's checks, in its order: a member is let
+        // straight back in, so only a newcomer is turned away by a block or
+        // a full group.
+        if (!alreadyMember) {
+          yield* requireNoBlockWith(
+            db,
+            currentUser.id,
+            [invite.createdBy],
+            BLOCKED_MESSAGE,
+          );
+          if (memberCount >= MAX_GROUP_PARTICIPANTS)
+            return yield* Effect.fail(
+              new InvalidChatRequest({ message: FULL_MESSAGE }),
+            );
+        }
+
+        const authors = yield* loadAuthors(db, [invite.createdBy]);
+        return {
+          chatId: chatRow.id,
+          title: chatRow.title,
+          avatarVariants: toAvatarVariants(chatRow),
+          memberCount,
+          alreadyMember,
+          invitedBy: authors.get(invite.createdBy) ?? null,
+        };
+      }),
     joinChatViaInvite: ({ params: { code } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
 
-        const rows = yield* dbQuery(() =>
-          db
-            .select()
-            .from(chatInvites)
-            .where(eq(chatInvites.code, code))
-            .limit(1),
-        );
-        const invite = rows[0];
-        if (!invite)
-          return yield* Effect.fail(
-            new NotFound({ message: "Invite not found" }),
-          );
-        if (
-          invite.revokedAt !== null ||
-          !(yield* creatorStillManages(db, invite))
-        )
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "This invite has been revoked",
-            }),
-          );
-        if (
-          invite.expiresAt !== null &&
-          invite.expiresAt.getTime() <= Date.now()
-        )
-          return yield* Effect.fail(
-            new InvalidChatRequest({ message: "This invite has expired" }),
-          );
-        // The plain read above is just a fast-path rejection for an
-        // already-obviously-exhausted invite — the authoritative check is
-        // the guarded UPDATE inside the transaction below, which is immune
-        // to the TOCTOU race two concurrent redemptions of a
-        // `maxUses`-limited invite would otherwise hit if this were the
-        // only check.
-        if (invite.maxUses !== null && invite.useCount >= invite.maxUses)
-          return yield* Effect.fail(
-            new InvalidChatRequest({
-              message: "This invite has reached its use limit",
-            }),
-          );
-
+        const invite = yield* loadRedeemableInvite(db, code);
         const chatRow = yield* getChatOr404(db, invite.chatId);
         const alreadyIn = yield* isParticipant(db, chatRow.id, currentUser.id);
         if (alreadyIn)
@@ -229,7 +287,7 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
           db,
           currentUser.id,
           [invite.createdBy],
-          "You can't join this chat because of a block",
+          BLOCKED_MESSAGE,
         );
 
         // Participant cap, `useCount` bump, and the join itself all run
@@ -301,7 +359,7 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
                   ? "This invite has been revoked"
                   : result.reason === "maxUses"
                     ? "This invite has reached its use limit"
-                    : `Group chats can have at most ${MAX_GROUP_PARTICIPANTS} participants`,
+                    : FULL_MESSAGE,
             }),
           );
         if (!result.joined)

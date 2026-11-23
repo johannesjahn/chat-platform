@@ -756,6 +756,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chats/invites/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["chats.previewChatInvite"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chats/invites/{code}/join": {
         parameters: {
             query?: never;
@@ -1783,6 +1799,21 @@ export interface components {
         };
         /** @enum {string} */
         MessageContentType: "text" | "image_url" | "attachment";
+        ChatInvitePreview: {
+            chatId: number;
+            title: string | null;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
+            memberCount: number;
+            alreadyMember: boolean;
+            invitedBy: components["schemas"]["AuthorSummary"] | null;
+        };
+        AuthorSummary: {
+            id: number;
+            username: string;
+            displayName: string | null;
+            avatarUrl: string | null;
+            avatarVariants: components["schemas"]["AvatarVariants"] | null;
+        };
         ChatInvite: {
             id: number;
             chatId: number;
@@ -1902,13 +1933,6 @@ export interface components {
             updatedAt: number;
             reactions: components["schemas"]["ReactionSummary"][];
             replyCount: number;
-        };
-        AuthorSummary: {
-            id: number;
-            username: string;
-            displayName: string | null;
-            avatarUrl: string | null;
-            avatarVariants: components["schemas"]["AvatarVariants"] | null;
         };
         UpdateCommentBody: {
             content: string;
@@ -5877,6 +5901,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotFoundEncoded"];
+                };
+            };
+        };
+    };
+    "chats.previewChatInvite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ChatInvitePreview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatInvitePreview"];
+                };
+            };
+            /** @description InvalidChatRequest | HttpApiDecodeError */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvalidChatRequestEncoded"] | components["schemas"]["HttpApiDecodeErrorEncoded"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFoundEncoded"];
+                };
+            };
+            /** @description TooManyRequests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TooManyRequestsEncoded"];
                 };
             };
         };
