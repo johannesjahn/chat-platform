@@ -4,7 +4,11 @@ import { Check, CheckCheck, Loader2, Pin, Star, X } from "lucide-react";
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar, type AvatarVariants } from "@/components/Avatar";
 import { ProfileHoverCard } from "@/components/ProfileHoverCard";
-import { MessageActionGroup } from "@/components/chat/bubble/MessageActionGroup";
+import {
+  MessageActionGroup,
+  type MessageActions,
+} from "@/components/chat/bubble/MessageActionGroup";
+import { MessageActionSheet } from "@/components/chat/bubble/MessageActionSheet";
 import {
   ForwardedLabel,
   QuotedParent,
@@ -18,6 +22,7 @@ import { MentionTextarea } from "@/components/MentionTextarea";
 import { Button } from "@/components/ui/button";
 import { DisclosureChevron } from "@/components/ui/collapse";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import { attachmentKind } from "@/lib/attachments";
 import {
   MAX_MESSAGE_CONTENT_LENGTH,
@@ -194,7 +199,7 @@ export function MessageBubble({
     const timer = setTimeout(() => setCopied(null), 1500);
     return () => clearTimeout(timer);
   }, [copied]);
-  async function copy(kind: "text" | "link") {
+  async function copy(kind: "text" | "link"): Promise<boolean> {
     const value =
       kind === "text"
         ? (bodyText ?? message.content)
@@ -202,15 +207,28 @@ export function MessageBubble({
     try {
       await navigator.clipboard.writeText(value);
       setCopied(kind);
+      return true;
     } catch {
       setActionError("Couldn't copy to the clipboard.");
+      return false;
+    }
+  }
+  // The action sheet closes as soon as something is chosen, so it has no
+  // tick to show — a copy from it is confirmed with a toast instead.
+  const toast = useToast();
+  async function copyFromSheet(kind: "text" | "link") {
+    if (await copy(kind)) {
+      toast({
+        title: kind === "text" ? "Text copied" : "Link copied",
+        tone: "success",
+      });
     }
   }
 
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const reveal = useBubbleReveal(rowRef, isEditing);
-  const touchRevealed = reveal.revealed;
+  const revealed = reveal.revealed;
 
   const trimmedDraft = draft.trim();
   const canSave =
@@ -259,12 +277,35 @@ export function MessageBubble({
     }
   }
 
+  // What the action group (own messages left of the bubble, incoming ones
+  // right of it) and the touch action sheet both offer. Only your own
+  // messages can be edited; others' can be deleted by a moderating
+  // owner/admin.
+  const actions: MessageActions = {
+    message,
+    readOnly,
+    reactionPending,
+    onToggleReaction: (emoji) => void toggleReaction(emoji),
+    pinPending,
+    starPending,
+    onTogglePin: () => void togglePin(),
+    onToggleStar: () => void toggleStar(),
+    copied,
+    onCopy: (kind) => void copy(kind),
+    onReply,
+    onForward,
+    onEdit: isOwn && canEdit ? startEditing : undefined,
+    canDelete: isOwn ? canModify : canDeleteOthers,
+    deleting,
+    onDelete: () => void handleDelete(),
+  };
+
   // Shared visibility classes for both action groups (own + incoming). Hidden
-  // and revealed on `group-hover` for pointer devices as before; when a long
-  // press has revealed it on touch, the visible state is applied outright.
+  // and revealed on `group-hover` for pointer devices as before; when a
+  // right-click has revealed it, the visible state is applied outright.
   const actionGroupClassName = cn(
     "flex shrink-0 items-center gap-0.5 transition-all duration-300 ease-smooth",
-    touchRevealed
+    revealed
       ? "opacity-100 translate-x-0 scale-100"
       : "opacity-0 translate-x-2 scale-95 group-hover:opacity-100 group-hover:translate-x-0 group-hover:scale-100",
     compact &&
@@ -272,7 +313,7 @@ export function MessageBubble({
         "absolute -top-3.5 z-10 rounded-full border border-border bg-popover px-1 py-0.5 shadow-md",
         isOwn ? "right-1" : "left-1",
         // Invisible, it mustn't sit over the message above and eat clicks.
-        !touchRevealed && "pointer-events-none group-hover:pointer-events-auto",
+        !revealed && "pointer-events-none group-hover:pointer-events-auto",
       ),
   );
 
@@ -334,25 +375,7 @@ export function MessageBubble({
       )}
 
       {isOwn && !isEditing && (
-        <MessageActionGroup
-          message={message}
-          className={actionGroupClassName}
-          readOnly={readOnly}
-          reactionPending={reactionPending}
-          onToggleReaction={(emoji) => void toggleReaction(emoji)}
-          pinPending={pinPending}
-          starPending={starPending}
-          onTogglePin={() => void togglePin()}
-          onToggleStar={() => void toggleStar()}
-          copied={copied}
-          onCopy={(kind) => void copy(kind)}
-          onReply={onReply}
-          onForward={onForward}
-          deleting={deleting}
-          onDelete={() => void handleDelete()}
-          onEdit={canEdit ? startEditing : undefined}
-          canDelete={canModify}
-        />
+        <MessageActionGroup {...actions} className={actionGroupClassName} />
       )}
 
       <div
@@ -578,8 +601,9 @@ export function MessageBubble({
             actual reaction to show — otherwise nothing renders here at all, so
             the parent's `gap-1` doesn't reserve empty space under every
             message. Adding a reaction is done from the button beside the bubble
-            instead — revealed on hover for pointer devices, or via a long press
-            on touch (issue #309); see the action groups on either side. */}
+            instead — revealed on hover for pointer devices; on touch a long
+            press opens the action sheet, which leads with the reactions
+            (issues #309, #906). */}
         {!isEditing && hasReactions && (
           <div className="flex flex-wrap items-center gap-1">
             <ReactionList
@@ -602,25 +626,15 @@ export function MessageBubble({
       </div>
 
       {!isOwn && !isEditing && (
-        <MessageActionGroup
-          message={message}
-          className={actionGroupClassName}
-          readOnly={readOnly}
-          reactionPending={reactionPending}
-          onToggleReaction={(emoji) => void toggleReaction(emoji)}
-          pinPending={pinPending}
-          starPending={starPending}
-          onTogglePin={() => void togglePin()}
-          onToggleStar={() => void toggleStar()}
-          copied={copied}
-          onCopy={(kind) => void copy(kind)}
-          onReply={onReply}
-          onForward={onForward}
-          deleting={deleting}
-          onDelete={() => void handleDelete()}
-          canDelete={canDeleteOthers}
-        />
+        <MessageActionGroup {...actions} className={actionGroupClassName} />
       )}
+      <MessageActionSheet
+        {...actions}
+        open={reveal.sheetOpen && !isEditing}
+        onClose={reveal.closeSheet}
+        onCopy={(kind) => void copyFromSheet(kind)}
+        preview={bodyText}
+      />
       {lightboxOpen && message.contentType === "image_url" && (
         <Lightbox
           src={message.content}

@@ -1,5 +1,6 @@
 import type { Locator } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { longPress } from "./helpers";
 
 // Waits for a `<Collapse>` panel to finish opening and to stop gliding to a
 // new height. While it moves it clips its content, and acting inside it then
@@ -10,56 +11,16 @@ async function waitForPanelToSettle(panel: Locator) {
   await expect(panel).toHaveAttribute("data-settled", "");
   await expect
     .poll(() =>
-      panel.evaluate((el) => el.getAnimations({ subtree: true }).length),
+      // Only clock-driven ones: a scroll-driven animation (the reaction
+      // pills' edge fade, `scroll-fade-x`) never finishes.
+      panel.evaluate(
+        (el) =>
+          el
+            .getAnimations({ subtree: true })
+            .filter((a) => a.timeline instanceof DocumentTimeline).length,
+      ),
     )
     .toBe(0);
-}
-
-// Long-presses `target` (a message's text) until the bubble's action group is
-// revealed, then lifts the finger — the only way to reach a message's actions
-// on a device with no hover.
-async function longPress(target: Locator, actionGroup: Locator) {
-  // Emulate a stationary long press: dispatch a real touchstart on the bubble,
-  // hold past the ~450ms threshold without moving, then release — exactly what
-  // the component's onTouchStart/Move/End handlers listen for. Dispatched from
-  // within the bubble so the event bubbles up to the handler on the content
-  // column, and with no touchmove in between so the "moved → it's a scroll"
-  // guard never cancels it.
-  await target.evaluate((el) => {
-    const rect = el.getBoundingClientRect();
-    const touch = new Touch({
-      identifier: 1,
-      target: el,
-      clientX: rect.left + rect.width / 2,
-      clientY: rect.top + rect.height / 2,
-    });
-    el.dispatchEvent(
-      new TouchEvent("touchstart", {
-        bubbles: true,
-        cancelable: true,
-        touches: [touch],
-        targetTouches: [touch],
-        changedTouches: [touch],
-      }),
-    );
-  });
-
-  // Wait for the press to actually reveal the group (opacity animates to 1)
-  // before lifting the finger — polling on the outcome rather than a fixed
-  // hold avoids a race where a busy main thread delays the ~450ms timer past a
-  // hard-coded wait, and the touchend then cancels it.
-  await expect(actionGroup).toHaveCSS("opacity", "1");
-  await target.evaluate((el) => {
-    el.dispatchEvent(
-      new TouchEvent("touchend", {
-        bubbles: true,
-        cancelable: true,
-        touches: [],
-        targetTouches: [],
-        changedTouches: [],
-      }),
-    );
-  });
 }
 
 test(
@@ -96,20 +57,19 @@ test(
     // The "add a reaction" trigger only appears on hover, beside the bubble —
     // the same hover-only affordance as the edit/delete buttons — rather than
     // occupying permanent space below every message.
-    // A phone has no hover: there the group floats over the bubble and is
-    // only reachable by a long press.
+    // A phone has no hover: there a long press opens the action sheet, which
+    // leads with the reactions (issue #906).
     if (isMobile) {
-      await longPress(
+      const sheet = await longPress(
         bubble.getByText("React to this chat message"),
-        bubble.locator("div", {
-          has: pageA.getByRole("button", { name: "Add a reaction" }),
-        }),
       );
+      await sheet.getByRole("button", { name: "React with 👍" }).click();
+      await expect(sheet).toHaveCount(0);
     } else {
       await bubble.hover();
+      await bubble.getByRole("button", { name: "Add a reaction" }).click();
+      await pageA.getByRole("button", { name: "React with 👍" }).click();
     }
-    await bubble.getByRole("button", { name: "Add a reaction" }).click();
-    await pageA.getByRole("button", { name: "React with 👍" }).click();
 
     const pill = bubble.getByRole("button", { name: "Remove 👍 reaction" });
     await expect(pill).toBeVisible();
@@ -127,7 +87,7 @@ test(
   },
 );
 
-test("long-pressing a chat message on touch opens the reaction picker (issue #309)", async ({
+test("long-pressing a chat message on touch opens its action sheet (issues #309, #906)", async ({
   browser,
   injectApiUrl,
   signUp,
@@ -161,19 +121,18 @@ test("long-pressing a chat message on touch opens the reaction picker (issue #30
   // stays fully transparent (opacity-0) — invisible and unusable to a real
   // touch user. (Playwright would still click through a transparent element,
   // so opacity is what's asserted here, not `toBeVisible`.)
-  const addButton = bubble.getByRole("button", { name: "Add a reaction" });
   const actionGroup = bubble.locator("div", {
     has: pageA.getByRole("button", { name: "Add a reaction" }),
   });
   await expect(actionGroup).toHaveCSS("opacity", "0");
 
-  const target = bubble.getByText("Long-press to react on mobile");
-  await longPress(target, actionGroup);
-
-  // The group is revealed and stays put after release; open the picker and
-  // react.
-  await addButton.click();
-  await pageA.getByRole("button", { name: "React with 👍" }).click();
+  // A long press opens the sheet instead, and the pill stays hidden.
+  const sheet = await longPress(
+    bubble.getByText("Long-press to react on mobile"),
+  );
+  await expect(actionGroup).toHaveCSS("opacity", "0");
+  await sheet.getByRole("button", { name: "React with 👍" }).click();
+  await expect(sheet).toHaveCount(0);
 
   const pill = bubble.getByRole("button", { name: "Remove 👍 reaction" });
   await expect(pill).toBeVisible();

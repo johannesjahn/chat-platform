@@ -67,8 +67,9 @@ export function ChatListFilterBar({
               onChange((prev) => ({ ...prev, show: option.value }))
             }
             className={cn(
-              // A little taller below `lg`, where it's tapped, not clicked.
-              "flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors lg:py-1",
+              // Finger-sized below `lg`, where it's tapped, not clicked
+              // (issue #906).
+              "min-h-9 flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors lg:min-h-0",
               filter.show === option.value
                 ? "bg-primary/15 text-foreground"
                 : "text-muted-foreground hover:text-foreground",

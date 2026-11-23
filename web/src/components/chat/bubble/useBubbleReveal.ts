@@ -9,12 +9,19 @@ import { type TouchEvent, useEffect, useRef, useState } from "react";
  * apps; desktop hover behaviour is left untouched. A desktop right-click
  * reveals it too (issue #554). Split out of MessageBubble in issue #811;
  * `rowRef` is the message's row, which a tap outside of puts the group away.
+ *
+ * On touch the long press no longer reveals the pill itself (issue #906):
+ * its 24px icons were too small for a finger, unlabelled, and sat over the
+ * next bubble. It opens `sheetOpen` instead — `MessageActionSheet`, the
+ * same actions as labelled, finger-sized rows. The pill is still what a
+ * hover or a right-click shows.
  */
 export function useBubbleReveal(
   rowRef: React.RefObject<HTMLDivElement | null>,
   isEditing: boolean,
 ) {
   const [revealed, setRevealed] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   // Set once the long press actually fires, so the follow-up `contextmenu`
@@ -32,13 +39,11 @@ export function useBubbleReveal(
   // Cancel any pending timer if the bubble unmounts mid-press.
   useEffect(() => clearLongPress, []);
 
-  // While the touch-revealed group is showing, dismiss it when the next tap
-  // lands outside this message row (the reaction popover itself portals to
-  // document.body, so picking an emoji counts as "outside" and collapses the
-  // group too — which is the desired outcome once a reaction is chosen).
-  //
-  // A desktop right-click reveals the same group (issue #554) and is put
-  // away the same way, or with Escape.
+  // While a right-click-revealed group is showing (issue #554), dismiss it
+  // when the next click lands outside this message row (the reaction popover
+  // itself portals to document.body, so picking an emoji counts as "outside"
+  // and collapses the group too — which is the desired outcome once a
+  // reaction is chosen), or on Escape.
   useEffect(() => {
     if (!revealed) return;
     const dismiss = (event: Event) => {
@@ -68,7 +73,7 @@ export function useBubbleReveal(
     longPressTimer.current = setTimeout(() => {
       longPressFired.current = true;
       longPressTimer.current = null;
-      setRevealed(true);
+      setSheetOpen(true);
       // A short haptic cue on trigger where supported (unsupported on e.g.
       // iOS Safari, hence the capability check rather than optional-call).
       if (typeof navigator.vibrate === "function") navigator.vibrate(10);
@@ -109,6 +114,8 @@ export function useBubbleReveal(
 
   return {
     revealed,
+    sheetOpen,
+    closeSheet: () => setSheetOpen(false),
     // Spread onto the bubble.
     handlers: {
       onTouchStart,

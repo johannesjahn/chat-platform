@@ -51,7 +51,9 @@ export function GameShell({
             {...(back.game
               ? { to: "/games/$game", params: { game: back.game } }
               : { to: "/games" })}
-            className="group inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            // `min-h-9` so it's a finger-sized target, not a 20px line of
+            // text (issue #906); `-my-2` keeps the header's spacing.
+            className="group -my-2 inline-flex min-h-9 w-fit items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="size-4 transition-transform duration-300 group-hover:-translate-x-0.5" />
             {back.label}

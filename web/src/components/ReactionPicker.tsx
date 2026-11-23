@@ -25,10 +25,15 @@ export function ReactionList({
   reactions,
   pending,
   onToggle,
+  burst = true,
 }: {
   reactions: ReadonlyArray<ReactionSummary>;
   pending: boolean;
   onToggle: (emoji: string) => void;
+  // The ring a pill throws off as it becomes yours. Off inside a scroller,
+  // where it would be clipped, and — left at its scaled-up end state — would
+  // give the scroller a few pixels of vertical scroll.
+  burst?: boolean;
 }) {
   const active = reactions.filter((r) => r.count > 0);
   if (active.length === 0) return null;
@@ -57,7 +62,8 @@ export function ReactionList({
             // it can't disturb the row's layout, and the `key` above is what
             // replays it: React remounts the button when `reactedByMe` flips,
             // which restarts both this and the emoji's kick.
-            reaction.reactedByMe &&
+            burst &&
+              reaction.reactedByMe &&
               "motion-safe:after:absolute motion-safe:after:inset-0 motion-safe:after:rounded-full motion-safe:after:border motion-safe:after:border-primary/60 motion-safe:after:content-[''] motion-safe:after:pointer-events-none motion-safe:after:animate-reaction-burst",
           )}
         >
@@ -212,22 +218,36 @@ export function ReactionAddButton({
 // the caller's `onToggle` (post vs comment mutations) so both look and behave
 // identically. The chat's MessageBubble composes `ReactionList` and
 // `ReactionAddButton` separately instead of using this combined layout.
+//
+// The pills stay on one line however many kinds there are (issue #906):
+// wrapping split a post's action row in two at phone widths, one pill per
+// row at 320px, and reshuffled it on every tap. Instead the pills scroll
+// sideways inside the space their row leaves them, with the far edge faded
+// while there's more, and the add button stays put beside them. Give the
+// picker `min-w-0` room in a flex row for that to kick in.
 export function ReactionPicker({
   reactions,
   pending,
   onToggle,
+  className,
 }: {
   reactions: ReadonlyArray<ReactionSummary>;
   pending: boolean;
   onToggle: (emoji: string) => void;
+  className?: string;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      <ReactionList
-        reactions={reactions}
-        pending={pending}
-        onToggle={onToggle}
-      />
+    <div className={cn("flex min-w-0 items-center gap-1", className)}>
+      {/* The padding (cancelled by the margin) is room for a pill's focus
+          ring, which the scroller would otherwise clip. */}
+      <div className="scroll-fade-x -m-1 flex min-w-0 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <ReactionList
+          reactions={reactions}
+          pending={pending}
+          onToggle={onToggle}
+          burst={false}
+        />
+      </div>
       <ReactionAddButton
         reactions={reactions}
         pending={pending}

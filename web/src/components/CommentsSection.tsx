@@ -168,7 +168,9 @@ function CommentReplies({
           type="button"
           variant="link"
           size="sm"
-          className="mt-1 h-auto w-fit p-0 pl-1 text-xs"
+          // A full button's height (issue #906): as a bare line of text it
+          // was a 16px target.
+          className="h-8 w-fit px-1 text-xs has-[>svg]:px-1"
           aria-expanded={open}
           onClick={onToggle}
         >
@@ -342,7 +344,9 @@ function LiveCommentItem({
               <Link
                 to="/users/$id"
                 params={{ id: String(comment.authorId) }}
-                className="min-w-0 text-sm font-medium wrap-anywhere hover:underline"
+                // `py-0.5` (taken back by the margin) makes it a 24px
+                // target, not a 20px line (issue #906).
+                className="-my-0.5 min-w-0 py-0.5 text-sm font-medium wrap-anywhere hover:underline"
               >
                 {authorLabel}
                 {authorHandle && (

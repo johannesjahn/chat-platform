@@ -668,7 +668,13 @@ and [`desktop-layout.spec.ts`](web/e2e/desktop-layout.spec.ts) covers the
 wide (1440px) and phone (390px) layouts;
 [`mobile-breakpoints.spec.ts`](web/e2e/mobile-breakpoints.spec.ts) the sizes
 around the phone — 320px, tablet portrait, landscape phone (issue #905) —
-where the phone top bar and immersive conversation must hold as well. Tests tagged `@layout`
+where the phone top bar and immersive conversation must hold as well.
+[`touch-targets.spec.ts`](web/e2e/touch-targets.spec.ts) runs as a Pixel 7
+(issue #906): every visible control on the main pages must be at least
+24×24px, a post's reaction row stays one line (its pills scroll), and a
+long press on a message opens `MessageActionSheet`
+(`components/chat/bubble/`) — labelled, 44px rows — not the hover pill; a
+long press in a spec goes through `longPress` in `helpers.ts`. Tests tagged `@layout`
 (`test(title, { tag: "@layout" }, …)`) also run in the `phone` (Pixel 7) and
 `wide` (1440×900) Playwright projects (issue #566). Tag a test whose assertions
 depend on the viewport, but only if it uses UI that every layout has (desktop-only

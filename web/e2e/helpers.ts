@@ -241,3 +241,45 @@ export async function openSettled(page: Page, path: string, ready: Locator) {
   // Let the refetches that connect set off come back.
   await page.waitForTimeout(500);
 }
+
+// Long-presses `target` (inside a message bubble) the way a finger does, and
+// returns the action sheet it opens (issue #906) — on a device with no hover,
+// the only way to a message's actions. A real touchstart is dispatched from
+// within the bubble, so it bubbles up to the bubble's handlers, and held with
+// no touchmove (which would make it a scroll) until the sheet is up: polling
+// for the outcome rather than a fixed hold, since a busy main thread can
+// delay the ~450ms timer past any hard-coded wait. Then the finger lifts.
+export async function longPress(target: Locator): Promise<Locator> {
+  await target.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    const touch = new Touch({
+      identifier: 1,
+      target: el,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    });
+    el.dispatchEvent(
+      new TouchEvent("touchstart", {
+        bubbles: true,
+        cancelable: true,
+        touches: [touch],
+        targetTouches: [touch],
+        changedTouches: [touch],
+      }),
+    );
+  });
+  const sheet = target.page().getByRole("dialog", { name: "Message actions" });
+  await expect(sheet).toBeVisible();
+  await target.evaluate((el) => {
+    el.dispatchEvent(
+      new TouchEvent("touchend", {
+        bubbles: true,
+        cancelable: true,
+        touches: [],
+        targetTouches: [],
+        changedTouches: [],
+      }),
+    );
+  });
+  return sheet;
+}
