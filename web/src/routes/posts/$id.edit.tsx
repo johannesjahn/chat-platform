@@ -115,6 +115,12 @@ function EditPostPage() {
       initialContent={post.content}
       initialAttachment={post.attachment}
       initialCaption={post.caption}
+      backFallback={
+        <Link to="/posts/$id" params={{ id }}>
+          <ArrowLeft className="size-4" />
+          Back to post
+        </Link>
+      }
       onSubmit={async ({ contentType, content, attachmentId, caption }) => {
         await updatePost.mutateAsync({
           params: { path: { id } },

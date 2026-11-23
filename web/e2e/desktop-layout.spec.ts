@@ -609,8 +609,17 @@ test.describe("between lg and xl", () => {
     const chatId = await groupChat(request, apiUrl, me, "Modal crew", [bob]);
 
     await page.goto(`/chats/${chatId}`);
+    // Below `xl` "Chat details" opens a sheet, not the side panel (#907).
+    await page.getByRole("button", { name: "Chat details" }).click();
     await expect(
-      page.getByRole("button", { name: "Chat details" }),
+      page.getByRole("dialog", { name: "Chat details" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("complementary", { name: "Chat details" }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Close chat details" }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Chat details" }),
     ).toHaveCount(0);
     await page.getByRole("button", { name: "Manage group" }).click();
     await expect(

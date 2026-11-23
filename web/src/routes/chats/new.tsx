@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { Loader2, MessageCircle, Search, Users } from "lucide-react";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { ArrowLeft, Loader2, MessageCircle, Search, Users } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
+import { BackButton } from "@/components/BackButton";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { Button } from "@/components/ui/button";
 import {
@@ -117,7 +118,18 @@ function NewChatPage() {
     selected.length <= MAX_GROUP_PARTICIPANTS - 1;
 
   return (
-    <main className="mx-auto w-full max-w-xl px-4 py-10">
+    <main className="mx-auto flex w-full max-w-xl flex-col gap-6 px-4 py-10">
+      {/* The way out on a phone, where there may be no browser back button
+          (issue #907). Beside the desktop chat list there's no need. */}
+      <BackButton
+        className="lg:hidden"
+        fallback={
+          <Link to="/chats">
+            <ArrowLeft className="size-4" />
+            Back to chats
+          </Link>
+        }
+      />
       <Card className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
         <CardHeader>
           <CardTitle asChild>

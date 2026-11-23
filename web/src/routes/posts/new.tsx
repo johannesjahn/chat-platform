@@ -1,4 +1,5 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { ArrowLeft } from "lucide-react";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PostForm } from "@/components/PostForm";
 import { useSession } from "@/lib/auth";
@@ -33,6 +34,12 @@ function NewPostPage() {
       description="Share a text update or an image with everyone."
       submitLabel="Post"
       allowOfflineQueue
+      backFallback={
+        <Link to="/">
+          <ArrowLeft className="size-4" />
+          Back to feed
+        </Link>
+      }
       onSubmit={async (values) => {
         // Posted or queued (offline) either way — back to the feed, where a
         // queued post shows as pending.

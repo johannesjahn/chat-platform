@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, PanelRight, Settings2, Users } from "lucide-react";
+import { ArrowLeft, Info, PanelRight, Settings2, Users } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { PresenceDot } from "@/components/PresenceDot";
 import { UserStatusBadge } from "@/components/UserStatusBadge";
@@ -24,7 +24,9 @@ export const CHAT_HEADER_CLASS =
 
 /**
  * The page conversation's header (a docked window draws its own compact
- * one): back, the other person — or the group — and chat details. Split out
+ * one): back, the other person — or the group — and chat details: the
+ * side panel's toggle at `xl`+, a button opening the same details as a sheet
+ * below it (issue #907), beside a group's "Manage". Split out
  * of ChatConversation in issue #811; the presence/status hooks stay there,
  * since they run for a docked conversation too.
  */
@@ -37,6 +39,7 @@ export function ConversationHeader({
   detailsAsPanel,
   detailsOpen,
   onOpenDetails,
+  onOpenDetailsSheet,
 }: {
   chat: Chat;
   name: string;
@@ -46,6 +49,7 @@ export function ConversationHeader({
   detailsAsPanel: boolean;
   detailsOpen: boolean;
   onOpenDetails: () => void;
+  onOpenDetailsSheet: () => void;
 }) {
   const otherParticipantId = otherParticipant?.userId;
   // Shared with the chat list's row for this chat, so opening a conversation
@@ -182,17 +186,28 @@ export function ConversationHeader({
           <PanelRight className="size-4" />
         </Button>
       ) : (
-        chat.type === "group" && (
+        <div className="flex shrink-0 items-center gap-1">
           <Button
-            variant="outline"
-            size="sm"
-            aria-label="Manage group"
-            onClick={onOpenDetails}
+            size="icon"
+            variant="ghost"
+            aria-label="Chat details"
+            title="Chat details"
+            onClick={onOpenDetailsSheet}
           >
-            <Settings2 className="size-4" />
-            <span className="hidden sm:inline">Manage</span>
+            <Info className="size-4" />
           </Button>
-        )
+          {chat.type === "group" && (
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label="Manage group"
+              onClick={onOpenDetails}
+            >
+              <Settings2 className="size-4" />
+              <span className="hidden sm:inline">Manage</span>
+            </Button>
+          )}
+        </div>
       )}
     </CardHeader>
   );
