@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Loader2, MessageCircleOff, WifiOff } from "lucide-react";
+import { Loader2, MessageCircle, WifiOff } from "lucide-react";
 import {
   ChatComposer,
   type ChatComposerHandle,
@@ -368,7 +368,7 @@ export function ChatConversation({
     return (
       <main className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center px-4 py-10">
         <EmptyState
-          icon={isApiError ? MessageCircleOff : WifiOff}
+          icon={isApiError ? MessageCircle : WifiOff}
           title={isApiError ? "Chat not found" : "Can't load this conversation"}
           pageHeading
           description={

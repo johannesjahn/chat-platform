@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { FileX } from "lucide-react";
+import { FileText } from "lucide-react";
 import { CommentsSection } from "@/components/CommentsSection";
 import { EmptyState } from "@/components/EmptyState";
 import { LoginPrompt } from "@/components/LoginPrompt";
@@ -91,7 +91,7 @@ export function PostDetail({
   if (notFound) {
     return (
       <EmptyState
-        icon={FileX}
+        icon={FileText}
         title="Post not found"
         titleAs={Heading}
         titleId={headingId}

@@ -6,7 +6,7 @@ import {
   Loader2,
   MessageCircle,
   Sparkles,
-  UserX,
+  UserRound,
 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { BlockUserControls } from "@/components/BlockUserControls";
@@ -186,7 +186,7 @@ function UserProfilePage() {
     return (
       <main className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center px-4 py-10">
         <EmptyState
-          icon={UserX}
+          icon={UserRound}
           title={notFound ? "User not found" : "Can't load this profile"}
           pageHeading
           description={

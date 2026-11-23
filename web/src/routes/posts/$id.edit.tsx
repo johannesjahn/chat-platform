@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, FileX } from "lucide-react";
+import { ArrowLeft, FileText } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PostForm, PostFormSkeleton } from "@/components/PostForm";
@@ -60,7 +60,7 @@ function EditPostPage() {
     return (
       <main className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center px-4 py-10">
         <EmptyState
-          icon={FileX}
+          icon={FileText}
           title="Post not found"
           pageHeading
           description="It may have been deleted, or the link is wrong."
