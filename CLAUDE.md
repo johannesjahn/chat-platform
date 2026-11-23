@@ -665,7 +665,10 @@ newest message, so assert conversation text through `page.getByRole("main")`.
 Use the `logOut`/`goToOwnProfile`/`openSearchBox`/`openAccountMenuItem`
 helpers in `web/e2e/helpers.ts` rather than reaching for top-bar controls,
 and [`desktop-layout.spec.ts`](web/e2e/desktop-layout.spec.ts) covers the
-wide (1440px) and phone (390px) layouts. Tests tagged `@layout`
+wide (1440px) and phone (390px) layouts;
+[`mobile-breakpoints.spec.ts`](web/e2e/mobile-breakpoints.spec.ts) the sizes
+around the phone — 320px, tablet portrait, landscape phone (issue #905) —
+where the phone top bar and immersive conversation must hold as well. Tests tagged `@layout`
 (`test(title, { tag: "@layout" }, …)`) also run in the `phone` (Pixel 7) and
 `wide` (1440×900) Playwright projects (issue #566). Tag a test whose assertions
 depend on the viewport, but only if it uses UI that every layout has (desktop-only

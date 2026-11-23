@@ -13,15 +13,14 @@ import { userHandle } from "@/lib/users";
 // The conversation's own header, shared with the loading skeleton so the two
 // are the same height and opening a chat doesn't shift the thread.
 //
-// It owns `env(safe-area-inset-top)` below `sm`, where the immersive shell
+// It owns `env(safe-area-inset-top)` below `lg`, where the immersive shell
 // hides the site nav (see styles.css) and this becomes the topmost chrome on
 // screen — `viewport-fit=cover` lets the page run under the status bar, so
 // something has to put a background there or the clock sits on the messages.
-// Above `sm` the nav is back and owns the inset again, hence `sm:pt-3`.
 // At `lg` it's exactly as tall as the chat list pane's header beside it
 // (issue #554), so the two read as one bar across the messenger.
 export const CHAT_HEADER_CLASS =
-  "flex shrink-0 flex-row items-center gap-3 border-b border-border pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-3 lg:h-16 lg:py-0";
+  "flex shrink-0 flex-row items-center gap-3 border-b border-border pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] lg:h-16 lg:py-0";
 
 /**
  * The page conversation's header (a docked window draws its own compact

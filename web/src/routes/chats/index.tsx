@@ -56,16 +56,19 @@ function ChatsListPage() {
         </h1>
         {session && (
           <div className="flex items-center gap-2">
-            <Button asChild size="sm" variant="outline">
+            {/* Icon-only on the narrowest phones (issue #905): at 320px the
+                labelled pair doesn't fit beside the heading and the page
+                scrolls sideways. The label stays the accessible name. */}
+            <Button asChild size="sm" variant="outline" title="Join via invite">
               <Link to="/chats/join">
                 <Link2 className="size-4" />
-                Join via invite
+                <span className="max-[25rem]:sr-only">Join via invite</span>
               </Link>
             </Button>
-            <Button asChild size="sm">
+            <Button asChild size="sm" title="New chat">
               <Link to="/chats/new">
                 <PlusCircle className="size-4" />
-                New chat
+                <span className="max-[25rem]:sr-only">New chat</span>
               </Link>
             </Button>
           </div>
