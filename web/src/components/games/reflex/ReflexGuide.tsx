@@ -52,8 +52,11 @@ const KINDS = Object.keys(REFLEX_KIND_COPY) as ReflexKind[];
 // how points work — so nobody's first false start is a surprise.
 export function ReflexGuide() {
   return (
-    <div className="flex flex-col gap-3">
-      <ol className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+    // Five across only once the strip itself is wide enough, not the
+    // viewport: beside the lobby chat (`lg`–`xl`) or at `sm` a fifth of it
+    // is ~75px, and "Quick draw" wrapped where the others didn't (#903).
+    <div className="@container flex flex-col gap-3">
+      <ol className="grid grid-cols-2 gap-2 @2xl:grid-cols-5">
         {KINDS.map((kind, index) => {
           const Icon = REFLEX_KIND_ICONS[kind];
           return (
@@ -63,7 +66,7 @@ export function ReflexGuide() {
               className={cn(
                 "flex flex-col gap-2 rounded-xl border border-border/50 bg-background/40 p-2.5",
                 "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:fill-mode-both stagger-in",
-                index === KINDS.length - 1 && "col-span-2 sm:col-span-1",
+                index === KINDS.length - 1 && "col-span-2 @2xl:col-span-1",
               )}
             >
               <span className="relative flex aspect-[16/10] items-center justify-center overflow-hidden rounded-lg bg-[oklch(0.16_0.03_220)] text-white">

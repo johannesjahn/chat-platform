@@ -24,12 +24,15 @@ export function GamePanel({
   return (
     <section
       className={cn(
-        "game-glow relative flex flex-col gap-4 rounded-2xl bg-card/70 p-5 backdrop-blur-md",
+        "game-glow relative flex min-w-0 flex-col gap-4 rounded-2xl bg-card/70 p-5 backdrop-blur-md",
         "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500",
         live && "game-ring",
         className,
       )}
     >
+      {/* `min-w-0` above: as a grid or flex child it would otherwise grow to
+          fit its widest line — a long host name in a lobby row — and push
+          the page sideways instead of letting that line truncate (#903). */}
       {(title || actions) && (
         <div className="flex flex-wrap items-center gap-2">
           {Icon && <Icon className="size-4.5 text-[var(--game-from)]" />}
