@@ -12,6 +12,7 @@ import { serializableTransaction } from "../serializableTransaction.ts";
 import {
   chatInvites,
   chatParticipants,
+  users,
   type DbChatInvite,
 } from "../db/schema.ts";
 import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
@@ -37,6 +38,37 @@ const toApiChatInvite = (row: DbChatInvite): ChatInvite => ({
   useCount: row.useCount,
   revokedAt: row.revokedAt ? row.revokedAt.getTime() : null,
 });
+
+// Whether an invite's creator may still invite people into its chat: an
+// owner/admin of it, or a site admin (issue #894). Leaving, removal and
+// demotion revoke a creator's links outright (`revokeInvitesBy` in
+// membershipHandlers.ts); this covers rows that predate that.
+const creatorStillManages = (
+  db: ChatsDeps["db"],
+  invite: DbChatInvite,
+): Effect.Effect<boolean> =>
+  dbQuery(() =>
+    db
+      .select({ siteRole: users.role, chatRole: chatParticipants.role })
+      .from(users)
+      .leftJoin(
+        chatParticipants,
+        and(
+          eq(chatParticipants.userId, users.id),
+          eq(chatParticipants.chatId, invite.chatId),
+        ),
+      )
+      .where(eq(users.id, invite.createdBy))
+      .limit(1),
+  ).pipe(
+    Effect.map(
+      ([row]) =>
+        row !== undefined &&
+        (row.siteRole === "admin" ||
+          row.chatRole === "owner" ||
+          row.chatRole === "admin"),
+    ),
+  );
 
 export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
   ({
@@ -158,7 +190,10 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
           return yield* Effect.fail(
             new NotFound({ message: "Invite not found" }),
           );
-        if (invite.revokedAt !== null)
+        if (
+          invite.revokedAt !== null ||
+          !(yield* creatorStillManages(db, invite))
+        )
           return yield* Effect.fail(
             new InvalidChatRequest({
               message: "This invite has been revoked",
@@ -204,9 +239,9 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
         // entirely when unlimited) rather than just re-reading `useCount` —
         // two concurrent redemptions of a `maxUses: 1` invite could
         // otherwise both read "0 < 1" and both proceed. Ordered cap-check
-        // first, then the guarded bump, then the insert, so a request that
-        // fails either check never mutates `chatInvites` or
-        // `chatParticipants`.
+        // first, then the revocation re-check and the guarded bump, then the
+        // insert, so a request that fails a check never mutates
+        // `chatInvites` or `chatParticipants`.
         //
         // `alreadyIn` above is only a fast path: two concurrent joins by
         // the same user (a double-tap) both pass it, and when the loser is
@@ -222,6 +257,17 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
             return { ok: true as const, joined: false };
           if (currentParticipants.length >= MAX_GROUP_PARTICIPANTS)
             return { ok: false as const, reason: "cap" as const };
+
+          // Revoked since the read above — say by its creator leaving the
+          // group (issue #894). A revoke that commits after this read
+          // updates the same row the bump below does, so this transaction
+          // is aborted and retried rather than joining through it.
+          const [current] = await tx
+            .select({ revokedAt: chatInvites.revokedAt })
+            .from(chatInvites)
+            .where(eq(chatInvites.id, invite.id));
+          if (!current || current.revokedAt !== null)
+            return { ok: false as const, reason: "revoked" as const };
 
           const useCountGuard =
             invite.maxUses !== null
@@ -251,9 +297,11 @@ export const inviteHandlers = ({ db, storage, connections }: ChatsDeps) =>
           return yield* Effect.fail(
             new InvalidChatRequest({
               message:
-                result.reason === "maxUses"
-                  ? "This invite has reached its use limit"
-                  : `Group chats can have at most ${MAX_GROUP_PARTICIPANTS} participants`,
+                result.reason === "revoked"
+                  ? "This invite has been revoked"
+                  : result.reason === "maxUses"
+                    ? "This invite has reached its use limit"
+                    : `Group chats can have at most ${MAX_GROUP_PARTICIPANTS} participants`,
             }),
           );
         if (!result.joined)
