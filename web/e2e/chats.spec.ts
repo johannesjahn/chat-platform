@@ -141,7 +141,7 @@ test("a user can redeem a group invite through the join page and via a direct in
   createUser,
   signUp,
 }) => {
-  // Four users (seed + A + B + C) and three browser contexts: this ran at
+  // Five users (seed + A + B + C + D) and four browser contexts: this ran at
   // 37s against the default 30s budget on the sharded CI runners back when
   // users were registered through the form. `signUp` took most of that away,
   // but keep the tripled "slow" budget as headroom rather than cutting it close.
@@ -178,7 +178,7 @@ test("a user can redeem a group invite through the join page and via a direct in
     },
   );
   expect(inviteResponse.ok()).toBe(true);
-  const { code } = await inviteResponse.json();
+  const { code, id: inviteId } = await inviteResponse.json();
 
   const contextB = await browser.newContext();
   await injectApiUrl(contextB);
@@ -194,10 +194,22 @@ test("a user can redeem a group invite through the join page and via a direct in
   await pageB.getByRole("button", { name: "Continue" }).click();
   await expect(pageB).toHaveURL(`/chats/join/${code}`);
   await expect(pageB.getByText("You've been invited to a chat")).toBeVisible();
+  // The preview (issue #899) names the group before joining.
+  const invitePreview = pageB.getByRole("main");
+  await expect(invitePreview.getByText("Invite squad")).toBeVisible();
+  await expect(invitePreview.getByText("2 members")).toBeVisible();
+  await expect(invitePreview.getByText(/^Invited by /)).toBeVisible();
 
   await pageB.getByRole("button", { name: "Join chat" }).click();
   await expect(pageB).toHaveURL(/\/chats\/\d+/);
   await expect(pageB.getByRole("main").getByText("Invite squad")).toBeVisible();
+
+  // Back on the link as a member, it opens the chat instead.
+  await pageB.goto(`/chats/join/${code}`);
+  await expect(pageB.getByText("You're already in this chat")).toBeVisible();
+  await expect(pageB.getByRole("button", { name: "Join chat" })).toHaveCount(0);
+  await pageB.getByRole("link", { name: "Open chat" }).click();
+  await expect(pageB).toHaveURL(`/chats/${chatId}`);
 
   // Path 2: a brand-new user opening the shared invite link directly (the
   // `<origin>/chats/join/<code>` shape the copy-link button produces) also
@@ -213,9 +225,27 @@ test("a user can redeem a group invite through the join page and via a direct in
   await expect(pageC).toHaveURL(/\/chats\/\d+/);
   await expect(pageC.getByRole("main").getByText("Invite squad")).toBeVisible();
 
+  // A revoked link says why it's dead before anything is clicked, and
+  // offers no Join button.
+  const revoke = await request.delete(
+    `${apiUrl}/chats/${chatId}/invites/${inviteId}`,
+    { headers: { Authorization: `Bearer ${sessionA.accessToken}` } },
+  );
+  expect(revoke.ok()).toBe(true);
+  const contextD = await browser.newContext();
+  await injectApiUrl(contextD);
+  const pageD = await contextD.newPage();
+  await signUp(pageD);
+  await pageD.goto(`/chats/join/${code}`);
+  await expect(pageD.getByText("This invite link doesn't work")).toBeVisible();
+  await expect(pageD.getByText("This invite has been revoked")).toBeVisible();
+  await expect(pageD.getByText("Invite squad")).toHaveCount(0);
+  await expect(pageD.getByRole("button", { name: "Join chat" })).toHaveCount(0);
+
   await contextA.close();
   await contextB.close();
   await contextC.close();
+  await contextD.close();
 });
 
 test(

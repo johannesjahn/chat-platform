@@ -5404,6 +5404,98 @@
         }
       }
     },
+    "/chats/invites/{code}": {
+      "get": {
+        "tags": [
+          "chats"
+        ],
+        "operationId": "chats.previewChatInvite",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ChatInvitePreview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatInvitePreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidChatRequest | HttpApiDecodeError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidChatRequestEncoded"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HttpApiDecodeErrorEncoded"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedEncoded"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenEncoded"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundEncoded"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "TooManyRequests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyRequestsEncoded"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chats/invites/{code}/join": {
       "post": {
         "tags": [
@@ -10578,6 +10670,108 @@
           "attachment"
         ]
       },
+      "ChatInvitePreview": {
+        "type": "object",
+        "properties": {
+          "chatId": {
+            "type": "number"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarVariants": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvatarVariants"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "memberCount": {
+            "type": "number"
+          },
+          "alreadyMember": {
+            "type": "boolean"
+          },
+          "invitedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuthorSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "chatId",
+          "title",
+          "avatarVariants",
+          "memberCount",
+          "alreadyMember",
+          "invitedBy"
+        ],
+        "additionalProperties": false
+      },
+      "AuthorSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "avatarVariants": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvatarVariants"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "displayName",
+          "avatarUrl",
+          "avatarVariants"
+        ],
+        "additionalProperties": false
+      },
       "ChatInvite": {
         "type": "object",
         "properties": {
@@ -11246,55 +11440,6 @@
           "updatedAt",
           "reactions",
           "replyCount"
-        ],
-        "additionalProperties": false
-      },
-      "AuthorSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "username": {
-            "type": "string"
-          },
-          "displayName": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "avatarUrl": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "avatarVariants": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AvatarVariants"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "username",
-          "displayName",
-          "avatarUrl",
-          "avatarVariants"
         ],
         "additionalProperties": false
       },
