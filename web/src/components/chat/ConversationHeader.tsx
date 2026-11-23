@@ -1,12 +1,23 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, Info, PanelRight, Settings2, Users } from "lucide-react";
+import {
+  ArrowLeft,
+  Info,
+  PanelRight,
+  Settings2,
+  Users,
+  UserX,
+} from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { PresenceDot } from "@/components/PresenceDot";
 import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { Button } from "@/components/ui/button";
 import { CardHeader } from "@/components/ui/card";
 import { setChatDetailsOpen } from "@/lib/chatDetails";
-import { type Chat, chatViewTransitionNames } from "@/lib/chats";
+import {
+  type Chat,
+  chatViewTransitionNames,
+  isDirectChatWithDeletedAccount,
+} from "@/lib/chats";
 import { isStatusVisible, type UserStatus } from "@/lib/status";
 import { userHandle } from "@/lib/users";
 
@@ -56,6 +67,7 @@ export function ConversationHeader({
   // morphs its avatar and title into the header instead of the two screens
   // simply cross-fading (see chatViewTransitionNames / router.tsx).
   const transitionNames = chatViewTransitionNames(chat.id);
+  const deletedPartner = isDirectChatWithDeletedAccount(chat);
   return (
     <CardHeader className={CHAT_HEADER_CLASS}>
       {/* Beside the desktop chat list there's nothing to go back to. */}
@@ -156,7 +168,11 @@ export function ConversationHeader({
               className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-sm font-semibold text-accent-foreground transition-transform motion-safe:group-hover/hdr:scale-105"
               style={{ viewTransitionName: transitionNames.avatar }}
             >
-              <Users className="size-4" />
+              {deletedPartner ? (
+                <UserX className="size-4" />
+              ) : (
+                <Users className="size-4" />
+              )}
             </div>
           )}
           <div className="flex min-w-0 flex-1 flex-col leading-tight">
@@ -167,8 +183,14 @@ export function ConversationHeader({
               {name}
             </span>
             <span className="truncate text-xs text-muted-foreground">
-              {chat.participants.length} participant
-              {chat.participants.length === 1 ? "" : "s"}
+              {deletedPartner ? (
+                "This account was deleted"
+              ) : (
+                <>
+                  {chat.participants.length} participant
+                  {chat.participants.length === 1 ? "" : "s"}
+                </>
+              )}
             </span>
           </div>
         </button>

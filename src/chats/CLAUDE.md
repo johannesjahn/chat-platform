@@ -4,7 +4,7 @@
 
 Reuse these rather than re-deriving them in a handler:
 
-- `sendPath.ts`: the one send path: `insertMessage`, `directChatBlocked`,
+- `sendPath.ts`: the one send path: `insertMessage`, `directChatClosed`,
   `publishNewMessage`.
 - `access.ts`: 404 lookups and participation/role checks. Chat handlers
   start with `loadChatAs(db, id, currentUser, access)` (or
@@ -14,6 +14,13 @@ Reuse these rather than re-deriving them in a handler:
   `publishChatChange` (bump + publish with no `change`), the tail of every
   mutation but a send or a read receipt.
 - `messageViews.ts` (the `Message` view, `messageCaption`), `unread.ts`.
+- `departure.ts`: what leaving does to a chat (`departParticipant`: owner
+  hand-off, delete once empty, version bump). Account deletion runs it for
+  every chat first (`departAllChats`, issue #895), so a deleted account
+  never leaves an ownerless group, and the rest get `chat_updated`. A
+  direct chat left with one participant is read-only: `directChatClosed`
+  rejects sends, the client shows `DeletedAccountBar`. The account's
+  messages still cascade away with it.
 
 ## Message requests
 

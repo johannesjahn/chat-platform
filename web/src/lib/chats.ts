@@ -162,7 +162,19 @@ export function useChatsList(
 export function chatDisplayName(chat: Chat, currentUserId: number): string {
   if (chat.type === "group") return chat.title ?? "Group chat";
   const other = chat.participants.find((p) => p.userId !== currentUserId);
-  return other ? userLabel(other) : "Direct chat";
+  return other ? userLabel(other) : DELETED_ACCOUNT_NAME;
+}
+
+export const DELETED_ACCOUNT_NAME = "Deleted account";
+
+/**
+ * A direct chat whose other half deleted their account (issue #895): the
+ * deletion takes them out of it, so it's left with just the viewer. The
+ * server rejects sends into it, and the conversation shows
+ * `DeletedAccountBar` in place of the composer.
+ */
+export function isDirectChatWithDeletedAccount(chat: Chat): boolean {
+  return chat.type === "direct" && chat.participants.length < 2;
 }
 
 /**

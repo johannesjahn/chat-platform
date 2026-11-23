@@ -36,7 +36,8 @@ import {
   toApiMessage,
 } from "./messageViews.ts";
 import {
-  directChatBlocked,
+  DIRECT_CHAT_CLOSED_MESSAGE,
+  directChatClosed,
   findMessageByClientId,
   insertMessage,
   publishNewMessage,
@@ -229,11 +230,14 @@ export const forwardHandlers = ({
                 ),
               );
 
-            if (yield* directChatBlocked(db, chatRow, currentUser.id))
+            // A partner who deleted their account leaves nothing to post
+            // into, so that reads like any other chat you can't post in.
+            const closed = yield* directChatClosed(db, chatRow, currentUser.id);
+            if (closed !== null)
               return failed(
                 targetId,
-                "blocked",
-                "You can't send messages in this chat because of a block",
+                closed === "blocked" ? "blocked" : "unavailable",
+                DIRECT_CHAT_CLOSED_MESSAGE[closed],
               );
             if (contentProblem !== null)
               return failed(targetId, "invalid_content", contentProblem);

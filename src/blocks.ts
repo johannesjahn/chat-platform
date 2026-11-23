@@ -26,7 +26,7 @@ export const blockedOrMutedUserIds = async (
 };
 
 // Whether a *block* (not a mere mute) exists in either direction between two
-// users — the gate on direct messaging (see `directChatBlocked` in
+// users — the gate on direct messaging (see `directChatClosed` in
 // chats/sendPath.ts). Blocking is symmetric for messaging: if A blocked B,
 // neither A nor B can message the other in their direct chat. A mute never
 // blocks messaging, so it's excluded here.

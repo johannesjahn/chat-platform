@@ -8,6 +8,8 @@ import { attachments, users } from "../db/schema.ts";
 import { type UsersDeps, type UsersHandlers } from "./handlerKit.ts";
 import { deleteAvatarObjects } from "../avatars.ts";
 import { enforceRateLimit } from "../RateLimiter.ts";
+import { departAllChats } from "../chats/departure.ts";
+import { RealtimeConnections } from "../Realtime.ts";
 import { verifyPassword } from "./credentials.ts";
 import { toPublicUser } from "./userViews.ts";
 
@@ -31,23 +33,42 @@ const ACCOUNT_OBJECT_DELETE_CONCURRENCY = 8;
 // rows are gone nothing else would ever find the objects. The attachment rows
 // are deleted explicitly, in the same transaction as the user, so the keys
 // swept are exactly the rows removed.
+//
+// Before the row goes, the account leaves every chat it's in the way a
+// leave would (issue #895, `departAllChats`): a group it owned passes to the
+// next member instead of being left ownerless, and everyone left behind —
+// including the other half of a direct chat, which then takes no more
+// messages — gets `chat_updated` once the transaction has committed.
 const deleteUserAndObjects = (
   db: DrizzleDb,
   storage: AttachmentStorage["Service"],
+  connections: RealtimeConnections["Service"],
   userId: number,
   avatarTokens: ReadonlyArray<string | null>,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const storageKeys = yield* dbQuery(() =>
+    const { storageKeys, afterDeparture } = yield* dbQuery(() =>
       db.transaction(async (tx) => {
+        const afterDeparture = await departAllChats(
+          db,
+          tx,
+          storage,
+          connections,
+          userId,
+        );
         const removed = await tx
           .delete(attachments)
           .where(eq(attachments.uploaderId, userId))
           .returning({ storageKey: attachments.storageKey });
         await tx.delete(users).where(eq(users.id, userId));
-        return removed.map((row) => row.storageKey);
+        return {
+          storageKeys: removed.map((row) => row.storageKey),
+          afterDeparture,
+        };
       }),
     );
+
+    yield* afterDeparture;
 
     yield* deleteAvatarObjects(storage, avatarTokens);
     yield* Effect.forEach(
@@ -100,7 +121,7 @@ export const accountHandlers = ({
             new InvalidCredentials({ message: "Incorrect password" }),
           );
 
-        yield* deleteUserAndObjects(db, storage, currentUser.id, [
+        yield* deleteUserAndObjects(db, storage, connections, currentUser.id, [
           dbUser.avatarSmallKey,
           dbUser.avatarMediumKey,
           dbUser.avatarLargeKey,
@@ -202,7 +223,7 @@ export const accountHandlers = ({
             new NotFound({ message: `User ${id} not found` }),
           );
 
-        yield* deleteUserAndObjects(db, storage, id, [
+        yield* deleteUserAndObjects(db, storage, connections, id, [
           dbUser.avatarSmallKey,
           dbUser.avatarMediumKey,
           dbUser.avatarLargeKey,

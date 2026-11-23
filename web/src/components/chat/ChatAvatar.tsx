@@ -1,7 +1,11 @@
-import { Users } from "lucide-react";
+import { Users, UserX } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { PresenceDot } from "@/components/PresenceDot";
-import { chatDisplayName, type Chat } from "@/lib/chats";
+import {
+  chatDisplayName,
+  isDirectChatWithDeletedAccount,
+  type Chat,
+} from "@/lib/chats";
 import { useIsOnline } from "@/lib/presence";
 import { userAvatarName } from "@/lib/users";
 import { cn } from "@/lib/utils";
@@ -67,7 +71,7 @@ export function ChatAvatar({
         GLYPH_SIZES[size],
       )}
     >
-      <Users />
+      {isDirectChatWithDeletedAccount(chat) ? <UserX /> : <Users />}
     </span>
   );
 }
