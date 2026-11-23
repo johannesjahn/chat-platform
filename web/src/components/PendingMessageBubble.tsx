@@ -4,11 +4,8 @@ import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { MentionText } from "@/components/MentionText";
 import { Button } from "@/components/ui/button";
 import { type Attachment, attachmentKind } from "@/lib/attachments";
-import {
-  MESSAGE_COLLAPSE_THRESHOLD,
-  type MessageContentType,
-  parentPreviewText,
-} from "@/lib/chats";
+import { type MessageContentType, parentPreviewText } from "@/lib/chats";
+import { isLongText, MESSAGE_COLLAPSE } from "@/lib/longText";
 import type { OutboxReplyPreview } from "@/lib/outbox";
 import { cn } from "@/lib/utils";
 
@@ -38,12 +35,16 @@ function PendingText({ text, failed }: { text: string; failed: boolean }) {
     <p
       className={cn(
         "whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed",
-        text.length > MESSAGE_COLLAPSE_THRESHOLD && "line-clamp-4",
+        isLongText(text, MESSAGE_COLLAPSE) && "line-clamp-4",
       )}
     >
       <MentionText
         text={text}
-        className={failed ? undefined : "text-primary-foreground underline"}
+        className={
+          failed
+            ? undefined
+            : "text-primary-foreground underline decoration-primary-foreground hover:decoration-primary-foreground"
+        }
       />
     </p>
   );

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { Loader2, MessageCircle, WifiOff } from "lucide-react";
 import {
   ChatComposer,
   type ChatComposerHandle,
@@ -14,6 +14,7 @@ import {
 } from "@/components/chat/ConversationHeader";
 import { ChatDetailsSheet } from "@/components/chat/ChatDetailsPanel";
 import { DropOverlay } from "@/components/chat/DropOverlay";
+import { EmptyState } from "@/components/EmptyState";
 import { useFileDrop } from "@/components/chat/useFileDrop";
 import { ForwardDialog } from "@/components/chat/ForwardDialog";
 import { forwardToast } from "@/components/chat/forwardToast";
@@ -34,12 +35,7 @@ import { GroupManagementDialog } from "@/components/GroupManagementDialog";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PinnedMessagesBar } from "@/components/PinnedMessagesBar";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { $api } from "@/lib/api";
@@ -372,29 +368,23 @@ export function ChatConversation({
       );
     }
     return (
-      <main className="mx-auto w-full max-w-2xl px-4 py-10">
-        <Card>
-          <CardHeader>
-            <h1 className="text-lg font-semibold">
-              {isApiError ? "Chat not found" : "Can't load this conversation"}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {isApiError
-                ? "It may have been deleted, or you're not a member."
-                : isOnline
-                  ? "Something went wrong reaching the server. Try again in a moment."
-                  : "You're offline, and this conversation hasn't been loaded on this device yet."}
-            </p>
-          </CardHeader>
-          <CardFooter>
-            <Button asChild>
-              <Link to="/chats">
-                <ArrowLeft className="size-4" />
-                Back to chats
-              </Link>
-            </Button>
-          </CardFooter>
-        </Card>
+      <main className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center px-4 py-10">
+        <EmptyState
+          icon={isApiError ? MessageCircle : WifiOff}
+          title={isApiError ? "Chat not found" : "Can't load this conversation"}
+          pageHeading
+          description={
+            isApiError
+              ? "It may have been deleted, or you're not a member."
+              : isOnline
+                ? "Something went wrong reaching the server. Try again in a moment."
+                : "You're offline, and this conversation hasn't been loaded on this device yet."
+          }
+        >
+          <Button asChild>
+            <Link to="/chats">Back to chats</Link>
+          </Button>
+        </EmptyState>
       </main>
     );
   }
@@ -456,7 +446,10 @@ export function ChatConversation({
             </div>
           ) : messages.length === 0 && pendingMessages.length === 0 ? (
             <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-              No messages yet — say hi 👋
+              {/* A request has no composer to say hi with (issue #898). */}
+              {chat.messageRequest
+                ? "No messages yet"
+                : "No messages yet — say hi 👋"}
             </p>
           ) : (
             <ThreadMessages

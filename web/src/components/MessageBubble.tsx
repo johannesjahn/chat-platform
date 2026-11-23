@@ -24,12 +24,9 @@ import { DisclosureChevron } from "@/components/ui/collapse";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { attachmentKind } from "@/lib/attachments";
-import {
-  MAX_MESSAGE_CONTENT_LENGTH,
-  MESSAGE_COLLAPSE_THRESHOLD,
-  type ChatMessage,
-} from "@/lib/chats";
+import { MAX_MESSAGE_CONTENT_LENGTH, type ChatMessage } from "@/lib/chats";
 import { isImeComposing } from "@/lib/ime";
+import { isLongText as isLongTextOf, MESSAGE_COLLAPSE } from "@/lib/longText";
 import { useExpandableText } from "@/lib/motion";
 import { formatAbsoluteTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -152,7 +149,7 @@ export function MessageBubble({
       : message.contentType === "attachment"
         ? (message.caption ?? (hasAttachment ? null : message.content))
         : message.content;
-  const isLongText = (bodyText?.length ?? 0) > MESSAGE_COLLAPSE_THRESHOLD;
+  const isLongText = isLongTextOf(bodyText, MESSAGE_COLLAPSE);
   const {
     ref: textRef,
     expanded,
@@ -518,11 +515,13 @@ export function MessageBubble({
                 >
                   <MentionText
                     text={bodyText}
-                    // The primary-tinted link colour is invisible on an own
-                    // message's primary-filled bubble — underline it against
-                    // the bubble's own foreground colour there instead.
+                    // The link colour is invisible on an own message's
+                    // primary-filled bubble — underline it against the
+                    // bubble's own foreground colour there instead.
                     className={
-                      isOwn ? "text-primary-foreground underline" : undefined
+                      isOwn
+                        ? "text-primary-foreground underline decoration-primary-foreground hover:decoration-primary-foreground"
+                        : undefined
                     }
                   />
                 </p>

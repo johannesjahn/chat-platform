@@ -204,7 +204,7 @@ function UsersPage() {
           description="User search is only available to signed-in users."
         />
       ) : (
-        <div className="relative w-full lg:max-w-xl lg:self-start">
+        <div className="relative w-full">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
@@ -224,7 +224,7 @@ function UsersPage() {
         <>
           {/* Sized and placed like the search box above it, so the two
               share an axis at every layout (issue #764). */}
-          <p className="w-full text-center text-sm text-muted-foreground lg:max-w-xl lg:self-start">
+          <p className="w-full text-center text-sm text-muted-foreground">
             {typed && contacts?.length && contactMatches.length === 0
               ? "None of your contacts match. "
               : ""}

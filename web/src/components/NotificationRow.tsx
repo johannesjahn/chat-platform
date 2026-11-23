@@ -80,14 +80,19 @@ export function NotificationRow({
         </span>
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        {/* A name or handle is one unbroken word; let it break rather than
-            push the row wider than the inbox. */}
-        <span className="text-sm wrap-anywhere">
-          <span className="font-medium">{userLabel(n.actor)}</span>{" "}
+        {/* A name or handle is one unbroken word: each truncates at the
+            row's width, like the feed byline, rather than breaking
+            mid-word or pushing the row wider than the inbox (issue #898). */}
+        <span className="text-sm">
+          <span className="inline-block max-w-full truncate align-bottom font-medium">
+            {userLabel(n.actor)}
+          </span>{" "}
           {userHandle(n.actor) && (
-            <span className="text-muted-foreground">
-              {userHandle(n.actor)}{" "}
-            </span>
+            <>
+              <span className="inline-block max-w-full truncate align-bottom text-muted-foreground">
+                {userHandle(n.actor)}
+              </span>{" "}
+            </>
           )}
           <span className="text-muted-foreground">{describe(n)}</span>
         </span>

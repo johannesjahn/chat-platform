@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FileText } from "lucide-react";
+import { EmptyState } from "@/components/EmptyState";
 import { LoginPrompt } from "@/components/LoginPrompt";
 import { PostForm, PostFormSkeleton } from "@/components/PostForm";
 import { Button } from "@/components/ui/button";
@@ -57,23 +58,17 @@ function EditPostPage() {
 
   if (error || !post) {
     return (
-      <main className="mx-auto w-full max-w-xl px-4 py-10">
-        <Card>
-          <CardHeader>
-            <CardTitle asChild>
-              <h1>Post not found</h1>
-            </CardTitle>
-            <CardDescription>This post may have been deleted.</CardDescription>
-          </CardHeader>
-          <CardFooter>
-            <Button asChild>
-              <Link to="/">
-                <ArrowLeft className="size-4" />
-                Back to feed
-              </Link>
-            </Button>
-          </CardFooter>
-        </Card>
+      <main className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center px-4 py-10">
+        <EmptyState
+          icon={FileText}
+          title="Post not found"
+          pageHeading
+          description="It may have been deleted, or the link is wrong."
+        >
+          <Button asChild>
+            <Link to="/">Back to feed</Link>
+          </Button>
+        </EmptyState>
       </main>
     );
   }

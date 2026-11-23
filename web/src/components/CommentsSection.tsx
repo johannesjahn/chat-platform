@@ -25,6 +25,8 @@ import {
   useReplies,
 } from "@/lib/comments";
 import { errorMessage, isNotFoundError } from "@/lib/errors";
+import { COMMENT_COLLAPSE, isLongText } from "@/lib/longText";
+import { useExpandableText } from "@/lib/motion";
 import { ownCommentScope, ownWrites } from "@/lib/ownWrites";
 import { usePostCommentsSubscription } from "@/lib/postRooms";
 import type { ReactionEmoji } from "@/lib/reactions";
@@ -277,6 +279,19 @@ function LiveCommentItem({
   const [showReplies, setShowReplies] = useState(false);
   const [replying, setReplying] = useState(false);
   const [editing, setEditing] = useState(false);
+  // A long comment collapses like a long post or message, so it can't push
+  // the rest of the thread out of view (issue #898) — unless it's the one a
+  // link pointed at.
+  const isLong = isLongText(comment.content, COMMENT_COLLAPSE);
+  const {
+    ref: textRef,
+    expanded,
+    clamped,
+    toggle: toggleExpanded,
+  } = useExpandableText<HTMLParagraphElement>(
+    !isLong || highlighted,
+    "line-clamp-6",
+  );
 
   const addReaction = $api.useMutation("post", "/comments/{id}/reactions");
   const removeReaction = $api.useMutation("delete", "/comments/{id}/reactions");
@@ -379,9 +394,29 @@ function LiveCommentItem({
               />
             </div>
           ) : (
-            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-              <MentionText text={comment.content} />
-            </p>
+            <>
+              <p
+                ref={textRef}
+                className={cn(
+                  "whitespace-pre-wrap break-words text-sm leading-relaxed",
+                  clamped && "line-clamp-6",
+                )}
+              >
+                <MentionText text={comment.content} />
+              </p>
+              {isLong && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1 -ml-2 h-7 gap-1.5 px-2 text-xs text-primary hover:bg-primary/10 hover:text-primary"
+                  aria-expanded={expanded}
+                  onClick={toggleExpanded}
+                >
+                  <DisclosureChevron open={expanded} />
+                  {expanded ? "Show less" : "Show more"}
+                </Button>
+              )}
+            </>
           )}
         </div>
 

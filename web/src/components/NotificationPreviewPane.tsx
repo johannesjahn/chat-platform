@@ -191,7 +191,7 @@ function LobbyPreview({
     return (
       <PaneMessage>
         {isNotFoundError(lobby.error)
-          ? "This lobby has closed."
+          ? "Lobby not found. It may have closed when everyone left."
           : `Could not load the lobby: ${errorMessage(lobby.error)}`}
       </PaneMessage>
     );

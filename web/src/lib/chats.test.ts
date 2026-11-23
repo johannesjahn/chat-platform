@@ -6,6 +6,7 @@ import {
   chatsListQueryOptions,
   chatsUnreadCountQueryKey,
   chatsUnreadCountQueryOptions,
+  formatChatTimestamp,
   lastMessagePreview,
   lastMessageSender,
   lastMessageText,
@@ -140,4 +141,37 @@ test("a captioned attachment previews as its caption (issue #765)", () => {
   expect(
     parentPreviewText({ contentType: "attachment", content: "bread.png" }),
   ).toBe("📎 Attachment");
+});
+
+// Issue #898: the chat list said "Jul 26" for a chat last active in a
+// previous year, and never "Yesterday", unlike the thread's day separators.
+test("chat-list timestamps say Yesterday and carry the year when it isn't this one", () => {
+  const now = new Date(2026, 10, 23, 15, 0).getTime();
+  const today = new Date(2026, 10, 23, 9, 5).getTime();
+  expect(formatChatTimestamp(today, now)).toBe(
+    new Date(today).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    }),
+  );
+  expect(
+    formatChatTimestamp(new Date(2026, 10, 22, 23, 59).getTime(), now),
+  ).toBe("Yesterday");
+
+  const thisYear = new Date(2026, 6, 26).getTime();
+  const lastYear = new Date(2025, 6, 26).getTime();
+  expect(formatChatTimestamp(thisYear, now)).toBe(
+    new Date(thisYear).toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+    }),
+  );
+  expect(formatChatTimestamp(lastYear, now)).toBe(
+    new Date(lastYear).toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }),
+  );
+  expect(formatChatTimestamp(lastYear, now)).toContain("2025");
 });

@@ -12,6 +12,10 @@ type EmptyStateProps = {
   // Set where the empty state is all the page shows (a 404, an error page),
   // so its title is the page's `<h1>`.
   pageHeading?: boolean;
+  // Or the title's element outright, for a panel whose heading level the
+  // caller decides (the post overlay's `<h2>`), with an id to label it by.
+  titleAs?: "p" | "h1" | "h2";
+  titleId?: string;
 };
 
 // A friendly, lightly animated "nothing here yet" panel shared across the
@@ -26,8 +30,10 @@ export function EmptyState({
   children,
   className,
   pageHeading = false,
+  titleAs,
+  titleId,
 }: EmptyStateProps) {
-  const Title = pageHeading ? "h1" : "p";
+  const Title = titleAs ?? (pageHeading ? "h1" : "p");
   return (
     <div
       className={cn(
@@ -51,7 +57,7 @@ export function EmptyState({
         </span>
       </div>
       <div className="flex flex-col gap-1.5">
-        <Title className="text-base font-semibold tracking-tight">
+        <Title id={titleId} className="text-base font-semibold tracking-tight">
           {title}
         </Title>
         {description && (

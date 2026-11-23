@@ -20,6 +20,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { ProfileHoverCard } from "@/components/ProfileHoverCard";
+import { RelativeTime } from "@/components/RelativeTime";
 import { ChatConversation } from "@/components/chat/ChatConversation";
 import { FilterRail, type FilterRailItem } from "@/components/FilterRail";
 import { LoginPrompt } from "@/components/LoginPrompt";
@@ -679,12 +680,15 @@ function UserRow({ result: { user, snippet } }: { result: UserSearchResult }) {
   );
 }
 
-// The author/timestamp header every content row shares.
+// The author/timestamp header every content row shares. Posts and comments
+// show the relative age they show everywhere else ("5m"); a message keeps
+// the chat list's clock time / date (issue #898).
 function RowHeading({
   authorId,
   label,
   handle,
   createdAt,
+  chatTime = false,
   detail,
 }: {
   // Whose name `label` is, when it's a person's — hovering it then previews
@@ -694,6 +698,7 @@ function RowHeading({
   // The author's `@username` when `label` is a display name (issue #526).
   handle?: string;
   createdAt: number;
+  chatTime?: boolean;
   detail?: string;
 }) {
   const name = (
@@ -714,9 +719,16 @@ function RowHeading({
         ) : (
           <ProfileHoverCard userId={authorId}>{name}</ProfileHoverCard>
         )}
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {formatChatTimestamp(createdAt)}
-        </span>
+        {chatTime ? (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {formatChatTimestamp(createdAt)}
+          </span>
+        ) : (
+          <RelativeTime
+            value={createdAt}
+            className="shrink-0 text-xs text-muted-foreground"
+          />
+        )}
       </span>
       {detail && (
         <span className="truncate text-xs text-muted-foreground">{detail}</span>
@@ -841,6 +853,7 @@ function MessageRow({
           <RowHeading
             label={chatName}
             createdAt={createdAt}
+            chatTime
             detail={userLabelWithHandle(sender)}
           />
           <SearchHighlight

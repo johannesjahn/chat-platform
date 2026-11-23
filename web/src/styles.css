@@ -32,6 +32,12 @@
   --primary: oklch(0.373 0.064 258);
   --primary-foreground: oklch(0.98 0.01 280);
 
+  /* Inline links and @mentions in body text (issue #898). Light mode's
+     primary is the same navy as the text around it, so they get a blue of
+     their own (≥ 4.5:1 on the card and the page); dark mode's yellow
+     primary already stands out. */
+  --link: oklch(0.5 0.19 262);
+
   --secondary: oklch(0.95 0.016 280);
   --secondary-foreground: oklch(0.28 0.055 258);
 
@@ -73,6 +79,8 @@
   --primary: oklch(0.844 0.173 85);
   --primary-foreground: oklch(0.22 0.05 258);
 
+  --link: var(--primary);
+
   --secondary: oklch(0.28 0.045 260);
   --secondary-foreground: oklch(0.95 0.015 280);
 
@@ -106,6 +114,7 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-link: var(--link);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);

@@ -136,7 +136,9 @@ for (const { name, paths } of SIGNED_IN_PAGES) {
       // state.
       const { id: postId } = await post("/posts", {
         contentType: "text",
-        content: "Accessibility check\n\nA post with a comment under it.",
+        // A mention and a bare link, so their colour is scanned against
+        // the card in both themes (issue #898).
+        content: `Accessibility check\n\nA post for @${other.username} with a comment under it, see https://example.com.`,
       });
       await post(`/posts/${postId}/comments`, { content: "A first comment." });
       const { id: chatId } = await post("/chats/direct", {
