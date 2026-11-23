@@ -508,7 +508,11 @@ test("previewChatInvite fails for a dead link exactly as joining would", () =>
       const erin = yield* registerAndLogin("erin", "pw-testpass");
       const db = yield* Db;
 
-      const expectSameFailure = (code: string, tag: string, message: string) =>
+      const expectSameFailure = (
+        code: string,
+        tag: "NotFound" | "InvalidChatRequest" | "Forbidden",
+        message: string,
+      ) =>
         Effect.gen(function* () {
           const previewed = yield* previewFails(carol, code);
           const joined = yield* joinFails(carol, code);
