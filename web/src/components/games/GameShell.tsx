@@ -62,7 +62,12 @@ export function GameShell({
         <div className="flex flex-wrap items-center gap-4">
           <GameIcon game={game} size="lg" />
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <h1 className="break-words text-2xl font-bold tracking-tight sm:text-4xl">
+            {/* One line, truncated, like a lobby row: a 32-character host
+                name in "…'s lobby" otherwise wraps at heading size (#903). */}
+            <h1
+              title={typeof title === "string" ? title : undefined}
+              className="truncate text-2xl font-bold tracking-tight sm:text-4xl"
+            >
               <span className="game-text">{title ?? game.name}</span>
             </h1>
             <p className="text-sm text-muted-foreground sm:text-base">

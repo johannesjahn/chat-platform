@@ -191,7 +191,7 @@ export const GAMES: ReadonlyArray<GameDefinition> = [
     verbs: {
       start: "Start the duel",
       startSolo: "Play solo",
-      join: "Join the duel",
+      join: "Join the game",
     },
     accuracyLabel: "Clean",
     raceStats: false,

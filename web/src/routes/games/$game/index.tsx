@@ -149,7 +149,7 @@ function GameHub({ gameId }: { gameId: GameId }) {
             ))}
           </ol>
 
-          <div className="grid gap-6 lg:grid-cols-5">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
             <GamePanel
               title="Open lobbies"
               icon={DoorOpen}

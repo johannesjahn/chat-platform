@@ -304,41 +304,12 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
               }
             >
               <LobbySeats lobby={lobby} meId={meId} />
-              {me && !full && (
+              {/* A spectator's Join sits right under the seats, above any
+                  settings: Sketchy's pack picker (which only the host can
+                  change) would otherwise push it screens down (issue #903).
+                  The host's Start stays below them — pick, then start. */}
+              {!me && (
                 <div className="flex justify-center">
-                  <InvitePlayers lobby={lobby} meId={meId} />
-                </div>
-              )}
-              {Settings && <Settings lobby={lobby} isHost={isHost} />}
-              <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-                {isHost ? (
-                  <div className="flex flex-col items-center gap-1.5">
-                    <Button
-                      size="lg"
-                      disabled={start.isPending || missing > 0}
-                      onClick={() => start.mutate()}
-                      className="game-gradient min-w-48 border-0 text-white shadow-lg shadow-[var(--game-glow)] hover:opacity-95"
-                    >
-                      <Play className="size-4 fill-current" />
-                      {lobby.players.length === 1
-                        ? game.verbs.startSolo
-                        : game.verbs.start}
-                    </Button>
-                    {missing > 0 && (
-                      <span className="text-xs text-muted-foreground">
-                        Waiting for {missing} more{" "}
-                        {missing === 1 ? "player" : "players"} — this game needs{" "}
-                        {lobby.minPlayers}
-                      </span>
-                    )}
-                  </div>
-                ) : me ? (
-                  <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-                    Waiting for {host ? userLabel(host.user) : "the host"} to
-                    start
-                    <TypingDots />
-                  </span>
-                ) : (
                   <Button
                     size="lg"
                     disabled={join.isPending || full}
@@ -348,8 +319,46 @@ function LobbyPage({ gameId, lobbyId }: { gameId: GameId; lobbyId: number }) {
                     <Swords className="size-4" />
                     {full ? "Lobby full" : game.verbs.join}
                   </Button>
-                )}
-              </div>
+                </div>
+              )}
+              {me && !full && (
+                <div className="flex justify-center">
+                  <InvitePlayers lobby={lobby} meId={meId} />
+                </div>
+              )}
+              {Settings && <Settings lobby={lobby} isHost={isHost} />}
+              {me && (
+                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                  {isHost ? (
+                    <div className="flex flex-col items-center gap-1.5">
+                      <Button
+                        size="lg"
+                        disabled={start.isPending || missing > 0}
+                        onClick={() => start.mutate()}
+                        className="game-gradient min-w-48 border-0 text-white shadow-lg shadow-[var(--game-glow)] hover:opacity-95"
+                      >
+                        <Play className="size-4 fill-current" />
+                        {lobby.players.length === 1
+                          ? game.verbs.startSolo
+                          : game.verbs.start}
+                      </Button>
+                      {missing > 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          Waiting for {missing} more{" "}
+                          {missing === 1 ? "player" : "players"} — this game
+                          needs {lobby.minPlayers}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                      Waiting for {host ? userLabel(host.user) : "the host"} to
+                      start
+                      <TypingDots />
+                    </span>
+                  )}
+                </div>
+              )}
             </GamePanel>
           )}
 
