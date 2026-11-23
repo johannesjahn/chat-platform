@@ -12,6 +12,7 @@ import {
   CHAT_HEADER_CLASS,
   ConversationHeader,
 } from "@/components/chat/ConversationHeader";
+import { ChatDetailsSheet } from "@/components/chat/ChatDetailsPanel";
 import { DropOverlay } from "@/components/chat/DropOverlay";
 import { useFileDrop } from "@/components/chat/useFileDrop";
 import { ForwardDialog } from "@/components/chat/ForwardDialog";
@@ -196,6 +197,8 @@ export function ChatConversation({
   useImmersiveShell(!docked && !!session && (chatLoading || chat != null));
 
   const [managingGroup, setManagingGroup] = useState(false);
+  // Below `xl`, chat details open as a full-screen sheet (issue #907).
+  const [detailsSheetOpen, setDetailsSheetOpen] = useState(false);
   const detailsAsPanel = useChatDetailsAsPanel() && !docked;
   const detailsOpen = useChatDetailsOpen();
   // The group header and "Manage" open the modal, or at `xl` the panel.
@@ -577,6 +580,7 @@ export function ChatConversation({
           detailsAsPanel={detailsAsPanel}
           detailsOpen={detailsOpen}
           onOpenDetails={openDetails}
+          onOpenDetailsSheet={() => setDetailsSheetOpen(true)}
         />
         <PinnedMessagesBar
           chatId={chatId}
@@ -595,6 +599,14 @@ export function ChatConversation({
           currentUser={session.user}
           open={managingGroup}
           onClose={() => setManagingGroup(false)}
+        />
+      )}
+      {!detailsAsPanel && (
+        <ChatDetailsSheet
+          chatId={chat.id}
+          currentUser={session.user}
+          open={detailsSheetOpen}
+          onClose={() => setDetailsSheetOpen(false)}
         />
       )}
     </main>

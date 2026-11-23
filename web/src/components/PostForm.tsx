@@ -2,6 +2,7 @@ import { type ReactNode, useState } from "react";
 import { ImageIcon, Loader2, Paperclip, Type } from "lucide-react";
 import { AttachmentUploadField } from "@/components/AttachmentUploadField";
 import { MentionTextarea } from "@/components/MentionTextarea";
+import { BackButton } from "@/components/BackButton";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -69,6 +70,9 @@ type PostFormProps = {
     caption?: string | null;
   }) => Promise<void>;
   footer?: ReactNode;
+  // Where "Back" goes when there's no in-app page to return to (a direct
+  // load): a `<Link>` with an arrow and its label. See `BackButton`.
+  backFallback: ReactNode;
   // Lets `onSubmit` be attempted while offline instead of being blocked —
   // set by callers that queue the mutation locally when offline (see
   // lib/offlineQueue.ts) rather than requiring a live connection. Off by
@@ -88,6 +92,7 @@ export function PostForm({
   initialCaption = null,
   onSubmit,
   footer,
+  backFallback,
   allowOfflineQueue = false,
 }: PostFormProps) {
   const [contentType, setContentType] =
@@ -131,7 +136,10 @@ export function PostForm({
         (isOnline || allowOfflineQueue);
 
   return (
-    <main className="mx-auto w-full max-w-xl px-4 py-10">
+    <main className="mx-auto flex w-full max-w-xl flex-col gap-6 px-4 py-10">
+      {/* The way out on a phone, where there may be no browser back button
+          (issue #907). */}
+      <BackButton fallback={backFallback} />
       <Card className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
         <CardHeader>
           <CardTitle asChild>
