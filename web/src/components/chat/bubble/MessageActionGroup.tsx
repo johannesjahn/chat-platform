@@ -16,12 +16,34 @@ import { Button } from "@/components/ui/button";
 import type { ChatMessage } from "@/lib/chats";
 import { cn } from "@/lib/utils";
 
+// What a message offers, shared by the pill below and, on touch, by
+// `MessageActionSheet` (issue #906).
+export type MessageActions = {
+  message: ChatMessage;
+  readOnly: boolean;
+  reactionPending: boolean;
+  onToggleReaction: (emoji: string) => void;
+  pinPending: boolean;
+  starPending: boolean;
+  onTogglePin: () => void;
+  onToggleStar: () => void;
+  copied: "text" | "link" | null;
+  onCopy: (kind: "text" | "link") => void;
+  onReply?: () => void;
+  onForward?: () => void;
+  onEdit?: () => void;
+  canDelete: boolean;
+  deleting: boolean;
+  onDelete: () => void;
+};
+
 /**
- * The hover/long-press action group beside a bubble: react, pin, star, copy
+ * The hover/right-click action group beside a bubble: react, pin, star, copy
  * text, copy link, reply, forward, then edit and delete. Own and incoming
  * messages get the same group (split out of MessageBubble in issue #811) —
  * they differ only in whether editing is offered (`onEdit`) and what allows
- * deleting (`canDelete`: the sender, or a chat owner/admin moderating).
+ * deleting (`canDelete`: the sender, or a chat owner/admin moderating). On
+ * touch a long press opens `MessageActionSheet` instead.
  */
 export function MessageActionGroup({
   message,
@@ -41,25 +63,7 @@ export function MessageActionGroup({
   canDelete,
   deleting,
   onDelete,
-}: {
-  message: ChatMessage;
-  className: string;
-  readOnly: boolean;
-  reactionPending: boolean;
-  onToggleReaction: (emoji: string) => void;
-  pinPending: boolean;
-  starPending: boolean;
-  onTogglePin: () => void;
-  onToggleStar: () => void;
-  copied: "text" | "link" | null;
-  onCopy: (kind: "text" | "link") => void;
-  onReply?: () => void;
-  onForward?: () => void;
-  onEdit?: () => void;
-  canDelete: boolean;
-  deleting: boolean;
-  onDelete: () => void;
-}) {
+}: MessageActions & { className: string }) {
   return (
     <div className={className}>
       {!readOnly && (

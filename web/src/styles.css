@@ -1208,6 +1208,29 @@ html[data-session="in"] [data-session-only="out"] {
   animation: sheet-out var(--motion-collapse) var(--motion-ease-collapse) both;
 }
 
+@keyframes bottom-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes bottom-sheet-out {
+  to {
+    transform: translateY(100%);
+  }
+}
+
+/* The same pair for a sheet docked to the bottom edge (a message's actions
+   on touch, issue #906): it rises from below the screen and drops back. */
+@utility animate-bottom-sheet-in {
+  animation: bottom-sheet-in 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@utility animate-bottom-sheet-out {
+  animation: bottom-sheet-out var(--motion-collapse) var(--motion-ease-collapse)
+    both;
+}
+
 /* ───────────────────────────────────────────────────────────────────────────
    Disclosure motion
 

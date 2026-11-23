@@ -57,7 +57,8 @@ export function SegmentedControl<T extends string>({
           aria-checked={option.value === value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "relative z-10 rounded-full px-3 py-1 text-xs font-medium transition-colors duration-200",
+            // Taller below `lg`, where it's tapped (issue #906).
+            "relative z-10 rounded-full px-3 py-2 text-xs font-medium transition-colors duration-200 lg:py-1",
             option.value === value
               ? "text-white"
               : "text-muted-foreground hover:text-foreground",

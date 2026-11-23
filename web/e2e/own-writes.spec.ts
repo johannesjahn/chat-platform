@@ -45,7 +45,14 @@ async function waitForPanelAround(inside: Locator) {
   await expect(panel).toHaveAttribute("data-settled", "");
   await expect
     .poll(() =>
-      panel.evaluate((el) => el.getAnimations({ subtree: true }).length),
+      // Only clock-driven ones: a scroll-driven animation (the reaction
+      // pills' edge fade, `scroll-fade-x`) never finishes.
+      panel.evaluate(
+        (el) =>
+          el
+            .getAnimations({ subtree: true })
+            .filter((a) => a.timeline instanceof DocumentTimeline).length,
+      ),
     )
     .toBe(0);
 }

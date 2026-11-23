@@ -124,7 +124,8 @@ export function PostCard({
   const totalReactions = post.reactions.reduce((sum, r) => sum + r.count, 0);
   // With a single emoji kind its chip already shows the total, so a separate
   // counter would just repeat that number beside the add-reaction button
-  // (issue #503). Only surface it once there are several chips to sum up.
+  // (issue #503). Only surface it once there are several chips to sum up —
+  // and not on a phone, where the row has no room to spare (issue #906).
   const showReactionTotal =
     post.reactions.filter((r) => r.count > 0).length > 1;
   // A text post's content or an attachment's caption (issue #765). An
@@ -318,6 +319,9 @@ export function PostCard({
       </CardContent>
 
       <CardFooter className="flex-col items-stretch gap-0 border-t border-border/60 p-0">
+        {/* One line at every width (issue #906): the reaction pills scroll
+            inside whatever the rest of the row leaves them, and nothing else
+            in it shrinks or wraps. */}
         <div className="flex items-center gap-1 px-3 py-2">
           <ReactionPicker
             reactions={post.reactions}
@@ -326,7 +330,7 @@ export function PostCard({
           />
           {showReactionTotal && (
             <span
-              className="text-xs tabular-nums text-muted-foreground"
+              className="hidden shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground sm:inline"
               aria-label={`${totalReactions} reactions total`}
             >
               <CountUp value={totalReactions} /> total
@@ -340,10 +344,14 @@ export function PostCard({
             onClick={() => setShowComments((prev) => !prev)}
             onPointerEnter={preloadComments}
             onFocus={preloadComments}
-            className="h-8 gap-1.5 px-2 text-muted-foreground"
+            // Below 400px the label goes to screen readers only — the icon,
+            // count and chevron still say what it is and whether it's open.
+            className="h-8 shrink-0 gap-1.5 px-2 text-muted-foreground"
           >
             <MessageSquare className="size-4" />
-            {showComments ? "Hide comments" : "Comments"}
+            <span className="max-[25rem]:sr-only">
+              {showComments ? "Hide comments" : "Comments"}
+            </span>
             {post.commentCount > 0 && (
               <span className="tabular-nums">
                 {" · "}
@@ -352,18 +360,18 @@ export function PostCard({
             )}
             <DisclosureChevron open={showComments} className="size-3.5" />
           </Button>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex shrink-0 items-center gap-1">
             {/* Only surface a content-type badge for media posts — labelling
                 every plain-text post "Text" was pure noise. */}
             {post.contentType === "image_url" ? (
               <span className="flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
                 <ImageIcon className="size-3.5" />
-                Image
+                <span className="max-sm:sr-only">Image</span>
               </span>
             ) : post.contentType === "attachment" ? (
               <span className="flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
                 <Paperclip className="size-3.5" />
-                Attachment
+                <span className="max-sm:sr-only">Attachment</span>
               </span>
             ) : null}
             {openPost && (
