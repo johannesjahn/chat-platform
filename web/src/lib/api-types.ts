@@ -1894,8 +1894,9 @@ export interface components {
             id: number;
             postId: number;
             parentCommentId: number | null;
-            authorId: number;
-            author: components["schemas"]["AuthorSummary"];
+            authorId: number | null;
+            author: components["schemas"]["AuthorSummary"] | null;
+            deleted: boolean;
             content: string;
             createdAt: number;
             updatedAt: number;

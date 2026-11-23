@@ -17,6 +17,8 @@ import {
   addCreatedComment,
   type Comment,
   invalidatePostComments,
+  isLiveComment,
+  type LiveComment,
   MAX_COMMENT_CONTENT_LENGTH,
   useComment,
   useComments,
@@ -115,14 +117,7 @@ function CommentComposer({
   );
 }
 
-function CommentItem({
-  comment,
-  postId,
-  isReply = false,
-  highlighted = false,
-  hideReplies = false,
-}: {
-  comment: Comment;
+interface CommentItemProps {
   postId: number;
   isReply?: boolean;
   // The comment a notification points at (see `CommentThreadPreview`).
@@ -130,7 +125,140 @@ function CommentItem({
   // Leaves out the replies toggle — for a parent shown above just the one
   // reply being previewed.
   hideReplies?: boolean;
+}
+
+function CommentItem({
+  comment,
+  ...props
+}: CommentItemProps & { comment: Comment }) {
+  return isLiveComment(comment) ? (
+    <LiveCommentItem comment={comment} {...props} />
+  ) : (
+    <DeletedCommentItem comment={comment} {...props} />
+  );
+}
+
+// The "View N replies" toggle and the replies under a top-level comment,
+// shared by a live comment and a deleted one's placeholder.
+function CommentReplies({
+  comment,
+  postId,
+  open,
+  onToggle,
+}: {
+  comment: Comment;
+  postId: number;
+  open: boolean;
+  onToggle: () => void;
 }) {
+  // The toggle only renders while there are replies, so the panel must close
+  // with it when they drop to zero (deleted here or by someone else) — or it
+  // would sit open and empty with nothing left to close it (issue #544).
+  const repliesOpen = open && comment.replyCount > 0;
+  const replies = useReplies(comment.id, repliesOpen);
+  const replyRows = replies.data?.pages.flatMap((p) => p.comments) ?? [];
+
+  return (
+    <>
+      {/* Existing replies used to stay hidden until the viewer opened the
+          reply composer (issue #479) — the count makes them discoverable,
+          and expanding them no longer opens a composer. */}
+      {comment.replyCount > 0 && (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="mt-1 h-auto w-fit p-0 pl-1 text-xs"
+          aria-expanded={open}
+          onClick={onToggle}
+        >
+          {open
+            ? "Hide replies"
+            : `View ${comment.replyCount} ${
+                comment.replyCount === 1 ? "reply" : "replies"
+              }`}
+          <DisclosureChevron open={open} className="size-3.5" />
+        </Button>
+      )}
+      <Collapse open={repliesOpen}>
+        <div className="mt-2 flex flex-col gap-3">
+          {replyRows.map((reply) => (
+            <CommentItem
+              key={reply.id}
+              comment={reply}
+              postId={postId}
+              isReply
+            />
+          ))}
+          {replies.hasNextPage && (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto w-fit p-0 text-xs"
+              onClick={() => void replies.fetchNextPage()}
+              disabled={replies.isFetchingNextPage}
+            >
+              Show more replies
+            </Button>
+          )}
+        </div>
+      </Collapse>
+    </>
+  );
+}
+
+// What's left of a top-level comment deleted while it had replies (issue
+// #904): the replies stay under it, with no author, content or actions.
+function DeletedCommentItem({
+  comment,
+  postId,
+  highlighted = false,
+  hideReplies = false,
+}: CommentItemProps & { comment: Comment }) {
+  const [showReplies, setShowReplies] = useState(false);
+  return (
+    <div
+      className="flex gap-3"
+      data-testid="comment"
+      data-comment-id={comment.id}
+      data-deleted=""
+    >
+      <div
+        className="mt-0.5 size-7 shrink-0 rounded-full bg-muted"
+        aria-hidden="true"
+      />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div
+          className={cn(
+            "rounded-2xl border border-dashed px-3 py-2",
+            highlighted && "bg-primary/10 ring-1 ring-primary/50",
+          )}
+        >
+          <p className="text-sm italic text-muted-foreground">
+            Comment deleted
+          </p>
+        </div>
+        {!hideReplies && (
+          <CommentReplies
+            comment={comment}
+            postId={postId}
+            open={showReplies}
+            onToggle={() => setShowReplies((prev) => !prev)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LiveCommentItem({
+  comment,
+  postId,
+  isReply = false,
+  highlighted = false,
+  hideReplies = false,
+}: CommentItemProps & { comment: LiveComment }) {
   const session = useSession();
   const queryClient = useQueryClient();
   // The embedded author (issue #750) — no `GET /users/:id` per comment.
@@ -157,14 +285,6 @@ function CommentItem({
 
   // Only this post's comment queries — not every open section's (#753).
   const invalidateComments = () => invalidatePostComments(queryClient, postId);
-
-  // The toggle only renders while there are replies, so the panel must close
-  // with it when they drop to zero (deleted here or by someone else) — or it
-  // would sit open and empty with nothing left to close it (issue #544).
-  const repliesOpen =
-    showReplies && !isReply && !hideReplies && comment.replyCount > 0;
-  const replies = useReplies(comment.id, repliesOpen);
-  const replyRows = replies.data?.pages.flatMap((p) => p.comments) ?? [];
 
   const reactionPending = addReaction.isPending || removeReaction.isPending;
   const [reactionError, setReactionError] = useState<string | null>(null);
@@ -309,8 +429,12 @@ function CommentItem({
                 onClick={async () => {
                   const ok = await confirm({
                     title: "Delete this comment?",
+                    // Its replies stay, under a "Comment deleted" placeholder
+                    // (issue #904).
                     description:
-                      "It's removed from the post for everyone. This can't be undone.",
+                      comment.replyCount > 0
+                        ? "It's removed from the post for everyone. Its replies stay, under a “Comment deleted” note. This can't be undone."
+                        : "It's removed from the post for everyone. This can't be undone.",
                     confirmLabel: "Delete comment",
                   });
                   if (!ok) return;
@@ -349,52 +473,13 @@ function CommentItem({
           </Collapse>
         )}
 
-        {/* Existing replies used to stay hidden until the viewer opened the
-            reply composer (issue #479) — the count makes them discoverable,
-            and expanding them no longer opens a composer. */}
-        {!isReply && !hideReplies && comment.replyCount > 0 && (
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            className="mt-1 h-auto w-fit p-0 pl-1 text-xs"
-            aria-expanded={showReplies}
-            onClick={() => setShowReplies((prev) => !prev)}
-          >
-            {showReplies
-              ? "Hide replies"
-              : `View ${comment.replyCount} ${
-                  comment.replyCount === 1 ? "reply" : "replies"
-                }`}
-            <DisclosureChevron open={showReplies} className="size-3.5" />
-          </Button>
-        )}
-
-        {!isReply && (
-          <Collapse open={repliesOpen}>
-            <div className="mt-2 flex flex-col gap-3">
-              {replyRows.map((reply) => (
-                <CommentItem
-                  key={reply.id}
-                  comment={reply}
-                  postId={postId}
-                  isReply
-                />
-              ))}
-              {replies.hasNextPage && (
-                <Button
-                  type="button"
-                  variant="link"
-                  size="sm"
-                  className="h-auto w-fit p-0 text-xs"
-                  onClick={() => void replies.fetchNextPage()}
-                  disabled={replies.isFetchingNextPage}
-                >
-                  Show more replies
-                </Button>
-              )}
-            </div>
-          </Collapse>
+        {!isReply && !hideReplies && (
+          <CommentReplies
+            comment={comment}
+            postId={postId}
+            open={showReplies}
+            onToggle={() => setShowReplies((prev) => !prev)}
+          />
         )}
       </div>
     </div>

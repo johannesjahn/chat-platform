@@ -103,3 +103,53 @@ test(
     await expect(thread.locator(".collapse-panel")).toHaveCount(0);
   },
 );
+
+// Issue #904: deleting a comment used to cascade to every reply under it,
+// other people's included. The replies now stay, under a placeholder.
+test(
+  "deleting a comment keeps other people's replies under a placeholder",
+  { tag: "@layout" },
+  async ({ page, apiUrl, request, createUser, signUp }) => {
+    const me = await signUp(page);
+    const replier = await createUser();
+    const as = (user: typeof me) => ({
+      Authorization: `Bearer ${user.session.accessToken}`,
+    });
+
+    const post = await request.post(`${apiUrl}/posts`, {
+      headers: as(me),
+      data: { contentType: "text", content: "A post with a discussion" },
+    });
+    const { id: postId } = await post.json();
+    const comment = await request.post(`${apiUrl}/posts/${postId}/comments`, {
+      headers: as(me),
+      data: { content: "My regrettable comment" },
+    });
+    const { id: commentId } = await comment.json();
+    const reply = await request.post(
+      `${apiUrl}/comments/${commentId}/replies`,
+      {
+        headers: as(replier),
+        data: { content: "Someone else's reply" },
+      },
+    );
+    expect(reply.ok()).toBe(true);
+
+    await page.goto(`/posts/${postId}`);
+    const thread = page.locator(`[data-comment-id="${commentId}"]`);
+    await expect(thread.getByText("My regrettable comment")).toBeVisible();
+
+    await thread.getByRole("button", { name: "Delete" }).first().click();
+    const dialog = page.getByRole("alertdialog", {
+      name: "Delete this comment?",
+    });
+    await expect(dialog).toContainText("Its replies stay");
+    await dialog.getByRole("button", { name: "Delete comment" }).click();
+    await expect(dialog).toHaveCount(0);
+
+    await expect(thread.getByText("My regrettable comment")).toHaveCount(0);
+    await expect(thread.getByText("Comment deleted")).toBeVisible();
+    await thread.getByRole("button", { name: "View 1 reply" }).click();
+    await expect(thread.getByText("Someone else's reply")).toBeVisible();
+  },
+);

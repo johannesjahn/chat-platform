@@ -265,13 +265,20 @@ const CommentContent = Schema.Trimmed.check(Schema.isNonEmpty()).check(
 // with `parentCommentId` set — null for a top-level comment). Nesting is
 // capped at depth 2, so a reply's parent is always a top-level comment.
 // `reactions` mirrors `Post`'s — computed on read, not stored.
+//
+// A top-level comment deleted while it still has replies stays as a
+// placeholder so those replies aren't deleted with it (issue #904):
+// `deleted` is true, and it carries no author, content or reactions.
 export const Comment = Schema.Struct({
   id: Schema.Finite,
   postId: Schema.Finite,
   parentCommentId: Schema.NullOr(Schema.Finite),
-  authorId: Schema.Finite,
-  // Same embedded byline as `Post.author` (issue #750).
-  author: AuthorSummary,
+  // Null only on a deleted placeholder.
+  authorId: Schema.NullOr(Schema.Finite),
+  // Same embedded byline as `Post.author` (issue #750); null only on a
+  // deleted placeholder.
+  author: Schema.NullOr(AuthorSummary),
+  deleted: Schema.Boolean,
   content: Schema.String,
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
@@ -477,7 +484,8 @@ export const CommentsGroup = HttpApiGroup.make("comments")
   )
   .add(
     // Deletes a comment/reply — the author only (or an admin). A top-level
-    // comment's replies and every like on it cascade via the FKs.
+    // comment with replies becomes a `deleted` placeholder and its replies
+    // stay (issue #904); it goes for good with its last reply.
     HttpApiEndpoint.delete("deleteComment", "/comments/:id", {
       params: IdParam,
       success: HttpApiSchema.NoContent,

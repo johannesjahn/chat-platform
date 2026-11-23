@@ -6,7 +6,7 @@ import { Effect, Metric } from "effect";
 import { ChatApi } from "./Api.ts";
 import { Db } from "./Db.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
-import { comments, posts, users } from "./db/schema.ts";
+import { comments, likes, notifications, posts, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
 
 const run = makeTestRun();
@@ -392,7 +392,7 @@ test("commentCount counts top-level comments and replies on getPost/listPosts", 
     }),
   ));
 
-test("deleting a top-level comment cascades to its replies in commentCount", () =>
+test("a deleted comment's replies stay in commentCount, and the placeholder doesn't count (issue #904)", () =>
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("quinn");
@@ -400,7 +400,7 @@ test("deleting a top-level comment cascades to its replies in commentCount", () 
         params: { id: post.id },
         payload: { content: "top-level" },
       });
-      yield* authed.comments.createReply({
+      const reply = yield* authed.comments.createReply({
         params: { id: comment.id },
         payload: { content: "a reply" },
       });
@@ -409,13 +409,29 @@ test("deleting a top-level comment cascades to its replies in commentCount", () 
       });
       expect(withComments.commentCount).toBe(2);
 
-      // Deleting the top-level comment cascades to its reply (FK in schema),
-      // so the count drops back to 0.
+      // The reply keeps the comment as a placeholder, which isn't counted.
       yield* authed.comments.deleteComment({ params: { id: comment.id } });
-      const afterDelete = yield* authed.posts.getPost({
-        params: { id: post.id },
-      });
-      expect(afterDelete.commentCount).toBe(0);
+      expect(
+        (yield* authed.posts.getPost({ params: { id: post.id } })).commentCount,
+      ).toBe(1);
+
+      // The last reply takes the placeholder with it.
+      yield* authed.comments.deleteComment({ params: { id: reply.id } });
+      expect(
+        (yield* authed.posts.getPost({ params: { id: post.id } })).commentCount,
+      ).toBe(0);
+      const db = yield* Db;
+      const left = yield* Effect.promise(() =>
+        db.select().from(comments).where(eq(comments.postId, post.id)),
+      );
+      expect(left).toEqual([]);
+      const [stored] = yield* Effect.promise(() =>
+        db
+          .select({ count: posts.commentCount })
+          .from(posts)
+          .where(eq(posts.id, post.id)),
+      );
+      expect(stored?.count).toBe(0);
     }),
   ));
 
@@ -862,7 +878,80 @@ test("deleteComment lets the author delete; an admin can delete anyone's", () =>
     }),
   ));
 
-test("deleteComment cascades to its replies", () =>
+// Issue #904: the `parent_comment_id` cascade used to take everyone's
+// replies with a deleted comment.
+test("deleting a comment keeps other people's replies under a placeholder", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed: bob, post } = yield* setupPostBy("bob");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const carolClient = yield* makeAuthedClient(carol.accessToken);
+      const comment = yield* bob.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "bob's comment" },
+      });
+      yield* carolClient.comments.addCommentReaction({
+        params: { id: comment.id },
+        payload: { emoji: "👍" },
+      });
+      const reply = yield* carolClient.comments.createReply({
+        params: { id: comment.id },
+        payload: { content: "carol's reply" },
+      });
+
+      yield* bob.comments.deleteComment({ params: { id: comment.id } });
+
+      const listed = yield* carolClient.comments.listComments({
+        params: { id: post.id },
+        query: {},
+      });
+      expect(listed.comments).toHaveLength(1);
+      const placeholder = listed.comments[0]!;
+      expect(placeholder).toMatchObject({
+        id: comment.id,
+        deleted: true,
+        author: null,
+        authorId: null,
+        content: "",
+        reactions: [],
+        replyCount: 1,
+      });
+      const replies = yield* carolClient.comments.listReplies({
+        params: { id: comment.id },
+        query: {},
+      });
+      expect(replies.comments.map((c) => c.id)).toEqual([reply.id]);
+      expect(replies.comments[0]).toMatchObject({
+        deleted: false,
+        content: "carol's reply",
+        authorId: carol.user.id,
+      });
+      const fetched = yield* carolClient.comments.getComment({
+        params: { id: comment.id },
+      });
+      expect(fetched.deleted).toBe(true);
+      expect(fetched.content).toBe("");
+
+      // Its reactions and the notifications about it go, as with a delete;
+      // the notification about Carol's reply stays.
+      const db = yield* Db;
+      const reactionsLeft = yield* Effect.promise(() =>
+        db.select().from(likes).where(eq(likes.commentId, comment.id)),
+      );
+      expect(reactionsLeft).toEqual([]);
+      const notificationsLeft = yield* Effect.promise(() =>
+        db
+          .select({ commentId: notifications.commentId })
+          .from(notifications)
+          .where(eq(notifications.postId, post.id)),
+      );
+      // (Bob's comment on his own post never notified anyone; Carol's
+      // reaction to it did, and that row is the one that's gone.)
+      expect(notificationsLeft.map((n) => n.commentId)).toEqual([reply.id]);
+    }),
+  ));
+
+test("a deleted comment's placeholder can't be replied to, reacted to, edited or deleted again", () =>
   run(
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("evan");
@@ -870,20 +959,111 @@ test("deleteComment cascades to its replies", () =>
         params: { id: post.id },
         payload: { content: "parent" },
       });
-      const reply = yield* authed.comments.createReply({
+      yield* authed.comments.createReply({
         params: { id: comment.id },
         payload: { content: "child" },
       });
-
       yield* authed.comments.deleteComment({ params: { id: comment.id } });
 
-      // The reply is gone with its parent — reacting to it now 404s.
+      const id = { id: comment.id };
+      const failures = yield* Effect.all([
+        authed.comments
+          .createReply({ params: id, payload: { content: "late" } })
+          .pipe(Effect.flip),
+        authed.comments
+          .addCommentReaction({ params: id, payload: { emoji: "👍" } })
+          .pipe(Effect.flip),
+        authed.comments
+          .updateComment({ params: id, payload: { content: "revived" } })
+          .pipe(Effect.flip),
+        authed.comments.deleteComment({ params: id }).pipe(Effect.flip),
+      ]);
+      expect(failures.map((f) => f._tag)).toEqual([
+        "NotFound",
+        "NotFound",
+        "NotFound",
+        "NotFound",
+      ]);
+    }),
+  ));
+
+test("deleting a comment with no replies removes it outright", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("fern");
+      const comment = yield* authed.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "alone" },
+      });
+      yield* authed.comments.deleteComment({ params: { id: comment.id } });
       const result = yield* authed.comments
-        .addCommentReaction({
-          params: { id: reply.id },
-          payload: { emoji: "👍" },
-        })
+        .getComment({ params: { id: comment.id } })
         .pipe(Effect.flip);
       expect(result._tag).toBe("NotFound");
+    }),
+  ));
+
+test("deleting one of several replies under a placeholder keeps the placeholder", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed, post } = yield* setupPostBy("gale");
+      const comment = yield* authed.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "parent" },
+      });
+      const first = yield* authed.comments.createReply({
+        params: { id: comment.id },
+        payload: { content: "one" },
+      });
+      yield* authed.comments.createReply({
+        params: { id: comment.id },
+        payload: { content: "two" },
+      });
+      yield* authed.comments.deleteComment({ params: { id: comment.id } });
+      yield* authed.comments.deleteComment({ params: { id: first.id } });
+
+      const listed = yield* authed.comments.listComments({
+        params: { id: post.id },
+        query: {},
+      });
+      expect(listed.comments).toHaveLength(1);
+      expect(listed.comments[0]).toMatchObject({
+        deleted: true,
+        replyCount: 1,
+      });
+    }),
+  ));
+
+test("a placeholder whose replies the viewer all hides is left out of their thread", () =>
+  run(
+    Effect.gen(function* () {
+      const { authed: bob, post } = yield* setupPostBy("hal");
+      const carol = yield* registerAndLogin("iris", "pw-testpass");
+      const carolClient = yield* makeAuthedClient(carol.accessToken);
+      const comment = yield* bob.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "parent" },
+      });
+      yield* carolClient.comments.createReply({
+        params: { id: comment.id },
+        payload: { content: "carol's reply" },
+      });
+      yield* bob.comments.deleteComment({ params: { id: comment.id } });
+
+      const viewer = yield* registerAndLogin("jules", "pw-testpass");
+      const viewerClient = yield* makeAuthedClient(viewer.accessToken);
+      yield* viewerClient.users.setBlock({
+        params: { id: carol.user.id },
+        payload: { type: "mute" },
+      });
+      const listed = yield* viewerClient.comments.listComments({
+        params: { id: post.id },
+        query: {},
+      });
+      expect(listed.comments).toEqual([]);
+      expect(
+        (yield* viewerClient.posts.getPost({ params: { id: post.id } }))
+          .commentCount,
+      ).toBe(0);
     }),
   ));

@@ -20,6 +20,17 @@ import { refetchUnlessWarmed } from "./routeLoader";
 
 export type Comment = components["schemas"]["Comment"];
 
+// Every comment but a deleted placeholder (issue #904), which keeps a
+// thread's replies in place and carries no author or content.
+export type LiveComment = Comment & {
+  deleted: false;
+  authorId: number;
+  author: NonNullable<Comment["author"]>;
+};
+
+export const isLiveComment = (comment: Comment): comment is LiveComment =>
+  !comment.deleted && comment.authorId !== null && comment.author !== null;
+
 // Content is capped server-side (`MAX_COMMENT_CONTENT_LENGTH` in src/Api.ts) —
 // mirrored here so the composer can show a live counter without a round-trip.
 export const MAX_COMMENT_CONTENT_LENGTH = 2_000;

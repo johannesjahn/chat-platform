@@ -28,6 +28,7 @@ const comment = (
     avatarUrl: null,
     avatarVariants: null,
   },
+  deleted: false,
   content: `comment ${id}`,
   createdAt: id,
   updatedAt: id,
