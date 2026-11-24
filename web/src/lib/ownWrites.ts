@@ -1,7 +1,7 @@
 // Keeps this client's own writes from being fetched twice (issue #753).
 //
-// Creating a post or a comment publishes a realtime event (`post_changed` /
-// `comment_changed`) to everyone who'd see it — this client included. The
+// Creating a comment publishes a realtime event (`comment_changed`) to
+// everyone who'd see it — this client included. The
 // creating client already has the new row from its mutation response and
 // writes it into the cache itself, so applying the echo too only refetches
 // what's already there. But the event carries no actor, and it can arrive on
@@ -20,10 +20,8 @@
 
 export type OwnWriteScope = string;
 
-// Post ids and comment ids are separate sequences, so each scope keeps its
-// own set. A comment's echo is scoped to its post (a reply's echo carries the
+// A comment's echo is scoped to its post (a reply's echo carries the
 // post id too), which is all `comment_changed` lets this side key on.
-export const OWN_POST_SCOPE: OwnWriteScope = "post";
 export const ownCommentScope = (postId: number): OwnWriteScope =>
   `comments:${postId}`;
 

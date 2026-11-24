@@ -28,8 +28,7 @@ import {
 
 // Issue #749: what each `chat_updated` makes this client fetch. These pin
 // down that a read receipt and a new message in an open conversation cost
-// no refetch of the chat list or the chat, and that everything else —
-// including an event from a server that predates `change` — still
+// no refetch of the chat list or the chat, and that everything else still
 // refetches all three.
 
 type ChatsPage = components["schemas"]["ChatsPage"];
@@ -130,7 +129,7 @@ test("our own read is left to its response here, and refetches the counts elsewh
   const ownRead = {
     type: "chat_updated" as const,
     chatId,
-    change: "read",
+    change: "read" as const,
     userId: ME,
     fromMessageId: 0,
     lastReadMessageId: 3,
@@ -163,6 +162,7 @@ test("a new message in an open conversation fetches only the messages", () => {
       change: "message_created",
       messageId: 4,
       senderId: BOB,
+      message: message(4, chatId, BOB),
     },
     ME,
   );
@@ -174,33 +174,13 @@ test("a new message in an open conversation fetches only the messages", () => {
   release();
 });
 
-test("a new message in a chat that isn't open refetches the list and the chat", () => {
-  const chatId = nextChatId++;
-  const client = seed(chatId);
-  applyChatUpdated(
-    client,
-    {
-      type: "chat_updated",
-      chatId,
-      version: 2,
-      change: "message_created",
-      messageId: 4,
-      senderId: BOB,
-    },
-    ME,
-  );
-  expect(invalidated(client, chatId)).toEqual(everything);
-});
-
-test("an event without a change, one this client doesn't know, or after a gap refetches everything", () => {
+test("an event without a change, or after a gap refetches everything", () => {
   for (const event of [
-    // From a server that predates `change`.
     { version: 2 },
-    { version: 2, change: "something_new" },
     // A read, but version 3 after 1: something was missed.
     {
       version: 3,
-      change: "read",
+      change: "read" as const,
       userId: BOB,
       fromMessageId: 0,
       lastReadMessageId: 3,
@@ -336,6 +316,7 @@ const newMessage = (chatId: number, version: number, senderId = BOB) =>
     change: "message_created",
     messageId: 10 + version,
     senderId,
+    message: message(10 + version, chatId, senderId),
   }) as const;
 
 const listedChat = (client: QueryClient, chatId: number) =>
@@ -398,8 +379,10 @@ test("our own message from another device leaves the unread counts alone", () =>
 });
 
 test("a burst of messages refetches the lists once at once and once at the end of the window", async () => {
+  // A chat the list doesn't hold, so it can't be patched.
   const chatId = nextChatId++;
-  const client = seed(chatId);
+  const client = seed(nextChatId++);
+  recordChatVersion(chatId, 1);
   let listRefetches = 0;
   const invalidate = client.invalidateQueries.bind(client);
   client.invalidateQueries = ((filters, options) => {
@@ -424,15 +407,6 @@ test("a burst of messages refetches the lists once at once and once at the end o
 
 // The event carries the message (issue #834), so the list is patched from it
 // rather than refetched.
-const newMessageWithBody = (
-  chatId: number,
-  version: number,
-  senderId = BOB,
-) => {
-  const event = newMessage(chatId, version, senderId);
-  return { ...event, message: message(event.messageId, chatId, senderId) };
-};
-
 const listOf = (chats: Chat[]): InfiniteData<ChatsPage> => ({
   pages: [{ chats, limit: 20, nextCursor: null }],
   pageParams: [undefined],
@@ -446,7 +420,7 @@ test("a message the event carries becomes the listed chat's preview and moves it
     pages: [{ chats: [other], limit: 20, nextCursor: null }],
     pageParams: [undefined],
   });
-  const event = newMessageWithBody(chatId, 2);
+  const event = newMessage(chatId, 2);
 
   applyChatUpdated(client, event, ME);
 
@@ -485,7 +459,7 @@ test("a carried message for a chat nothing here has cached refetches the lists",
   const elsewhere = nextChatId++;
   recordChatVersion(elsewhere, 1);
 
-  applyChatUpdated(client, newMessageWithBody(elsewhere, 2), ME);
+  applyChatUpdated(client, newMessage(elsewhere, 2), ME);
 
   expect(client.getQueryState(chatsListQueryKey)?.isInvalidated).toBe(true);
 });
@@ -509,7 +483,7 @@ test("a carried message older than the chat's preview leaves it alone", () => {
 test("a carried message that doesn't match the event is ignored, and the list refetched", () => {
   const chatId = nextChatId++;
   const client = seed(chatId);
-  const event = { ...newMessageWithBody(chatId, 2), messageId: 99 };
+  const event = { ...newMessage(chatId, 2), messageId: 99 };
 
   applyChatUpdated(client, event, ME);
 
@@ -520,7 +494,7 @@ test("a carried message that doesn't match the event is ignored, and the list re
 test("our own message from another device, carried, becomes the preview without counting as unread", () => {
   const chatId = nextChatId++;
   const client = seed(chatId);
-  const event = newMessageWithBody(chatId, 2, ME);
+  const event = newMessage(chatId, 2, ME);
 
   applyChatUpdated(client, event, ME);
 
@@ -535,7 +509,7 @@ test("a carried message leaves the requests list alone, and an Unread list that 
   const unreadChat = chatOf(chatId, { unreadCount: 1 });
   client.setQueryData(unreadChatsListQueryKey, listOf([unreadChat]));
   client.setQueryData(chatRequestsListQueryKey, listOf([]));
-  const event = newMessageWithBody(chatId, 2);
+  const event = newMessage(chatId, 2);
 
   applyChatUpdated(client, event, ME);
 
@@ -616,7 +590,7 @@ test("a message brings an archived chat back to the main list", () => {
     archivedChatsListQueryKey,
     listOf([chatOf(archivedId, { archived: true, unreadCount: 2 })]),
   );
-  applyChatUpdated(client, newMessageWithBody(archivedId, 2), ME);
+  applyChatUpdated(client, newMessage(archivedId, 2), ME);
 
   const inList = (key: readonly unknown[]) =>
     client
@@ -653,7 +627,7 @@ test("a list fetch in flight when a message un-archives a chat is redone, not le
   void observer.refetch();
   await settle();
 
-  applyChatUpdated(client, newMessageWithBody(archivedId, 2), ME);
+  applyChatUpdated(client, newMessage(archivedId, 2), ME);
   await settle();
   // Answered from before the message, when the chat was still archived.
   answers[0]!({ chats: [], limit: 20, nextCursor: null });
@@ -691,7 +665,7 @@ test("a new message doesn't move a chat above a pinned one", () => {
       chatOf(chatId, { updatedAt: 3000 }),
     ]),
   );
-  applyChatUpdated(client, newMessageWithBody(chatId, 2), ME);
+  applyChatUpdated(client, newMessage(chatId, 2), ME);
   const ids = client
     .getQueryData<InfiniteData<ChatsPage>>(chatsListQueryKey)!
     .pages.flatMap((page) => page.chats)
@@ -706,7 +680,7 @@ test("a message left to a conversation that closes before reading it refetches t
     client.getQueryState(chatsListQueryKey)?.isInvalidated;
 
   const release = holdChatInView(chatId);
-  applyChatUpdated(client, newMessageWithBody(chatId, 2), ME);
+  applyChatUpdated(client, newMessage(chatId, 2), ME);
   expect(invalidated()).toBe(false);
   release();
   expect(invalidated()).toBe(true);
@@ -718,7 +692,7 @@ test("a message left to a conversation that closes before reading it refetches t
   const other = nextChatId++;
   const otherClient = seed(other);
   const releaseOther = holdChatInView(other);
-  const event = newMessageWithBody(other, 2);
+  const event = newMessage(other, 2);
   applyChatUpdated(otherClient, event, ME);
   applyMarkedRead(
     otherClient,
@@ -743,7 +717,7 @@ test("a message counts in its chat even while the total is being fetched", async
       queryFn: () => new Promise<never>(() => {}),
     })
     .catch(() => {});
-  applyChatUpdated(client, newMessageWithBody(chatId, 2), ME);
+  applyChatUpdated(client, newMessage(chatId, 2), ME);
   expect(listedChat(client, chatId)?.unreadCount).toBe(1);
   await client.cancelQueries();
 });

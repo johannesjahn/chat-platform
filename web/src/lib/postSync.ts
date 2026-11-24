@@ -20,9 +20,7 @@ import {
   userPostsQueryKeyPrefix,
 } from "./posts";
 
-// `change` is absent when talking to a server from before it was added —
-// treated as "might be new", which is what every event used to mean.
-export type PostChange = "created" | "updated" | "deleted";
+export type PostChange = "updated" | "deleted";
 
 // Applies one `post_changed` event to whatever this client has cached, at a
 // cost of at most one request (issue #662). It used to invalidate the feed,
@@ -33,15 +31,11 @@ export type PostChange = "created" | "updated" | "deleted";
 // - Deleted: dropped from the cache, no request.
 // - A post we have cached: refetched alone (`GET /posts/:id`) and patched in
 //   wherever it is, or dropped if it's gone by then.
-// - Created (not cached yet): the feed's newest page is fetched once and
-//   folded on top (`loadNewestFeedPage`). An open profile feed of its author
-//   gets it on top too. Only a server that predates `feed_head` sends this;
-//   a current one announces new posts coalesced instead (see feedHead.ts).
 // - Updated, but not cached: nothing on screen shows it, nothing to do.
 export async function syncChangedPost(
   queryClient: QueryClient,
   postId: number,
-  change: PostChange | undefined,
+  change: PostChange,
 ): Promise<void> {
   if (change === "deleted") {
     removeCachedPost(queryClient, postId);
@@ -49,16 +43,13 @@ export async function syncChangedPost(
   }
   if (isPostCached(queryClient, postId)) {
     await refreshCachedPost(queryClient, postId);
-    return;
   }
-  if (change === "updated") return;
-  await pullNewPost(queryClient, postId);
 }
 
 // Writes this client's own just-created post (the `POST /posts` response)
 // into the feed and its author's profile feed, wherever they're cached — in
-// place of refetching them (issue #753). Its realtime echo is then dropped
-// (see ownWrites.ts), so a create costs the write and nothing else.
+// place of refetching them (issue #753), so a create costs the write and
+// nothing else.
 export function addCreatedPost(queryClient: QueryClient, post: Post): void {
   queryClient.setQueryData<FeedData>(postsFeedQueryKey, (data) =>
     data ? insertFeedPost(data, post) : data,
@@ -137,30 +128,4 @@ export async function loadNewestFeedPage(
     cached ? mergeNewestFeedPage(cached, data) : cached,
   );
   return data;
-}
-
-async function pullNewPost(
-  queryClient: QueryClient,
-  postId: number,
-): Promise<void> {
-  let post: Post | undefined = (
-    await loadNewestFeedPage(queryClient)
-  )?.posts.find((p) => p.id === postId);
-
-  const profileCached = queryClient
-    .getQueriesData<UserPostsData>({ queryKey: userPostsQueryKeyPrefix })
-    .some(([, data]) => data !== undefined);
-  if (!profileCached) return;
-  if (!post) {
-    const { data } = await fetchClient
-      .GET("/posts/{id}", { params: { path: { id: String(postId) } } })
-      .catch(() => ({ data: undefined }));
-    if (!data) return;
-    post = data;
-  }
-  const created = post;
-  queryClient.setQueryData<UserPostsData>(
-    userPostsQueryKey(created.authorId),
-    (data) => (data ? prependUserPost(data, created) : data),
-  );
 }

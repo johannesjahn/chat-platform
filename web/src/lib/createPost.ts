@@ -1,7 +1,6 @@
 import { onlineManager, useQueryClient } from "@tanstack/react-query";
 import { $api } from "./api";
 import { enqueuePost, makeClientId } from "./offlineQueue";
-import { OWN_POST_SCOPE, ownWrites } from "./ownWrites";
 import { addCreatedPost } from "./postSync";
 
 export type NewPost = {
@@ -32,11 +31,8 @@ export function useCreatePost() {
       enqueuePost({ body }, clientId);
       return;
     }
-    // The response goes straight into the cached feeds, and the realtime
-    // echo of this create is dropped rather than refetched (issue #753):
-    // one request, no follow-up read.
-    const settle = ownWrites.begin(OWN_POST_SCOPE);
-    let createdId: number | null = null;
+    // The response goes straight into the cached feeds (issue #753): one
+    // request, no follow-up read.
     try {
       const post = await createPost.mutateAsync({
         body: {
@@ -45,7 +41,6 @@ export function useCreatePost() {
           clientId,
         },
       });
-      createdId = post.id;
       addCreatedPost(queryClient, post);
     } catch (err) {
       // A network-level failure discovered mid-request (as opposed to a
@@ -57,8 +52,6 @@ export function useCreatePost() {
         return;
       }
       throw err;
-    } finally {
-      settle(createdId);
     }
   };
 }

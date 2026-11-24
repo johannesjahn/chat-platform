@@ -30,29 +30,33 @@ import { classifyChatVersion, recordChatVersion } from "./chatVersions";
 // - a new message in a chat that isn't on screen is counted into the unread
 //   badge and made the listed chat's preview from the message the event
 //   carries (issue #834), so that's no request either;
-// - anything else, a missed version, or an event from a server that
-//   predates `change`, refetches all three, as before.
+// - anything else, or a missed version, refetches all three.
 
 type ChatsPage = components["schemas"]["ChatsPage"];
 type UnreadChatCount = components["schemas"]["UnreadChatCount"];
 
+// Without a `change`, something with no narrower meaning happened (see
+// ChatEvent in src/Realtime.ts).
 export type ChatUpdatedEvent = {
   type: "chat_updated";
   chatId: number;
   version: number;
-  // Absent from a server that predates it, and on any change that has no
-  // narrower meaning (see ChatEvent in src/Realtime.ts). A value this
-  // client doesn't know is treated the same way.
-  change?: string;
-  messageId?: number;
-  senderId?: number;
-  // On "message_created": the message as a participant other than its
-  // sender sees it — absent from a server that predates it.
-  message?: ChatMessage;
-  userId?: number;
-  fromMessageId?: number;
-  lastReadMessageId?: number;
-};
+} & (
+  | { change?: undefined }
+  | {
+      change: "message_created";
+      messageId: number;
+      senderId: number;
+      // As a participant other than its sender sees it.
+      message: ChatMessage;
+    }
+  | {
+      change: "read";
+      userId: number;
+      fromMessageId: number;
+      lastReadMessageId: number;
+    }
+);
 
 // --- Conversations on screen ------------------------------------------------
 
@@ -154,17 +158,13 @@ export function applyChatUpdated(
   recordChatVersion(chatId, version);
   if (classification === "gap") return refetchChat(queryClient, chatId);
 
-  if (
-    event.change === "read" &&
-    event.userId != null &&
-    event.lastReadMessageId != null
-  ) {
+  if (event.change === "read") {
     if (event.userId !== meId) {
       patchReadReceipt(
         queryClient,
         chatId,
         event.userId,
-        event.fromMessageId ?? 0,
+        event.fromMessageId,
         event.lastReadMessageId,
       );
       return;
@@ -188,8 +188,7 @@ export function applyChatUpdated(
     // message read (and that response carries the chat) or, for one of our
     // own, patches the preview from it.
     if (isChatInView(chatId)) {
-      if (event.messageId !== undefined)
-        leftToView.set(chatId, { queryClient, messageId: event.messageId });
+      leftToView.set(chatId, { queryClient, messageId: event.messageId });
       return;
     }
     // Off screen (issue #834). This used to refetch the unread total and
@@ -198,8 +197,7 @@ export function applyChatUpdated(
     // unread, which the badge and the listed chat can count themselves, and
     // the event carries the message, which is the listed chat's new
     // preview and puts it back at the top. Only a chat this client has
-    // nothing cached for, or a server that doesn't send the message, still
-    // refetches the lists — at most once per LIST_REFETCH_WINDOW_MS while
+    // nothing cached for still refetches the lists — at most once per LIST_REFETCH_WINDOW_MS while
     // messages keep arriving.
     if (event.senderId !== meId && !countUnread(queryClient, chatId)) {
       void queryClient.invalidateQueries({
@@ -208,7 +206,6 @@ export function applyChatUpdated(
     }
     const { message } = event;
     if (
-      message !== undefined &&
       message.id === event.messageId &&
       message.chatId === chatId &&
       placeNewestMessage(queryClient, chatId, message, version)
