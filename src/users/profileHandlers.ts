@@ -47,9 +47,6 @@ export const profileHandlers = ({
             .set({
               displayName: payload.displayName,
               avatarUrl: payload.avatarUrl,
-              avatarSmall: null,
-              avatarMedium: null,
-              avatarLarge: null,
               avatarSmallKey: null,
               avatarMediumKey: null,
               avatarLargeKey: null,
@@ -120,9 +117,6 @@ export const profileHandlers = ({
             .update(users)
             .set({
               avatarUrl: null,
-              avatarSmall: null,
-              avatarMedium: null,
-              avatarLarge: null,
               ...keys,
             })
             .where(eq(users.id, currentUser.id))
