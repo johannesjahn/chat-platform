@@ -14,7 +14,12 @@ import {
 } from "@/components/ui/card";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
-import { postsFeedQueryKey } from "@/lib/posts";
+import { backOrigin, canGoBackTo } from "@/lib/backOrigin";
+import {
+  postDetailQueryKeyPrefix,
+  postsFeedQueryKey,
+  userPostsQueryKeyPrefix,
+} from "@/lib/posts";
 import { staticTitle } from "@/lib/title";
 
 export const Route = createFileRoute("/posts/$id/edit")({
@@ -117,12 +122,29 @@ function EditPostPage() {
         </Link>
       }
       onSubmit={async ({ contentType, content, attachmentId, caption }) => {
+        const { location } = router.state;
         await updatePost.mutateAsync({
           params: { path: { id } },
           body: { contentType, content, attachmentId, caption },
         });
-        await queryClient.invalidateQueries({ queryKey: postsFeedQueryKey });
-        await router.navigate({ to: "/" });
+        await Promise.all(
+          [
+            postsFeedQueryKey,
+            userPostsQueryKeyPrefix,
+            postDetailQueryKeyPrefix,
+          ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+        );
+        // They may have left while the save was running.
+        if (router.state.location.href !== location.href) return;
+        // Back to wherever the edit was opened from (issue #896), or to the
+        // post when there's no such place, as `BackButton` does.
+        if (canGoBackTo(router, backOrigin(location))) router.history.back();
+        else
+          await router.navigate({
+            to: "/posts/$id",
+            params: { id },
+            replace: true,
+          });
       }}
     />
   );

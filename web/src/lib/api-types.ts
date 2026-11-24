@@ -1840,6 +1840,11 @@ export interface components {
         };
         /** @enum {string} */
         ReactionEmoji: "👍" | "❤️" | "😂" | "😮" | "😢" | "😡";
+        AttachmentInUseEncoded: {
+            /** @enum {string} */
+            _tag: "AttachmentInUse";
+            message: string;
+        };
         UpdateMessageBody: {
             contentType: components["schemas"]["MessageContentType"];
             content: string;
@@ -3103,6 +3108,15 @@ export interface operations {
                     "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
+            /** @description AttachmentInUse */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentInUseEncoded"];
+                };
+            };
         };
     };
     "posts.deletePost": {
@@ -3249,6 +3263,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotFoundEncoded"];
+                };
+            };
+            /** @description AttachmentInUse */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentInUseEncoded"];
                 };
             };
         };
@@ -4944,6 +4967,15 @@ export interface operations {
                     "application/json": components["schemas"]["NotFoundEncoded"];
                 };
             };
+            /** @description AttachmentInUse */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentInUseEncoded"];
+                };
+            };
         };
     };
     "chats.forwardMessage": {
@@ -5186,6 +5218,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotFoundEncoded"];
+                };
+            };
+            /** @description AttachmentInUse */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentInUseEncoded"];
                 };
             };
         };

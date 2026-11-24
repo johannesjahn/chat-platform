@@ -7,7 +7,13 @@ import { HttpApiClient } from "effect/http-api";
 import { Effect, Layer } from "effect";
 import { ChatApi } from "./Api.ts";
 import { Db, type DrizzleDb } from "./Db.ts";
-import { chatInvites, chatParticipants, chats, users } from "./db/schema.ts";
+import {
+  attachments,
+  chatInvites,
+  chatParticipants,
+  chats,
+  users,
+} from "./db/schema.ts";
 import * as schema from "./db/schema.ts";
 import { Jwt, JwtLive } from "./Jwt.ts";
 import { makeTestRun } from "./testApi.ts";
@@ -113,6 +119,76 @@ describeIfPostgres("chat transactions on real Postgres", () => {
             .refresh({ payload: { refreshToken: winner.success.refreshToken } })
             .pipe(Effect.flip);
           expect(after._tag).toBe("InvalidCredentials");
+        }
+      }),
+    ));
+
+  // Claims of one attachment take turns on its row lock, across posts and
+  // messages (issue #896).
+  test("concurrent posts and messages with one attachment store it once", () =>
+    run(
+      Effect.gen(function* () {
+        const alice = yield* createUser("alice");
+        const bob = yield* createUser("bob");
+        const chat = yield* alice.client.chats.createDirectChat({
+          payload: { userId: bob.user.id },
+        });
+        const upload = () =>
+          query(() =>
+            db
+              .insert(attachments)
+              .values({
+                uploaderId: alice.user.id,
+                filename: "a.png",
+                mimeType: "image/png",
+                size: 1,
+                storageKey: "attachments/a",
+              })
+              .returning(),
+          ).pipe(Effect.map((rows) => rows[0]!.id));
+        const send = (
+          i: number,
+          payload: {
+            contentType: "attachment";
+            content: string;
+            attachmentId: number;
+            clientId?: string;
+          },
+        ) =>
+          Effect.gen(function* () {
+            return i % 2 === 0
+              ? yield* alice.client.posts.createPost({ payload })
+              : yield* alice.client.chats.createMessage({
+                  params: { id: chat.id },
+                  payload,
+                });
+          });
+        const body = (attachmentId: number) => ({
+          contentType: "attachment" as const,
+          content: "a.png",
+          attachmentId,
+        });
+
+        const shared = yield* upload();
+        const results = yield* Effect.all(
+          Array.from({ length: 6 }, (_, i) =>
+            send(i, body(shared)).pipe(Effect.result),
+          ),
+          { concurrency: "unbounded" },
+        );
+        expect(results.filter((r) => r._tag === "Success").length).toBe(1);
+        for (const r of results)
+          if (r._tag === "Failure")
+            expect(r.failure._tag).toBe("AttachmentInUse");
+
+        // A double-sent create under one key is the same row, not a conflict.
+        for (const kind of [0, 1]) {
+          const payload = { ...body(yield* upload()), clientId: "same" };
+          const twins = yield* Effect.all(
+            Array.from({ length: 4 }, () => send(kind, payload)),
+            { concurrency: "unbounded" },
+          );
+          expect(new Set(twins.map((t) => t.id)).size).toBe(1);
         }
       }),
     ));

@@ -578,3 +578,31 @@ test("someone else's post, edit and delete reach a deeply scrolled feed without 
   expect(singleRequests.length).toBeLessThanOrEqual(1);
   await expect(articles).toHaveCount(20);
 });
+
+test("saving an edit returns to where it was opened from (issue #896)", async ({
+  page,
+  signUp,
+}) => {
+  const { username } = await signUp(page);
+  await page.goto("/posts/new");
+  await page.fill("#content", "First draft");
+  await page.getByRole("button", { name: "Post", exact: true }).click();
+  await expect(page).toHaveURL("/");
+  const card = page.getByRole("article", { name: `Post by @${username}` });
+  const postId = await card.getAttribute("data-post-id");
+
+  // From the post page…
+  await page.goto(`/posts/${postId}`);
+  await page.getByRole("link", { name: "Edit post" }).click();
+  await page.fill("#content", "Second draft");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page).toHaveURL(`/posts/${postId}`);
+  await expect(page.getByText("Second draft")).toBeVisible();
+
+  // …and opened directly, with nowhere to go back to, also to the post.
+  await page.goto(`/posts/${postId}/edit`);
+  await page.fill("#content", "Third draft");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page).toHaveURL(`/posts/${postId}`);
+  await expect(page.getByText("Third draft")).toBeVisible();
+});

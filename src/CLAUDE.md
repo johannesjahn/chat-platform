@@ -97,6 +97,11 @@ activity first, capped at `MAX_CONTACTS`. That rule is `contactOf`
 
 ## Attachments
 
+**One row per attachment** (issue #896): anything that stores a client's
+`attachmentId` writes through `withClaimedAttachment` (attachments.ts), which
+404s on someone else's upload and 409s on one already on another post or
+message. An edit that keeps its file skips both.
+
 **Captions** (issue #765, `0037`): posts and messages carry an optional
 `caption` beside an attachment.
 

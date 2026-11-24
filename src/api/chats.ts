@@ -4,6 +4,7 @@ import { Authentication } from "../Auth.ts";
 import { Attachment } from "./attachments.ts";
 import { AvatarVariants, isMinLength } from "./common.ts";
 import {
+  AttachmentInUse,
   Forbidden,
   InvalidChatRequest,
   NotFound,
@@ -739,7 +740,7 @@ export const ChatsGroup = HttpApiGroup.make("chats")
       params: ChatIdPath,
       payload: CreateMessageBody,
       success: Message.pipe(HttpApiSchema.status(201)),
-      error: [NotFound, Forbidden],
+      error: [NotFound, Forbidden, AttachmentInUse],
     }).middleware(Authentication),
   )
   .add(
@@ -790,7 +791,7 @@ export const ChatsGroup = HttpApiGroup.make("chats")
       params: MessageIdPath,
       payload: UpdateMessageBody,
       success: Message,
-      error: [NotFound, Forbidden],
+      error: [NotFound, Forbidden, AttachmentInUse],
     }).middleware(Authentication),
   )
   .add(

@@ -2,7 +2,6 @@ import { HttpApiBuilder } from "effect/http-api";
 import { and, desc, eq, lt, notInArray } from "drizzle-orm";
 import { Effect, Metric } from "effect";
 import {
-  type Attachment,
   ChatApi,
   DEFAULT_POSTS_LIMIT,
   Forbidden,
@@ -10,9 +9,9 @@ import {
   NotFound,
 } from "./Api.ts";
 import {
-  getOwnedAttachmentOr404,
   resolveAttachments,
   toApiAttachment,
+  withClaimedAttachment,
 } from "./attachments.ts";
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
@@ -245,41 +244,48 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               );
           }
 
-          let attachment: Attachment | null = null;
-          if (payload.attachmentId !== undefined) {
-            const attachmentRow = yield* getOwnedAttachmentOr404(
-              db,
-              payload.attachmentId,
-              currentUser.id,
-            );
-            attachment = toApiAttachment(
-              attachmentRow,
-              storage.presignGetUrl(attachmentRow.storageKey),
-            );
-          }
-
           // Set both from a single Date rather than relying on the schema's
           // independent per-column $defaultFn — two separate `new Date()`
           // calls can land a millisecond apart, and a freshly created post's
           // createdAt/updatedAt should be identical, not just close.
           const now = new Date();
-          const rows = yield* dbQuery(() =>
-            db
-              .insert(posts)
-              .values({
-                authorId: currentUser.id,
-                contentType: payload.contentType,
-                content: payload.content,
-                attachmentId: payload.attachmentId ?? null,
-                caption: payload.caption ?? null,
-                clientId: payload.clientId ?? null,
-                createdAt: now,
-                updatedAt: now,
-              })
-              .onConflictDoNothing()
-              .returning(),
+          const { clientId } = payload;
+          // A concurrent create of the same key that won the race has the
+          // attachment by now, so only a claim it didn't make is a conflict.
+          const claimed = yield* withClaimedAttachment(
+            db,
+            payload.attachmentId,
+            currentUser.id,
+            async (tx) =>
+              (
+                await tx
+                  .insert(posts)
+                  .values({
+                    authorId: currentUser.id,
+                    contentType: payload.contentType,
+                    content: payload.content,
+                    attachmentId: payload.attachmentId ?? null,
+                    caption: payload.caption ?? null,
+                    clientId: payload.clientId ?? null,
+                    createdAt: now,
+                    updatedAt: now,
+                  })
+                  .onConflictDoNothing()
+                  .returning()
+              )[0],
+          ).pipe(
+            Effect.catchTag("AttachmentInUse", (error) =>
+              Effect.gen(function* () {
+                const stored =
+                  clientId === undefined
+                    ? undefined
+                    : yield* findPostByClientId(db, currentUser.id, clientId);
+                if (!stored) return yield* Effect.fail(error);
+                return { result: undefined, attachment: null };
+              }),
+            ),
           );
-          const row = rows[0];
+          const row = claimed.result;
           if (!row && payload.clientId !== undefined) {
             // Lost a race with a concurrent create of the same key.
             const existing = yield* findPostByClientId(
@@ -297,6 +303,12 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           }
           if (!row)
             return yield* Effect.die(new Error("INSERT returned no rows"));
+          const attachment = claimed.attachment
+            ? toApiAttachment(
+                claimed.attachment,
+                storage.presignGetUrl(claimed.attachment.storageKey),
+              )
+            : null;
           yield* Metric.update(
             Metric.withAttributes(contentCreatedTotal, { type: "post" }),
             1,
@@ -328,40 +340,48 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               new Forbidden({ message: "You can only edit your own posts" }),
             );
 
-          let attachment: Attachment | null = null;
-          if (payload.attachmentId !== undefined) {
-            const attachmentRow = yield* getOwnedAttachmentOr404(
-              db,
-              payload.attachmentId,
-              currentUser.id,
-            );
-            attachment = toApiAttachment(
-              attachmentRow,
-              storage.presignGetUrl(attachmentRow.storageKey),
-            );
-          }
-
-          const rows = yield* dbQuery(() =>
-            db
-              .update(posts)
-              .set({
-                contentType: payload.contentType,
-                content: payload.content,
-                attachmentId: payload.attachmentId ?? null,
-                // Omitted keeps the current caption (see `UpdatePostBody`);
-                // only an attachment carries one.
-                caption:
-                  payload.contentType !== "attachment"
-                    ? null
-                    : payload.caption === undefined
-                      ? captionOf(existing)
-                      : payload.caption,
-                updatedAt: new Date(),
-              })
-              .where(eq(posts.id, id))
-              .returning(),
+          const claimed = yield* withClaimedAttachment(
+            db,
+            payload.attachmentId,
+            currentUser.id,
+            async (tx) =>
+              (
+                await tx
+                  .update(posts)
+                  .set({
+                    contentType: payload.contentType,
+                    content: payload.content,
+                    attachmentId: payload.attachmentId ?? null,
+                    // Omitted keeps the current caption (see `UpdatePostBody`);
+                    // only an attachment carries one.
+                    caption:
+                      payload.contentType !== "attachment"
+                        ? null
+                        : payload.caption === undefined
+                          ? captionOf(existing)
+                          : payload.caption,
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(posts.id, id))
+                  .returning()
+              )[0],
+            async (tx) => {
+              const current = await tx
+                .select({ attachmentId: posts.attachmentId })
+                .from(posts)
+                .where(eq(posts.id, id))
+                .for("update");
+              return current[0]?.attachmentId ?? null;
+            },
           );
-          const row = rows[0];
+          const row = claimed.result;
+          const attachment = claimed.attachment
+            ? toApiAttachment(
+                claimed.attachment,
+                storage.presignGetUrl(claimed.attachment.storageKey),
+              )
+            : null;
+
           if (!row)
             return yield* Effect.die(new Error("UPDATE returned no rows"));
           // Editing a post's content leaves its reactions and comments
