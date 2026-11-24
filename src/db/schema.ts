@@ -450,6 +450,54 @@ export const chatParticipants = pgTable(
 export type DbChatParticipant = typeof chatParticipants.$inferSelect;
 export type NewDbChatParticipant = typeof chatParticipants.$inferInsert;
 
+// Group activity shown between a chat's messages (issue #900); see
+// chats/chatEvents.ts. References only: names are joined in at read time, and
+// an account that's deleted leaves its events behind without one.
+// `afterMessageId` is the chat's newest message when it happened (0 for
+// none), deliberately no FK: that message may be deleted.
+export const chatEvents = pgTable(
+  "chat_events",
+  {
+    id: serial("id").primaryKey(),
+    chatId: integer("chat_id")
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    afterMessageId: integer("after_message_id").notNull(),
+    type: text("type", {
+      enum: [
+        "member_added",
+        "member_joined",
+        "member_left",
+        "member_removed",
+        "renamed",
+        "avatar_changed",
+        "avatar_removed",
+        "owner_changed",
+        "admin_granted",
+        "admin_revoked",
+      ],
+    }).notNull(),
+    actorId: integer("actor_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    targetId: integer("target_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    // The new title, for "renamed".
+    detail: text("detail"),
+    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+  },
+  (table) => [
+    index("chat_events_chat_id_idx").on(table.chatId, table.id),
+    // Serve the `set null` FKs when an account is deleted.
+    index("chat_events_actor_id_idx").on(table.actorId),
+    index("chat_events_target_id_idx").on(table.targetId),
+  ],
+);
+
+export type DbChatEvent = typeof chatEvents.$inferSelect;
+export type NewDbChatEvent = typeof chatEvents.$inferInsert;
+
 export const messages = pgTable(
   "messages",
   {

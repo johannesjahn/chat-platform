@@ -5,6 +5,7 @@ import { countsTowardUnread, hasLapsedMute } from "./chatMute";
 import {
   archivedChatsListQueryKey,
   chatDetailQueryKey,
+  chatEventsQueryKey,
   chatMessagesQueryKey,
   chatsListQueryKey,
   chatsUnreadCountQueryKey,
@@ -130,6 +131,7 @@ function refetchChat(queryClient: QueryClient, chatId: number): void {
   void queryClient.invalidateQueries({
     queryKey: chatMessagesQueryKey(chatId),
   });
+  void queryClient.invalidateQueries({ queryKey: chatEventsQueryKey(chatId) });
 }
 
 export function applyChatUpdated(

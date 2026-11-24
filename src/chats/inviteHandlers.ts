@@ -27,6 +27,7 @@ import {
   loadGroupChatAs,
 } from "./access.ts";
 import { buildChat, publishChatChange } from "./chatState.ts";
+import { recordChatEvents } from "./chatEvents.ts";
 import { newestMessageIdIn } from "./unread.ts";
 import { dbQuery } from "../Db.ts";
 
@@ -349,6 +350,9 @@ export const inviteHandlers = ({
             role: "member",
             lastReadMessageId: newestMessageIdIn(chatRow.id),
           });
+          await recordChatEvents(tx, chatRow.id, [
+            { type: "member_joined", actorId: currentUser.id },
+          ]);
           return { ok: true as const, joined: true };
         });
         if (!result.ok)

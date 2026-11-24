@@ -4962,6 +4962,85 @@
         }
       }
     },
+    "/chats/{id}/events": {
+      "get": {
+        "tags": [
+          "chats"
+        ],
+        "operationId": "chats.listChatEvents",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChatEvent"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HttpApiDecodeError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedEncoded"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenEncoded"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundEncoded"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chats/{id}/pins/{messageId}": {
       "delete": {
         "tags": [
@@ -11242,6 +11321,94 @@
           "messageId"
         ],
         "additionalProperties": false
+      },
+      "ChatEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ChatEventType"
+          },
+          "afterMessageId": {
+            "type": "number"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatEventPerson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatEventPerson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "afterMessageId",
+          "actor",
+          "target",
+          "detail",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "ChatEventPerson": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "ChatEventType": {
+        "type": "string",
+        "enum": [
+          "member_added",
+          "member_joined",
+          "member_left",
+          "member_removed",
+          "renamed",
+          "avatar_changed",
+          "avatar_removed",
+          "owner_changed",
+          "admin_granted",
+          "admin_revoked"
+        ]
       },
       "ReactionState": {
         "type": "object",

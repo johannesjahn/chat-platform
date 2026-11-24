@@ -53,6 +53,7 @@ import {
   isDirectChatWithDeletedAccount,
   type ChatMessage,
   useChatDetail,
+  useChatEvents,
   useChatMessages,
   useChatsTwoPane,
 } from "@/lib/chats";
@@ -133,6 +134,10 @@ export function ChatConversation({
     isFetching: messagesFetching,
     loadEarlier,
   } = useChatMessages(chatId, !!session);
+  const { data: chatEvents } = useChatEvents(
+    chatId,
+    !!session && chat?.type === "group",
+  );
 
   // A 403/404 is the server saying this viewer can't — or can no longer —
   // see this chat: they were removed from the group, it was deleted, or the
@@ -444,29 +449,34 @@ export function ChatConversation({
               <Skeleton className="h-10 w-2/3 self-start rounded-2xl" />
               <Skeleton className="h-10 w-1/2 self-end rounded-2xl" />
             </div>
-          ) : messages.length === 0 && pendingMessages.length === 0 ? (
-            <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-              {/* A request has no composer to say hi with (issue #898). */}
-              {chat.messageRequest
-                ? "No messages yet"
-                : "No messages yet — say hi 👋"}
-            </p>
           ) : (
-            <ThreadMessages
-              chat={chat}
-              messages={messages}
-              me={session.user}
-              canManage={canManage}
-              compact={docked || !isDesktop}
-              jumpHighlight={jumpHighlight}
-              editRequest={editRequest}
-              onEdit={handleEditMessage}
-              onDelete={handleDeleteMessage}
-              onReply={setReplyingTo}
-              onForward={(message) => setForwarding({ message, open: true })}
-              onJumpTo={(messageId) => void jumpToMessage(messageId)}
-              onEditEnd={focusComposer}
-            />
+            <>
+              <ThreadMessages
+                chat={chat}
+                messages={messages}
+                events={chatEvents ?? []}
+                hasEarlier={messagesData?.hasEarlier ?? false}
+                me={session.user}
+                canManage={canManage}
+                compact={docked || !isDesktop}
+                jumpHighlight={jumpHighlight}
+                editRequest={editRequest}
+                onEdit={handleEditMessage}
+                onDelete={handleDeleteMessage}
+                onReply={setReplyingTo}
+                onForward={(message) => setForwarding({ message, open: true })}
+                onJumpTo={(messageId) => void jumpToMessage(messageId)}
+                onEditEnd={focusComposer}
+              />
+              {messages.length === 0 && pendingMessages.length === 0 && (
+                <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                  {/* A request has no composer to say hi with (issue #898). */}
+                  {chat.messageRequest
+                    ? "No messages yet"
+                    : "No messages yet — say hi 👋"}
+                </p>
+              )}
+            </>
           )}
 
           {!messagesLoading && <PendingMessageList items={pendingMessages} />}

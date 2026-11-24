@@ -30,6 +30,7 @@ import {
   notifyChatUpdated,
   publishChatChange,
 } from "./chatState.ts";
+import { recordChatEvents } from "./chatEvents.ts";
 import { newestMessageIdIn } from "./unread.ts";
 import {
   deleteChatRow,
@@ -238,6 +239,15 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
                 })),
               )
               .onConflictDoNothing();
+            await recordChatEvents(
+              tx,
+              id,
+              newIds.map((targetId) => ({
+                type: "member_added" as const,
+                actorId: currentUser.id,
+                targetId,
+              })),
+            );
           }
           return { ok: true as const, newIds };
         });
@@ -309,7 +319,13 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
             }),
           );
 
-        const result = yield* departParticipant(db, storage, chatRow, userId);
+        const result = yield* departParticipant(
+          db,
+          storage,
+          chatRow,
+          userId,
+          currentUser.id,
+        );
         if (result.deleted)
           return yield* Effect.die(
             new Error("Chat unexpectedly emptied by removeParticipant"),
@@ -484,6 +500,14 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
                 );
               await revokeInvitesBy(tx, id, previousOwnerId);
             }
+            if (previousOwnerId !== payload.userId)
+              await recordChatEvents(tx, id, [
+                {
+                  type: "owner_changed",
+                  actorId: currentUser.id,
+                  targetId: payload.userId,
+                },
+              ]);
             return updated[0];
           }),
         );
@@ -547,6 +571,17 @@ export const membershipHandlers = ({ db, storage, connections }: ChatsDeps) =>
               );
             if (payload.role === "member")
               await revokeInvitesBy(tx, id, userId);
+            if (payload.role !== targetRole)
+              await recordChatEvents(tx, id, [
+                {
+                  type:
+                    payload.role === "admin"
+                      ? "admin_granted"
+                      : "admin_revoked",
+                  actorId: currentUser.id,
+                  targetId: userId,
+                },
+              ]);
           }),
         );
 

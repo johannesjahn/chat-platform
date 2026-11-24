@@ -692,6 +692,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chats/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["chats.listChatEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chats/{id}/pins/{messageId}": {
         parameters: {
             query?: never;
@@ -1883,6 +1899,21 @@ export interface components {
         PinMessageBody: {
             messageId: number;
         };
+        ChatEvent: {
+            id: number;
+            type: components["schemas"]["ChatEventType"];
+            afterMessageId: number;
+            actor: components["schemas"]["ChatEventPerson"] | null;
+            target: components["schemas"]["ChatEventPerson"] | null;
+            detail: string | null;
+            createdAt: number;
+        };
+        ChatEventPerson: {
+            userId: number;
+            name: string;
+        };
+        /** @enum {string} */
+        ChatEventType: "member_added" | "member_joined" | "member_left" | "member_removed" | "renamed" | "avatar_changed" | "avatar_removed" | "owner_changed" | "admin_granted" | "admin_revoked";
         ReactionState: {
             reactions: components["schemas"]["ReactionSummary"][];
         };
@@ -5615,6 +5646,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description HttpApiDecodeError */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFoundEncoded"];
+                };
+            };
+        };
+    };
+    "chats.listChatEvents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatEvent"][];
                 };
             };
             /** @description HttpApiDecodeError */
