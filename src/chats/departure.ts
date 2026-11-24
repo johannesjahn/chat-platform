@@ -11,6 +11,7 @@ import {
 } from "../db/schema.ts";
 import { deleteAvatarObjects } from "../avatars.ts";
 import { RealtimeConnections } from "../Realtime.ts";
+import { recordChatEvents } from "./chatEvents.ts";
 import { getParticipants, notifyChatUpdated } from "./chatState.ts";
 
 // What a participant leaving a chat does to it — shared by `leaveChat` and
@@ -18,7 +19,7 @@ import { getParticipants, notifyChatUpdated } from "./chatState.ts";
 // (users/accountHandlers.ts, issue #895), which must leave every chat the
 // same way rather than letting the `users` FK cascades drop the rows.
 
-type TxDb = Pick<DrizzleDb, "select" | "update" | "delete">;
+type TxDb = Pick<DrizzleDb, "select" | "insert" | "update" | "delete">;
 
 // Deletes a chat row (its cascading FKs, see db/schema.ts, take care of the
 // rest of the database) and then, best-effort, its group avatar's objects —
@@ -87,15 +88,18 @@ const departInTx = async (
   storage: AttachmentStorage["Service"],
   chatRow: DbChat,
   departingUserId: number,
+  // Who removed them, when they didn't leave by themselves.
+  removedBy?: number,
 ): Promise<Departure> => {
-  await tx
+  const departed = await tx
     .delete(chatParticipants)
     .where(
       and(
         eq(chatParticipants.chatId, chatRow.id),
         eq(chatParticipants.userId, departingUserId),
       ),
-    );
+    )
+    .returning({ id: chatParticipants.id });
   await revokeInvitesBy(tx, chatRow.id, departingUserId);
 
   const remaining = await tx
@@ -111,6 +115,18 @@ const departInTx = async (
     const sweepAvatar = await deleteChatRow(tx, storage, chatRow.id);
     return { deleted: true, sweepAvatar };
   }
+
+  // Not a second time if a concurrent request already took them out.
+  if (chatRow.type === "group" && departed.length > 0)
+    await recordChatEvents(tx, chatRow.id, [
+      removedBy === undefined
+        ? { type: "member_left", actorId: departingUserId }
+        : {
+            type: "member_removed",
+            actorId: removedBy,
+            targetId: departingUserId,
+          },
+    ]);
 
   // A direct chat has no owner to hand off: its `createdBy` only records
   // who started it.
@@ -138,6 +154,10 @@ const departInTx = async (
           eq(chatParticipants.userId, newOwner.userId),
         ),
       );
+    if (departed.length > 0)
+      await recordChatEvents(tx, chatRow.id, [
+        { type: "owner_changed", targetId: newOwner.userId },
+      ]);
   }
 
   const updated = await tx
@@ -156,6 +176,7 @@ export const departParticipant = (
   storage: AttachmentStorage["Service"],
   chatRow: DbChat,
   departingUserId: number,
+  removedBy?: number,
 ): Effect.Effect<
   | { readonly deleted: true }
   | {
@@ -166,7 +187,9 @@ export const departParticipant = (
 > =>
   Effect.gen(function* () {
     const result = yield* dbQuery(() =>
-      db.transaction((tx) => departInTx(tx, storage, chatRow, departingUserId)),
+      db.transaction((tx) =>
+        departInTx(tx, storage, chatRow, departingUserId, removedBy),
+      ),
     );
 
     if (result.deleted) {

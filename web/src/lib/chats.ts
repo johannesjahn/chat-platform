@@ -15,6 +15,7 @@ import {
   archivedChatsListQueryKey,
   chatsUnreadCountQueryKey,
   chatDetailQueryKey,
+  chatEventsQueryKey,
   chatMessagesQueryKey,
   chatPinnedQueryKey,
   chatStarredQueryKey,
@@ -289,6 +290,23 @@ export function useChatDetail(chatId: number | undefined, enabled: boolean) {
   return useQuery({
     ...chatDetailQueryOptions(chatId ?? -1),
     enabled: enabled && chatId != null,
+  });
+}
+
+// A group's activity rows (issue #900), refreshed by any `chat_updated` that
+// isn't a message or a read (see chatSync.ts).
+export function useChatEvents(chatId: number | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: chatEventsQueryKey(chatId ?? -1),
+    enabled: enabled && chatId != null,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await fetchClient.GET("/chats/{id}/events", {
+        params: { path: { id: String(chatId) } },
+        signal,
+      });
+      if (error) throw error;
+      return data;
+    },
   });
 }
 

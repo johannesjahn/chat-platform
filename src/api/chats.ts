@@ -271,6 +271,46 @@ export const UpdateChatPreferencesBody = Schema.Struct({
   pinned: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "UpdateChatPreferencesBody" });
 
+// Something that happened to a group (issue #900), shown between its messages:
+// after the one with id `afterMessageId`, 0 for before any.
+//
+// `actor` did it, to `target` where there is one (added, removed, made owner
+// or admin); either is null once that account is gone, and `actor` is null
+// when the group passed on because its owner left.
+export const ChatEventType = Schema.Literals([
+  "member_added",
+  "member_joined",
+  "member_left",
+  "member_removed",
+  "renamed",
+  "avatar_changed",
+  "avatar_removed",
+  "owner_changed",
+  "admin_granted",
+  "admin_revoked",
+]).annotate({ identifier: "ChatEventType" });
+
+const ChatEventPerson = Schema.Struct({
+  userId: Schema.Finite,
+  name: Schema.String,
+}).annotate({ identifier: "ChatEventPerson" });
+
+export const ChatEvent = Schema.Struct({
+  id: Schema.Finite,
+  type: ChatEventType,
+  afterMessageId: Schema.Finite,
+  actor: Schema.NullOr(ChatEventPerson),
+  target: Schema.NullOr(ChatEventPerson),
+  // The new title, for "renamed".
+  detail: Schema.NullOr(Schema.String),
+  createdAt: Schema.Finite,
+}).annotate({ identifier: "ChatEvent" });
+
+export type ChatEvent = typeof ChatEvent.Type;
+
+// How many of a chat's newest events are listed.
+export const MAX_CHAT_EVENTS = 200;
+
 export const CreateDirectChatBody = Schema.Struct({
   userId: Schema.Finite,
 }).annotate({ identifier: "CreateDirectChatBody" });
@@ -891,6 +931,14 @@ export const ChatsGroup = HttpApiGroup.make("chats")
     HttpApiEndpoint.get("listPinnedMessages", "/chats/:id/pins", {
       params: ChatIdPath,
       success: Schema.Array(Message),
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
+  )
+  .add(
+    // The group's newest `MAX_CHAT_EVENTS` events, oldest first (issue #900).
+    HttpApiEndpoint.get("listChatEvents", "/chats/:id/events", {
+      params: ChatIdPath,
+      success: Schema.Array(ChatEvent),
       error: [NotFound, Forbidden],
     }).middleware(Authentication),
   )
