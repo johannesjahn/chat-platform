@@ -111,10 +111,9 @@ describe("checkMigration", () => {
   });
 });
 
-// Migrations before this one predate the check. Several of them would fail
-// it (0002's DROP DEFAULT, 0010's and 0015's new constraints) and they're
-// applied everywhere, so they're left as they are rather than annotated.
-const FIRST_CHECKED_MIGRATION = 42;
+// The baseline (0000) creates everything, so there's no earlier schema for it
+// to break.
+const FIRST_CHECKED_MIGRATION = 1;
 
 const drizzleDir = new URL("../drizzle/", import.meta.url);
 const checkedMigrations = readdirSync(drizzleDir)

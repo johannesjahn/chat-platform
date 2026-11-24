@@ -25,7 +25,7 @@ const WINDOWS: ReadonlyArray<{ readonly label: string; readonly ms: number }> =
   ];
 
 // How far behind someone's latest content `users.last_active_at` may be
-// (see db/schema.ts): its triggers (migration 0041, which hard-codes the
+// (see db/schema.ts): its triggers (in the baseline migration, which hard-codes the
 // same interval) only move it once it's this far behind, so a window can
 // miss someone whose activity all fell in its first quarter hour. Coarse
 // enough that a busy user's sends almost never write to `users`, fine

@@ -26,7 +26,7 @@ Reuse these rather than re-deriving them in a handler:
 
 Being put in a group by someone you share no chat with makes it a _message
 request_ for you (issue #785): `chat_participants.request_pending` and
-`added_by` (`0038`), decided by `strangersTo` (membershipHandlers.ts),
+`added_by`, decided by `strangersTo` (membershipHandlers.ts),
 accepted with `POST /chats/:id/accept`, declined with `/leave`.
 
 - **Per participant, not per chat.** Direct chats and invite-link joins
@@ -52,8 +52,8 @@ accepted with `POST /chats/:id/accept`, declined with `/leave`.
 ## Mute, archive, pin
 
 `PATCH /chats/:id/preferences` (issue #900, `preferenceHandlers.ts`) sets the
-caller's own `muted_until`/`archived_at`/`pinned_at` on `chat_participants`
-(`0044`); every rule about them is in `preferences.ts`.
+caller's own `muted_until`/`archived_at`/`pinned_at` on `chat_participants`;
+every rule about them is in `preferences.ts`.
 
 - **Archived is derived**: `archived_at > chats.updated_at`, so a new message
   un-archives without the send path writing participant rows. Only a message
@@ -68,7 +68,7 @@ caller's own `muted_until`/`archived_at`/`pinned_at` on `chat_participants`
 ## Group activity
 
 Membership, title, picture, owner and role changes write a `chat_events` row
-(issue #900, `0046`) through `recordChatEvents` (`chatEvents.ts`), in the
+(issue #900) through `recordChatEvents` (`chatEvents.ts`), in the
 transaction that makes the change; a new handler that changes a group does
 the same.
 
@@ -90,7 +90,7 @@ chats.
 - **A forward is a new message owned by the forwarder**, built through the
   send path above. It copies none of `parentMessageId`, reactions, reads,
   pins or stars.
-- **Attribution is a snapshot**: `messages.forwarded_from_*` (`0034`) store
+- **Attribution is a snapshot**: `messages.forwarded_from_*` store
   the original sender's name at forward time with `set null` FKs. A forward
   of a forward copies them through, so the label always credits the
   original author and never nests.

@@ -111,7 +111,7 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
             })
             .from(users)
             // Matches a fragment of either name, not just the username —
-            // both columns carry a GIN trigram index (migration 0023), so
+            // both columns carry a GIN trigram index, so
             // this stays an index lookup rather than the sequential scan an
             // unanchored ILIKE used to force.
             .where(

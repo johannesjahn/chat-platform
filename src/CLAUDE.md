@@ -66,8 +66,8 @@ Two guards in `openapi.test.ts` (run after touching any endpoint):
 
 `GET /search` and `/search/{users,posts,comments,messages}`: predicates in
 `search.ts`, assembled in `SearchHandler.ts`. Two index-served branches: a
-word/prefix branch over generated `tsvector` columns (GIN, `0017`) and a
-substring branch (`ILIKE '%token%'`) over `pg_trgm` GIN indexes (`0023`).
+word/prefix branch over generated `tsvector` columns (GIN) and a
+substring branch (`ILIKE '%token%'`) over `pg_trgm` GIN indexes.
 
 - **Branches are a union of per-branch subqueries, never an `OR`**: under an
   `OR` with `ORDER BY id DESC LIMIT n` Postgres can use neither index. Every
@@ -189,7 +189,7 @@ PRESENCE_BUCKETS`); the Lua scripts derive the same key with
 The hourly jobs (refresh-token cleanup, orphaned-attachment cleanup, the
 `active_users` gauges) run **once per interval across all replicas** (issue
 #831, `scheduledJobs.ts`). Each replica ticks every few minutes and runs a
-job only if it claims it: one atomic upsert on `scheduled_jobs` (`0039`)
+job only if it claims it: one atomic upsert on `scheduled_jobs`
 that moves `last_run_at` forward only when the interval has passed. No
 session lock, so it works behind a transaction-mode PgBouncer. The
 `active_users` winner stores its counts in `result` and every replica sets
@@ -198,8 +198,8 @@ job goes through `forkTicker(runIfClaimed(name, every, job))`.
 
 ## Notifications
 
-The bell and `/notifications` inbox (issue #317): `notifications` table
-(`0027`), `api/notifications.ts`, read by `NotificationsHandler.ts`.
+The bell and `/notifications` inbox (issue #317): `notifications` table,
+`api/notifications.ts`, read by `NotificationsHandler.ts`.
 
 - Rows are written by the handler that performed the action, always through
   `createNotifications` (notifications.ts), which owns suppression (never
@@ -233,13 +233,11 @@ zero-filled daily timeline, live health.
   domain metrics in `Metrics.ts`. Active users are counted in Postgres so
   the id set never leaves it, from `users.last_active_at`
   (`countActiveUsersSince`, issue #831), which insert triggers on posts,
-  comments, likes and messages move forward at most every 15 minutes
-  (`0041`). A new content type that counts as activity needs the trigger
-  too.
+  comments, likes and messages move forward at most every 15 minutes. A
+  new content type that counts as activity needs the trigger too.
 - **`health` is this process's counters**, from the same `effect/Metric`
   registry `/metrics` renders; Prometheus/Grafana is the deployment-wide
   view.
-- Users created before `0025` all read as signed up when it ran.
 
 ## Tests
 

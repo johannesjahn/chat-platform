@@ -16,13 +16,13 @@ import type { SearchSnippetSegment } from "./Api.ts";
 //      (`fox & jump:*` style). This is the one that understands language:
 //      "run" finds "running" via the english stemmer, and the trailing `:*`
 //      makes a half-typed last word ("jum") match while the user is still
-//      typing. Served by the GIN index over `search_vector` (migration 0017).
+//      typing. Served by the GIN index over `search_vector` (the baseline migration).
 //
 //   2. **Substring branch** — every token appears somewhere in the raw text,
 //      anywhere inside a word (`ILIKE '%frag%'`). This is what makes searching
 //      for a *fragment* work at all: `to_tsvector` only ever indexes whole
 //      (stemmed) lexemes, so "ragmen" can never match "fragmentary" through
-//      branch 1. Served by the GIN trigram indexes added in migration 0023, so
+//      branch 1. Served by the GIN trigram indexes, so
 //      it stays an index lookup rather than the sequential scan an unanchored
 //      ILIKE would otherwise force.
 //
@@ -33,7 +33,7 @@ import type { SearchSnippetSegment } from "./Api.ts";
 // ---------------------------------------------------------------------------
 
 // Postgres text-search configuration used for every indexed `tsvector` (see
-// migration 0017) and every query. Must match the config baked into the
+// the baseline migration) and every query. Must match the config baked into the
 // generated columns, or the query lexemes wouldn't line up with the indexed
 // ones — "english" applies stemming and stop-word removal on both sides.
 export const SEARCH_CONFIG = "english";

@@ -72,27 +72,15 @@ export const users = pgTable(
     // upload quota check (`enforceUploadQuota` in attachments.ts) is a
     // single-row read instead of a `SUM` over every attachment the user ever
     // uploaded (issue #326). The app never writes it: a trigger on
-    // `attachments` (migration 0033) adjusts it on every insert, delete and
+    // `attachments` adjusts it on every insert, delete and
     // size/uploader change, so it can't drift — not via the cleanup sweep, a
-    // cascade, a direct insert in a test, or a replica still running code
-    // from before the column existed. The DB default is what makes adding it
-    // expand-only; the migration backfills existing users from the real sum.
+    // cascade, or a direct insert in a test.
     storageUsedBytes: bigint("storage_used_bytes", { mode: "number" })
       .notNull()
       .default(0),
-    // Signup time. Added for the admin dashboard (signup timeline and the
-    // "new users" activity windows) — until then nothing recorded when an
-    // account was created, and `id` ordering only gives relative order, not
-    // a date.
-    //
-    // Unlike every other `created_at` in this file this one carries a *DB*
-    // default rather than an app-side `$defaultFn`, and that's load-bearing
-    // for the expand-contract rule in CLAUDE.md: mid-rollout, replicas still
-    // running the old code insert users without this column, so the database
-    // itself has to fill it or the insert would violate NOT NULL. The same
-    // default is what backfills existing rows, which means every account
-    // that predates this migration reads as having signed up the moment it
-    // ran — signup history is only meaningful from this deploy forward.
+    // Signup time, for the admin dashboard (signup timeline and the "new
+    // users" activity windows). Filled by the database, unlike every other
+    // `created_at` in this file.
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .defaultNow(),
@@ -102,12 +90,10 @@ export const users = pgTable(
     // distinct authors of every content table's window, which grows with
     // history (issue #831); counting this column costs one pass over
     // `users`. Never set by the app: insert triggers on the four tables
-    // move it forward (migration 0041), so old replicas' inserts count too,
-    // and only once it's ACTIVITY_RESOLUTION behind the new row — most
+    // move it forward and only once it's ACTIVITY_RESOLUTION behind the new row — most
     // inserts update nothing. Internal only: no API view exposes it, and it
     // holds less than the content rows it's derived from, which go with the
-    // account. Null for anyone inactive since before the migration's
-    // 31-day backfill.
+    // account. Null for anyone who has created nothing.
     lastActiveAt: timestamp("last_active_at", {
       withTimezone: true,
       mode: "date",
@@ -231,11 +217,10 @@ export const posts = pgTable(
     // for posts created without one, which are never deduplicated.
     clientId: text("client_id"),
     // Comments and replies on the post, kept by a database trigger on
-    // `comments` (migration 0040, issue #835) rather than counted on every
-    // feed read. A trigger, not app code, so every path that adds or removes
-    // a comment — cascades from a deleted comment or account included, and
-    // old replicas mid-rollout — keeps it right. The database default covers
-    // old replicas inserting posts without the column. Only the plain total:
+    // `comments` (issue #835) rather than counted on every feed
+    // read. A trigger, not app code, so every path that adds or removes a
+    // comment — cascades from a deleted comment or account included — keeps
+    // it right. Only the plain total:
     // a viewer who hid someone still gets a live count (see
     // `postCommentCounts` in posts.ts).
     commentCount: integer("comment_count").notNull().default(0),
@@ -300,7 +285,7 @@ export const comments = pgTable(
     // "Comment deleted" placeholder those replies hang off, since the
     // `parent_comment_id` cascade would take other people's replies with it.
     // It's hard-deleted once its last reply goes. Not counted in
-    // `posts.comment_count` (migration 0042).
+    // `posts.comment_count`.
     deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
@@ -433,13 +418,10 @@ export const chatParticipants = pgTable(
     // `isMessageRequestFor` in chats/chatState.ts — and out of message
     // search, with every write others would see (sends, forwards in,
     // reactions, pins, typing, edits, read receipts) refused until accepted
-    // (issue #808, `requireAcceptedParticipant`). A database default (not an
-    // app-side one) for the same rollout reason as `users.created_at`: old
-    // replicas insert participants without the column, and those must read
-    // as accepted, which is how every row predating the migration reads.
+    // (issue #808, `requireAcceptedParticipant`).
     requestPending: boolean("request_pending").notNull().default(false),
     // Who added this participant — null for a creator, an invite-link join,
-    // a direct chat, every row predating migration 0037, or once the adder's
+    // a direct chat, or once the adder's
     // account is gone. Lets a declined request offer to block the adder.
     addedBy: integer("added_by").references(() => users.id, {
       onDelete: "set null",

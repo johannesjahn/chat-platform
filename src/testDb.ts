@@ -8,7 +8,7 @@ import * as schema from "./db/schema.ts";
 
 const createTestDb = async () => {
   // `{ extensions: { pg_trgm } }` for the same reason as src/Db.ts: the
-  // trigram indexes migration 0023 creates need the contrib bundle loaded
+  // trigram indexes the baseline migration creates need the contrib bundle loaded
   // into this PGlite instance.
   const db = drizzle({ client: await createPglite(), schema });
   await migrate(db, { migrationsFolder: "./drizzle" });

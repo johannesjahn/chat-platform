@@ -55,7 +55,7 @@ import { effectiveStatus } from "./users/userViews.ts";
 // parameter: it's a fixed, server-controlled constant (never user input), and
 // `to_tsquery` takes it as a `regconfig`, which a bound text parameter wouldn't
 // resolve to. Must stay equal to `SEARCH_CONFIG` in search.ts (and the config
-// baked into the generated columns in migration 0017).
+// baked into the generated columns in the baseline migration).
 const CONFIG = sql`'english'`;
 
 // Matches nothing, for a query that produced no usable branch at all (e.g.
@@ -66,12 +66,12 @@ const MATCHES_NOTHING = sql`false`;
 // The two match branches, as separate predicates (see the long comment at the
 // top of search.ts):
 //
-//   * the word/prefix branch, against the generated `tsvector` (GIN, migration
-//     0017) — language-aware: stemming plus a trailing `:*` on every token, so
-//     "run" finds "running" and a half-typed "jum" finds "jumps";
-//   * the substring branch, `ILIKE '%token%'` per token (GIN trigram,
-//     migration 0023) — literal-minded: finds a fragment *inside* a word,
-//     which no `tsvector` can express.
+//   * the word/prefix branch, against the generated `tsvector` (GIN) —
+//     language-aware: stemming plus a trailing `:*` on every token, so "run"
+//     finds "running" and a half-typed "jum" finds "jumps";
+//   * the substring branch, `ILIKE '%token%'` per token (GIN trigram) —
+//     literal-minded: finds a fragment *inside* a word, which no `tsvector`
+//     can express.
 //
 // They're returned separately, not OR'd, on purpose — see `matchingIds`.
 //
@@ -188,7 +188,7 @@ const recentFirstArm = (
 
 // The generated tsvector columns are deliberately absent from the Drizzle
 // schema (a bare `db.select()` would otherwise materialize them on every hot
-// read — see migration 0017), so they're referenced by raw, fully-qualified
+// read — see the baseline migration), so they're referenced by raw, fully-qualified
 // SQL here.
 const postsVector = sql`"posts"."search_vector"`;
 const commentsVector = sql`"comments"."search_vector"`;
@@ -294,7 +294,7 @@ const peopleSearchAllowed = (q: string, role: "user" | "admin"): boolean =>
 // A person matches when every token appears somewhere in their username or
 // display name — "jo sm" finds "josmith"/"Jo Smith" either way round. Tokens
 // of at least three characters are served by the trigram indexes on both
-// columns (migration 0023); a shorter one is filtered after them.
+// columns; a shorter one is filtered after them.
 const matchesUser = (q: string): SQL => {
   const tokens = searchTokens(q);
   if (tokens.length === 0) return MATCHES_NOTHING;

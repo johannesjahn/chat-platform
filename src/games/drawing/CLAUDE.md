@@ -7,8 +7,8 @@ reveal. Pure modules here (`timeline`, `ballot`, `scoring`, `view`,
 `src/games/lobbyStore.ts`; the client is `web/src/components/games/drawing/`.
 
 - **Stages are derived, like phases.** `buildTimeline` lays the game out
-  from `startsAt` and the `game_drawings`/`game_bluffs`/`game_votes` rows
-  (`0028`): each stage runs its full timer _or_ ends at its last required
+  from `startsAt` and the `game_drawings`/`game_bluffs`/`game_votes` rows:
+  each stage runs its full timer _or_ ends at its last required
   submission. A submission is accepted only while its stage is current (the
   draw stage has a short grace), and bluffs/votes are stamped with the
   instant that was checked, so a finished stage never moves. The players are

@@ -105,7 +105,7 @@ test("updateActiveUserGauges sets active_users{window} to the distinct count of 
   ));
 
 // Issue #831: users.last_active_at, which the counts read, is kept by insert
-// triggers (migration 0041) — moved forward only once it's
+// triggers — moved forward only once it's
 // ACTIVITY_RESOLUTION behind, and never back.
 test("content inserts move last_active_at forward, at most once per ACTIVITY_RESOLUTION and never backwards", () =>
   run(
