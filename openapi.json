@@ -1383,6 +1383,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "AttachmentInUse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentInUseEncoded"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1582,6 +1592,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/NotFoundEncoded"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AttachmentInUse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentInUseEncoded"
                 }
               }
             }
@@ -4038,6 +4058,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "AttachmentInUse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentInUseEncoded"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -4380,6 +4410,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/NotFoundEncoded"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AttachmentInUse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentInUseEncoded"
                 }
               }
             }
@@ -10916,6 +10956,25 @@
           "😢",
           "😡"
         ]
+      },
+      "AttachmentInUseEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "AttachmentInUse"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "message"
+        ],
+        "additionalProperties": false
       },
       "UpdateMessageBody": {
         "type": "object",

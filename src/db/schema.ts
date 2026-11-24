@@ -163,7 +163,7 @@ export type NewDbRefreshToken = typeof refreshTokens.$inferInsert;
 // or leak past its TTL. An attachment is only ever referenced by exactly one
 // message/post (via their nullable `attachmentId` FK below) — it isn't a
 // shared media library — so there's no back-reference here to what it's
-// attached to.
+// attached to. `withClaimedAttachment` (attachments.ts) enforces that.
 export const attachments = pgTable(
   "attachments",
   {

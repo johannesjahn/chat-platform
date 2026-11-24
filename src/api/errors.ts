@@ -16,6 +16,14 @@ export class NotFound extends Schema.TaggedError<NotFound>()(
   { httpApiStatus: 404 },
 ) {}
 
+// Raised when the attachment a post or message wants to attach is already on
+// another one (issue #896; see withClaimedAttachment in attachments.ts).
+export class AttachmentInUse extends Schema.TaggedError<AttachmentInUse>()(
+  "AttachmentInUse",
+  { message: Schema.String },
+  { httpApiStatus: 409 },
+) {}
+
 export class UsernameTaken extends Schema.TaggedError<UsernameTaken>()(
   "UsernameTaken",
   { message: Schema.String },

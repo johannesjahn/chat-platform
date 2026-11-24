@@ -6,7 +6,7 @@ import { Effect } from "effect";
 import sharp from "sharp";
 import { type Attachment, ChatApi } from "./Api.ts";
 import { Db } from "./Db.ts";
-import { messages, posts } from "./db/schema.ts";
+import { messages, posts, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
 
 // Captions on attachments (issue #765): `caption` beside `attachmentId` on
@@ -417,5 +417,154 @@ test("a chat message carries a caption through replies and forwards", () =>
         payload: { contentType: "text", content: "nevermind" },
       });
       expect(toText.caption).toBeNull();
+    }),
+  ));
+
+// Issue #896: an edit that keeps its file isn't attaching a new one, and an
+// attachment is on at most one post or message.
+
+const makeAdmin = (username: string) =>
+  Effect.gen(function* () {
+    const { user } = yield* registerAndLogin(username);
+    const db = yield* Db;
+    yield* Effect.promise(() =>
+      db.update(users).set({ role: "admin" }).where(eq(users.id, user.id)),
+    );
+    // Log in again so the token carries the admin role.
+    const { accessToken } = yield* (yield* makeClient).users.login({
+      payload: { username, password: "pw-testpass" },
+    });
+    return { user, accessToken, client: yield* makeAuthedClient(accessToken) };
+  });
+
+const attachmentBody = (attachmentId: number, caption?: string) => ({
+  contentType: "attachment" as const,
+  content: "bread.png",
+  attachmentId,
+  ...(caption === undefined ? {} : { caption }),
+});
+
+test("an admin can edit the caption of someone else's attachment post and message", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice");
+      const admin = yield* makeAdmin("admin1");
+      const upload = yield* uploadPng(handler, alice.accessToken);
+      const post = yield* alice.client.posts.createPost({
+        payload: attachmentBody(upload.id, "Lok what I baked"),
+      });
+      const edited = yield* admin.client.posts.updatePost({
+        params: { id: post.id },
+        payload: attachmentBody(upload.id, "Look what I baked"),
+      });
+      expect(edited.caption).toBe("Look what I baked");
+      expect(edited.attachment!.id).toBe(upload.id);
+
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: admin.user.id },
+      });
+      const messageUpload = yield* uploadPng(handler, alice.accessToken);
+      const message = yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: attachmentBody(messageUpload.id, "tpyo"),
+      });
+      // Only an accepted participant may edit.
+      yield* admin.client.chats.acceptChatRequest({ params: { id: chat.id } });
+      const editedMessage = yield* admin.client.chats.updateMessage({
+        params: { id: chat.id, messageId: message.id },
+        payload: attachmentBody(messageUpload.id, "typo"),
+      });
+      expect(editedMessage.caption).toBe("typo");
+      expect(editedMessage.attachment!.id).toBe(messageUpload.id);
+
+      // A different file still has to be the admin's own.
+      const unused = yield* uploadPng(handler, alice.accessToken);
+      const refused = yield* admin.client.posts
+        .updatePost({
+          params: { id: post.id },
+          payload: attachmentBody(unused.id),
+        })
+        .pipe(Effect.flip);
+      expect(refused._tag).toBe("NotFound");
+    }),
+  ));
+
+test("an attachment already on a post or message can't go on another", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const onPost = yield* uploadPng(handler, alice.accessToken);
+      const onMessage = yield* uploadPng(handler, alice.accessToken);
+      const body = attachmentBody(onPost.id);
+      const post = yield* alice.client.posts.createPost({ payload: body });
+      yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: attachmentBody(onMessage.id),
+      });
+      const otherPost = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "hi" },
+      });
+      const otherMessage = yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: { contentType: "text", content: "hi" },
+      });
+
+      for (const { id } of [onPost, onMessage]) {
+        const payload = attachmentBody(id);
+        for (const [method, path] of [
+          ["POST", "/posts"],
+          ["PUT", `/posts/${otherPost.id}`],
+          ["POST", `/chats/${chat.id}/messages`],
+          ["PUT", `/chats/${chat.id}/messages/${otherMessage.id}`],
+        ] as const) {
+          const response = yield* rawJson(
+            handler,
+            alice.accessToken,
+            method,
+            path,
+            payload,
+          );
+          expect([method, path, response.status]).toEqual([method, path, 409]);
+        }
+      }
+
+      // Once its post is gone, the file is free again.
+      yield* alice.client.posts.deletePost({ params: { id: post.id } });
+      const again = yield* alice.client.posts.updatePost({
+        params: { id: otherPost.id },
+        payload: body,
+      });
+      expect(again.attachment!.id).toBe(onPost.id);
+    }),
+  ));
+
+test("a row that already shares its attachment stays editable, and a retried create isn't a conflict", () =>
+  run(({ handler }) =>
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice");
+      const upload = yield* uploadPng(handler, alice.accessToken);
+      const payload = { ...attachmentBody(upload.id), clientId: "retry-1" };
+      const post = yield* alice.client.posts.createPost({ payload });
+      const retried = yield* alice.client.posts.createPost({ payload });
+      expect(retried.id).toBe(post.id);
+
+      const db = yield* Db;
+      yield* Effect.promise(() =>
+        db.insert(posts).values({
+          authorId: alice.user.id,
+          contentType: "attachment",
+          content: "bread.png",
+          attachmentId: upload.id,
+        }),
+      );
+      const edited = yield* alice.client.posts.updatePost({
+        params: { id: post.id },
+        payload: attachmentBody(upload.id, "still mine"),
+      });
+      expect(edited.caption).toBe("still mine");
     }),
   ));

@@ -1,16 +1,15 @@
 import { and, desc, eq, gt, lt } from "drizzle-orm";
 import { Effect, Metric } from "effect";
 import {
-  type Attachment,
   DEFAULT_MESSAGES_LIMIT,
   Forbidden,
   InvalidChatRequest,
   type ParentMessagePreview,
 } from "../Api.ts";
 import {
-  getOwnedAttachmentOr404,
   resolveAttachments,
   toApiAttachment,
+  withClaimedAttachment,
 } from "../attachments.ts";
 import { CurrentUser } from "../Auth.ts";
 import { type DrizzleDb, dbQuery } from "../Db.ts";
@@ -236,19 +235,6 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
             new Forbidden({ message: DIRECT_CHAT_CLOSED_MESSAGE[closed] }),
           );
 
-        let attachment: Attachment | null = null;
-        if (payload.attachmentId !== undefined) {
-          const attachmentRow = yield* getOwnedAttachmentOr404(
-            db,
-            payload.attachmentId,
-            currentUser.id,
-          );
-          attachment = toApiAttachment(
-            attachmentRow,
-            storage.presignGetUrl(attachmentRow.storageKey),
-          );
-        }
-
         // A reply must quote a message in *this* chat (issue #217).
         // `getMessageOr404` filters on (chatId, messageId), so a parent from
         // another chat — or one that doesn't exist — 404s here, and the
@@ -264,20 +250,44 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
         }
 
         const now = new Date();
-        const row = yield* dbQuery(() =>
-          insertMessage(db, {
-            chatId: id,
-            senderId: currentUser.id,
-            contentType: payload.contentType,
-            content: payload.content,
-            attachmentId: payload.attachmentId ?? null,
-            caption: payload.caption ?? null,
-            parentMessageId: payload.parentMessageId ?? null,
-            clientId: payload.clientId ?? null,
-            createdAt: now,
-            updatedAt: now,
-          }),
+        const { clientId } = payload;
+        // A concurrent create of the same key that won the race has the
+        // attachment by now, so only a claim it didn't make is a conflict.
+        const claimed = yield* withClaimedAttachment(
+          db,
+          payload.attachmentId,
+          currentUser.id,
+          (tx) =>
+            insertMessage(tx, {
+              chatId: id,
+              senderId: currentUser.id,
+              contentType: payload.contentType,
+              content: payload.content,
+              attachmentId: payload.attachmentId ?? null,
+              caption: payload.caption ?? null,
+              parentMessageId: payload.parentMessageId ?? null,
+              clientId: payload.clientId ?? null,
+              createdAt: now,
+              updatedAt: now,
+            }),
+        ).pipe(
+          Effect.catchTag("AttachmentInUse", (error) =>
+            Effect.gen(function* () {
+              const stored =
+                clientId === undefined
+                  ? undefined
+                  : yield* findMessageByClientId(
+                      db,
+                      id,
+                      currentUser.id,
+                      clientId,
+                    );
+              if (!stored) return yield* Effect.fail(error);
+              return { result: undefined, attachment: null };
+            }),
+          ),
         );
+        const row = claimed.result;
         if (!row && payload.clientId !== undefined) {
           // Lost a race with a concurrent send of the same key.
           const existing = yield* findMessageByClientId(
@@ -296,6 +306,12 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
         }
         if (!row)
           return yield* Effect.die(new Error("INSERT returned no rows"));
+        const attachment = claimed.attachment
+          ? toApiAttachment(
+              claimed.attachment,
+              storage.presignGetUrl(claimed.attachment.storageKey),
+            )
+          : null;
         yield* Metric.update(
           Metric.withAttributes(contentCreatedTotal, { type: "message" }),
           1,
@@ -342,40 +358,48 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
             new Forbidden({ message: "You can only edit your own messages" }),
           );
 
-        let attachment: Attachment | null = null;
-        if (payload.attachmentId !== undefined) {
-          const attachmentRow = yield* getOwnedAttachmentOr404(
-            db,
-            payload.attachmentId,
-            currentUser.id,
-          );
-          attachment = toApiAttachment(
-            attachmentRow,
-            storage.presignGetUrl(attachmentRow.storageKey),
-          );
-        }
-
-        const rows = yield* dbQuery(() =>
-          db
-            .update(messages)
-            .set({
-              contentType: payload.contentType,
-              content: payload.content,
-              attachmentId: payload.attachmentId ?? null,
-              // Omitted keeps the current caption (see `UpdateMessageBody`);
-              // only an attachment carries one.
-              caption:
-                payload.contentType !== "attachment"
-                  ? null
-                  : payload.caption === undefined
-                    ? messageCaption(existing)
-                    : payload.caption,
-              updatedAt: new Date(),
-            })
-            .where(eq(messages.id, messageId))
-            .returning(),
+        const claimed = yield* withClaimedAttachment(
+          db,
+          payload.attachmentId,
+          currentUser.id,
+          async (tx) =>
+            (
+              await tx
+                .update(messages)
+                .set({
+                  contentType: payload.contentType,
+                  content: payload.content,
+                  attachmentId: payload.attachmentId ?? null,
+                  // Omitted keeps the current caption (see `UpdateMessageBody`);
+                  // only an attachment carries one.
+                  caption:
+                    payload.contentType !== "attachment"
+                      ? null
+                      : payload.caption === undefined
+                        ? messageCaption(existing)
+                        : payload.caption,
+                  updatedAt: new Date(),
+                })
+                .where(eq(messages.id, messageId))
+                .returning()
+            )[0],
+          async (tx) => {
+            const current = await tx
+              .select({ attachmentId: messages.attachmentId })
+              .from(messages)
+              .where(eq(messages.id, messageId))
+              .for("update");
+            return current[0]?.attachmentId ?? null;
+          },
         );
-        const row = rows[0];
+        const row = claimed.result;
+        const attachment = claimed.attachment
+          ? toApiAttachment(
+              claimed.attachment,
+              storage.presignGetUrl(claimed.attachment.storageKey),
+            )
+          : null;
+
         if (!row)
           return yield* Effect.die(new Error("UPDATE returned no rows"));
 

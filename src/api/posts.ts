@@ -4,6 +4,7 @@ import { Authentication } from "../Auth.ts";
 import { Attachment } from "./attachments.ts";
 import { AvatarVariants, IdParam, isAllowedImageUrl } from "./common.ts";
 import {
+  AttachmentInUse,
   Forbidden,
   InvalidCommentRequest,
   InvalidPostsRequest,
@@ -362,8 +363,9 @@ export const PostsGroup = HttpApiGroup.make("posts")
       payload: CreatePostBody,
       success: Post.pipe(HttpApiSchema.status(201)),
       // Raised when `attachmentId` doesn't reference an attachment owned by
-      // the caller (see getOwnedAttachmentOr404 in attachments.ts).
-      error: NotFound,
+      // the caller, or one that's already on another post or message (see
+      // withClaimedAttachment in attachments.ts).
+      error: [NotFound, AttachmentInUse],
     }).middleware(Authentication),
   )
   .add(
@@ -371,7 +373,7 @@ export const PostsGroup = HttpApiGroup.make("posts")
       params: { id: Schema.Int },
       payload: UpdatePostBody,
       success: Post,
-      error: [NotFound, Forbidden],
+      error: [NotFound, Forbidden, AttachmentInUse],
     }).middleware(Authentication),
   )
   .add(
