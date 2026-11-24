@@ -27,10 +27,10 @@ name: Tag Release
 # deploy-frontend builds web/ and pushes it to Cloudflare Workers (static
 # assets) via Wrangler — see k8s/README.md's "Frontend: Cloudflare Workers"
 # section. It lives here (rather than its own push-triggered workflow) so it
-# stays tied to the same release as the backend image build. It runs in
-# parallel with argocd-sync (both only need `docker`, not each other) since
-# the two deploys are independent — the frontend doesn't need the backend's
-# ArgoCD sync to have happened first. It only runs when `tag` actually cut a
+# stays tied to the same release as the backend image build. It waits for
+# argocd-sync, which only succeeds once the new backend is rolled out and
+# healthy, so a stuck rollout fails the run instead of leaving a new frontend
+# on an old backend. It only runs when `tag` actually cut a
 # new release, so frontend deploys stay tied to a backend version bump
 # instead of running on every pipeline invocation.
 #
@@ -120,9 +120,10 @@ jobs:
             johannesjahn/chat-platform:${{ steps.version.outputs.tag }}
 
   argocd-sync:
-    name: Trigger ArgoCD sync
+    name: Sync ArgoCD and wait for rollout
     needs: docker
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     # Two releases close together (e.g. back-to-back merges that each bump
     # the version) used to fire overlapping syncs, and ArgoCD refuses a sync
     # while one is still running ("another operation is already in
@@ -164,6 +165,20 @@ jobs:
             sleep 15
           done
 
+      # The sync action returns before ArgoCD has picked the operation up, so
+      # the app still shows the *previous* operation's result for a while.
+      # Remember which one that was, to tell the two apart below.
+      - name: Record the previous ArgoCD operation
+        id: previous
+        env:
+          ARGOCD_ADDRESS: ${{ vars.ARGOCD_ADDRESS }}
+          ARGOCD_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
+          ARGOCD_APP_NAME: ${{ vars.ARGOCD_APP_NAME }}
+        run: |
+          url="https://${ARGOCD_ADDRESS}/api/v1/applications/${ARGOCD_APP_NAME}"
+          app=$(curl -fsS --max-time 30 --retry 5 --retry-all-errors -H "Authorization: Bearer ${ARGOCD_TOKEN}" "$url")
+          echo "started_at=$(jq -r '.status.operationState.startedAt // "none"' <<<"$app")" >> "$GITHUB_OUTPUT"
+
       # Not SHA-pinned like the other actions in this file: its action.yml
       # derives the ghcr.io image tag it docker-pulls from the *name of its
       # own checkout directory* (i.e. the ref you pin it to), rather than a
@@ -179,9 +194,60 @@ jobs:
           action: sync
           appName: ${{ vars.ARGOCD_APP_NAME }}
 
+      # A sync can hang without failing, e.g. when the cluster never starts
+      # the migration Job's pod. `reconciledAt` guards against reading a
+      # "Healthy" that predates the sync; ArgoCD refreshes it every few
+      # minutes. Failed reads are retried until the deadline.
+      - name: Wait for the sync and rollout
+        env:
+          ARGOCD_ADDRESS: ${{ vars.ARGOCD_ADDRESS }}
+          ARGOCD_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
+          ARGOCD_APP_NAME: ${{ vars.ARGOCD_APP_NAME }}
+          PREVIOUS_STARTED_AT: ${{ steps.previous.outputs.started_at }}
+        run: |
+          url="https://${ARGOCD_ADDRESS}/api/v1/applications/${ARGOCD_APP_NAME}"
+          deadline=$(( $(date +%s) + 1200 ))
+          while :; do
+            if app=$(curl -fsS --max-time 30 -H "Authorization: Bearer ${ARGOCD_TOKEN}" "$url") &&
+              fields=$(jq -r '.status | [
+                .operationState.startedAt // "none",
+                .operationState.phase // "none",
+                .health.status // "none",
+                (.reconciledAt // "") >= (.operationState.finishedAt // "~"),
+                (.operationState.message // "" | gsub("\\s+"; " "))
+              ] | map(tostring) | join("|")' <<<"$app"); then
+              IFS='|' read -r started phase health fresh message <<<"$fields"
+              if [ "$started" = "$PREVIOUS_STARTED_AT" ]; then
+                status="sync not started yet (previous operation: $phase)"
+              else
+                status="sync $phase, health $health: $message"
+                case "$phase" in
+                  Failed | Error)
+                    echo "::error::ArgoCD $status"
+                    exit 1
+                    ;;
+                  Succeeded)
+                    if [ "$health" = "Healthy" ] && [ "$fresh" = "true" ]; then
+                      echo "ArgoCD $status"
+                      exit 0
+                    fi
+                    ;;
+                esac
+              fi
+            else
+              status="couldn't read the ArgoCD application"
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::The rollout didn't finish within 20 minutes; last state: $status"
+              exit 1
+            fi
+            echo "$status; checking again in 15s."
+            sleep 15
+          done
+
   deploy-frontend:
     name: Build & deploy frontend to Cloudflare Workers
-    needs: [tag, docker]
+    needs: [tag, docker, argocd-sync]
     if: |
       always() &&
       needs.tag.outputs.created == 'true' &&
