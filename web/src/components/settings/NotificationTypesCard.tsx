@@ -52,13 +52,30 @@ export function NotificationTypesCard() {
       if (failure) throw failure;
       return preferences;
     },
-    onMutate: () => setSaveError(null),
-    onSuccess: (preferences) =>
-      queryClient.setQueryData(notificationPreferencesQueryKey, preferences),
-    onError: (failure) => setSaveError(errorMessage(failure)),
+    mutationKey: notificationPreferencesQueryKey,
+    // Shown at once; the response of the last save still out settles it.
+    onMutate: (changes) => {
+      setSaveError(null);
+      queryClient.setQueryData<Preferences>(
+        notificationPreferencesQueryKey,
+        (current) => current && { ...current, ...changes },
+      );
+    },
+    onSuccess: (preferences) => {
+      if (
+        queryClient.isMutating({
+          mutationKey: notificationPreferencesQueryKey,
+        }) === 1
+      )
+        queryClient.setQueryData(notificationPreferencesQueryKey, preferences);
+    },
+    onError: (failure) => {
+      setSaveError(errorMessage(failure));
+      return queryClient.invalidateQueries({
+        queryKey: notificationPreferencesQueryKey,
+      });
+    },
   });
-  // What's being saved shows at once, and reverts if it fails.
-  const shown = data && { ...data, ...(save.isPending ? save.variables : {}) };
   const failure = saveError ?? (error ? errorMessage(error) : null);
 
   return (
@@ -76,7 +93,7 @@ export function NotificationTypesCard() {
             {failure}
           </p>
         )}
-        {shown
+        {data
           ? TYPES.map(({ type, label }) => {
               const Icon = NOTIFICATION_ICONS[type];
               return (
@@ -89,8 +106,7 @@ export function NotificationTypesCard() {
                   <input
                     type="checkbox"
                     className="size-6 shrink-0 accent-primary"
-                    checked={shown[type]}
-                    disabled={save.isPending}
+                    checked={data[type]}
                     onChange={(e) => save.mutate({ [type]: e.target.checked })}
                   />
                 </label>

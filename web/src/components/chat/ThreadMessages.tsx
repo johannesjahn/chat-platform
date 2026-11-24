@@ -19,14 +19,23 @@ import { useTypingUsers } from "@/lib/typing";
 import { userAvatarName, userHandle, userLabel } from "@/lib/users";
 
 // Splits oldest-first timeline items into runs sharing a local calendar day.
+// Keyed by the day, not by a run's first item: activity arriving, or older
+// messages paged in, at the start of a day mustn't remount the rest of it
+// (which would lose an edit in progress). A day can recur when timestamps are
+// out of order, hence the count.
 function groupByDay<T extends { createdAt: number }>(items: T[]) {
-  const groups: T[][] = [];
-  let lastKey: string | undefined;
+  const groups: { key: string; items: T[] }[] = [];
+  const runs = new Map<string, number>();
+  let lastDay: string | undefined;
   for (const item of items) {
-    const key = localDayKey(item.createdAt);
-    if (key !== lastKey) groups.push([]);
-    groups[groups.length - 1]!.push(item);
-    lastKey = key;
+    const day = localDayKey(item.createdAt);
+    if (day !== lastDay) {
+      const run = runs.get(day) ?? 0;
+      runs.set(day, run + 1);
+      groups.push({ key: `${day}#${run}`, items: [] });
+    }
+    groups[groups.length - 1]!.items.push(item);
+    lastDay = day;
   }
   return groups;
 }
@@ -47,9 +56,10 @@ function ChatEventRow({ events, meId }: { events: ChatEvent[]; meId: number }) {
 }
 
 /**
- * The thread's confirmed messages and a group's activity, a date separator at the top of each day,
- * one MessageBubble each (split out of ChatConversation in issue #811). The
- * callbacks are per message; what to do with them is the conversation's.
+ * The thread's confirmed messages, one MessageBubble each, and a group's
+ * activity, with a date separator at the top of each day (split out of
+ * ChatConversation in issue #811). The callbacks are per message; what to do
+ * with them is the conversation's.
  */
 export function ThreadMessages({
   chat,
@@ -90,8 +100,8 @@ export function ThreadMessages({
     // pinned while its parent is on screen, so scoping each
     // separator to its own day makes it get pushed out by the
     // next day's separator instead of piling up behind it.
-    <div key={itemKey(group[0]!)} className="flex flex-col gap-2">
-      {group.map((item, position) => {
+    <div key={group.key} className="flex flex-col gap-2">
+      {group.items.map((item, position) => {
         const isFirstOfDay = position === 0;
         if (item.kind === "events")
           return (

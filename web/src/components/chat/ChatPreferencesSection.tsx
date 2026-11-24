@@ -60,6 +60,11 @@ export function ChatPreferencesSection({ chat }: { chat: Chat }) {
     },
     onError: (failure) => setError(errorMessage(failure)),
   });
+  // One at a time, without disabling the button: that would drop keyboard
+  // focus on every press.
+  const save = (changes: Changes) => {
+    if (!isPending) mutate(changes);
+  };
   const muted = isChatMuted(chat);
 
   return (
@@ -79,8 +84,7 @@ export function ChatPreferencesSection({ chat }: { chat: Chat }) {
           type="button"
           variant="outline"
           size="sm"
-          disabled={isPending}
-          onClick={() => mutate({ pinned: !chat.pinned })}
+          onClick={() => save({ pinned: !chat.pinned })}
         >
           {chat.pinned ? (
             <PinOff className="size-4" />
@@ -93,8 +97,7 @@ export function ChatPreferencesSection({ chat }: { chat: Chat }) {
           type="button"
           variant="outline"
           size="sm"
-          disabled={isPending}
-          onClick={() => mutate({ archived: !chat.archived })}
+          onClick={() => save({ archived: !chat.archived })}
         >
           {chat.archived ? (
             <ArchiveRestore className="size-4" />
@@ -118,8 +121,7 @@ export function ChatPreferencesSection({ chat }: { chat: Chat }) {
             type="button"
             variant="outline"
             size="sm"
-            disabled={isPending}
-            onClick={() => mutate({ mute: null })}
+            onClick={() => save({ mute: null })}
           >
             Unmute chat
           </Button>
@@ -130,8 +132,7 @@ export function ChatPreferencesSection({ chat }: { chat: Chat }) {
               type="button"
               variant="outline"
               size="sm"
-              disabled={isPending}
-              onClick={() => mutate({ mute: value })}
+              onClick={() => save({ mute: value })}
             >
               {label}
             </Button>

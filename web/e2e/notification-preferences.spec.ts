@@ -10,9 +10,16 @@ test("a notification type turned off in settings stays off", async ({
   await page.goto("/settings?section=notifications");
   const reactions = page.getByRole("checkbox", { name: "Reactions" });
   await expect(reactions).toBeChecked();
-  await reactions.click();
+  const saved = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/notifications/preferences") &&
+      response.request().method() === "PATCH",
+  );
+  await reactions.focus();
+  await page.keyboard.press("Space");
   await expect(reactions).not.toBeChecked();
-  await expect(reactions).toBeEnabled();
+  await saved;
+  await expect(reactions).toBeFocused();
 
   await page.reload();
   await expect(reactions).not.toBeChecked();
