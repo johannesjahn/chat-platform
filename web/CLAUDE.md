@@ -62,9 +62,14 @@ closes instantly.
 
 CI's `check:bundle` fails once the gzipped pre-hydration JS, all JS, or all
 CSS outgrows `bundle-budget.json` (raise it in the same PR when growth is
-deliberate). The pre-hydration figure has ~2 kB headroom (issue #754, #806),
-so a sizeable eager import trips it.
+deliberate). The pre-hydration figure has ~1.5 kB headroom (issue #754,
+#806), so a sizeable eager import trips it.
 
+- `src/client.tsx` hydrates through `RouterClient`, not Start's `StartClient`:
+  there are no server functions, and that entry ships seroval and the RPC
+  client. A server function or serialization adapter needs `StartClient` back.
+- `vite.config.ts` groups the always-loaded framework packages into one
+  `framework` chunk. A package only some pages need doesn't belong in it.
 - The realtime socket, its cache patchers, browser notifications and offline
   replay live in the lazy `src/components/shell/ShellServices.tsx`; import
   them from there, not from the root or nav.

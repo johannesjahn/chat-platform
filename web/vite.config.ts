@@ -6,10 +6,30 @@ import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { optionalChunksPlugin, sharedPwaOptions } from "./vite.pwa-options.ts";
 
+const FRAMEWORK_MODULES =
+  /node_modules\/(?:react|react-dom|scheduler|use-sync-external-store|@tanstack\/(?:react-router|router-core|history|store|react-store|react-query|query-core))\//;
+
 export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
+  environments: {
+    client: {
+      build: {
+        rolldownOptions: {
+          output: {
+            // Every page needs all of this before it hydrates. As one chunk
+            // it gzips smaller than the dozen slivers automatic splitting
+            // makes of it (issue #754), and an app-only deploy leaves it
+            // cached.
+            codeSplitting: {
+              groups: [{ name: "framework", test: FRAMEWORK_MODULES }],
+            },
+          },
+        },
+      },
     },
   },
   plugins: [
