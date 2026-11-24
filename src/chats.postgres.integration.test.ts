@@ -19,8 +19,8 @@ import { Jwt, JwtLive } from "./Jwt.ts";
 import { makeTestRun } from "./testApi.ts";
 import { resetTestDb } from "./testDb.ts";
 
-// createDirectChat, addParticipants and joinChatViaInvite close their
-// check-then-write races with `serializable` transactions, which Postgres
+// addParticipants and joinChatViaInvite close their check-then-write races
+// (createDirectChat relies on a unique index instead) with `serializable` transactions, which Postgres
 // enforces by aborting the loser (40001) for `serializableTransaction` to
 // retry (issue #654). Every other test runs on PGlite, a single connection
 // whose transactions never overlap — so none of that is exercised there.
@@ -214,14 +214,23 @@ describeIfPostgres("chat transactions on real Postgres", () => {
           db.select({ n: count() }).from(chats).where(eq(chats.type, "direct")),
         );
         expect(direct?.n).toBe(1);
+
+        // The index itself refuses a second one, not just the handler.
+        const pair = [alice.user.id, bob.user.id];
+        const second = yield* Effect.tryPromise(() =>
+          db.insert(chats).values({
+            type: "direct",
+            directUserLow: Math.min(...pair),
+            directUserHigh: Math.max(...pair),
+          }),
+        ).pipe(Effect.result);
+        expect(second._tag).toBe("Failure");
       }),
     ));
 
   test("concurrent createDirectChat for different pairs all succeed", () =>
     run(
       Effect.gen(function* () {
-        // Serializable isolation tracks reads by index page, so even
-        // requests for unrelated pairs abort each other.
         const left = yield* createUsers("left", 12);
         const right = yield* createUsers("right", 12);
 

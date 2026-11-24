@@ -317,49 +317,75 @@ export const comments = pgTable(
 export type DbComment = typeof comments.$inferSelect;
 export type NewDbComment = typeof comments.$inferInsert;
 
-export const chats = pgTable("chats", {
-  id: serial("id").primaryKey(),
-  type: text("type", { enum: ["direct", "group"] }).notNull(),
-  // Only set (and editable) for group chats — a direct chat's "name" is
-  // always derived client-side from the other participant.
-  title: text("title"),
-  // Nullable + set null (not cascade): if the creator's account is ever
-  // deleted, the chat and everyone else's messages should survive — it just
-  // becomes un-renameable/un-manageable rather than vanishing for every
-  // other participant.
-  createdBy: integer("created_by").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  createdAt: timestamp("created_at", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  // Bumped whenever a message is sent, so the chat list can sort by recent
-  // activity with a plain ORDER BY instead of a per-row message subquery.
-  updatedAt: timestamp("updated_at", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  // Monotonically incremented on every participant-visible change to this
-  // chat (message sent/edited/deleted, read receipts advancing, rename,
-  // participants added) — see `bumpChatVersion` in chats/chatState.ts.
-  // Carried on the `chat_updated` realtime event and in the `Chat` API
-  // response so clients can tell exactly when they've missed an event (the
-  // version they observe jumps by more than one) instead of only being able
-  // to guess from a dropped/delayed socket message (issue #55).
-  version: integer("version").notNull().default(1),
-  // Uploaded-and-cropped group avatar (only set for `type: "group"` chats),
-  // stored and served exactly like an uploaded user avatar (issue #269/#289)
-  // — see the comment on `users.avatarSmallKey` above for the full rationale.
-  // Each column holds a short random token: both the object's storage key
-  // suffix (`avatars/<token>`, src/avatars.ts) and the path segment of the
-  // long-cache proxy URL returned to clients (`GET /avatars/:token`, see
-  // src/AvatarRoute.ts). Unlike `users`, there's no external-URL alternative
-  // (no `avatarUrl` column) or legacy base64 columns to carry — this table
-  // goes straight to the current object-storage pattern since it's a new
-  // column, not a migration of pre-existing data.
-  avatarSmallKey: text("avatar_small_key"),
-  avatarMediumKey: text("avatar_medium_key"),
-  avatarLargeKey: text("avatar_large_key"),
-});
+export const chats = pgTable(
+  "chats",
+  {
+    id: serial("id").primaryKey(),
+    type: text("type", { enum: ["direct", "group"] }).notNull(),
+    // Only set (and editable) for group chats — a direct chat's "name" is
+    // always derived client-side from the other participant.
+    title: text("title"),
+    // Nullable + set null (not cascade): if the creator's account is ever
+    // deleted, the chat and everyone else's messages should survive — it just
+    // becomes un-renameable/un-manageable rather than vanishing for every
+    // other participant.
+    createdBy: integer("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    // The pair a direct chat is between, lower user id first; null for a group.
+    // The unique index on them is what allows only one direct chat per pair,
+    // whoever starts it. Set null, so the chat outlives a deleted account
+    // (read-only, see `directChatClosed`): a null never collides, and nobody
+    // can be that user again.
+    directUserLow: integer("direct_user_low").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    directUserHigh: integer("direct_user_high").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    // Bumped whenever a message is sent, so the chat list can sort by recent
+    // activity with a plain ORDER BY instead of a per-row message subquery.
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    // Monotonically incremented on every participant-visible change to this
+    // chat (message sent/edited/deleted, read receipts advancing, rename,
+    // participants added) — see `bumpChatVersion` in chats/chatState.ts.
+    // Carried on the `chat_updated` realtime event and in the `Chat` API
+    // response so clients can tell exactly when they've missed an event (the
+    // version they observe jumps by more than one) instead of only being able
+    // to guess from a dropped/delayed socket message (issue #55).
+    version: integer("version").notNull().default(1),
+    // Uploaded-and-cropped group avatar (only set for `type: "group"` chats),
+    // stored and served exactly like an uploaded user avatar (issue #269/#289)
+    // — see the comment on `users.avatarSmallKey` above for the full rationale.
+    // Each column holds a short random token: both the object's storage key
+    // suffix (`avatars/<token>`, src/avatars.ts) and the path segment of the
+    // long-cache proxy URL returned to clients (`GET /avatars/:token`, see
+    // src/AvatarRoute.ts). Unlike `users`, there's no external-URL alternative
+    // (no `avatarUrl` column) or legacy base64 columns to carry — this table
+    // goes straight to the current object-storage pattern since it's a new
+    // column, not a migration of pre-existing data.
+    avatarSmallKey: text("avatar_small_key"),
+    avatarMediumKey: text("avatar_medium_key"),
+    avatarLargeKey: text("avatar_large_key"),
+  },
+  (table) => [
+    uniqueIndex("chats_direct_pair_idx").on(
+      table.directUserLow,
+      table.directUserHigh,
+    ),
+    // Serves the set-null FK; the index above serves the other one.
+    index("chats_direct_user_high_idx").on(table.directUserHigh),
+    check(
+      "chats_direct_pair_ordered",
+      sql`${table.directUserLow} < ${table.directUserHigh}`,
+    ),
+  ],
+);
 
 export type DbChat = typeof chats.$inferSelect;
 export type NewDbChat = typeof chats.$inferInsert;

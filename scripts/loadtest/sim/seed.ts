@@ -69,7 +69,11 @@ await step(`direct chats (${directChats})`, () =>
     SELECT (s.k - 1) * ${N} + i, p.u, now() - interval '30 days', 'member'
     FROM generate_series(1, ${N}) i
     CROSS JOIN unnest(ARRAY[${DIRECT_STRIDES.join(",")}]) WITH ORDINALITY AS s(stride, k)
-    CROSS JOIN LATERAL (VALUES (i), (((i - 1 + s.stride) % ${N}) + 1)) p(u);`),
+    CROSS JOIN LATERAL (VALUES (i), (((i - 1 + s.stride) % ${N}) + 1)) p(u);
+    UPDATE chats c SET direct_user_low = p.low, direct_user_high = p.high
+    FROM (SELECT chat_id, min(user_id) AS low, max(user_id) AS high
+          FROM chat_participants GROUP BY chat_id) p
+    WHERE p.chat_id = c.id;`),
 );
 
 const groups = Math.floor(N / GROUP_STEP);

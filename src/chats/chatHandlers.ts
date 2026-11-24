@@ -1,9 +1,8 @@
-import { and, count, desc, eq, inArray, lt, or } from "drizzle-orm";
+import { and, desc, eq, lt, or } from "drizzle-orm";
 import { Effect } from "effect";
 import { DEFAULT_CHATS_LIMIT, InvalidChatRequest, NotFound } from "../Api.ts";
 import { CurrentUser } from "../Auth.ts";
 import { deleteAvatarObjects, toAvatarVariants } from "../avatars.ts";
-import { serializableTransaction } from "../serializableTransaction.ts";
 
 import { chatParticipants, chats } from "../db/schema.ts";
 import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
@@ -207,74 +206,55 @@ export const chatHandlers = ({
             new NotFound({ message: `User ${payload.userId} not found` }),
           );
 
-        // The "does a direct chat for this pair already exist" check and
-        // the "create one if not" insert run inside a single `serializable`
-        // transaction. Two concurrent requests for the same pair would
-        // otherwise both see "no existing chat" and both create one; under
-        // `serializable` isolation Postgres instead aborts one of them, and
-        // `serializableTransaction` retries it — so the loser re-runs the
-        // check, finds the winner's chat and returns it.
-        const result = yield* serializableTransaction(db, async (tx) => {
-          // A direct chat always has exactly the two participants it
-          // was created with, so matching on "both ids are
-          // participants of some direct chat, and it has exactly two
-          // participants" uniquely identifies the (at most one)
-          // existing chat for this pair.
-          const existing = await tx
-            .select({ chatId: chatParticipants.chatId })
-            .from(chatParticipants)
-            .innerJoin(chats, eq(chats.id, chatParticipants.chatId))
-            .where(
-              and(
-                eq(chats.type, "direct"),
-                inArray(chatParticipants.userId, [
-                  currentUser.id,
-                  payload.userId,
-                ]),
-              ),
-            )
-            .groupBy(chatParticipants.chatId)
-            .having(eq(count(chatParticipants.userId), 2));
+        // The unique index on the pair decides races: a second insert waits
+        // for the first to commit, then does nothing and finds its chat.
+        const pair = {
+          directUserLow: Math.min(currentUser.id, payload.userId),
+          directUserHigh: Math.max(currentUser.id, payload.userId),
+        };
+        const result = yield* dbQuery(() =>
+          db.transaction(async (tx) => {
+            const now = new Date();
+            const created = await tx
+              .insert(chats)
+              .values({
+                type: "direct",
+                title: null,
+                createdBy: currentUser.id,
+                createdAt: now,
+                updatedAt: now,
+                ...pair,
+              })
+              .onConflictDoNothing({
+                target: [chats.directUserLow, chats.directUserHigh],
+              })
+              .returning();
+            const newRow = created[0];
+            if (!newRow) {
+              const rows = await tx
+                .select()
+                .from(chats)
+                .where(
+                  and(
+                    eq(chats.directUserLow, pair.directUserLow),
+                    eq(chats.directUserHigh, pair.directUserHigh),
+                  ),
+                );
+              const row = rows[0];
+              if (!row) throw new Error("Existing chat vanished");
+              return { row, created: false };
+            }
 
-          if (existing[0]) {
-            const rows = await tx
-              .select()
-              .from(chats)
-              .where(eq(chats.id, existing[0].chatId));
-            const row = rows[0];
-            if (!row) throw new Error("Existing chat vanished mid-transaction");
-            return { row, created: false };
-          }
-
-          const now = new Date();
-          const created = await tx
-            .insert(chats)
-            .values({
-              type: "direct",
-              title: null,
-              createdBy: currentUser.id,
-              createdAt: now,
-              updatedAt: now,
-            })
-            .returning();
-          const newRow = created[0];
-          if (!newRow) throw new Error("INSERT returned no rows");
-
-          await tx.insert(chatParticipants).values([
-            {
-              chatId: newRow.id,
-              userId: currentUser.id,
-              joinedAt: now,
-            },
-            {
-              chatId: newRow.id,
-              userId: payload.userId,
-              joinedAt: now,
-            },
-          ]);
-
-          return { row: newRow, created: true };
-        });
+            await tx.insert(chatParticipants).values(
+              [currentUser.id, payload.userId].map((userId) => ({
+                chatId: newRow.id,
+                userId,
+                joinedAt: now,
+              })),
+            );
+            return { row: newRow, created: true };
+          }),
+        );
         const chatRow = result.row;
 
         const participants = yield* getParticipants(db, chatRow.id);
