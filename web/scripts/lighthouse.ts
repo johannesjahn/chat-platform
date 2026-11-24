@@ -96,8 +96,7 @@ const token = session.accessToken;
 const post = await api<{ id: number }>(
   "/posts",
   {
-    contentType: "text",
-    content: "Lighthouse check\n\nA post with a comment under it.",
+    body: "Lighthouse check\n\nA post with a comment under it.",
   },
   token,
 );
@@ -107,11 +106,7 @@ const chat = await api<{ id: number }>(
   { userId: other.user.id },
   token,
 );
-await api(
-  `/chats/${chat.id}/messages`,
-  { contentType: "text", content: "Hello there!" },
-  token,
-);
+await api(`/chats/${chat.id}/messages`, { body: "Hello there!" }, token);
 
 const PAGES: { path: string; signedIn: boolean }[] = [
   { path: "/login", signedIn: false },
