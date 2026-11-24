@@ -103,7 +103,12 @@ const SIGNED_IN_PAGES: { name: string; paths: (seeded: Seeded) => string[] }[] =
     },
     {
       name: "notifications, search and settings",
-      paths: () => ["/notifications", "/search?q=accessibility", "/settings"],
+      paths: () => [
+        "/notifications",
+        "/search?q=accessibility",
+        "/settings",
+        "/settings?section=notifications",
+      ],
     },
     {
       name: "games",

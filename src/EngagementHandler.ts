@@ -544,7 +544,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             postId: id,
             commentId: row.id,
           });
-          yield* createNotifications({ db, connections }, [
+          const notified = yield* createNotifications({ db, connections }, [
             {
               userId: post.authorId,
               actorId: currentUser.id,
@@ -553,8 +553,9 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               commentId: row.id,
             },
           ]);
-          // The post's author already hears about this comment above; a
-          // mention of them in it would only notify them twice.
+          // The post's author already hears about this comment above (unless
+          // they turned that off); a mention of them in it would only notify
+          // them twice.
           yield* notifyMentions(
             { db, connections },
             {
@@ -562,7 +563,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               content: row.content,
               postId: id,
               commentId: row.id,
-              exclude: [post.authorId],
+              exclude: notified,
             },
           );
           return toApiComment(row, yield* loadCommentAuthor(db, row));
@@ -647,7 +648,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             postId: parent.postId,
             commentId: row.id,
           });
-          yield* createNotifications({ db, connections }, [
+          const notified = yield* createNotifications({ db, connections }, [
             {
               userId: parent.authorId,
               actorId: currentUser.id,
@@ -663,7 +664,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
               content: row.content,
               postId: parent.postId,
               commentId: row.id,
-              exclude: [parent.authorId],
+              exclude: notified,
             },
           );
           return toApiComment(row, yield* loadCommentAuthor(db, row));

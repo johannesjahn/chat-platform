@@ -8,6 +8,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -1185,6 +1186,21 @@ export const notifications = pgTable(
 
 export type DbNotification = typeof notifications.$inferSelect;
 export type NewDbNotification = typeof notifications.$inferInsert;
+
+// A notification type a user has turned off or back on (issue #900). No row
+// means on, so a type added later starts on for everyone. `type` is free-form
+// text for the same reason as `notifications.type`.
+export const notificationPreferences = pgTable(
+  "notification_preferences",
+  {
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    enabled: boolean("enabled").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.type] })],
+);
 
 // One row per background job that must run once per interval across every
 // replica, not once per replica (issue #831; see src/scheduledJobs.ts). A
