@@ -126,7 +126,7 @@ test("group chats can be created, renamed by the creator, and show all participa
   // Close the panel so the assertion matches only the chat header title.
   await pageA.getByRole("button", { name: "Close chat details" }).click();
   await expect(
-    pageA.getByRole("main").getByText("Renamed squad"),
+    pageA.getByRole("main").getByText("Renamed squad", { exact: true }),
   ).toBeVisible();
 
   await contextA.close();
