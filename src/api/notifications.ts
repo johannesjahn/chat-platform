@@ -29,6 +29,34 @@ export const NotificationType = Schema.Literals([
 
 export type NotificationType = typeof NotificationType.Type;
 
+// Whether each type reaches the caller (issue #900); all on by default.
+const preferenceFields = {
+  comment: Schema.Boolean,
+  reply: Schema.Boolean,
+  reaction: Schema.Boolean,
+  mention: Schema.Boolean,
+  game_invite: Schema.Boolean,
+  game_record: Schema.Boolean,
+} satisfies Record<NotificationType, unknown>;
+
+export const NotificationPreferences = Schema.Struct(preferenceFields).annotate(
+  { identifier: "NotificationPreferences" },
+);
+
+export type NotificationPreferences = typeof NotificationPreferences.Type;
+
+// Omitted types keep their setting.
+export const UpdateNotificationPreferencesBody = Schema.Struct({
+  comment: Schema.optional(preferenceFields.comment),
+  reply: Schema.optional(preferenceFields.reply),
+  reaction: Schema.optional(preferenceFields.reaction),
+  mention: Schema.optional(preferenceFields.mention),
+  game_invite: Schema.optional(preferenceFields.game_invite),
+  game_record: Schema.optional(preferenceFields.game_record),
+} satisfies Record<NotificationType, unknown>).annotate({
+  identifier: "UpdateNotificationPreferencesBody",
+});
+
 export const Notification = Schema.Struct({
   id: Schema.Finite,
   type: NotificationType,
@@ -98,6 +126,24 @@ export const NotificationsGroup = HttpApiGroup.make("notifications")
       "/notifications/unread-count",
       {
         success: UnreadNotificationCount,
+      },
+    ).middleware(Authentication),
+  )
+  .add(
+    HttpApiEndpoint.get(
+      "getNotificationPreferences",
+      "/notifications/preferences",
+      { success: NotificationPreferences },
+    ).middleware(Authentication),
+  )
+  .add(
+    // Only affects what happens from now on: rows already in the inbox stay.
+    HttpApiEndpoint.patch(
+      "updateNotificationPreferences",
+      "/notifications/preferences",
+      {
+        payload: UpdateNotificationPreferencesBody,
+        success: NotificationPreferences,
       },
     ).middleware(Authentication),
   )

@@ -7982,6 +7982,106 @@
         }
       }
     },
+    "/notifications/preferences": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "operationId": "notifications.getNotificationPreferences",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "NotificationPreferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferences"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HttpApiDecodeError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedEncoded"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "notifications"
+        ],
+        "operationId": "notifications.updateNotificationPreferences",
+        "parameters": [],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "NotificationPreferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferences"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HttpApiDecodeError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedEncoded"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateNotificationPreferencesBody"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
     "/notifications/read-all": {
       "post": {
         "tags": [
@@ -8205,6 +8305,104 @@
         "required": [
           "count"
         ],
+        "additionalProperties": false
+      },
+      "NotificationPreferences": {
+        "type": "object",
+        "properties": {
+          "comment": {
+            "type": "boolean"
+          },
+          "reply": {
+            "type": "boolean"
+          },
+          "reaction": {
+            "type": "boolean"
+          },
+          "mention": {
+            "type": "boolean"
+          },
+          "game_invite": {
+            "type": "boolean"
+          },
+          "game_record": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "comment",
+          "reply",
+          "reaction",
+          "mention",
+          "game_invite",
+          "game_record"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateNotificationPreferencesBody": {
+        "type": "object",
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reaction": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mention": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "game_invite": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "game_record": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
         "additionalProperties": false
       },
       "InvalidNotificationRequestEncoded": {

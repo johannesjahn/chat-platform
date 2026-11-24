@@ -316,6 +316,13 @@
       "when": 1795491886650,
       "tag": "0044_chat_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1795492773415,
+      "tag": "0045_notification_preferences",
+      "breakpoints": true
     }
   ]
 }

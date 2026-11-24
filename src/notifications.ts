@@ -8,7 +8,7 @@ import {
 import { recipientsMutingSender } from "./blocks.ts";
 import { type DrizzleDb, timedDbCall } from "./Db.ts";
 import { RealtimeConnections } from "./Realtime.ts";
-import { notifications, users } from "./db/schema.ts";
+import { notificationPreferences, notifications, users } from "./db/schema.ts";
 
 // Write-side helpers for in-app notifications (issue #317). Every handler
 // that does something *to* another user's content — comment, reply, react,
@@ -18,6 +18,7 @@ import { notifications, users } from "./db/schema.ts";
 //  - a recipient who has blocked *or* muted the actor hears nothing from
 //    them — the same rule chat notifications already follow (see
 //    `recipientsMutingSender` in blocks.ts);
+//  - a recipient who turned the type off (issue #900) gets none of it;
 //  - one action notifies a given recipient at most once.
 // See the `notifications` table in db/schema.ts for what a row holds.
 
@@ -81,23 +82,43 @@ const filterRecipients = async (
     );
     kept.push(...list.filter((input) => !muting.has(input.userId)));
   }
-  return kept;
+  if (kept.length === 0) return kept;
+
+  const off = await db
+    .select({
+      userId: notificationPreferences.userId,
+      type: notificationPreferences.type,
+    })
+    .from(notificationPreferences)
+    .where(
+      and(
+        inArray(notificationPreferences.userId, [
+          ...new Set(kept.map((input) => input.userId)),
+        ]),
+        eq(notificationPreferences.enabled, false),
+      ),
+    );
+  const turnedOff = new Set(off.map((row) => `${row.userId}:${row.type}`));
+  return kept.filter(
+    (input) => !turnedOff.has(`${input.userId}:${input.type}`),
+  );
 };
 
 // Best-effort, like the realtime push it triggers: the comment/reaction/
 // invite that caused a notification has already been written, and failing
 // that request because its side-notification couldn't be recorded would be
 // worse than a missing inbox entry. Failures are logged, never raised.
+// Returns who was notified.
 export const createNotifications = (
   { db, connections }: NotificationDeps,
   inputs: ReadonlyArray<NotificationInput>,
 ) =>
   Effect.gen(function* () {
-    if (inputs.length === 0) return;
+    if (inputs.length === 0) return [];
     const kept = yield* timedDbCall(
       Effect.tryPromise(() => filterRecipients(db, inputs)),
     );
-    if (kept.length === 0) return;
+    if (kept.length === 0) return [];
     const now = new Date();
     yield* timedDbCall(
       Effect.tryPromise(() =>
@@ -116,14 +137,14 @@ export const createNotifications = (
         ),
       ),
     );
-    yield* notifyInboxChanged(
-      connections,
-      kept.map((input) => input.userId),
-    );
+    const notified = kept.map((input) => input.userId);
+    yield* notifyInboxChanged(connections, notified);
+    return notified;
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logWarning("notifications: failed to record notifications").pipe(
         Effect.annotateLogs({ cause: String(cause) }),
+        Effect.as<number[]>([]),
       ),
     ),
   );

@@ -209,7 +209,8 @@ The bell and `/notifications` inbox (issue #317): `notifications` table
 
 - Rows are written by the handler that performed the action, always through
   `createNotifications` (notifications.ts), which owns suppression (never
-  yourself, never from someone you blocked/muted).
+  yourself, never from someone you blocked/muted, never a type you turned
+  off in `notification_preferences`, issue #900). It returns who it notified.
 - **References, not copies**: a row stores ids; the excerpt is joined in at
   read time and target FKs cascade. Undoing a reaction retracts its
   notification.
@@ -219,7 +220,8 @@ The bell and `/notifications` inbox (issue #317): `notifications` table
 - Live delivery is an id-less `notifications_changed` to the recipient
   (`notifyUsers`); the client refetches.
 
-To add a type: add it to `NotificationType`, call `createNotifications`
+To add a type: add it to `NotificationType` and the preferences (the
+compiler lists the places, plus `NotificationTypesCard.tsx`), call `createNotifications`
 from the handler that causes it, then on the client give it a sentence in
 `web/src/components/NotificationRow.tsx`, an icon in `NOTIFICATION_ICONS`
 (`web/src/components/notificationIcons.ts`), a target in

@@ -540,3 +540,73 @@ test("taking someone's all-time #1 spot notifies them; beating your own record d
       expect((yield* inbox(alice.client)).notifications).toHaveLength(0);
     }),
   ));
+
+// --- Preferences (issue #900) -----------------------------------------------
+
+test("a type that's turned off creates no notification, for that user only", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* setup("alice");
+      const bob = yield* setup("bob");
+      const post = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "hello" },
+      });
+      const bobsPost = yield* bob.client.posts.createPost({
+        payload: { contentType: "text", content: "hello" },
+      });
+      const all =
+        yield* alice.client.notifications.getNotificationPreferences();
+      expect(Object.values(all)).toEqual([true, true, true, true, true, true]);
+
+      const updated =
+        yield* alice.client.notifications.updateNotificationPreferences({
+          payload: { reaction: false },
+        });
+      expect(updated).toEqual({ ...all, reaction: false });
+
+      const react = (who: typeof alice, id: number, emoji: "👍" | "❤️") =>
+        who.client.comments.addPostReaction({
+          params: { id },
+          payload: { emoji },
+        });
+      yield* react(bob, post.id, "👍");
+      yield* react(alice, bobsPost.id, "👍");
+      expect((yield* inbox(alice.client)).notifications).toEqual([]);
+      expect((yield* inbox(bob.client)).notifications).toHaveLength(1);
+
+      // Other types still arrive, and turning it back on works.
+      yield* bob.client.comments.createComment({
+        params: { id: post.id },
+        payload: { content: "hi" },
+      });
+      yield* alice.client.notifications.updateNotificationPreferences({
+        payload: { reaction: true },
+      });
+      yield* react(bob, post.id, "❤️");
+      expect(
+        (yield* inbox(alice.client)).notifications.map((n) => n.type),
+      ).toEqual(["reaction", "comment"]);
+    }),
+  ));
+
+test("with comments off, a comment that mentions the author still notifies the mention", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* setup("alice");
+      const bob = yield* setup("bob");
+      const post = yield* alice.client.posts.createPost({
+        payload: { contentType: "text", content: "hello" },
+      });
+      yield* alice.client.notifications.updateNotificationPreferences({
+        payload: { comment: false },
+      });
+      for (const content of ["no mention", "hey @alice"])
+        yield* bob.client.comments.createComment({
+          params: { id: post.id },
+          payload: { content },
+        });
+      expect(
+        (yield* inbox(alice.client)).notifications.map((n) => n.type),
+      ).toEqual(["mention"]);
+    }),
+  ));
