@@ -349,12 +349,12 @@ export const getLastMessagesForChats = (
           // Spelled out with an alias: in a single-table select Drizzle
           // renders `${messages.chatId}` unqualified, which inside this
           // subquery would bind to `messages`, not the outer `chats`.
-          lastId: sql<number | null>`(
+          lastId: sql`(
             SELECT latest.id FROM ${messages} AS latest
             WHERE latest.chat_id = ${chats}.id
             ORDER BY latest.id DESC
             LIMIT 1
-          )`,
+          )`.mapWith((id): number | null => Number(id)),
         })
         .from(chats)
         .where(inArray(chats.id, chatIds)),

@@ -1,6 +1,7 @@
 import {
   type AnyPgColumn,
   bigint,
+  bigserial,
   boolean,
   check,
   doublePrecision,
@@ -434,7 +435,7 @@ export const chatParticipants = pgTable(
     // `markRead` only ever moves it forward. Null means nothing read yet.
     // Deliberately no FK: deleting the message it points at must not reset
     // the watermark (`set null` would make the whole history unread again).
-    lastReadMessageId: integer("last_read_message_id"),
+    lastReadMessageId: bigint("last_read_message_id", { mode: "number" }),
     // Message requests (issue #785): true while this participant was put in
     // a group by someone they shared no (accepted) chat with, until they
     // accept. A pending row is kept out of the participant's chat list and
@@ -487,7 +488,7 @@ export const chatEvents = pgTable(
     chatId: integer("chat_id")
       .notNull()
       .references(() => chats.id, { onDelete: "cascade" }),
-    afterMessageId: integer("after_message_id").notNull(),
+    afterMessageId: bigint("after_message_id", { mode: "number" }).notNull(),
     type: text("type", {
       enum: [
         "member_added",
@@ -529,7 +530,10 @@ export type NewDbChatEvent = typeof chatEvents.$inferInsert;
 export const messages = pgTable(
   "messages",
   {
-    id: serial("id").primaryKey(),
+    // 64-bit, as are the columns holding it: one of the tables that grow
+    // fastest (issue #940). In raw SQL, `mapWith(Number)`: Bun.sql reads a
+    // bigint as a string.
+    id: bigserial("id", { mode: "number" }).primaryKey(),
     chatId: integer("chat_id")
       .notNull()
       .references(() => chats.id, { onDelete: "cascade" }),
@@ -558,7 +562,7 @@ export const messages = pgTable(
     // replies in place — the quoted preview just falls back to "message
     // unavailable" client-side — rather than silently removing every reply
     // along with it.
-    parentMessageId: integer("parent_message_id").references(
+    parentMessageId: bigint("parent_message_id", { mode: "number" }).references(
       (): AnyPgColumn => messages.id,
       { onDelete: "set null" },
     ),
@@ -578,10 +582,9 @@ export const messages = pgTable(
     // three through unchanged, so the label always credits the original
     // author and chains never nest. All nullable with no default, so the
     // migration is expand-only.
-    forwardedFromMessageId: integer("forwarded_from_message_id").references(
-      (): AnyPgColumn => messages.id,
-      { onDelete: "set null" },
-    ),
+    forwardedFromMessageId: bigint("forwarded_from_message_id", {
+      mode: "number",
+    }).references((): AnyPgColumn => messages.id, { onDelete: "set null" }),
     forwardedFromSenderId: integer("forwarded_from_sender_id").references(
       () => users.id,
       { onDelete: "set null" },
@@ -651,7 +654,7 @@ export const pinnedMessages = pgTable(
     chatId: integer("chat_id")
       .notNull()
       .references(() => chats.id, { onDelete: "cascade" }),
-    messageId: integer("message_id")
+    messageId: bigint("message_id", { mode: "number" })
       .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
     pinnedBy: integer("pinned_by").references(() => users.id, {
@@ -690,7 +693,7 @@ export const starredMessages = pgTable(
     userId: integer("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    messageId: integer("message_id")
+    messageId: bigint("message_id", { mode: "number" })
       .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
@@ -729,7 +732,7 @@ export type NewDbStarredMessage = typeof starredMessages.$inferInsert;
 export const likes = pgTable(
   "likes",
   {
-    id: serial("id").primaryKey(),
+    id: bigserial("id", { mode: "number" }).primaryKey(),
     userId: integer("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -739,9 +742,12 @@ export const likes = pgTable(
     commentId: integer("comment_id").references(() => comments.id, {
       onDelete: "cascade",
     }),
-    messageId: integer("message_id").references(() => messages.id, {
-      onDelete: "cascade",
-    }),
+    messageId: bigint("message_id", { mode: "number" }).references(
+      () => messages.id,
+      {
+        onDelete: "cascade",
+      },
+    ),
     // Defaults to the original binary "like" emoji so a row inserted without
     // specifying one (shouldn't happen post-migration, but keeps the column
     // additive/backward-compatible per the expand-contract note in CLAUDE.md)
@@ -1192,7 +1198,7 @@ export type DbGameVote = typeof gameVotes.$inferSelect;
 export const notifications = pgTable(
   "notifications",
   {
-    id: serial("id").primaryKey(),
+    id: bigserial("id", { mode: "number" }).primaryKey(),
     userId: integer("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
