@@ -11,6 +11,7 @@ import { inviteHandlers } from "./chats/inviteHandlers.ts";
 import { membershipHandlers } from "./chats/membershipHandlers.ts";
 import { messageHandlers } from "./chats/messageHandlers.ts";
 import { pinStarHandlers } from "./chats/pinStarHandlers.ts";
+import { preferenceHandlers } from "./chats/preferenceHandlers.ts";
 import { readHandlers } from "./chats/readHandlers.ts";
 
 // The `chats` group, one module per area under src/chats/ (issue #811):
@@ -22,7 +23,8 @@ import { readHandlers } from "./chats/readHandlers.ts";
 // - messageHandlers — list, send, edit, delete, typing, reactions;
 // - readHandlers — read receipts and the unread total;
 // - forwardHandlers — forwarding a message into other chats;
-// - pinStarHandlers — pins (shared) and stars (private).
+// - pinStarHandlers — pins (shared) and stars (private);
+// - preferenceHandlers — the caller's own mute, archive and pin for a chat.
 //
 // Shared helpers sit next to them: the single send path (sendPath.ts —
 // `insertMessage`, `directChatClosed`, `publishNewMessage`, also used by
@@ -48,6 +50,7 @@ export const ChatsHandlerLive = HttpApiBuilder.group(
       ...readHandlers(deps),
       ...forwardHandlers(deps),
       ...pinStarHandlers(deps),
+      ...preferenceHandlers(deps),
     });
   }),
 );

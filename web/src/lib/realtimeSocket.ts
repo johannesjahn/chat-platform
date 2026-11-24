@@ -55,6 +55,7 @@ const SELF_HEAL_SPREAD_MS = 10_000;
 type RealtimeSocketEvent =
   | ChatUpdatedEvent
   | { type: "chat_deleted"; chatId: number }
+  | { type: "chat_preferences_changed"; chatId: number }
   | {
       type: "post_changed";
       postId: number;
@@ -259,6 +260,14 @@ export function useRealtimeSocket(enabled: boolean): void {
           });
           break;
         }
+        // We muted, archived or pinned a chat, here or on another device
+        // (issue #900): it may be in another list, and count differently.
+        case "chat_preferences_changed":
+          void queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
+          void queryClient.invalidateQueries({
+            queryKey: chatDetailQueryKey(parsed.chatId),
+          });
+          break;
         case "post_changed":
           // Arrives only while a card shows the post (its room — see
           // usePostRoom, issue #828), and touches only that post — at most

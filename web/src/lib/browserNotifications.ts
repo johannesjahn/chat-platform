@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useRouter } from "@tanstack/react-router";
-import { chatDisplayName, type Chat } from "./chats";
+import { chatDisplayName, takeNewlyUnread, type Chat } from "./chats";
 
 // Opt-in browser notifications (issue #554): a system notification for a new
 // direct/group message or in-app notification while the tab is in the
@@ -71,56 +71,53 @@ function preview(chat: Chat): string {
 
 /**
  * Shows a system notification when the unread counts go *up* while the tab
- * is hidden — the counts the nav badges already track, so this needs no
- * realtime plumbing of its own. A chat notification names the chat and
- * quotes its newest message; clicking one focuses the tab and opens it.
+ * is hidden — the loaded chats' own counts (a new message always bumps its
+ * chat onto the first page) and the bell's, so this needs no realtime
+ * plumbing of its own. Muted chats don't notify (issue #900). A chat
+ * notification names the chat and quotes its newest message; clicking one
+ * focuses the tab and opens it.
  */
 export function useBrowserNotifications({
   currentUserId,
   chats,
-  unreadChats,
   unreadNotifications,
 }: {
   currentUserId: number | undefined;
   chats: Chat[];
-  unreadChats: number;
   unreadNotifications: number;
 }) {
   const router = useRouter();
   const state = useBrowserNotificationState();
-  const previousRef = useRef({ unreadChats, unreadNotifications });
+  const previousRef = useRef(unreadNotifications);
+  const seenUnreadRef = useRef(new Map<number, number>());
 
   useEffect(() => {
     const previous = previousRef.current;
-    previousRef.current = { unreadChats, unreadNotifications };
+    previousRef.current = unreadNotifications;
+    const [chat] = takeNewlyUnread(seenUnreadRef.current, chats);
     if (state !== "on" || currentUserId === undefined) return;
     if (!document.hidden) return;
 
-    if (unreadChats > previous.unreadChats) {
-      // The list is newest-first, so the first chat with something unread
-      // is the one that just got the message.
-      const chat = chats.find((c) => c.unreadCount > 0);
-      if (chat) {
-        const notification = new Notification(
-          chatDisplayName(chat, currentUserId),
-          {
-            body: preview(chat),
-            tag: `chat-${chat.id}`,
-            icon: "/favicon-192x192.png",
-          },
-        );
-        notification.onclick = () => {
-          window.focus();
-          void router.navigate({
-            to: "/chats/$id",
-            params: { id: String(chat.id) },
-          });
-          notification.close();
-        };
-      }
+    if (chat) {
+      const notification = new Notification(
+        chatDisplayName(chat, currentUserId),
+        {
+          body: preview(chat),
+          tag: `chat-${chat.id}`,
+          icon: "/favicon-192x192.png",
+        },
+      );
+      notification.onclick = () => {
+        window.focus();
+        void router.navigate({
+          to: "/chats/$id",
+          params: { id: String(chat.id) },
+        });
+        notification.close();
+      };
     }
-    if (unreadNotifications > previous.unreadNotifications) {
-      const count = unreadNotifications - previous.unreadNotifications;
+    if (unreadNotifications > previous) {
+      const count = unreadNotifications - previous;
       const notification = new Notification("Chat Platform", {
         body:
           count === 1
@@ -135,5 +132,5 @@ export function useBrowserNotifications({
         notification.close();
       };
     }
-  }, [state, currentUserId, chats, unreadChats, unreadNotifications, router]);
+  }, [state, currentUserId, chats, unreadNotifications, router]);
 }

@@ -12,12 +12,14 @@ import {
   chatsListQueryKey,
   unreadChatsListQueryKey,
   chatRequestsListQueryKey,
+  archivedChatsListQueryKey,
   chatsUnreadCountQueryKey,
   chatDetailQueryKey,
   chatMessagesQueryKey,
   chatPinnedQueryKey,
   chatStarredQueryKey,
 } from "./chatQueryKeys";
+import { countsTowardUnread } from "./chatMute";
 import { useIsDesktop } from "./media";
 import { isFreshlyWarmed, refetchUnlessWarmed } from "./routeLoader";
 import { userLabel } from "./users";
@@ -103,6 +105,7 @@ export {
   chatsListQueryKey,
   unreadChatsListQueryKey,
   chatRequestsListQueryKey,
+  archivedChatsListQueryKey,
   chatsUnreadCountQueryKey,
   chatDetailQueryKey,
   chatMessagesQueryKey,
@@ -141,16 +144,22 @@ export function useChatsTwoPane(): boolean {
 // `unread=true` list, its own cache entry, paged the same way — so an
 // unread chat that's far down the full list shows up without scrolling to it.
 //
-// `requestsOnly` is the message requests list (issue #785) instead.
+// `requestsOnly` is the message requests list (issue #785) instead, and
+// `archivedOnly` the archived chats (issue #900).
 export function useChatsList(
   enabled: boolean,
   {
     unreadOnly = false,
     requestsOnly = false,
-  }: { unreadOnly?: boolean; requestsOnly?: boolean } = {},
+    archivedOnly = false,
+  }: {
+    unreadOnly?: boolean;
+    requestsOnly?: boolean;
+    archivedOnly?: boolean;
+  } = {},
 ) {
   return useInfiniteQuery({
-    ...chatsListQueryOptions({ unreadOnly, requestsOnly }),
+    ...chatsListQueryOptions({ unreadOnly, requestsOnly, archivedOnly }),
     enabled,
   });
 }
@@ -258,20 +267,21 @@ export function formatDaySeparator(
 }
 
 /**
- * The unread messages in whichever chat-list pages are loaded. Not the
- * total (that's `useTotalUnreadCount`) — only for code that pairs a count
- * with the loaded chats themselves, like the browser notification that
- * names the chat a new message just arrived in, which must move with the
- * same response as the list it reads from.
+ * The loaded chats that just got something unread, newest first — what a
+ * system notification is shown for. `seen` holds each chat's unread count as
+ * of the last call and is updated in place. Compared per chat, muted ones
+ * included, so a mute ending (issue #900) isn't taken for a new message.
  */
-export function loadedUnreadCount(
-  pages: ReadonlyArray<{ readonly chats: ReadonlyArray<Chat> }>,
-): number {
-  return pages.reduce(
-    (sum, page) =>
-      sum + page.chats.reduce((pageSum, chat) => pageSum + chat.unreadCount, 0),
-    0,
+export function takeNewlyUnread(
+  seen: Map<number, number>,
+  chats: ReadonlyArray<Chat>,
+): Chat[] {
+  const risen = chats.filter(
+    (chat) =>
+      chat.unreadCount > (seen.get(chat.id) ?? 0) && countsTowardUnread(chat),
   );
+  for (const chat of chats) seen.set(chat.id, chat.unreadCount);
+  return risen.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export function useChatDetail(chatId: number | undefined, enabled: boolean) {

@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Link } from "@tanstack/react-router";
-import { Forward, ImageIcon, Users, UserX } from "lucide-react";
+import { BellOff, Forward, ImageIcon, Pin, Users, UserX } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { PresenceDot } from "@/components/PresenceDot";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,6 +14,7 @@ import {
   lastMessageText,
   type Chat,
 } from "@/lib/chats";
+import { isChatMuted, unreadBadgeTone } from "@/lib/chatMute";
 import { useIsOnline } from "@/lib/presence";
 import { useUserStatus } from "@/lib/status";
 import { userAvatarName } from "@/lib/users";
@@ -60,6 +61,7 @@ export function ChatListItem({
     ? { avatar: undefined, title: undefined }
     : chatViewTransitionNames(chat.id);
   const hasUnread = chat.unreadCount > 0;
+  const muted = isChatMuted(chat);
   const lastMessage = chat.lastMessage;
   const sender = lastMessageSender(chat, currentUserId);
   const otherParticipant =
@@ -88,7 +90,7 @@ export function ChatListItem({
         // A conic sheen creeping around the border of a row that's waiting on
         // you — the "this one is live" cue, without adding a second badge
         // next to the count that's already there.
-        hasUnread && !compact && "motion-safe:animate-border-glow",
+        hasUnread && !muted && !compact && "motion-safe:animate-border-glow",
       )}
     >
       {chat.type === "direct" && otherParticipant ? (
@@ -146,11 +148,27 @@ export function ChatListItem({
         className="flex min-w-0 flex-1 flex-col"
       >
         <div className="flex items-center justify-between gap-2">
-          <span
-            className="truncate font-medium"
-            style={{ viewTransitionName: transitionNames.title }}
-          >
-            {name}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span
+              className="truncate font-medium"
+              style={{ viewTransitionName: transitionNames.title }}
+            >
+              {name}
+            </span>
+            {chat.pinned && (
+              <Pin
+                className="size-3.5 shrink-0 text-muted-foreground"
+                role="img"
+                aria-label="Pinned chat"
+              />
+            )}
+            {muted && (
+              <BellOff
+                className="size-3.5 shrink-0 text-muted-foreground"
+                role="img"
+                aria-label="Muted"
+              />
+            )}
           </span>
           {lastMessage && (
             <span className="shrink-0 text-xs text-muted-foreground">
@@ -191,7 +209,10 @@ export function ChatListItem({
           {hasUnread && (
             <span
               data-testid="unread-badge"
-              className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground motion-safe:animate-badge-pop"
+              className={cn(
+                "flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold motion-safe:animate-badge-pop",
+                unreadBadgeTone(chat),
+              )}
             >
               {chat.unreadCount > 99 ? "99+" : chat.unreadCount}
             </span>

@@ -11,6 +11,7 @@ import { type ChatChange, RealtimeConnections } from "../Realtime.ts";
 
 import { chatParticipants, chats, users, type DbChat } from "../db/schema.ts";
 import { getLastMessage } from "./messageViews.ts";
+import { toChatPreferences } from "./preferences.ts";
 import { getUnreadCount } from "./unread.ts";
 import { toAvatarVariants } from "../avatars.ts";
 import { effectiveStatus } from "../users/userViews.ts";
@@ -187,17 +188,25 @@ export const toMessageRequest = (row: {
 }): MessageRequest | null =>
   row.requestPending ? { addedBy: row.addedBy } : null;
 
-// The viewer's pending request for `chatId`, if it is one for them.
-const isMessageRequestFor = (
+// What the `Chat` view takes from the viewer's own participant row: whether
+// it's a pending request for them, and their settings. The defaults for a
+// viewer who isn't a participant (a site admin managing a group).
+const getViewerState = (
   db: DrizzleDb,
   chatId: number,
   userId: number,
-): Effect.Effect<MessageRequest | null> =>
+  updatedAt: Date,
+): Effect.Effect<
+  Pick<Chat, "messageRequest" | "mutedUntil" | "archived" | "pinned">
+> =>
   dbQuery(() =>
     db
       .select({
         requestPending: chatParticipants.requestPending,
         addedBy: chatParticipants.addedBy,
+        mutedUntil: chatParticipants.mutedUntil,
+        archivedAt: chatParticipants.archivedAt,
+        pinnedAt: chatParticipants.pinnedAt,
       })
       .from(chatParticipants)
       .where(
@@ -207,7 +216,21 @@ const isMessageRequestFor = (
         ),
       )
       .limit(1),
-  ).pipe(Effect.map((rows) => (rows[0] ? toMessageRequest(rows[0]) : null)));
+  ).pipe(
+    Effect.map(([row]) =>
+      row
+        ? {
+            messageRequest: toMessageRequest(row),
+            ...toChatPreferences(row, updatedAt),
+          }
+        : {
+            messageRequest: null,
+            mutedUntil: null,
+            archived: false,
+            pinned: false,
+          },
+    ),
+  );
 
 // `participants`, if passed, is used as-is instead of re-fetching — callers
 // that already have a fresh list (e.g. because they just notified over the
@@ -229,10 +252,11 @@ export const buildChat = (
       currentUserId,
     );
     const unreadCount = yield* getUnreadCount(db, row.id, currentUserId);
-    const messageRequest = yield* isMessageRequestFor(
+    const viewerState = yield* getViewerState(
       db,
       row.id,
       currentUserId,
+      row.updatedAt,
     );
     return {
       id: row.id,
@@ -246,7 +270,7 @@ export const buildChat = (
       lastMessage,
       unreadCount,
       avatarVariants: toAvatarVariants(row),
-      messageRequest,
+      ...viewerState,
     };
   });
 

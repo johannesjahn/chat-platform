@@ -20,6 +20,11 @@ export const chatRequestsListQueryKey = [
   ...chatsListQueryKey,
   "requests",
 ] as const;
+// Archived chats (issue #900): `GET /chats?archived=true`, likewise.
+export const archivedChatsListQueryKey = [
+  ...chatsListQueryKey,
+  "archived",
+] as const;
 export const chatsUnreadCountQueryKey = [
   ...chatsListQueryKey,
   "unread-count",

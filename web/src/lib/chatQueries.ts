@@ -7,6 +7,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { fetchClient } from "./api";
 import type { components } from "./api-types";
 import {
+  archivedChatsListQueryKey,
   chatRequestsListQueryKey,
   chatsListQueryKey,
   chatsUnreadCountQueryKey,
@@ -39,13 +40,20 @@ export type MessagesPageResponse = components["schemas"]["MessagesPage"];
 export function chatsListQueryOptions({
   unreadOnly = false,
   requestsOnly = false,
-}: { unreadOnly?: boolean; requestsOnly?: boolean } = {}) {
+  archivedOnly = false,
+}: {
+  unreadOnly?: boolean;
+  requestsOnly?: boolean;
+  archivedOnly?: boolean;
+} = {}) {
   return infiniteQueryOptions({
     queryKey: requestsOnly
       ? chatRequestsListQueryKey
-      : unreadOnly
-        ? unreadChatsListQueryKey
-        : chatsListQueryKey,
+      : archivedOnly
+        ? archivedChatsListQueryKey
+        : unreadOnly
+          ? unreadChatsListQueryKey
+          : chatsListQueryKey,
     refetchOnMount: refetchUnlessWarmed,
     // `chat_updated`/`chat_deleted` keep every chat list current while the
     // socket is up, so a mount doesn't refetch one (issue #752).
@@ -58,6 +66,7 @@ export function chatsListQueryOptions({
             ...(pageParam ? { cursor: pageParam } : {}),
             ...(unreadOnly ? { unread: "true" as const } : {}),
             ...(requestsOnly ? { requests: "true" as const } : {}),
+            ...(archivedOnly ? { archived: "true" as const } : {}),
           },
         },
         signal,
@@ -85,8 +94,8 @@ export function chatsUnreadCountQueryOptions() {
 }
 
 /**
- * The viewer's unread messages over every chat they're in — the Chats nav
- * badge, the phone header badge, the dock and the tab title. Counted by the
+ * The viewer's unread messages over every chat they're in, bar muted and
+ * archived ones (issue #900) — the Chats nav badge, the phone header badge, the dock and the tab title. Counted by the
  * server (`GET /chats/unread-count`, issue #756), not summed over the loaded
  * pages of the chat list, which only ever hold the newest chats: an unread
  * chat that has dropped off the first page still counts.

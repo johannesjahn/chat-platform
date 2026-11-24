@@ -12,7 +12,8 @@ keep it.
   `change`: a `read` is patched in with no request; a `message_created` in a
   chat on screen (`holdChatInView`) fetches only `after=`; off screen it is
   counted into the unread badge and its `message` becomes the listed chat's
-  preview and moves it up, with no request (#834). The conversation's
+  preview and moves it up, with no request (#834). A conversation that closes
+  before it got to a message left to it refetches the lists. The conversation's
   mark-read response (`applyMarkedRead`) updates list, detail and unread
   total. No `change`, an unknown one, or a version gap refetches all three.
   Query keys live in import-free `chatQueryKeys.ts` so this stays testable

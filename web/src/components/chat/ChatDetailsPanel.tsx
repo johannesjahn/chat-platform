@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { BlockUserControls } from "@/components/BlockUserControls";
+import { ChatPreferencesSection } from "@/components/chat/ChatPreferencesSection";
 import { DetailsSection } from "@/components/chat/DetailsSection";
 import {
   GroupIdentity,
@@ -276,6 +277,7 @@ function ChatDetails({
       ) : (
         other && <DirectChatPerson participant={other} />
       )}
+      {!chat.messageRequest && <ChatPreferencesSection chat={chat} />}
       <PinnedSection chat={chat} onJump={onJump} />
       <StarredSection chat={chat} onJump={onJump} />
       <SharedMediaSection chatId={chat.id} onJump={onJump} />

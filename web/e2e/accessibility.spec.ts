@@ -96,6 +96,8 @@ const SIGNED_IN_PAGES: { name: string; paths: (seeded: Seeded) => string[] }[] =
         `/chats/${chatId}`,
         // Message requests (issue #785): the list, and one open.
         "/chats/requests",
+        // Archived chats (issue #900).
+        "/chats/archived",
         `/chats/${requestId}`,
       ],
     },
@@ -148,6 +150,20 @@ for (const { name, paths } of SIGNED_IN_PAGES) {
         contentType: "text",
         content: "Hello there!",
       });
+      // A muted and pinned chat beside it, and an archived one.
+      for (const data of [
+        { mute: "always", pinned: true },
+        { archived: true },
+      ]) {
+        const { id } = await post("/chats/direct", {
+          userId: (await createUser()).session.user.id,
+        });
+        const response = await request.patch(
+          `${apiUrl}/chats/${id}/preferences`,
+          { headers, data },
+        );
+        expect(response.ok()).toBe(true);
+      }
       const { id: lobbyId } = await post("/games/typing/lobbies");
       // A group from a stranger is a message request.
       const stranger = await createUser();

@@ -10,7 +10,8 @@ import {
 } from "drizzle-orm";
 import { Effect } from "effect";
 import { type DrizzleDb, dbQuery } from "../Db.ts";
-import { chatParticipants, messages } from "../db/schema.ts";
+import { chatParticipants, chats, messages } from "../db/schema.ts";
+import { countsTowardUnreadTotal } from "./preferences.ts";
 
 // Unread counts against each participant's read watermark
 // (`chat_participants.last_read_message_id`). The counts leave pending
@@ -80,7 +81,8 @@ export const getUnreadCountsForChats = (
         Effect.map((rows) => new Map(rows.map((r) => [r.chatId, r.total]))),
       );
 
-// The caller's unread total over every chat they're in (issue #756), for
+// The caller's unread total over every chat they're in that's neither muted
+// nor archived (issues #756, #900), for
 // `GET /chats/unread-count` — the same watermark join as
 // `getUnreadCountsForChats`, just not narrowed to one page's chats, so a
 // chat that's dropped off the first page of the list still counts.
@@ -92,6 +94,7 @@ export const getUnreadTotal = (
     db
       .select({ count: count(), chats: countDistinct(messages.chatId) })
       .from(chatParticipants)
+      .innerJoin(chats, eq(chats.id, chatParticipants.chatId))
       .innerJoin(
         messages,
         and(
@@ -105,8 +108,7 @@ export const getUnreadTotal = (
       .where(
         and(
           eq(chatParticipants.userId, userId),
-          // Message requests stay out of the badge (issue #785).
-          eq(chatParticipants.requestPending, false),
+          countsTowardUnreadTotal(new Date()),
           ne(messages.senderId, userId),
         ),
       ),

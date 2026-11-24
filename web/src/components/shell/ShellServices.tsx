@@ -1,6 +1,6 @@
 import { useSession } from "@/lib/auth";
 import { useBrowserNotifications } from "@/lib/browserNotifications";
-import { loadedUnreadCount, useChatsList } from "@/lib/chats";
+import { useChatsList } from "@/lib/chats";
 import { useUnreadNotificationCount } from "@/lib/notifications";
 import { useOfflineQueueSync } from "@/lib/offlineQueue";
 import { useRealtimeSocket } from "@/lib/realtimeSocket";
@@ -24,10 +24,6 @@ export function ShellServices() {
   useBrowserNotifications({
     currentUserId: session?.user.id,
     chats: chatsData?.pages.flatMap((page) => page.chats) ?? [],
-    // The loaded pages' count, not the server total: it names the chat
-    // from `chats`, so it has to move in step with that same response. A new
-    // message always bumps its chat onto the first page anyway.
-    unreadChats: loadedUnreadCount(chatsData?.pages ?? []),
     unreadNotifications,
   });
   return null;
