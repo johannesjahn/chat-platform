@@ -51,7 +51,7 @@ test("a post of many short lines and a long comment both collapse", async ({
   const manyLines = Array.from({ length: 40 }, (_, i) => `line${i}`).join("\n");
   const post = await request.post(`${apiUrl}/posts`, {
     headers,
-    data: { contentType: "text", content: manyLines },
+    data: { body: manyLines },
   });
   expect(post.ok()).toBe(true);
   const { id: postId } = await post.json();

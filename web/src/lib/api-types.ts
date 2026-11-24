@@ -1832,10 +1832,8 @@ export interface components {
             id: number;
             chatId: number;
             senderId: number;
-            contentType: components["schemas"]["MessageContentType"];
-            content: string;
+            body: string;
             attachment: components["schemas"]["Attachment"] | null;
-            caption: string | null;
             parentMessage: components["schemas"]["ParentMessagePreview"] | null;
             createdAt: number;
             updatedAt: number;
@@ -1859,13 +1857,10 @@ export interface components {
             id: number;
             senderId: number;
             senderName: string;
-            contentType: components["schemas"]["MessageContentType"];
-            content: string;
-            caption: string | null;
+            body: string;
+            hasAttachment: boolean;
             forwarded: boolean;
         };
-        /** @enum {string} */
-        MessageContentType: "text" | "image_url" | "attachment";
         ChatInvitePreview: {
             chatId: number;
             title: string | null;
@@ -1928,10 +1923,8 @@ export interface components {
             message: string;
         };
         UpdateMessageBody: {
-            contentType: components["schemas"]["MessageContentType"];
-            content: string;
+            body: string;
             attachmentId?: number | null;
-            caption?: string | null;
         };
         MarkReadBody: {
             messageId: number;
@@ -1954,10 +1947,8 @@ export interface components {
             clientId?: string | null;
         };
         CreateMessageBody: {
-            contentType: components["schemas"]["MessageContentType"];
-            content: string;
+            body: string;
             attachmentId?: number | null;
-            caption?: string | null;
             parentMessageId?: number | null;
             clientId?: string | null;
         };
@@ -2048,28 +2039,20 @@ export interface components {
             id: number;
             authorId: number;
             author: components["schemas"]["AuthorSummary"];
-            contentType: components["schemas"]["PostContentType"];
-            content: string;
+            body: string;
             attachment: components["schemas"]["Attachment"] | null;
-            caption: string | null;
             createdAt: number;
             updatedAt: number;
             reactions: components["schemas"]["ReactionSummary"][];
             commentCount: number;
         };
-        /** @enum {string} */
-        PostContentType: "text" | "image_url" | "attachment";
         UpdatePostBody: {
-            contentType: components["schemas"]["PostContentType"];
-            content: string;
+            body: string;
             attachmentId?: number | null;
-            caption?: string | null;
         };
         CreatePostBody: {
-            contentType: components["schemas"]["PostContentType"];
-            content: string;
+            body: string;
             attachmentId?: number | null;
-            caption?: string | null;
             clientId?: string | null;
         };
         InvalidPostsRequestEncoded: {

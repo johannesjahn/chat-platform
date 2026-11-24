@@ -29,7 +29,7 @@ test("titles follow navigation and use loaded data", async ({
 
   const response = await request.post(`${apiUrl}/posts`, {
     headers: { Authorization: `Bearer ${session.accessToken}` },
-    data: { contentType: "text", content: "Weekend plans\n\nHiking, mostly." },
+    data: { body: "Weekend plans\n\nHiking, mostly." },
   });
   expect(response.ok()).toBe(true);
   const post = (await response.json()) as { id: number };

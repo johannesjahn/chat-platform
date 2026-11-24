@@ -13,7 +13,7 @@ Reuse these rather than re-deriving them in a handler:
 - `chatState.ts`: participants, `version`, `buildChat`, and
   `publishChatChange` (bump + publish with no `change`), the tail of every
   mutation but a send or a read receipt.
-- `messageViews.ts` (the `Message` view, `messageCaption`), `unread.ts`.
+- `messageViews.ts` (the `Message` view), `unread.ts`.
 - `departure.ts`: what leaving does to a chat (`departParticipant`: owner
   hand-off, delete once empty, version bump). Account deletion runs it for
   every chat first (`departAllChats`, issue #895), so a deleted account

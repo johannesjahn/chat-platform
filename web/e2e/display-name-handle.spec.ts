@@ -43,13 +43,13 @@ test("a display name copying someone else's handle still shows the impersonator'
     expect(accepted.ok()).toBe(true);
     const sent = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: as(user.session.accessToken),
-      data: { contentType: "text", content },
+      data: { body: content },
     });
     expect(sent.ok()).toBe(true);
   }
   const post = await request.post(`${apiUrl}/posts`, {
     headers: as(impostor.session.accessToken),
-    data: { contentType: "text", content: "Posted under a borrowed name" },
+    data: { body: "Posted under a borrowed name" },
   });
   expect(post.ok()).toBe(true);
 
@@ -94,7 +94,7 @@ test("user pickers and lists show the @username next to a display name", async (
   const word = `wren${carol.username.slice(-6)}`;
   const post = await request.post(`${apiUrl}/posts`, {
     headers: as(carol.session.accessToken),
-    data: { contentType: "text", content: `Spotted a ${word} today` },
+    data: { body: `Spotted a ${word} today` },
   });
   expect(post.ok()).toBe(true);
   const group = await request.post(`${apiUrl}/chats/group`, {

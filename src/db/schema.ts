@@ -216,25 +216,15 @@ export const posts = pgTable(
     authorId: integer("author_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    contentType: text("content_type", {
-      enum: ["text", "image_url", "attachment"],
-    }).notNull(),
-    content: text("content").notNull(),
-    // Set only when contentType is "attachment" — null'd out (rather than
-    // cascading the post's own deletion) if the attachment row it points at
+    // May be empty when there is an attachment; the API requires one of the
+    // two. Not a CHECK: the `set null` below would then fail for a post with
+    // an empty body.
+    body: text("body").notNull(),
+    // Null'd out (rather than cascading the post's own deletion) if the attachment row it points at
     // is ever removed independently, since a post should outlive that.
     attachmentId: integer("attachment_id").references(() => attachments.id, {
       onDelete: "set null",
     }),
-    // Text shown alongside an attachment (issue #765, migration 0037) — only
-    // meaningful when contentType is "attachment", null otherwise or when the
-    // post has no caption. A column of its own rather than a reuse of
-    // `content`, which keeps holding the filename for attachment rows: rows
-    // written before this (and by old replicas mid-rollout) only ever have the
-    // filename there, so reading `content` as a caption would print every old
-    // attachment's filename as its text, and an old replica reading a new row
-    // would show the caption where it expects a filename.
-    caption: text("caption"),
     // Client-generated idempotency key (issue #657, like
     // `messages.clientId`): a retried create carrying the same key from the
     // same author returns the stored post instead of inserting another. Null
@@ -540,18 +530,11 @@ export const messages = pgTable(
     senderId: integer("sender_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    contentType: text("content_type", {
-      enum: ["text", "image_url", "attachment"],
-    }).notNull(),
-    content: text("content").notNull(),
-    // Mirrors `posts.attachmentId` — set only when contentType is
-    // "attachment".
+    // Mirror `posts.body` and `posts.attachmentId`.
+    body: text("body").notNull(),
     attachmentId: integer("attachment_id").references(() => attachments.id, {
       onDelete: "set null",
     }),
-    // Mirrors `posts.caption` (issue #765) — text sent alongside an
-    // attachment; `content` keeps the filename.
-    caption: text("caption"),
     // Threaded/quoted replies (issue #217) — null for a normal message, set to
     // the id of the message this one is replying to. Validated at create time
     // (`createMessage` in chats/messageHandlers.ts) to reference a message in
@@ -634,10 +617,6 @@ export const messages = pgTable(
 export type DbMessage = typeof messages.$inferSelect;
 export type NewDbMessage = typeof messages.$inferInsert;
 
-// One row per (message, reader) — the read state of a message is tracked
-// per user rather than as a single "read" flag, so group chats can later
-// show "read by N of M" without a schema change.
-//
 // Chat-wide pinned messages (issue #223) — one row per pinned message,
 // visible to every participant of the chat. A message can be pinned at most
 // once (the unique index on `messageId`), so pinning is idempotent and

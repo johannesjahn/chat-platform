@@ -54,7 +54,7 @@ test(
     const headers = { Authorization: `Bearer ${other.session.accessToken}` };
     const post = await request.post(`${apiUrl}/posts`, {
       headers,
-      data: { contentType: "text", content: "A post with a long byline" },
+      data: { body: "A post with a long byline" },
     });
     const { id: postId } = await post.json();
     const comment = await request.post(`${apiUrl}/posts/${postId}/comments`, {
@@ -104,7 +104,7 @@ test(
     expect(accepted.ok()).toBe(true);
     const sent = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: { Authorization: `Bearer ${other.session.accessToken}` },
-      data: { contentType: "text", content: "Hello there" },
+      data: { body: "Hello there" },
     });
     expect(sent.ok()).toBe(true);
 

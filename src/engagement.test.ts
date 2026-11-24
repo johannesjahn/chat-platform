@@ -54,7 +54,7 @@ const setupPostBy = (username: string) =>
     );
     const authed = yield* makeAuthedClient(accessToken);
     const post = yield* authed.posts.createPost({
-      payload: { contentType: "text", content: `post by ${username}` },
+      payload: { body: `post by ${username}` },
     });
     return { user, accessToken, authed, post };
   });
@@ -474,7 +474,7 @@ test("deleting a post with comments works, and the stored count matches a live c
     Effect.gen(function* () {
       const { authed, post } = yield* setupPostBy("sam");
       const other = yield* authed.posts.createPost({
-        payload: { contentType: "text", content: "another post" },
+        payload: { body: "another post" },
       });
       for (const id of [post.id, post.id, other.id]) {
         yield* authed.comments.createComment({

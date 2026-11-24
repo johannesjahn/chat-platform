@@ -284,7 +284,7 @@ export function ChatConversation({
   function editLastMessage() {
     const mine = [...messages]
       .reverse()
-      .find((m) => m.senderId === session?.user.id && m.contentType === "text");
+      .find((m) => m.senderId === session?.user.id && m.body !== "");
     if (!mine) return;
     setEditRequest((prev) => ({
       messageId: mine.id,
@@ -398,7 +398,7 @@ export function ChatConversation({
   // Mirrors the backend's `requireChatManager` (see src/chats/access.ts).
   const canManage = canManageChat(chat, session.user);
 
-  async function handleEditMessage(messageId: number, content: string) {
+  async function handleEditMessage(messageId: number, body: string) {
     // No manual refetch here either — same reasoning as a send, the
     // `chat_updated` WS push triggered by this edit already invalidates the
     // messages/list queries for every participant, including this client.
@@ -406,7 +406,11 @@ export function ChatConversation({
       params: {
         path: { id: String(chatId), messageId: String(messageId) },
       },
-      body: { contentType: "text", content },
+      body: {
+        body,
+        // An edit replaces both, and only the text changes here.
+        attachmentId: messages.find((m) => m.id === messageId)?.attachment?.id,
+      },
     });
   }
 

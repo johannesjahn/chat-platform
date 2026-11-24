@@ -2,15 +2,11 @@ import { onlineManager, useQueryClient } from "@tanstack/react-query";
 import { $api } from "./api";
 import { enqueuePost, makeClientId } from "./offlineQueue";
 import { OWN_POST_SCOPE, ownWrites } from "./ownWrites";
-import { type PostContentType } from "./posts";
 import { addCreatedPost } from "./postSync";
 
 export type NewPost = {
-  contentType: PostContentType;
-  content: string;
+  body: string;
   attachmentId?: number;
-  // Text posted alongside an attachment (issue #765).
-  caption?: string | null;
 };
 
 /**
@@ -22,12 +18,7 @@ export function useCreatePost() {
   const queryClient = useQueryClient();
   const createPost = $api.useMutation("post", "/posts");
 
-  return async function submit({
-    contentType,
-    content,
-    attachmentId,
-    caption,
-  }: NewPost) {
+  return async function submit({ body, attachmentId }: NewPost) {
     // Idempotency key (issue #657), shared by the live attempt and any queued
     // replay of it: if the connection drops after the server stored the post
     // but before the response arrived, the replay is recognised as a repeat
@@ -37,8 +28,8 @@ export function useCreatePost() {
     // fail. An attachment post can't be queued this way (the forms only let
     // one through while online, since it needs an already-completed
     // upload), so it always falls through to the live request below.
-    if (contentType !== "attachment" && !onlineManager.isOnline()) {
-      enqueuePost({ contentType, content }, clientId);
+    if (attachmentId === undefined && !onlineManager.isOnline()) {
+      enqueuePost({ body }, clientId);
       return;
     }
     // The response goes straight into the cached feeds, and the realtime
@@ -49,10 +40,8 @@ export function useCreatePost() {
     try {
       const post = await createPost.mutateAsync({
         body: {
-          contentType,
-          content,
+          body,
           attachmentId,
-          caption: caption ?? undefined,
           clientId,
         },
       });
@@ -63,8 +52,8 @@ export function useCreatePost() {
       // rejected request, which leaves connectivity untouched) — queue it
       // rather than surfacing the failure, same as above (again, not for an
       // attachment post — see the comment above).
-      if (contentType !== "attachment" && !onlineManager.isOnline()) {
-        enqueuePost({ contentType, content }, clientId);
+      if (attachmentId === undefined && !onlineManager.isOnline()) {
+        enqueuePost({ body }, clientId);
         return;
       }
       throw err;

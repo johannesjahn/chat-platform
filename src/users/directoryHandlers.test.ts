@@ -371,14 +371,14 @@ test("listUserPosts returns only the target user's posts, newest-first, with a t
       });
       const otherClient = yield* makeAuthedClient(otherToken);
       yield* otherClient.posts.createPost({
-        payload: { contentType: "text", content: "not grace's post" },
+        payload: { body: "not grace's post" },
       });
 
       const created = [];
       for (let i = 0; i < 3; i++) {
         created.push(
           yield* authorClient.posts.createPost({
-            payload: { contentType: "text", content: `grace post ${i}` },
+            payload: { body: `grace post ${i}` },
           }),
         );
       }
@@ -412,7 +412,7 @@ test("listUserPosts paginates newest-first with a keyset cursor", () =>
       for (let i = 0; i < 3; i++) {
         created.push(
           yield* authed.posts.createPost({
-            payload: { contentType: "text", content: `post ${i}` },
+            payload: { body: `post ${i}` },
           }),
         );
       }

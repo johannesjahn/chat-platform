@@ -114,8 +114,7 @@ export default function (data) {
     const res = http.post(
       `${BASE_URL}/chats/${data.chatId}/messages`,
       JSON.stringify({
-        contentType: "text",
-        content: randomText(`ws-${__VU}-${__ITER}`, 10),
+        body: randomText(`ws-${__VU}-${__ITER}`, 10),
       }),
       {
         headers: authHeaders(user.accessToken),

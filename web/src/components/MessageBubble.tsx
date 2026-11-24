@@ -16,7 +16,6 @@ import {
 import { useBubbleReveal } from "@/components/chat/bubble/useBubbleReveal";
 import { useMessageToggles } from "@/components/chat/bubble/useMessageToggles";
 import { ReactionList } from "@/components/ReactionPicker";
-import { Lightbox } from "@/components/LazyLightbox";
 import { MentionText } from "@/components/MentionText";
 import { MentionTextarea } from "@/components/MentionTextarea";
 import { Button } from "@/components/ui/button";
@@ -24,7 +23,7 @@ import { DisclosureChevron } from "@/components/ui/collapse";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { attachmentKind } from "@/lib/attachments";
-import { MAX_MESSAGE_CONTENT_LENGTH, type ChatMessage } from "@/lib/chats";
+import { MAX_MESSAGE_BODY_LENGTH, type ChatMessage } from "@/lib/chats";
 import { isImeComposing } from "@/lib/ime";
 import { isLongText as isLongTextOf, MESSAGE_COLLAPSE } from "@/lib/longText";
 import { useExpandableText } from "@/lib/motion";
@@ -138,17 +137,9 @@ export function MessageBubble({
 
   const hasReactions = message.reactions.some((r) => r.count > 0);
   const wasEdited = message.updatedAt !== message.createdAt;
-  // The prose the bubble shows: a text message's content, or an attachment's
-  // caption (issue #765), under the file. An attachment whose file is gone
-  // still shows its filename, as it always has.
-  const hasAttachment =
-    message.contentType === "attachment" && message.attachment !== null;
+  // Empty beside an attachment without text, or where its file is gone.
   const bodyText =
-    message.contentType === "image_url"
-      ? null
-      : message.contentType === "attachment"
-        ? (message.caption ?? (hasAttachment ? null : message.content))
-        : message.content;
+    message.body || (message.attachment ? null : "Attachment unavailable");
   const isLongText = isLongTextOf(bodyText, MESSAGE_COLLAPSE);
   const {
     ref: textRef,
@@ -157,14 +148,14 @@ export function MessageBubble({
     toggle: toggleExpanded,
   } = useExpandableText<HTMLParagraphElement>(!isLongText, "line-clamp-4");
   const [isEditing, setIsEditing] = useState(false);
-  const [draft, setDraft] = useState(message.content);
+  const [draft, setDraft] = useState(message.body);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const confirm = useConfirm();
-  const canEdit = canModify && !readOnly && message.contentType === "text";
+  const canEdit = canModify && !readOnly && message.body !== "";
 
   function startEditing() {
-    setDraft(message.content);
+    setDraft(message.body);
     setIsEditing(true);
   }
 
@@ -199,7 +190,7 @@ export function MessageBubble({
   async function copy(kind: "text" | "link"): Promise<boolean> {
     const value =
       kind === "text"
-        ? (bodyText ?? message.content)
+        ? message.body
         : `${window.location.origin}/chats/${message.chatId}?message=${message.id}`;
     try {
       await navigator.clipboard.writeText(value);
@@ -222,7 +213,6 @@ export function MessageBubble({
     }
   }
 
-  const [lightboxOpen, setLightboxOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const reveal = useBubbleReveal(rowRef, isEditing);
   const revealed = reveal.revealed;
@@ -230,8 +220,8 @@ export function MessageBubble({
   const trimmedDraft = draft.trim();
   const canSave =
     trimmedDraft.length > 0 &&
-    trimmedDraft.length <= MAX_MESSAGE_CONTENT_LENGTH &&
-    trimmedDraft !== message.content;
+    trimmedDraft.length <= MAX_MESSAGE_BODY_LENGTH &&
+    trimmedDraft !== message.body;
 
   // Chat bubbles size to content (no definite width), so a percentage-width
   // media element can't resolve against it and collapses to its intrinsic
@@ -239,7 +229,6 @@ export function MessageBubble({
   // reasonable width. File/PDF rows aren't affected by that bug and should
   // keep sizing to their content.
   const attachmentWidthClassName =
-    message.contentType === "attachment" &&
     message.attachment &&
     ["image", "video", "audio"].includes(
       attachmentKind(message.attachment.mimeType),
@@ -481,25 +470,9 @@ export function MessageBubble({
                 </Button>
               </div>
             </div>
-          ) : message.contentType === "image_url" ? (
-            <button
-              type="button"
-              onClick={() => setLightboxOpen(true)}
-              onPointerEnter={Lightbox.preload}
-              onFocus={Lightbox.preload}
-              aria-label="View image full-size"
-              className="block cursor-zoom-in"
-            >
-              <img
-                src={message.content}
-                alt=""
-                loading="lazy"
-                className="max-h-72 w-72 max-w-full rounded-lg bg-muted object-cover"
-              />
-            </button>
           ) : (
             <>
-              {hasAttachment && message.attachment && (
+              {message.attachment && (
                 <AttachmentPreview
                   attachment={message.attachment}
                   className={attachmentWidthClassName}
@@ -634,13 +607,6 @@ export function MessageBubble({
         onCopy={(kind) => void copyFromSheet(kind)}
         preview={bodyText}
       />
-      {lightboxOpen && message.contentType === "image_url" && (
-        <Lightbox
-          src={message.content}
-          alt=""
-          onClose={() => setLightboxOpen(false)}
-        />
-      )}
     </div>
   );
 }

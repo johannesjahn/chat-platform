@@ -478,9 +478,6 @@ function SharedMediaSection({
   const newestFirst = [...(data?.messages ?? [])].reverse();
   const images = newestFirst
     .flatMap((message) => {
-      if (message.contentType === "image_url") {
-        return [{ message, src: message.content, alt: "" }];
-      }
       if (
         message.attachment &&
         attachmentKind(message.attachment.mimeType) === "image"

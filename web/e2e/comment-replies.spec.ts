@@ -16,7 +16,7 @@ test(
 
     const post = await request.post(`${apiUrl}/posts`, {
       headers: as(author),
-      data: { contentType: "text", content: "A post with a thread" },
+      data: { body: "A post with a thread" },
     });
     const { id: postId } = await post.json();
     const comment = await request.post(`${apiUrl}/posts/${postId}/comments`, {
@@ -62,7 +62,7 @@ test(
 
     const post = await request.post(`${apiUrl}/posts`, {
       headers: as,
-      data: { contentType: "text", content: "A post with a short thread" },
+      data: { body: "A post with a short thread" },
     });
     const { id: postId } = await post.json();
     const comment = await request.post(`${apiUrl}/posts/${postId}/comments`, {
@@ -118,7 +118,7 @@ test(
 
     const post = await request.post(`${apiUrl}/posts`, {
       headers: as(me),
-      data: { contentType: "text", content: "A post with a discussion" },
+      data: { body: "A post with a discussion" },
     });
     const { id: postId } = await post.json();
     const comment = await request.post(`${apiUrl}/posts/${postId}/comments`, {

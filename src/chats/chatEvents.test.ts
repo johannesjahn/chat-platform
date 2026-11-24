@@ -108,7 +108,7 @@ test("an event follows the newest message, and is neither unread nor activity", 
       yield* bob.client.chats.acceptChatRequest({ params: { id } });
       const message = yield* alice.client.chats.createMessage({
         params: { id },
-        payload: { contentType: "text", content: "hi" },
+        payload: { body: "hi" },
       });
       yield* bob.client.chats.markRead({
         params: { id },

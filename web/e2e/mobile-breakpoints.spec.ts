@@ -33,16 +33,14 @@ async function seed(
     return (await response.json()) as { id: number };
   };
   const { id: postId } = await post("/posts", {
-    contentType: "text",
-    content: "A post to give the feed a real row.",
+    body: "A post to give the feed a real row.",
   });
   const { id: chatId } = await post("/chats/direct", {
     userId: other.session.user.id,
   });
   for (let i = 1; i <= 8; i++) {
     await post(`/chats/${chatId}/messages`, {
-      contentType: "text",
-      content: `Message number ${i}`,
+      body: `Message number ${i}`,
     });
   }
   return { me, chatId, postId };

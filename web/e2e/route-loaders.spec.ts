@@ -26,7 +26,7 @@ test("hovering a link starts its page's requests, and following it doesn't repea
 
   const post = await request.post(`${apiUrl}/posts`, {
     headers: as(other),
-    data: { contentType: "text", content: "A post worth warming" },
+    data: { body: "A post worth warming" },
   });
   const { id: postId } = await post.json();
   const chat = await request.post(`${apiUrl}/chats/direct`, {
@@ -38,7 +38,7 @@ test("hovering a link starts its page's requests, and following it doesn't repea
   // chat, which isn't what's being counted here.
   const message = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
     headers: as(me),
-    data: { contentType: "text", content: "A message worth warming" },
+    data: { body: "A message worth warming" },
   });
   expect(message.ok()).toBe(true);
 
@@ -120,7 +120,7 @@ test("a conversation opened from its warmed window still pages back through olde
   for (let i = 0; i < 45; i++) {
     const sent = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: auth,
-      data: { contentType: "text", content: `Paged message ${i}` },
+      data: { body: `Paged message ${i}` },
     });
     expect(sent.ok()).toBe(true);
   }
@@ -182,7 +182,7 @@ test("the notifications inbox renders from its loader without fetching again", a
   const other = await createUser();
   const post = await request.post(`${apiUrl}/posts`, {
     headers: { Authorization: `Bearer ${me.session.accessToken}` },
-    data: { contentType: "text", content: "Comment on this" },
+    data: { body: "Comment on this" },
   });
   const { id: postId } = await post.json();
   const comment = await request.post(`${apiUrl}/posts/${postId}/comments`, {

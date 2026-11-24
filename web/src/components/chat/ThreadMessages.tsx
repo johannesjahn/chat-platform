@@ -133,9 +133,8 @@ export function ThreadMessages({
                 onReply({
                   id: message.id,
                   senderName: sender ? userLabel(sender) : "Someone",
-                  contentType: message.contentType,
-                  content: message.content,
-                  caption: message.caption,
+                  body: message.body,
+                  hasAttachment: message.attachment !== null,
                 })
               }
               onForward={() => onForward(message)}

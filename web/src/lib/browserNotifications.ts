@@ -1,6 +1,11 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useRouter } from "@tanstack/react-router";
-import { chatDisplayName, takeNewlyUnread, type Chat } from "./chats";
+import {
+  chatDisplayName,
+  messagePreview,
+  takeNewlyUnread,
+  type Chat,
+} from "./chats";
 
 // Opt-in browser notifications (issue #554): a system notification for a new
 // direct/group message or in-app notification while the tab is in the
@@ -63,10 +68,7 @@ export async function setBrowserNotifications(on: boolean): Promise<void> {
 function preview(chat: Chat): string {
   const last = chat.lastMessage;
   if (!last) return "New message";
-  if (last.contentType === "image_url") return "📷 Photo";
-  if (last.contentType === "attachment")
-    return `📎 ${last.caption || "Attachment"}`;
-  return last.content;
+  return messagePreview(last);
 }
 
 /**

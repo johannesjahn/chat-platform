@@ -93,8 +93,7 @@ const seedActivity = Effect.gen(function* () {
       .insert(posts)
       .values({
         authorId: fresh!.id,
-        contentType: "text",
-        content: "hello",
+        body: "hello",
         createdAt: daysAgo(0.5),
         updatedAt: daysAgo(0.5),
       })
@@ -132,8 +131,7 @@ const seedActivity = Effect.gen(function* () {
     db.insert(messages).values({
       chatId: chat!.id,
       senderId: fresh!.id,
-      contentType: "text",
-      content: "hi",
+      body: "hi",
       createdAt: daysAgo(10),
       updatedAt: daysAgo(10),
     }),
@@ -313,8 +311,7 @@ test("a session in another time zone changes neither created_at nor the timeline
         yield* Effect.promise(() =>
           db.insert(posts).values({
             authorId: user.id,
-            contentType: "text",
-            content: "late",
+            body: "late",
             createdAt: late,
             updatedAt: late,
           }),

@@ -35,8 +35,7 @@ test("a stranger's group waits in Message requests until it's accepted", async (
     { title: "Totally legit deals", participantIds: [me.session.user.id] },
   );
   await api(request, `${apiUrl}/chats/${group.id}/messages`, token, {
-    contentType: "text",
-    content: "Click this link",
+    body: "Click this link",
   });
 
   await page.goto("/chats");

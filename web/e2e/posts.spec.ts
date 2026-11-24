@@ -40,7 +40,7 @@ test(
       ).join("\n");
       const response = await request.post(`${apiUrl}/posts`, {
         headers: { Authorization: `Bearer ${session.accessToken}` },
-        data: { contentType: "text", content },
+        data: { body: content },
       });
       expect(response.ok()).toBe(true);
     }
@@ -124,7 +124,7 @@ test("a reaction reaches the cards showing the post live, and no socket that isn
   const author = await createUser();
   const created = await request.post(`${apiUrl}/posts`, {
     headers: { Authorization: `Bearer ${author.session.accessToken}` },
-    data: { contentType: "text", content: "React to me" },
+    data: { body: "React to me" },
   });
   expect(created.ok()).toBe(true);
   const postId = ((await created.json()) as { id: number }).id;
@@ -243,7 +243,7 @@ test(
     );
     const response = await request.post(`${apiUrl}/posts`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: { contentType: "text", content: longContent },
+      data: { body: longContent },
     });
     expect(response.ok()).toBe(true);
 
@@ -280,45 +280,6 @@ test(
 );
 
 test(
-  "clicking a feed image post opens it full-size in a lightbox",
-  { tag: "@layout" },
-  async ({ page, request, apiUrl, signUp }) => {
-    const { username } = await signUp(page);
-
-    // Seed an image post directly against the API — the point here is the
-    // feed's lightbox behavior, not the "new post" upload flow. The host is on
-    // the backend's image-URL allowlist (see ALLOWED_IMAGE_HOST_DOMAINS); the
-    // image itself never has to load for the card's click target to exist.
-    const session = await page.evaluate(() =>
-      JSON.parse(localStorage.getItem("chat-platform-session") ?? "null"),
-    );
-    const response = await request.post(`${apiUrl}/posts`, {
-      headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: {
-        contentType: "image_url",
-        content: "https://picsum.photos/seed/lightbox/600/800",
-      },
-    });
-    expect(response.ok()).toBe(true);
-
-    await page.goto("/");
-    const card = page.getByRole("article", { name: `Post by @${username}` });
-    await expect(card).toBeVisible();
-
-    // No lightbox until the image is clicked.
-    await expect(page.getByRole("dialog")).toHaveCount(0);
-
-    await card.getByRole("button", { name: "View image full-size" }).click();
-    const lightbox = page.getByRole("dialog", { name: "Image" });
-    await expect(lightbox).toBeVisible();
-
-    // Esc closes it again.
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("dialog")).toHaveCount(0);
-  },
-);
-
-test(
   "the full-screen viewer zooms and pans an image past its on-page size",
   { tag: "@layout" },
   async ({ page, request, apiUrl, signUp }) => {
@@ -328,9 +289,8 @@ test(
     );
     const headers = { Authorization: `Bearer ${session.accessToken}` };
 
-    // An attachment post (rather than an image-URL one) so the image is served
-    // by the test backend and actually decodes in the browser — the viewer's
-    // zoom math is driven by the image's natural size, so it needs a real one.
+    // A real image, decoded by the browser: the viewer's zoom math is driven
+    // by its natural size.
     // Tall and narrow: at fit scale it's letterboxed, and one zoom step makes
     // it overflow vertically, which is what gives the pan something to do.
     const upload = await request.post(`${apiUrl}/attachments`, {
@@ -348,10 +308,9 @@ test(
     const post = await request.post(`${apiUrl}/posts`, {
       headers,
       data: {
-        contentType: "attachment",
         // The composer sends the filename as the post's content for
         // attachment posts (see ChatComposer/PostForm) — mirrored here.
-        content: attachment.filename,
+        body: "",
         attachmentId: attachment.id,
       },
     });
@@ -450,36 +409,23 @@ test(
   },
 );
 
-test("switching post type keeps a separate draft per type (issue #524)", async ({
-  page,
-  signUp,
-}) => {
+test("switching post type keeps the text", async ({ page, signUp }) => {
   await signUp(page);
   await page.goto("/posts/new");
 
   const text = "My thoughtful text post about hiking this weekend.";
-  await page.getByRole("button", { name: "Text" }).click();
   await page.fill("#content", text);
   await expect(page.getByText(`${text.length}/10000`)).toBeVisible();
 
-  // The text draft must not leak into the URL field (where it would be
-  // flagged as an invalid image URL), and the post-length counter doesn't
-  // belong under a URL input.
-  await page.getByRole("button", { name: "Image URL" }).click();
-  await expect(page.locator("#content")).toHaveValue("");
-  await expect(page.getByText("Image URLs must be https://")).toHaveCount(0);
-  await expect(page.getByText(/\/10000$/)).toHaveCount(0);
+  await page.getByRole("button", { name: "File", exact: true }).click();
+  await expect(page.getByLabel("Caption (optional)")).toHaveValue(text);
+  // A file post needs its file.
+  await expect(
+    page.getByRole("button", { name: "Post", exact: true }),
+  ).toBeDisabled();
 
-  const url = "https://picsum.photos/id/1/600/800";
-  await page.fill("#content", url);
-
-  // Back to Text: the text draft is restored and the URL stays behind.
-  await page.getByRole("button", { name: "Text" }).click();
-  await expect(page.locator("#content")).toHaveValue(text);
-
-  // ...and the URL draft is still there when switching back again.
-  await page.getByRole("button", { name: "Image URL" }).click();
-  await expect(page.locator("#content")).toHaveValue(url);
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await expect(page.getByLabel("Text", { exact: true })).toHaveValue(text);
 });
 
 test("someone else's post, edit and delete reach a deeply scrolled feed without refetching its pages (issues #662, #827)", async ({
@@ -495,7 +441,7 @@ test("someone else's post, edit and delete reach a deeply scrolled feed without 
   for (let i = 0; i < 20; i++) {
     const response = await request.post(`${apiUrl}/posts`, {
       headers: auth,
-      data: { contentType: "text", content: `Backlog post ${i}` },
+      data: { body: `Backlog post ${i}` },
     });
     expect(response.ok()).toBe(true);
     postIds.push(((await response.json()) as { id: number }).id);
@@ -532,7 +478,7 @@ test("someone else's post, edit and delete reach a deeply scrolled feed without 
   // pill fetches the newest page once, and every loaded page stays.
   const created = await request.post(`${apiUrl}/posts`, {
     headers: auth,
-    data: { contentType: "text", content: "Fresh post from someone else" },
+    data: { body: "Fresh post from someone else" },
   });
   expect(created.ok()).toBe(true);
   const newPosts = page.getByRole("button", { name: "New posts" });
@@ -553,7 +499,7 @@ test("someone else's post, edit and delete reach a deeply scrolled feed without 
   const edited = postIds[10]!;
   const update = await request.put(`${apiUrl}/posts/${edited}`, {
     headers: auth,
-    data: { contentType: "text", content: "Backlog post, edited" },
+    data: { body: "Backlog post, edited" },
   });
   expect(update.ok()).toBe(true);
   await expect(page.getByText("Backlog post, edited")).toBeVisible({

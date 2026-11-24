@@ -17,14 +17,6 @@ import { comments, type DbPost, posts } from "./db/schema.ts";
 
 export const NO_REACTIONS: ReactionSummary[] = [];
 
-// A post's caption (issue #765) only counts on an "attachment" post: an edit
-// by a replica that predates captions can turn a captioned attachment into a
-// text post without clearing the column, and that leftover never shows.
-export const captionOf = (row: {
-  readonly contentType: string;
-  readonly caption: string | null;
-}): string | null => (row.contentType === "attachment" ? row.caption : null);
-
 // `author` is the post's embedded byline (issue #750), resolved by the caller
 // in one batch per response — see authors.ts.
 export const toApiPost = (
@@ -37,10 +29,8 @@ export const toApiPost = (
   id: row.id,
   authorId: row.authorId,
   author,
-  contentType: row.contentType,
-  content: row.content,
+  body: row.body,
   attachment,
-  caption: captionOf(row),
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
   reactions: [...reactions],

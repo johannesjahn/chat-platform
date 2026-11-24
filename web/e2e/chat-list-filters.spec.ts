@@ -47,8 +47,7 @@ test(
       { userId: me.session.user.id },
     );
     await api(request, `${apiUrl}/chats/${bobChat.id}/messages`, bob, {
-      contentType: "text",
-      content: "Unread hello from Bob",
+      body: "Unread hello from Bob",
     });
     const carolChat = await api<{ id: number }>(
       request,
@@ -57,8 +56,7 @@ test(
       { userId: carol.session.user.id },
     );
     await api(request, `${apiUrl}/chats/${carolChat.id}/messages`, me, {
-      contentType: "text",
-      content: "Hi Carol",
+      body: "Hi Carol",
     });
     await api(request, `${apiUrl}/chats/group`, me, {
       title: "Weekend plans",

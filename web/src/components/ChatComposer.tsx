@@ -8,35 +8,22 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  ImageIcon,
-  Mic,
-  Paperclip,
-  Reply,
-  SendHorizontal,
-  X,
-} from "lucide-react";
+import { Mic, Plus, Reply, SendHorizontal, X } from "lucide-react";
 import { AttachmentUploadField } from "@/components/AttachmentUploadField";
-import { ComposerAttachMenu } from "@/components/ComposerAttachMenu";
 import { MentionTextarea } from "@/components/MentionTextarea";
 import { VoiceRecorderField } from "@/components/VoiceRecorderField";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { $api } from "@/lib/api";
 import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
   type Attachment,
 } from "@/lib/attachments";
 import { isImeComposing } from "@/lib/ime";
-import { isAllowedImageUrl } from "@/lib/imageHosts";
 import { useIsCoarsePointer } from "@/lib/media";
 import { useOnlineStatus } from "@/lib/online";
 import { cn } from "@/lib/utils";
 import { canRecordVoice } from "@/lib/voice";
-import {
-  MAX_MESSAGE_CONTENT_LENGTH,
-  type MessageContentType,
-} from "@/lib/chats";
+import { MAX_MESSAGE_BODY_LENGTH, parentPreviewText } from "@/lib/chats";
 
 // How often a `typing` push (see `POST /chats/:id/typing`) goes out while
 // the user keeps typing without pausing — comfortably under the client-side
@@ -79,10 +66,8 @@ function maxComposerHeight(textarea: HTMLTextAreaElement): number {
 export type ReplyTarget = {
   id: number;
   senderName: string;
-  contentType: MessageContentType;
-  content: string;
-  // An attachment's caption (issue #765), shown in place of "Attachment".
-  caption?: string | null;
+  body: string;
+  hasAttachment: boolean;
 };
 
 // What the conversation around the composer can ask of it: a file dropped
@@ -100,13 +85,10 @@ type ChatComposerProps = {
   // sends it in the background (lib/outbox.ts), so the composer clears and
   // takes the next message without waiting on the request.
   onSend: (values: {
-    contentType: MessageContentType;
-    content: string;
+    body: string;
     attachmentId?: number;
     // The uploaded file itself, so the "sending" bubble can preview it.
     attachment?: Attachment;
-    // Text typed alongside the file (issue #765).
-    caption?: string;
     parentMessageId?: number;
   }) => void;
   // The message being replied to, or null when composing a normal message.
@@ -121,30 +103,14 @@ type ChatComposerProps = {
   autoFocus?: boolean;
 };
 
-function replyPreviewText(target: ReplyTarget): string {
-  if (target.contentType === "image_url") return "📷 Photo";
-  if (target.contentType === "attachment")
-    return target.caption ? `📎 ${target.caption}` : "📎 Attachment";
-  return target.content;
-}
+// A voice message is sent as an ordinary attachment (see submit() below); it
+// just gets there via VoiceRecorderField's record-and-upload flow instead of
+// AttachmentUploadField's pick-a-file flow.
+type ComposerMode = "text" | "attachment" | "voice";
 
-// UI-level mode the composer is in — a superset of the backend's
-// `MessageContentType`. "voice" has no backend counterpart: a voice message
-// is sent as an ordinary `attachment`-type message (see submit() below), it
-// just gets there via VoiceRecorderField's record-and-upload flow instead
-// of AttachmentUploadField's pick-a-file flow.
-type ComposerMode = MessageContentType | "voice";
-
-// Both "attachment" and "voice" send as an uploaded-attachment message —
-// they share the same `attachment` state and the same send gating below.
-function usesAttachment(mode: ComposerMode): mode is "attachment" | "voice" {
-  return mode === "attachment" || mode === "voice";
-}
-
-// What the trigger that opened a mode says once you're in it, since there it
-// backs out of that mode instead of opening the sheet.
+// What the attach button says once you're in a mode, since there it backs out
+// of that mode instead of opening the file picker.
 function cancelLabelFor(mode: ComposerMode): string {
-  if (mode === "image_url") return "Cancel photo link";
   if (mode === "voice") return "Cancel voice message";
   return "Cancel attachment";
 }
@@ -158,11 +124,10 @@ export function ChatComposer({
   onEditLast,
   autoFocus = false,
 }: ChatComposerProps) {
-  const [contentType, setContentType] = useState<ComposerMode>("text");
-  const [content, setContent] = useState("");
+  const [mode, setMode] = useState<ComposerMode>("text");
+  const [body, setBody] = useState("");
   const [attachment, setAttachment] = useState<Attachment | null>(null);
-  // The file chosen through the attach sheet's own hidden `<input>` — the
-  // sheet opens the OS picker itself (that's the second of the two taps), so
+  // The file chosen through the attach button's own hidden `<input>`, so
   // the upload field is handed a file that's already been chosen rather than
   // rendering a drop zone for one.
   const [pickedFile, setPickedFile] = useState<File | null>(null);
@@ -183,13 +148,12 @@ export function ChatComposer({
   const enterInsertsNewline = useIsCoarsePointer();
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const urlInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Grow the textarea to fit what's been typed, up to MAX_VISIBLE_LINES —
   // the message field, or an attachment's caption field.
   useEffect(() => {
-    if (contentType !== "text" && contentType !== "attachment") return;
+    if (mode !== "text" && mode !== "attachment") return;
     const textarea = textareaRef.current;
     if (!textarea) return;
     // An *empty* textarea still reports its wrapped placeholder's height in
@@ -198,7 +162,7 @@ export function ChatComposer({
     // ~86px (five lines) tall on a 390px-wide phone before a single character
     // was typed. Clearing the inline height hands sizing back to the CSS
     // floor (`rows={1}` + `min-h-9`) until there's something real to measure.
-    if (content === "") {
+    if (body === "") {
       textarea.style.height = "";
       textarea.style.overflowY = "hidden";
       return;
@@ -215,7 +179,7 @@ export function ChatComposer({
     // computed ceiling through subpixel rounding.
     textarea.style.overflowY =
       textarea.scrollHeight > max + 1 ? "auto" : "hidden";
-  }, [content, contentType]);
+  }, [body, mode]);
 
   useEffect(() => {
     if (autoFocus) textareaRef.current?.focus();
@@ -226,56 +190,44 @@ export function ChatComposer({
   // Starting a reply (from a bubble's Reply action) drops focus into the
   // composer so the user can start typing the reply straight away.
   useEffect(() => {
-    if (replyingTo && contentType === "text") textareaRef.current?.focus();
-  }, [replyingTo, contentType]);
+    if (replyingTo && mode === "text") textareaRef.current?.focus();
+  }, [replyingTo, mode]);
 
-  // Switching modes moves focus to whatever the new mode is asking for, so
-  // picking "Photo" out of the attach sheet leaves the caret in the link
-  // field and backing out of a mode leaves it back in the message field.
+  // Backing out of a mode leaves the caret back in the message field.
   // The field being focused only exists after the render that switched the
   // mode, so the switch flags what to focus and this picks it up afterwards.
   // A flag set by an interaction (rather than an effect keyed on the mode) is
   // also what keeps the composer from grabbing focus — and on a phone,
   // opening the keyboard — just because a chat was opened.
-  // A message typed but not sent, parked while the photo-link field has
-  // `content` (the two share it), so backing out of a photo link doesn't
-  // throw the draft away.
-  const textDraftRef = useRef("");
-  const focusAfterRenderRef = useRef<"message" | "link" | null>(null);
+  const focusAfterRenderRef = useRef(false);
   useEffect(() => {
-    const target = focusAfterRenderRef.current;
-    if (!target) return;
-    focusAfterRenderRef.current = null;
-    if (target === "message") textareaRef.current?.focus();
-    else urlInputRef.current?.focus();
+    if (!focusAfterRenderRef.current) return;
+    focusAfterRenderRef.current = false;
+    textareaRef.current?.focus();
   });
 
-  const trimmed = content.trim();
-  const overLimit = trimmed.length > MAX_MESSAGE_CONTENT_LENGTH;
-  const nearLimit = trimmed.length > MAX_MESSAGE_CONTENT_LENGTH * 0.9;
-  const invalidImageUrl =
-    contentType === "image_url" &&
-    trimmed.length > 0 &&
-    !isAllowedImageUrl(trimmed);
-  // Sending while offline is allowed for text/image_url — `onSend` queues the
+  const trimmed = body.trim();
+  const overLimit = trimmed.length > MAX_MESSAGE_BODY_LENGTH;
+  const nearLimit = trimmed.length > MAX_MESSAGE_BODY_LENGTH * 0.9;
+  // Both "attachment" and "voice" send as an uploaded attachment: they share
+  // the same `attachment` state and the same send gating below.
+  const usesAttachment = mode !== "text";
+  // Sending while offline is allowed for text — `onSend` queues the
   // message locally instead of failing (see lib/offlineQueue.ts). An
   // attachment message can't be queued the same way (it needs a completed
   // upload, which needs a live connection), so it requires being online. A
   // file's caption (issue #765) is held to the same length as a message.
-  const canSend = usesAttachment(contentType)
+  const canSend = usesAttachment
     ? attachment !== null && isOnline && !overLimit
-    : trimmed.length > 0 && !overLimit && !invalidImageUrl;
+    : trimmed.length > 0 && !overLimit;
 
   // With nothing typed there's nothing to send, so the trailing button is a
   // microphone instead — the arrangement every chat app has settled on, and
-  // the reason voice isn't a row in the attach sheet. It needs a live
+  // the reason voice isn't behind the attach button. It needs a live
   // connection (a clip uploads the moment it stops recording, and an
   // attachment can't be queued offline) and a browser that can record.
   const showMic =
-    contentType === "text" &&
-    trimmed.length === 0 &&
-    isOnline &&
-    canRecordVoice();
+    mode === "text" && trimmed.length === 0 && isOnline && canRecordVoice();
 
   function notifyTyping() {
     const now = Date.now();
@@ -284,40 +236,29 @@ export function ChatComposer({
     sendTyping.mutate({ params: { path: { id: String(chatId) } } });
   }
 
-  function handleContentChange(value: string) {
-    setContent(value);
+  function handleBodyChange(value: string) {
+    setBody(value);
     if (value.trim().length > 0) notifyTyping();
   }
 
   // Back to a plain text message, dropping whatever the abandoned mode had
-  // in flight and handing back the half-written message the photo-link field
-  // was borrowing `content` from.
+  // in flight but keeping the text.
   function resetToText() {
-    focusAfterRenderRef.current = "message";
-    if (contentType === "image_url") {
-      setContent(textDraftRef.current);
-      textDraftRef.current = "";
-    }
-    setContentType("text");
+    focusAfterRenderRef.current = true;
+    setMode("text");
     setAttachment(null);
     setPickedFile(null);
   }
 
-  // Hands a file to the upload field the same way the attach sheet's picker
-  // does — from a paste, or a drop anywhere on the conversation. A photo
-  // link in progress is set aside for it (its draft text comes back with
-  // the message field), a voice clip isn't: a recording is never thrown away
-  // by a stray drop.
+  // Hands a file to the upload field the same way the attach button's picker
+  // does — from a paste, or a drop anywhere on the conversation. A recording
+  // is never thrown away by a stray drop.
   function attachFile(file: File) {
-    if (contentType === "voice") return;
-    if (contentType === "image_url") {
-      setContent(textDraftRef.current);
-      textDraftRef.current = "";
-    }
+    if (mode === "voice") return;
     setAttachment(null);
     setPickedFile(file);
     setPickedFileKey((key) => key + 1);
-    setContentType("attachment");
+    setMode("attachment");
   }
 
   useImperativeHandle(ref, () => ({
@@ -351,27 +292,17 @@ export function ChatComposer({
     // A reply quotes the message the parent passed as `replyingTo` — thread
     // its id through as `parentMessageId` so the send records the link.
     const parentMessageId = replyingTo?.id;
-    onSend(
-      usesAttachment(contentType)
-        ? {
-            contentType: "attachment",
-            content: attachment!.filename,
-            attachmentId: attachment!.id,
-            attachment: attachment!,
-            // What was typed in the message field goes along as the file's
-            // caption (issue #765) instead of being dropped.
-            ...(contentType === "attachment" && trimmed !== ""
-              ? { caption: trimmed }
-              : {}),
-            parentMessageId,
-          }
-        : { contentType, content: trimmed, parentMessageId },
-    );
-    setContent("");
-    textDraftRef.current = "";
+    onSend({
+      body: mode === "voice" ? "" : trimmed,
+      ...(usesAttachment
+        ? { attachmentId: attachment!.id, attachment: attachment! }
+        : {}),
+      parentMessageId,
+    });
+    setBody("");
     setAttachment(null);
     setPickedFile(null);
-    setContentType("text");
+    setMode("text");
     lastTypingSentAtRef.current = 0;
     onCancelReply?.();
   }
@@ -389,7 +320,7 @@ export function ChatComposer({
       onCancelReply?.();
     } else if (
       event.key === "ArrowUp" &&
-      content === "" &&
+      body === "" &&
       !replyingTo &&
       !event.shiftKey &&
       !event.altKey &&
@@ -400,13 +331,13 @@ export function ChatComposer({
     }
   }
 
-  // The rounded field the text (or the photo URL) sits in — one surface the
-  // whole row is built around, which is what makes a chat composer read as a
-  // composer rather than as a form control with buttons either side of it.
+  // The rounded field the text sits in — one surface the whole row is built
+  // around, which is what makes a chat composer read as a composer rather than
+  // as a form control with buttons either side of it.
   const fieldClassName = cn(
     "flex min-w-0 flex-1 items-end rounded-3xl border border-input bg-background px-3 py-1 shadow-sm transition-[border-color,box-shadow] duration-200",
     "focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50",
-    (overLimit || invalidImageUrl) &&
+    overLimit &&
       "border-destructive focus-within:border-destructive focus-within:ring-destructive/30",
   );
 
@@ -427,7 +358,7 @@ export function ChatComposer({
               Replying to {replyingTo.senderName}
             </span>
             <span className="truncate text-muted-foreground">
-              {replyPreviewText(replyingTo)}
+              {parentPreviewText(replyingTo)}
             </span>
           </div>
           <Button
@@ -443,34 +374,26 @@ export function ChatComposer({
         </div>
       )}
       <div className="flex items-end gap-1.5">
-        <ComposerAttachMenu
-          active={contentType !== "text"}
-          activeLabel={cancelLabelFor(contentType)}
-          onCancel={resetToText}
-          actions={[
-            {
-              key: "photo",
-              label: "Photo",
-              description: "Share a link to an image",
-              icon: <ImageIcon className="size-4" />,
-              onSelect: () => {
-                textDraftRef.current = content;
-                setContent("");
-                focusAfterRenderRef.current = "link";
-                setContentType("image_url");
-              },
-            },
-            {
-              key: "file",
-              label: "File",
-              description: "Image, video or audio",
-              // Straight to the OS picker: opening it here is what keeps a
-              // file upload at two taps.
-              icon: <Paperclip className="size-4" />,
-              onSelect: () => fileInputRef.current?.click(),
-            },
-          ]}
-        />
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          aria-label={mode === "text" ? "Attach" : cancelLabelFor(mode)}
+          onClick={() => {
+            if (mode === "text") fileInputRef.current?.click();
+            else resetToText();
+          }}
+          className="size-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+        >
+          <Plus
+            // In a mode, the plus turns into a close cross: one glyph, two
+            // meanings, and the rotation is what tells you which.
+            className={cn(
+              "size-5 transition-transform duration-300 ease-spring",
+              mode !== "text" && "rotate-45",
+            )}
+          />
+        </Button>
         <input
           ref={fileInputRef}
           type="file"
@@ -479,12 +402,12 @@ export function ChatComposer({
           onChange={handleFilePicked}
         />
 
-        {contentType === "text" ? (
+        {mode === "text" ? (
           <div className={fieldClassName}>
             <MentionTextarea
               ref={textareaRef}
-              value={content}
-              onValueChange={handleContentChange}
+              value={body}
+              onValueChange={handleBodyChange}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               // One collapsed attach button and one send button leave the
@@ -526,29 +449,7 @@ export function ChatComposer({
               className="min-h-9 w-full resize-none overflow-hidden border-0 bg-transparent px-0 py-1.5 shadow-none transition-[height] duration-150 ease-smooth focus-visible:ring-0"
             />
           </div>
-        ) : contentType === "image_url" ? (
-          <div className={fieldClassName}>
-            <ImageIcon className="mb-2.5 size-4 shrink-0 text-muted-foreground" />
-            <Input
-              ref={urlInputRef}
-              type="url"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              onKeyDown={(e) => {
-                if (isImeComposing(e)) return;
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  submit();
-                }
-                if (e.key === "Escape") resetToText();
-              }}
-              placeholder="https://picsum.photos/id/1/600/800"
-              aria-label="Image link"
-              aria-invalid={invalidImageUrl}
-              className="h-9 min-w-0 flex-1 border-0 bg-transparent px-2 shadow-none focus-visible:ring-0"
-            />
-          </div>
-        ) : contentType === "attachment" ? (
+        ) : mode === "attachment" ? (
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
             <AttachmentUploadField
               key={pickedFileKey}
@@ -571,8 +472,8 @@ export function ChatComposer({
             <div className={fieldClassName}>
               <MentionTextarea
                 ref={textareaRef}
-                value={content}
-                onValueChange={handleContentChange}
+                value={body}
+                onValueChange={handleBodyChange}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
                 placeholder="Add a caption…"
@@ -602,7 +503,7 @@ export function ChatComposer({
             type="button"
             size="icon"
             aria-label="Record a voice message"
-            onClick={() => setContentType("voice")}
+            onClick={() => setMode("voice")}
             className="size-10 shrink-0 rounded-full transition-all duration-300 ease-spring active:scale-95"
           >
             {/* Keyed so the swap between the two trailing actions plays the
@@ -649,13 +550,7 @@ export function ChatComposer({
           </Button>
         )}
       </div>
-      {invalidImageUrl && (
-        <span className="self-end text-xs text-destructive">
-          Must be an https:// link from a supported image host (e.g.
-          picsum.photos, imgur.com, unsplash.com).
-        </span>
-      )}
-      {!isOnline && usesAttachment(contentType) ? (
+      {!isOnline && usesAttachment ? (
         <span className="self-end text-xs text-muted-foreground">
           You&apos;re offline — file attachments can&apos;t be queued and need a
           live connection to send.
@@ -673,7 +568,7 @@ export function ChatComposer({
               overLimit ? "text-destructive" : "text-muted-foreground",
             )}
           >
-            {trimmed.length}/{MAX_MESSAGE_CONTENT_LENGTH}
+            {trimmed.length}/{MAX_MESSAGE_BODY_LENGTH}
           </span>
         )
       )}

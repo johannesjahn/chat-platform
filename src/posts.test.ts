@@ -58,7 +58,7 @@ test("createPost rejects an unauthenticated request", () =>
     Effect.gen(function* () {
       const c = yield* makeClient;
       const result = yield* c.posts
-        .createPost({ payload: { contentType: "text", content: "hello" } })
+        .createPost({ payload: { body: "hello" } })
         .pipe(Effect.flip);
       expect(result._tag).toBe("Unauthorized");
     }),
@@ -73,11 +73,10 @@ test("createPost creates a text post owned by the current user", () =>
       );
       const authed = yield* makeAuthedClient(accessToken);
       const post = yield* authed.posts.createPost({
-        payload: { contentType: "text", content: "hello world" },
+        payload: { body: "hello world" },
       });
       expect(post.authorId).toBe(user.id);
-      expect(post.contentType).toBe("text");
-      expect(post.content).toBe("hello world");
+      expect(post.body).toBe("hello world");
       expect(typeof post.id).toBe("number");
       expect(post.createdAt).toBe(post.updatedAt);
     }),
@@ -97,7 +96,7 @@ test('createPost increments content_created_total{type="post"}', () =>
       });
       const before = yield* Metric.value(postsCreated);
       yield* authed.posts.createPost({
-        payload: { contentType: "text", content: "counted" },
+        payload: { body: "counted" },
       });
       const after = yield* Metric.value(postsCreated);
       expect(after.count).toBe(before.count + 1);
@@ -119,7 +118,7 @@ test("createPost is idempotent per author and clientId (issue #657)", () =>
         clientId?: string,
       ) =>
         client.posts.createPost({
-          payload: { contentType: "text", content, clientId },
+          payload: { body: content, clientId },
         });
       const postsCreated = Metric.withAttributes(contentCreatedTotal, {
         type: "post",
@@ -131,7 +130,7 @@ test("createPost is idempotent per author and clientId (issue #657)", () =>
       // the key identifies the attempt, not the content.
       const repeat = yield* create(alice, "once again", "key-1");
       expect(repeat.id).toBe(first.id);
-      expect(repeat.content).toBe("once");
+      expect(repeat.body).toBe("once");
       expect((yield* Metric.value(postsCreated)).count).toBe(before.count);
 
       // A different key, no key, or the same key from another author is a
@@ -146,73 +145,9 @@ test("createPost is idempotent per author and clientId (issue #657)", () =>
     }),
   ));
 
-test("createPost creates an image_url post", () =>
-  run(
-    Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("bob", "pw-testpass");
-      const authed = yield* makeAuthedClient(accessToken);
-      const post = yield* authed.posts.createPost({
-        payload: {
-          contentType: "image_url",
-          content: "https://picsum.photos/200",
-        },
-      });
-      expect(post.contentType).toBe("image_url");
-      expect(post.content).toBe("https://picsum.photos/200");
-    }),
-  ));
-
-test("createPost rejects an image_url from a non-allowlisted host", () =>
-  run(
-    Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("bobby", "pw-testpass");
-      const authed = yield* makeAuthedClient(accessToken);
-      yield* authed.posts
-        .createPost({
-          payload: {
-            contentType: "image_url",
-            content: "https://evil.example.com/cat.png",
-          },
-        })
-        .pipe(Effect.flip);
-    }),
-  ));
-
-test("createPost rejects a non-https image_url", () =>
-  run(
-    Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("bobbi", "pw-testpass");
-      const authed = yield* makeAuthedClient(accessToken);
-      yield* authed.posts
-        .createPost({
-          payload: {
-            contentType: "image_url",
-            content: "http://picsum.photos/200",
-          },
-        })
-        .pipe(Effect.flip);
-    }),
-  ));
-
-test("createPost rejects a javascript: image_url", () =>
-  run(
-    Effect.gen(function* () {
-      const { accessToken } = yield* registerAndLogin("bobette", "pw-testpass");
-      const authed = yield* makeAuthedClient(accessToken);
-      yield* authed.posts
-        .createPost({
-          payload: {
-            contentType: "image_url",
-            content: "javascript:alert(1)",
-          },
-        })
-        .pipe(Effect.flip);
-    }),
-  ));
-
 // Regression tests for issue #171. The typed client above encodes payloads
 // through the same schema the server decodes with, so a refinement failure
-// like the image_url allowlist above never actually reaches the server —
+// like `requireBodyOrAttachment` never actually reaches the server —
 // `HttpApiClient` catches it while encoding the request, before anything is
 // sent. Sending a raw, hand-built request instead (as any non-browser client
 // could) is the only way to exercise the server's actual decode-error
@@ -230,8 +165,7 @@ test("HttpApiDecodeError response keeps a Schema.filter refinement's own message
         headers: { Authorization: `Bearer ${accessToken}` },
       }).pipe(
         HttpClientRequest.bodyJsonUnsafe({
-          contentType: "image_url",
-          content: "https://evil.example.com/cat.png",
+          body: "",
         }),
       );
       const response = yield* client.execute(request);
@@ -239,8 +173,7 @@ test("HttpApiDecodeError response keeps a Schema.filter refinement's own message
       const body = yield* response.json;
       expect(body).toMatchObject({
         _tag: "HttpApiDecodeError",
-        message:
-          "content must be an https:// URL from an allowed image-hosting domain",
+        message: "body may only be empty when there is an attachment",
       });
     }),
   ));
@@ -257,12 +190,11 @@ test("HttpApiDecodeError response replaces a structural type mismatch with a gen
         headers: { Authorization: `Bearer ${accessToken}` },
       }).pipe(
         HttpClientRequest.bodyJsonUnsafe({
-          contentType: "text",
           // Wrong type entirely (not a filter/refinement violation) — no
           // hand-authored message exists for this, so the sanitized
           // response must fall back to a generic message instead of
           // leaking the raw "Expected string, received number" trace.
-          content: 12345,
+          body: 12345,
         }),
       );
       const response = yield* client.execute(request);
@@ -287,7 +219,7 @@ test("createPost rejects content over the max length", () =>
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.posts
         .createPost({
-          payload: { contentType: "text", content: "x".repeat(10_001) },
+          payload: { body: "x".repeat(10_001) },
         })
         .pipe(Effect.flip);
     }),
@@ -299,12 +231,12 @@ test("createPost rejects an empty content string", () =>
       const { accessToken } = yield* registerAndLogin("dave", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       yield* authed.posts
-        .createPost({ payload: { contentType: "text", content: "" } })
+        .createPost({ payload: { body: "" } })
         .pipe(Effect.flip);
     }),
   ));
 
-test("createPost rejects an invalid content type", () =>
+test("createPost rejects a body that is not text", () =>
   run(
     Effect.gen(function* () {
       const { accessToken } = yield* registerAndLogin("erin", "pw-testpass");
@@ -312,8 +244,7 @@ test("createPost rejects an invalid content type", () =>
       yield* authed.posts
         .createPost({
           payload: {
-            contentType: "video" as never,
-            content: "hello",
+            body: 5 as never,
           },
         })
         .pipe(Effect.flip);
@@ -326,7 +257,7 @@ test("getPost rejects an unauthenticated request", () =>
       const { accessToken } = yield* registerAndLogin("frank", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const created = yield* authed.posts.createPost({
-        payload: { contentType: "text", content: "post" },
+        payload: { body: "post" },
       });
 
       const c = yield* makeClient;
@@ -343,7 +274,7 @@ test("getPost returns the post for an authenticated request", () =>
       const { accessToken } = yield* registerAndLogin("frankie", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const created = yield* authed.posts.createPost({
-        payload: { contentType: "text", content: "post" },
+        payload: { body: "post" },
       });
 
       const fetched = yield* authed.posts.getPost({
@@ -369,7 +300,7 @@ test("listPosts returns a default first page with a null nextCursor", () =>
       const authed = yield* makeAuthedClient(accessToken);
       for (let i = 0; i < 3; i++) {
         yield* authed.posts.createPost({
-          payload: { contentType: "text", content: `post ${i}` },
+          payload: { body: `post ${i}` },
         });
       }
 
@@ -389,7 +320,7 @@ test("listPosts paginates newest-first with a keyset cursor, without gaps or dup
       for (let i = 0; i < 5; i++) {
         created.push(
           yield* authed.posts.createPost({
-            payload: { contentType: "text", content: `post ${i}` },
+            payload: { body: `post ${i}` },
           }),
         );
       }
@@ -463,19 +394,17 @@ test("updatePost allows the author to edit their post", () =>
       const { accessToken } = yield* registerAndLogin("grace", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const created = yield* authed.posts.createPost({
-        payload: { contentType: "text", content: "original" },
+        payload: { body: "original" },
       });
 
       const updated = yield* authed.posts.updatePost({
         params: { id: created.id },
         payload: {
-          contentType: "image_url",
-          content: "https://picsum.photos/id/1/200",
+          body: "edited",
         },
       });
       expect(updated.id).toBe(created.id);
-      expect(updated.contentType).toBe("image_url");
-      expect(updated.content).toBe("https://picsum.photos/id/1/200");
+      expect(updated.body).toBe("edited");
       expect(updated.updatedAt).toBeGreaterThanOrEqual(created.updatedAt);
     }),
   ));
@@ -486,7 +415,7 @@ test("updatePost rejects edits from a user who doesn't own the post", () =>
       const author = yield* registerAndLogin("henry", "pw-testpass");
       const authorClient = yield* makeAuthedClient(author.accessToken);
       const created = yield* authorClient.posts.createPost({
-        payload: { contentType: "text", content: "mine" },
+        payload: { body: "mine" },
       });
 
       const intruder = yield* registerAndLogin("iris", "pw-testpass");
@@ -494,7 +423,7 @@ test("updatePost rejects edits from a user who doesn't own the post", () =>
       const result = yield* intruderClient.posts
         .updatePost({
           params: { id: created.id },
-          payload: { contentType: "text", content: "hijacked" },
+          payload: { body: "hijacked" },
         })
         .pipe(Effect.flip);
       expect(result._tag).toBe("Forbidden");
@@ -507,7 +436,7 @@ test("updatePost allows an admin to edit another user's post", () =>
       const author = yield* registerAndLogin("oscar", "pw-testpass");
       const authorClient = yield* makeAuthedClient(author.accessToken);
       const created = yield* authorClient.posts.createPost({
-        payload: { contentType: "text", content: "mine" },
+        payload: { body: "mine" },
       });
 
       yield* registerAndLogin("paula", "pw-testpass");
@@ -520,9 +449,9 @@ test("updatePost allows an admin to edit another user's post", () =>
 
       const updated = yield* adminClient.posts.updatePost({
         params: { id: created.id },
-        payload: { contentType: "text", content: "edited by admin" },
+        payload: { body: "edited by admin" },
       });
-      expect(updated.content).toBe("edited by admin");
+      expect(updated.body).toBe("edited by admin");
       expect(updated.authorId).toBe(author.user.id);
     }),
   ));
@@ -535,7 +464,7 @@ test("updatePost returns 404 for a missing post", () =>
       const result = yield* authed.posts
         .updatePost({
           params: { id: 9999 },
-          payload: { contentType: "text", content: "nope" },
+          payload: { body: "nope" },
         })
         .pipe(Effect.flip);
       expect(result._tag).toBe("NotFound");
@@ -548,7 +477,7 @@ test("deletePost allows the author to delete their post", () =>
       const { accessToken } = yield* registerAndLogin("karen", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const created = yield* authed.posts.createPost({
-        payload: { contentType: "text", content: "to delete" },
+        payload: { body: "to delete" },
       });
 
       yield* authed.posts.deletePost({ params: { id: created.id } });
@@ -566,7 +495,7 @@ test("deletePost rejects deletes from a user who doesn't own the post", () =>
       const author = yield* registerAndLogin("liam", "pw-testpass");
       const authorClient = yield* makeAuthedClient(author.accessToken);
       const created = yield* authorClient.posts.createPost({
-        payload: { contentType: "text", content: "mine" },
+        payload: { body: "mine" },
       });
 
       const intruder = yield* registerAndLogin("mona", "pw-testpass");
@@ -584,7 +513,7 @@ test("deletePost allows an admin to delete another user's post", () =>
       const author = yield* registerAndLogin("quincy", "pw-testpass");
       const authorClient = yield* makeAuthedClient(author.accessToken);
       const created = yield* authorClient.posts.createPost({
-        payload: { contentType: "text", content: "mine" },
+        payload: { body: "mine" },
       });
 
       yield* registerAndLogin("rachel", "pw-testpass");
@@ -610,7 +539,7 @@ test("deletePost rejects an unauthenticated request", () =>
       const { accessToken } = yield* registerAndLogin("nina", "pw-testpass");
       const authed = yield* makeAuthedClient(accessToken);
       const created = yield* authed.posts.createPost({
-        payload: { contentType: "text", content: "post" },
+        payload: { body: "post" },
       });
 
       const c = yield* makeClient;

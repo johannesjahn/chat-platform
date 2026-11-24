@@ -20,7 +20,7 @@ import { useCreatePost } from "@/lib/createPost";
 import { errorMessage } from "@/lib/errors";
 import { isImeComposing } from "@/lib/ime";
 import { useOnlineStatus } from "@/lib/online";
-import { MAX_POST_CONTENT_LENGTH } from "@/lib/posts";
+import { MAX_POST_BODY_LENGTH } from "@/lib/posts";
 import { userAvatarName } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
@@ -29,8 +29,7 @@ import { cn } from "@/lib/utils";
  * on your mind?" at the top of the feed that expands in place on focus, so
  * posting doesn't mean leaving for `/posts/new`. Text with an optional file
  * — picked, pasted from the clipboard, or dropped anywhere on the composer —
- * where the text becomes the file's caption (issue #765). Image-link posts
- * stay on the full form.
+ * which the text is posted beside.
  */
 export function InlineComposer({ session }: { session: Session }) {
   const createPost = useCreatePost();
@@ -49,10 +48,9 @@ export function InlineComposer({ session }: { session: Session }) {
 
   const trimmed = text.trim();
   const hasFile = file !== null || attachment !== null;
-  const overLimit = trimmed.length > MAX_POST_CONTENT_LENGTH;
+  const overLimit = trimmed.length > MAX_POST_BODY_LENGTH;
   // A file post needs its upload finished (and so a connection); a text
-  // post can be queued offline. Either way the text must fit — with a file
-  // it's the caption.
+  // post can be queued offline. Either way the text must fit.
   const canPost = hasFile
     ? attachment !== null && isOnline && !overLimit && !pending
     : trimmed.length > 0 && !overLimit && !pending;
@@ -92,18 +90,7 @@ export function InlineComposer({ session }: { session: Session }) {
     setPending(true);
     setError(null);
     try {
-      // With a file attached, the text is posted as its caption (issue
-      // #765) — `content` stays the filename, as for every attachment.
-      await createPost(
-        attachment
-          ? {
-              contentType: "attachment",
-              content: attachment.filename,
-              attachmentId: attachment.id,
-              ...(trimmed !== "" ? { caption: trimmed } : {}),
-            }
-          : { contentType: "text", content: trimmed },
-      );
+      await createPost({ body: trimmed, attachmentId: attachment?.id });
       reset();
     } catch (err) {
       setError(errorMessage(err));
@@ -226,8 +213,8 @@ export function InlineComposer({ session }: { session: Session }) {
                 overLimit ? "text-destructive" : "text-muted-foreground",
               )}
             >
-              {trimmed.length > MAX_POST_CONTENT_LENGTH * 0.8 &&
-                `${trimmed.length}/${MAX_POST_CONTENT_LENGTH}`}
+              {trimmed.length > MAX_POST_BODY_LENGTH * 0.8 &&
+                `${trimmed.length}/${MAX_POST_BODY_LENGTH}`}
             </span>
             <Button
               type="button"

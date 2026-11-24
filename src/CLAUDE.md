@@ -71,20 +71,15 @@ substring branch (`ILIKE '%token%'`) over `pg_trgm` GIN indexes (`0023`).
 
 - **Branches are a union of per-branch subqueries, never an `OR`**: under an
   `OR` with `ORDER BY id DESC LIMIT n` Postgres can use neither index. Every
-  filter (content type, keyset cursor, blocked authors, chat
-  participation, `request_pending`, `chatId`) lives _inside_ each arm; outside, it
+  filter (keyset cursor, blocked authors, chat participation, `request_pending`, `chatId`) lives _inside_ each arm; outside, it
   would shrink a page instead of pushing it deeper. See `matchingIds`.
 - **Posts and comments arms are recent-first** (`recentFirstArm`, issue
   #829): the newest `SEARCH_RECENT_WINDOW` ids are filtered in id order, and
   older rows are reached through the index only when that didn't fill the
   page (a one-time `count(*) < limit` guard).
-- **Content types in search predicates are SQL literals**, not parameters:
-  under a prepared statement's generic plan, `content_type = $1` can't prove
-  a partial index applies.
 - Snippets are built in TypeScript (`buildSnippet`), not `ts_headline`, so a
   pure substring hit is highlighted too.
-- Captions get their own union arms over partial expression indexes;
-  filenames are never searched.
+- Filenames are never searched.
 
 **Contacts below the 3-character floor.** User search needs 3 characters
 (issue #48) so the directory can't be browsed. Below that, the client
@@ -102,16 +97,15 @@ activity first, capped at `MAX_CONTACTS`. That rule is `contactOf`
 404s on someone else's upload and 409s on one already on another post or
 message. An edit that keeps its file skips both.
 
-**Captions** (issue #765, `0037`): posts and messages carry an optional
-`caption` beside an attachment.
+**One `body`** (issue #941): posts and messages have one text field, which
+may be empty beside an attachment (`requireBodyOrAttachment`, api/posts.ts).
+Not a `CHECK`: the attachment FK's `set null` would then fail. The filename
+lives only on the attachment.
 
-- `content` stays the filename on attachment rows.
-- `caption` counts only when `content_type = 'attachment'` (an old replica
-  can re-type a row and leave the column), so readers go through `captionOf`
-  (posts.ts) / `messageCaption` (chats/messageViews.ts).
-- Edits: omitted keeps, `null` clears. A `caption` on a non-attachment is a 400.
-- Captions notify `@mentions` on posts (not chats), are the notification
-  excerpt, and are copied by a forward.
+- An edit (`PUT`) replaces both: leaving `attachmentId` out removes the file.
+- `@mentions` in it notify on posts (not chats); it's the notification
+  excerpt and is copied by a forward.
+- An image URL in it is just text; external images exist only as avatars.
 
 **Media input** (issues #732, #734): every ffmpeg/ffprobe call goes through
 `runFfmpeg`/`runFfprobe` in `MediaInput.ts`, which whitelist protocol,

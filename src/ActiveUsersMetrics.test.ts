@@ -55,8 +55,7 @@ test("updateActiveUserGauges sets active_users{window} to the distinct count of 
           .insert(posts)
           .values({
             authorId: u1!.id,
-            contentType: "text",
-            content: "hi",
+            body: "hi",
             createdAt: hoursAgo(2),
             updatedAt: hoursAgo(2),
           })
@@ -91,8 +90,7 @@ test("updateActiveUserGauges sets active_users{window} to the distinct count of 
         db.insert(messages).values({
           chatId: chat!.id,
           senderId: u4!.id,
-          contentType: "text",
-          content: "old",
+          body: "old",
           createdAt: hoursAgo(24 * 40),
           updatedAt: hoursAgo(24 * 40),
         }),
@@ -134,8 +132,7 @@ test("content inserts move last_active_at forward, at most once per ACTIVITY_RES
           db.insert(messages).values({
             chatId: chat!.id,
             senderId: user!.id,
-            contentType: "text",
-            content: "hi",
+            body: "hi",
             createdAt: new Date(at),
             updatedAt: new Date(at),
           }),
@@ -162,8 +159,7 @@ test("content inserts move last_active_at forward, at most once per ACTIVITY_RES
           .insert(posts)
           .values({
             authorId: user!.id,
-            contentType: "text",
-            content: "hi",
+            body: "hi",
             createdAt: new Date(start + 4 * resolution),
             updatedAt: new Date(start + 4 * resolution),
           })

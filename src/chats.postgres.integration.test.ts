@@ -169,8 +169,7 @@ describeIfPostgres("chat transactions on real Postgres", () => {
           alice.client.chats.createMessage({
             params,
             payload: {
-              contentType: "text",
-              content,
+              body: content,
               ...(parentMessageId === undefined ? {} : { parentMessageId }),
             },
           });
@@ -238,7 +237,7 @@ describeIfPostgres("chat transactions on real Postgres", () => {
         expect(rows[0]?.at).toBeGreaterThan(reply.id);
 
         const post = yield* alice.client.posts.createPost({
-          payload: { contentType: "text", content: "hello" },
+          payload: { body: "hello" },
         });
         yield* bob.client.comments.addPostReaction({
           params: { id: post.id },
@@ -277,8 +276,7 @@ describeIfPostgres("chat transactions on real Postgres", () => {
         const send = (
           i: number,
           payload: {
-            contentType: "attachment";
-            content: string;
+            body: string;
             attachmentId: number;
             clientId?: string;
           },
@@ -292,8 +290,7 @@ describeIfPostgres("chat transactions on real Postgres", () => {
                 });
           });
         const body = (attachmentId: number) => ({
-          contentType: "attachment" as const,
-          content: "a.png",
+          body: "",
           attachmentId,
         });
 

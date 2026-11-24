@@ -103,8 +103,7 @@ test("a replica that doesn't win the active-users run still reports the counts t
       yield* Effect.promise(() =>
         db.insert(posts).values({
           authorId: author!.id,
-          contentType: "text",
-          content: "hi",
+          body: "hi",
         }),
       );
 

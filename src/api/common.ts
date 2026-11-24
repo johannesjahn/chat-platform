@@ -28,8 +28,8 @@ export const isMinLength = (minLength: number) =>
             : [{}, true],
   });
 
-// Hosting domains an image URL (avatar or post/message `image_url` content)
-// is allowed to point at (issue #47): rendered directly as an `<img src>`,
+// Hosting domains an external avatar URL is allowed to point at (issue
+// #47): rendered directly as an `<img src>`,
 // so without this an author could embed a `javascript:`/`data:` URL, track
 // viewers via an arbitrary third-party host, or serve mixed (non-https)
 // content. Matches the domain itself or any subdomain, e.g. "i.imgur.com"

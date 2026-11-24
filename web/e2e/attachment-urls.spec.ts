@@ -170,8 +170,7 @@ test("a feed refetch keeps attachment images as they are instead of reloading th
   const post = await request.post(`${apiUrl}/posts`, {
     headers,
     data: {
-      contentType: "attachment",
-      content: attachment.filename,
+      body: "",
       attachmentId: attachment.id,
     },
   });
@@ -244,8 +243,7 @@ test("a chat refetch keeps attachment images as they are instead of reloading th
   const message = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
     headers,
     data: {
-      contentType: "attachment",
-      content: attachment.filename,
+      body: "",
       attachmentId: attachment.id,
     },
   });

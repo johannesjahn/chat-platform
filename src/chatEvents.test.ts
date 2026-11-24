@@ -88,7 +88,7 @@ test("a new message tells every participant who sent which message", () =>
       const mark = published.length;
       const message = yield* bob.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi", clientId: "c-1" },
+        payload: { body: "hi", clientId: "c-1" },
       });
       const { clientId, ...shared } = message;
       expect(clientId).toBe("c-1");
@@ -121,7 +121,7 @@ test("the message an event carries is what the recipient's chat list then shows"
       const mark = published.length;
       yield* bob.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "preview me" },
+        payload: { body: "preview me" },
       });
       const event = chatUpdates(chat.id, mark)[0];
 
@@ -152,7 +152,7 @@ test("a forwarded message is announced in its target chat as a new message", () 
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: source.id },
-        payload: { contentType: "text", content: "pass it on" },
+        payload: { body: "pass it on" },
       });
 
       const mark = published.length;
@@ -174,7 +174,7 @@ test("a forwarded message is announced in its target chat as a new message", () 
       expect(event?.["message"]).toMatchObject({
         id: forwarded?.id,
         chatId: target.id,
-        content: "pass it on",
+        body: "pass it on",
       });
     }),
   ));
@@ -189,11 +189,11 @@ test("a read receipt is one event naming the reader and the range they read", ()
       });
       const first = yield* bob.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "one" },
+        payload: { body: "one" },
       });
       const second = yield* bob.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "two" },
+        payload: { body: "two" },
       });
 
       let mark = published.length;
@@ -274,7 +274,7 @@ test("one group message read by everyone is one publish per participant, not per
       const mark = published.length;
       const message = yield* owner.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hello all" },
+        payload: { body: "hello all" },
       });
       for (const member of members) {
         yield* member.client.chats.markRead({
@@ -319,7 +319,7 @@ test("a change with no narrower meaning still goes out without one", () =>
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "draft" },
+        payload: { body: "draft" },
       });
 
       const mark = published.length;
@@ -329,7 +329,7 @@ test("a change with no narrower meaning still goes out without one", () =>
       });
       yield* alice.client.chats.updateMessage({
         params: { id: chat.id, messageId: message.id },
-        payload: { contentType: "text", content: "final" },
+        payload: { body: "final" },
       });
       yield* alice.client.chats.deleteMessage({
         params: { id: chat.id, messageId: message.id },

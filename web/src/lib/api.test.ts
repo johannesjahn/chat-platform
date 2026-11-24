@@ -112,13 +112,13 @@ describe("a 401 Unauthorized", () => {
     };
 
     const { data, error } = await fetchClient.POST("/posts", {
-      body: { contentType: "text", content: "hello" },
+      body: { body: "hello" },
     });
 
     expect(error).toBeUndefined();
     expect(data).toEqual({ id: 7 } as never);
     // The replay carries the same body as the original request.
-    const sent = { contentType: "text", content: "hello" };
+    const sent = { body: "hello" };
     expect(bodies).toEqual([sent, sent]);
     expect(requests.filter(isRefresh)).toHaveLength(1);
     expect(authStub.session?.accessToken).toBe(NEW);

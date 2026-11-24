@@ -107,7 +107,7 @@ export function MessageActionGroup({
       >
         <Star className={cn("size-3.5", message.starred && "fill-current")} />
       </Button>
-      {(message.contentType === "text" || message.caption) && (
+      {message.body !== "" && (
         <Button
           type="button"
           size="icon"

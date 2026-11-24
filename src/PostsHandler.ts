@@ -25,7 +25,6 @@ import { RealtimeConnections } from "./Realtime.ts";
 import { type DbPost, posts } from "./db/schema.ts";
 import {
   NO_REACTIONS,
-  captionOf,
   decodePostsCursor,
   encodePostsCursor,
   postCommentCounts,
@@ -38,17 +37,6 @@ const canModify = (
   currentUser: { readonly id: number; readonly role: string },
   post: { readonly authorId: number },
 ): boolean => currentUser.role === "admin" || post.authorId === currentUser.id;
-
-// The part of a post that's prose and so can carry `@mentions`: a "text"
-// post's content, or an "attachment" post's caption (issue #765) — both are
-// rendered as text, with mentions linked (see PostCard.tsx). An "image_url"
-// post's content and an attachment's filename are never shown as prose.
-const mentionText = (row: {
-  readonly contentType: string;
-  readonly content: string;
-  readonly caption: string | null;
-}): string | undefined =>
-  row.contentType === "text" ? row.content : (captionOf(row) ?? undefined);
 
 const getPostOr404 = (db: DrizzleDb, id: number) =>
   Effect.gen(function* () {
@@ -262,10 +250,8 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                   .insert(posts)
                   .values({
                     authorId: currentUser.id,
-                    contentType: payload.contentType,
-                    content: payload.content,
+                    body: payload.body,
                     attachmentId: payload.attachmentId ?? null,
-                    caption: payload.caption ?? null,
                     clientId: payload.clientId ?? null,
                     createdAt: now,
                     updatedAt: now,
@@ -316,17 +302,14 @@ export const PostsHandlerLive = HttpApiBuilder.group(
           // Coalesced into feed viewers' next `feed_head`, not broadcast
           // (issue #827; see FeedHeadEvent in Realtime.ts).
           yield* connections.announcePost(row.id);
-          const mentions = mentionText(row);
-          if (mentions !== undefined) {
-            yield* notifyMentions(
-              { db, connections },
-              {
-                actorId: currentUser.id,
-                content: mentions,
-                postId: row.id,
-              },
-            );
-          }
+          yield* notifyMentions(
+            { db, connections },
+            {
+              actorId: currentUser.id,
+              content: row.body,
+              postId: row.id,
+            },
+          );
           const author = yield* loadPostAuthor(db, row);
           return toApiPost(row, author, NO_REACTIONS, attachment);
         }),
@@ -349,17 +332,8 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 await tx
                   .update(posts)
                   .set({
-                    contentType: payload.contentType,
-                    content: payload.content,
+                    body: payload.body,
                     attachmentId: payload.attachmentId ?? null,
-                    // Omitted keeps the current caption (see `UpdatePostBody`);
-                    // only an attachment carries one.
-                    caption:
-                      payload.contentType !== "attachment"
-                        ? null
-                        : payload.caption === undefined
-                          ? captionOf(existing)
-                          : payload.caption,
                     updatedAt: new Date(),
                   })
                   .where(eq(posts.id, id))
@@ -404,18 +378,15 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             change: "updated",
           });
           // Only names this edit added are pinged (see notifyMentions).
-          const mentions = mentionText(row);
-          if (mentions !== undefined) {
-            yield* notifyMentions(
-              { db, connections },
-              {
-                actorId: row.authorId,
-                content: mentions,
-                previousContent: mentionText(existing),
-                postId: row.id,
-              },
-            );
-          }
+          yield* notifyMentions(
+            { db, connections },
+            {
+              actorId: row.authorId,
+              content: row.body,
+              previousContent: existing.body,
+              postId: row.id,
+            },
+          );
           const author = yield* loadPostAuthor(db, row);
           return toApiPost(
             row,

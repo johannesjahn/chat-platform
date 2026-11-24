@@ -9,11 +9,9 @@ import {
   chatsListQueryKey,
   markShownBeforeConfirm,
 } from "./chats";
-import type { MessageContentType } from "./chats";
 import { errorMessage } from "./errors";
 import { useOnlineStatus } from "./online";
 import { postsFeedQueryKey, userPostsQueryKeyPrefix } from "./posts";
-import type { PostContentType } from "./posts";
 
 // Client-side queue for write mutations attempted while offline (issue
 // #177) — read-only offline support (persisted query cache) already exists,
@@ -38,8 +36,7 @@ export type QueuedMessage = Owned & {
   kind: "message";
   clientId: string;
   chatId: number;
-  contentType: MessageContentType;
-  content: string;
+  body: string;
   // Set when the queued message is a reply (issue #217) — the quoted parent's
   // id, threaded through to the send on replay. A parent is always a
   // server-assigned id (you can only reply to an already-sent message), so it
@@ -53,8 +50,7 @@ export type QueuedMessage = Owned & {
 export type QueuedPost = Owned & {
   kind: "post";
   clientId: string;
-  contentType: PostContentType;
-  content: string;
+  body: string;
   createdAt: number;
   status: QueuedItemStatus;
   error?: string;
@@ -62,7 +58,7 @@ export type QueuedPost = Owned & {
 
 type QueuedItem = QueuedMessage | QueuedPost;
 
-const STORAGE_KEY = "chat-platform-offline-mutation-queue";
+const STORAGE_KEY = "chat-platform-offline-mutation-queue-v2";
 const EMPTY_QUEUE: QueuedItem[] = [];
 
 function parseQueue(raw: string): QueuedItem[] {
@@ -146,8 +142,7 @@ function currentUserId(): number | null {
 export function enqueueMessage(
   chatId: number,
   values: {
-    contentType: MessageContentType;
-    content: string;
+    body: string;
     parentMessageId?: number;
   },
   // The idempotency key of the live attempt that failed, if there was one —
@@ -164,8 +159,7 @@ export function enqueueMessage(
       clientId,
       ownerId: currentUserId(),
       chatId,
-      contentType: values.contentType,
-      content: values.content,
+      body: values.body,
       parentMessageId: values.parentMessageId,
       createdAt: Date.now(),
       status: "pending",
@@ -174,10 +168,7 @@ export function enqueueMessage(
 }
 
 export function enqueuePost(
-  values: {
-    contentType: PostContentType;
-    content: string;
-  },
+  values: { body: string },
   // The idempotency key of the live attempt that failed, if there was one
   // (issue #657) — see `enqueueMessage`.
   clientId: string = makeClientId(),
@@ -188,8 +179,7 @@ export function enqueuePost(
       kind: "post",
       clientId,
       ownerId: currentUserId(),
-      contentType: values.contentType,
-      content: values.content,
+      body: values.body,
       createdAt: Date.now(),
       status: "pending",
     },
@@ -303,8 +293,7 @@ async function drainQueue(queryClient: QueryClient): Promise<void> {
         result = await fetchClient.POST("/chats/{id}/messages", {
           params: { path: { id: String(next.chatId) } },
           body: {
-            contentType: next.contentType,
-            content: next.content,
+            body: next.body,
             clientId: next.clientId,
             ...(next.parentMessageId !== undefined
               ? { parentMessageId: next.parentMessageId }
@@ -339,8 +328,7 @@ async function drainQueue(queryClient: QueryClient): Promise<void> {
       try {
         result = await fetchClient.POST("/posts", {
           body: {
-            contentType: next.contentType,
-            content: next.content,
+            body: next.body,
             clientId: next.clientId,
           },
         });

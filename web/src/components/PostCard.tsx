@@ -2,7 +2,6 @@ import { type CSSProperties, Suspense, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
-  ImageIcon,
   Loader2,
   Maximize2,
   MessageSquare,
@@ -13,7 +12,6 @@ import {
 import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { Avatar } from "@/components/Avatar";
 import { ProfileHoverCard } from "@/components/ProfileHoverCard";
-import { Lightbox } from "@/components/LazyLightbox";
 import { MentionText } from "@/components/MentionText";
 import { ReactionPicker } from "@/components/ReactionPicker";
 import { RelativeTime } from "@/components/RelativeTime";
@@ -33,7 +31,7 @@ import { errorMessage } from "@/lib/errors";
 import { lazyNamed, whenIdle } from "@/lib/lazy";
 import { isLongText as isLongTextOf, POST_COLLAPSE } from "@/lib/longText";
 import { useExpandableText } from "@/lib/motion";
-import { patchCachedPost, postText } from "@/lib/posts";
+import { patchCachedPost } from "@/lib/posts";
 import { usePostRoom } from "@/lib/postRooms";
 import type { ReactionEmoji } from "@/lib/reactions";
 import { authorLabelOf } from "@/lib/users";
@@ -125,13 +123,8 @@ export function PostCard({
   // and not on a phone, where the row has no room to spare (issue #906).
   const showReactionTotal =
     post.reactions.filter((r) => r.count > 0).length > 1;
-  // A text post's content or an attachment's caption (issue #765). An
-  // attachment whose file is gone still shows its filename, as it always has.
-  const text =
-    postText(post) ??
-    (post.contentType === "attachment" && !post.attachment
-      ? post.content
-      : null);
+  // Empty beside an attachment without text, or where its file is gone.
+  const text = post.body || (post.attachment ? null : "Attachment unavailable");
   // A long post is collapsed behind "Show more" so it can't dominate the
   // feed (unless `fullText` is set).
   const isLongText = !fullText && isLongTextOf(text, POST_COLLAPSE);
@@ -146,7 +139,6 @@ export function PostCard({
   usePostRoom(post.id);
   const [showComments, setShowComments] = useState(false);
   useEffect(() => whenIdle(preloadComments), []);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const queryClient = useQueryClient();
   const addReaction = $api.useMutation("post", "/posts/{id}/reactions");
@@ -263,58 +255,40 @@ export function PostCard({
       </CardHeader>
 
       <CardContent className="px-0">
-        {post.contentType === "image_url" ? (
-          <button
-            type="button"
-            onClick={() => setLightboxOpen(true)}
-            onPointerEnter={Lightbox.preload}
-            onFocus={Lightbox.preload}
-            aria-label="View image full-size"
-            className="block w-full cursor-zoom-in"
-          >
-            <img
-              src={post.content}
-              alt=""
-              loading="lazy"
-              className="aspect-4/5 w-full bg-muted object-cover"
-            />
-          </button>
-        ) : (
-          <div className="px-6 pt-2 pb-4">
-            {text !== null && (
-              <>
-                {/* Grows to the full text and shrinks back instead of
+        <div className="px-6 pt-2 pb-4">
+          {text !== null && (
+            <>
+              {/* Grows to the full text and shrinks back instead of
                     snapping — see `useExpandableText`. */}
-                <p
-                  ref={textRef}
-                  className={cn(
-                    "whitespace-pre-wrap break-words text-base leading-relaxed",
-                    clamped && "line-clamp-6",
-                  )}
-                >
-                  <MentionText text={text} />
-                </p>
-                {isLongText && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="mt-2 h-8 gap-1.5 px-3 text-xs text-primary hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-smooth"
-                    aria-expanded={expanded}
-                    onClick={toggleExpanded}
-                  >
-                    <DisclosureChevron open={expanded} />
-                    {expanded ? "Show less" : "Show more"}
-                  </Button>
+              <p
+                ref={textRef}
+                className={cn(
+                  "whitespace-pre-wrap break-words text-base leading-relaxed",
+                  clamped && "line-clamp-6",
                 )}
-              </>
-            )}
-            {post.contentType === "attachment" && post.attachment && (
-              <div className={cn(text !== null && "mt-3")}>
-                <AttachmentPreview attachment={post.attachment} />
-              </div>
-            )}
-          </div>
-        )}
+              >
+                <MentionText text={text} />
+              </p>
+              {isLongText && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-2 h-8 gap-1.5 px-3 text-xs text-primary hover:bg-primary/10 hover:text-primary transition-all duration-300 ease-smooth"
+                  aria-expanded={expanded}
+                  onClick={toggleExpanded}
+                >
+                  <DisclosureChevron open={expanded} />
+                  {expanded ? "Show less" : "Show more"}
+                </Button>
+              )}
+            </>
+          )}
+          {post.attachment && (
+            <div className={cn(text !== null && "mt-3")}>
+              <AttachmentPreview attachment={post.attachment} />
+            </div>
+          )}
+        </div>
       </CardContent>
 
       <CardFooter className="flex-col items-stretch gap-0 border-t border-border/60 p-0">
@@ -362,12 +336,7 @@ export function PostCard({
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {/* Only surface a content-type badge for media posts — labelling
                 every plain-text post "Text" was pure noise. */}
-            {post.contentType === "image_url" ? (
-              <span className="flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
-                <ImageIcon className="size-3.5" />
-                <span className="max-sm:sr-only">Image</span>
-              </span>
-            ) : post.contentType === "attachment" ? (
+            {post.attachment ? (
               <span className="flex items-center gap-1.5 pr-1 text-xs text-muted-foreground">
                 <Paperclip className="size-3.5" />
                 <span className="max-sm:sr-only">Attachment</span>
@@ -430,13 +399,6 @@ export function PostCard({
           <CommentsSection postId={post.id} />
         </Suspense>
       </Collapse>
-      {lightboxOpen && post.contentType === "image_url" && (
-        <Lightbox
-          src={post.content}
-          alt=""
-          onClose={() => setLightboxOpen(false)}
-        />
-      )}
     </Card>
   );
 }

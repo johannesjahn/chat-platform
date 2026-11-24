@@ -92,8 +92,8 @@ await step(`group chats (${groups} x ${GROUP_SIZE})`, () =>
 
 await step(`messages (${MESSAGES_PER_CHAT}/chat)`, () =>
   sql.unsafe(`
-    INSERT INTO messages (chat_id, sender_id, content_type, content, created_at, updated_at)
-    SELECT c.id, p.user_id, 'text',
+    INSERT INTO messages (chat_id, sender_id, body, created_at, updated_at)
+    SELECT c.id, p.user_id,
            'history message ' || m || ' in chat ' || c.id || ' about ' ||
              (ARRAY['lunch','the game','deploys','weekend','music','a bug'])[1 + (c.id + m) % 6],
            now() - make_interval(mins => (${MESSAGES_PER_CHAT} - m) * 60),
@@ -104,7 +104,7 @@ await step(`messages (${MESSAGES_PER_CHAT}/chat)`, () =>
       SELECT user_id FROM chat_participants cp WHERE cp.chat_id = c.id
       ORDER BY user_id OFFSET (m % (CASE WHEN c.type = 'group' THEN ${GROUP_SIZE} ELSE 2 END)) LIMIT 1
     ) p
-    ORDER BY 6;`),
+    ORDER BY 4;`),
 );
 
 await step("read watermarks + chat timestamps", () =>
@@ -118,13 +118,13 @@ await step("read watermarks + chat timestamps", () =>
 
 await step(`posts (${POSTS_PER_USER}/user)`, () =>
   sql.unsafe(`
-    INSERT INTO posts (author_id, content_type, content, created_at, updated_at)
-    SELECT u, 'text', 'Seeded post ' || k || ' by sim' || u || ' on ' ||
+    INSERT INTO posts (author_id, body, created_at, updated_at)
+    SELECT u, 'Seeded post ' || k || ' by sim' || u || ' on ' ||
              (ARRAY['coffee','typescript','cats','running','postgres','jazz'])[1 + (u + k) % 6],
            now() - make_interval(secs => (random() * 7 * 86400)::int),
            now()
     FROM generate_series(1, ${N}) u, generate_series(1, ${POSTS_PER_USER}) k
-    ORDER BY 4;`),
+    ORDER BY 3;`),
 );
 
 await step("analyze", () => sql.unsafe("VACUUM ANALYZE"));

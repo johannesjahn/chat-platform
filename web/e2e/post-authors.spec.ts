@@ -28,12 +28,12 @@ test("the feed and a post's comments render bylines without per-author requests"
   }
   const post = await request.post(`${apiUrl}/posts`, {
     headers: as(alice),
-    data: { contentType: "text", content: "Alice's embedded post" },
+    data: { body: "Alice's embedded post" },
   });
   const { id: postId } = await post.json();
   const bobsPost = await request.post(`${apiUrl}/posts`, {
     headers: as(bob),
-    data: { contentType: "text", content: "Bob's embedded post" },
+    data: { body: "Bob's embedded post" },
   });
   expect(bobsPost.ok()).toBe(true);
   const comment = await request.post(`${apiUrl}/posts/${postId}/comments`, {

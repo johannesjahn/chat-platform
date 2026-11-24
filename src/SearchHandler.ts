@@ -5,7 +5,6 @@ import {
   eq,
   ilike,
   inArray,
-  isNotNull,
   lt,
   notInArray,
   or,
@@ -115,9 +114,8 @@ const matchBranches = (vector: SQL, content: PgColumn, q: string): SQL[] => {
 // term: 37ms as an OR, 9ms as this union — and the gap widens linearly with
 // the table, because the OR plan's per-row `ILIKE` never stops growing.
 //
-// Every filter (the content-type restriction, the keyset cursor, the
-// blocked-author exclusion, the chat-participant access check) has to live
-// *inside* each arm: an arm returns only its own newest `limit` ids, so a
+// Every filter (the keyset cursor, the blocked-author exclusion, the
+// chat-participant access check) has to live *inside* each arm: an arm returns only its own newest `limit` ids, so a
 // filter applied outside would silently shrink the page instead of pushing it
 // deeper.
 const matchingIds = (
@@ -195,55 +193,6 @@ const recentFirstArm = (
 const postsVector = sql`"posts"."search_vector"`;
 const commentsVector = sql`"comments"."search_vector"`;
 const messagesVector = sql`"messages"."search_vector"`;
-
-// Captions (issue #765) have no generated column: they're matched through
-// expression indexes (migration 0037), so this expression must stay exactly
-// the one indexed there.
-const captionVector = (caption: PgColumn): SQL =>
-  sql`to_tsvector(${CONFIG}, ${caption})`;
-
-// Every branch that can match a post or message: the text branches over a
-// "text" row's `content`, and the caption branches over an "attachment" row's
-// `caption` — whose `content` is just the filename, never searched. Each
-// branch carries its own content-type restriction, matching the partial
-// indexes behind it (migrations 0023 and 0037), so each stays its own
-// index-served union arm (see `matchingIds`).
-//
-// The content types are SQL literals, not bound parameters, on purpose:
-// Bun.sql prepares statements, and once Postgres switches a prepared search to
-// a generic plan, `content_type = $1` can no longer prove a partial index's
-// `WHERE content_type = 'attachment'` — the caption arms then fell back to a
-// parallel sequential scan of the whole table (82ms at 200k posts, issue
-// #829). A literal matches the partial index under any plan.
-const isContentType = (column: PgColumn, type: "text" | "attachment"): SQL =>
-  sql`${column} = ${sql.raw(`'${type}'`)}`;
-
-const contentBranches = (
-  table: { contentType: PgColumn; content: PgColumn; caption: PgColumn },
-  vector: SQL,
-  q: string,
-): SQL[] => [
-  ...matchBranches(vector, table.content, q).map(
-    (branch) => sql`(${and(isContentType(table.contentType, "text"), branch)})`,
-  ),
-  ...matchBranches(captionVector(table.caption), table.caption, q).map(
-    (branch) =>
-      sql`(${and(
-        isContentType(table.contentType, "attachment"),
-        isNotNull(table.caption),
-        branch,
-      )})`,
-  ),
-];
-
-// What a post/message search result's snippet is cut from: a text row's
-// content, or an attachment's caption.
-const searchableText = (row: {
-  contentType: string;
-  content: string;
-  caption: string | null;
-}): string =>
-  row.contentType === "attachment" ? (row.caption ?? "") : row.content;
 
 // The `users` columns every joined-in author/sender selects, folded into the
 // API's `User` shape by `toSearchUser`. Mirrors `publicUserColumns` in
@@ -447,9 +396,7 @@ const searchPostsPage = (
     db
       .select({
         id: posts.id,
-        contentType: posts.contentType,
-        content: posts.content,
-        caption: posts.caption,
+        body: posts.body,
         createdAt: posts.createdAt,
         ...userColumns,
       })
@@ -458,18 +405,12 @@ const searchPostsPage = (
       .where(
         matchingIds(
           posts.id,
-          contentBranches(posts, postsVector, q),
+          matchBranches(postsVector, posts.body, q),
           (branch) =>
             recentFirstArm(
               posts,
               posts.id,
-              and(
-                // Carries its own content-type restriction (see
-                // `contentBranches`): an image URL or an attachment's
-                // filename isn't searchable content.
-                branch,
-                excludeAuthors(posts.authorId, hidden),
-              ),
+              and(branch, excludeAuthors(posts.authorId, hidden)),
               after,
               limit + 1,
             ),
@@ -487,7 +428,7 @@ const searchPostsPage = (
           id: row.id,
           author: toSearchUser(row),
           createdAt: row.createdAt.getTime(),
-          snippet: buildSnippet(searchableText(row), q),
+          snippet: buildSnippet(row.body, q),
         })),
         limit,
         nextCursor: hasMore && last ? encodeSearchCursor(last.id) : null,
@@ -655,9 +596,7 @@ const searchMessagesPage = (
         .select({
           id: messages.id,
           chatId: messages.chatId,
-          contentType: messages.contentType,
-          content: messages.content,
-          caption: messages.caption,
+          body: messages.body,
           createdAt: messages.createdAt,
           ...userColumns,
         })
@@ -666,7 +605,7 @@ const searchMessagesPage = (
         .where(
           matchingIds(
             messages.id,
-            contentBranches(messages, messagesVector, q),
+            matchBranches(messagesVector, messages.body, q),
             (branch) => sql`select ${messages.id} from ${messages}
               inner join ${chatParticipants} on ${and(
                 eq(chatParticipants.chatId, messages.chatId),
@@ -699,7 +638,7 @@ const searchMessagesPage = (
         chatId: row.chatId,
         sender: toSearchUser(row),
         createdAt: row.createdAt.getTime(),
-        snippet: buildSnippet(searchableText(row), q),
+        snippet: buildSnippet(row.body, q),
       })),
       chats: searchChats,
       limit,

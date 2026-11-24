@@ -705,8 +705,7 @@ async function runWorker(config: Config, userIds: number[]) {
             "POST",
             `/chats/${chatId}/messages`,
             {
-              contentType: "text",
-              content: `sim message from ${id} at ${Date.now()}`,
+              body: `sim message from ${id} at ${Date.now()}`,
               clientId: crypto.randomUUID(),
             },
           );
@@ -763,8 +762,7 @@ async function runWorker(config: Config, userIds: number[]) {
           return;
         case "createPost": {
           const post = await call("POST /posts", "POST", "/posts", {
-            contentType: "text",
-            content: `sim post from ${id} about ${pick(["coffee", "jazz", "deploys", "cats"])}`,
+            body: `sim post from ${id} about ${pick(["coffee", "jazz", "deploys", "cats"])}`,
           });
           if (post?.id) ownPosts.add(post.id);
           return;

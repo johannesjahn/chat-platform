@@ -6,11 +6,11 @@ import { Effect } from "effect";
 import sharp from "sharp";
 import { type Attachment, ChatApi } from "./Api.ts";
 import { Db } from "./Db.ts";
-import { messages, posts, users } from "./db/schema.ts";
+import { attachments, messages, posts, users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
 
-// Captions on attachments (issue #765): `caption` beside `attachmentId` on
-// posts and chat messages, while `content` keeps the filename.
+// Posts and messages with an attachment, with and without text beside it
+// (issues #765 and #941).
 
 const run = makeTestRun();
 
@@ -84,146 +84,119 @@ const rawJson = (
     ),
   );
 
-test("a post can carry a caption beside its attachment, and content keeps the filename", () =>
+test("a post can carry text beside its attachment, and either on its own", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice");
       const upload = yield* uploadPng(handler, alice.accessToken);
       const created = yield* alice.client.posts.createPost({
         payload: {
-          contentType: "attachment",
-          content: "bread.png",
           attachmentId: upload.id,
-          caption: "Look what I baked https://example.com",
+          body: "Look what I baked https://example.com",
         },
       });
-      expect(created.caption).toBe("Look what I baked https://example.com");
-      expect(created.content).toBe("bread.png");
+      expect(created.body).toBe("Look what I baked https://example.com");
       expect(created.attachment!.id).toBe(upload.id);
 
       const fetched = yield* alice.client.posts.getPost({
         params: { id: created.id },
       });
-      expect(fetched.caption).toBe("Look what I baked https://example.com");
+      expect(fetched.body).toBe("Look what I baked https://example.com");
       const feed = yield* alice.client.posts.listPosts({ query: {} });
-      expect(feed.posts[0]!.caption).toBe(
-        "Look what I baked https://example.com",
-      );
+      expect(feed.posts[0]!.body).toBe("Look what I baked https://example.com");
 
-      // An edit that omits the caption (a client that predates it) keeps it…
-      const kept = yield* alice.client.posts.updatePost({
-        params: { id: created.id },
-        payload: {
-          contentType: "attachment",
-          content: "bread.png",
-          attachmentId: upload.id,
-        },
-      });
-      expect(kept.caption).toBe("Look what I baked https://example.com");
-      // …a new one replaces it, null clears it…
       const changed = yield* alice.client.posts.updatePost({
         params: { id: created.id },
         payload: {
-          contentType: "attachment",
-          content: "bread.png",
           attachmentId: upload.id,
-          caption: "Sourdough, day 3",
+          body: "Sourdough, day 3",
         },
       });
-      expect(changed.caption).toBe("Sourdough, day 3");
+      expect(changed.body).toBe("Sourdough, day 3");
       const cleared = yield* alice.client.posts.updatePost({
         params: { id: created.id },
         payload: {
-          contentType: "attachment",
-          content: "bread.png",
           attachmentId: upload.id,
-          caption: null,
+          body: "",
         },
       });
-      expect(cleared.caption).toBeNull();
-      // …and an attachment without one reads as null.
-      const plain = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "just text" },
+      expect(cleared.body).toBe("");
+      expect(cleared.attachment!.id).toBe(upload.id);
+      // An edit without an attachment removes it.
+      const toText = yield* alice.client.posts.updatePost({
+        params: { id: created.id },
+        payload: { body: "just words" },
       });
-      expect(plain.caption).toBeNull();
+      expect(toText.body).toBe("just words");
+      expect(toText.attachment).toBeNull();
+      const plain = yield* alice.client.posts.createPost({
+        payload: { body: "just text" },
+      });
+      expect(plain.attachment).toBeNull();
     }),
   ));
 
-test("a caption is rejected on anything but an attachment", () =>
+test("an empty body without an attachment is rejected", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice");
       const bob = yield* registerAndLogin("bob");
-      const response = yield* rawJson(
-        handler,
-        alice.accessToken,
-        "POST",
-        "/posts",
-        { contentType: "text", content: "hello", caption: "nope" },
-      );
-      expect(response.status).toBe(400);
-      const body = (yield* Effect.promise(() => response.json())) as {
-        message: string;
-      };
-      expect(body.message).toBe(
-        `caption may only be set when contentType is "attachment"`,
-      );
-
+      const post = yield* alice.client.posts.createPost({
+        payload: { body: "hello" },
+      });
       const chat = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
       });
-      const messageResponse = yield* rawJson(
-        handler,
-        alice.accessToken,
-        "POST",
-        `/chats/${chat.id}/messages`,
-        { contentType: "text", content: "hello", caption: "nope" },
-      );
-      expect(messageResponse.status).toBe(400);
+      const message = yield* alice.client.chats.createMessage({
+        params: { id: chat.id },
+        payload: { body: "hello" },
+      });
+      for (const [method, path] of [
+        ["POST", "/posts"],
+        ["PUT", `/posts/${post.id}`],
+        ["POST", `/chats/${chat.id}/messages`],
+        ["PUT", `/chats/${chat.id}/messages/${message.id}`],
+      ] as const) {
+        const response = yield* rawJson(
+          handler,
+          alice.accessToken,
+          method,
+          path,
+          { body: "" },
+        );
+        expect([method, path, response.status]).toEqual([method, path, 400]);
+        const error = (yield* Effect.promise(() => response.json())) as {
+          message: string;
+        };
+        expect(error.message).toBe(
+          "body may only be empty when there is an attachment",
+        );
+      }
     }),
   ));
 
-test("an old attachment row, with only a filename, still reads as it did", () =>
+// The `set null` FK must not be blocked by an empty body.
+test("deleting an attachment leaves a post without text behind, empty", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
       const db = yield* Db;
       const alice = yield* registerAndLogin("alice");
       const upload = yield* uploadPng(handler, alice.accessToken);
-      // What a replica that predates captions writes: no caption at all.
-      const [row] = yield* Effect.promise(() =>
-        db
-          .insert(posts)
-          .values({
-            authorId: alice.user.id,
-            contentType: "attachment",
-            content: "bread.png",
-            attachmentId: upload.id,
-          })
-          .returning(),
-      );
-      const fetched = yield* alice.client.posts.getPost({
-        params: { id: row!.id },
+      const post = yield* alice.client.posts.createPost({
+        payload: { body: "", attachmentId: upload.id },
       });
-      expect(fetched.content).toBe("bread.png");
-      expect(fetched.caption).toBeNull();
-      expect(fetched.attachment!.filename).toBe("bread.png");
-
-      // A leftover caption on a row an old replica turned into a text post
-      // never shows.
       yield* Effect.promise(() =>
-        db
-          .update(posts)
-          .set({ contentType: "text", content: "now text", caption: "stale" })
-          .where(eq(posts.id, row!.id)),
+        db.delete(attachments).where(eq(attachments.id, upload.id)),
       );
-      const edited = yield* alice.client.posts.getPost({
-        params: { id: row!.id },
+      const after = yield* alice.client.posts.getPost({
+        params: { id: post.id },
       });
-      expect(edited.caption).toBeNull();
+      expect(after.body).toBe("");
+      expect(after.attachment).toBeNull();
     }),
   ));
 
-test("an @mention in a caption notifies, and its excerpt is the caption", () =>
+test("an @mention beside an attachment notifies, and the text is its excerpt", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice");
@@ -232,10 +205,8 @@ test("an @mention in a caption notifies, and its excerpt is the caption", () =>
       const upload = yield* uploadPng(handler, alice.accessToken);
       const post = yield* alice.client.posts.createPost({
         payload: {
-          contentType: "attachment",
-          content: "bread.png",
           attachmentId: upload.id,
-          caption: "baked this with @bob",
+          body: "baked this with @bob",
         },
       });
       const inbox = yield* bob.client.notifications.listNotifications({
@@ -249,10 +220,8 @@ test("an @mention in a caption notifies, and its excerpt is the caption", () =>
       yield* alice.client.posts.updatePost({
         params: { id: post.id },
         payload: {
-          contentType: "attachment",
-          content: "bread.png",
           attachmentId: upload.id,
-          caption: "baked this with @bob and @carol",
+          body: "baked this with @bob and @carol",
         },
       });
       expect(
@@ -267,7 +236,7 @@ test("an @mention in a caption notifies, and its excerpt is the caption", () =>
     }),
   ));
 
-test("search finds a caption, but never an attachment's filename", () =>
+test("search finds the text beside an attachment, but never its filename", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice");
@@ -275,10 +244,8 @@ test("search finds a caption, but never an attachment's filename", () =>
       const postUpload = yield* uploadPng(handler, alice.accessToken);
       const post = yield* alice.client.posts.createPost({
         payload: {
-          contentType: "attachment",
-          content: "zebrafile.png",
           attachmentId: postUpload.id,
-          caption: "Freshly baked sourdough",
+          body: "Freshly baked sourdough",
         },
       });
       const chat = yield* alice.client.chats.createDirectChat({
@@ -288,10 +255,8 @@ test("search finds a caption, but never an attachment's filename", () =>
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
         payload: {
-          contentType: "attachment",
-          content: "zebrafile.png",
           attachmentId: messageUpload.id,
-          caption: "Harbor at dusk",
+          body: "Harbor at dusk",
         },
       });
 
@@ -330,7 +295,7 @@ test("search finds a caption, but never an attachment's filename", () =>
     }),
   ));
 
-test("a chat message carries a caption through replies and forwards", () =>
+test("a chat message carries its text through replies and forwards", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
       const db = yield* Db;
@@ -347,76 +312,68 @@ test("a chat message carries a caption through replies and forwards", () =>
       const original = yield* alice.client.chats.createMessage({
         params: { id: aliceBob.id },
         payload: {
-          contentType: "attachment",
-          content: "bread.png",
           attachmentId: upload.id,
-          caption: "Look what I baked",
+          body: "Look what I baked",
         },
       });
-      expect(original.caption).toBe("Look what I baked");
-      expect(original.content).toBe("bread.png");
+      expect(original.body).toBe("Look what I baked");
 
       const listed = yield* bob.client.chats.listMessages({
         params: { id: aliceBob.id },
         query: {},
       });
-      expect(listed.messages.find((m) => m.id === original.id)!.caption).toBe(
+      expect(listed.messages.find((m) => m.id === original.id)!.body).toBe(
         "Look what I baked",
       );
 
-      // A reply's quote shows the caption, not only "Attachment".
+      // A reply's quote shows the text, not only "Attachment".
       const reply = yield* bob.client.chats.createMessage({
         params: { id: aliceBob.id },
         payload: {
-          contentType: "text",
-          content: "yum",
+          body: "yum",
           parentMessageId: original.id,
         },
       });
       expect(reply.parentMessage).toMatchObject({
-        contentType: "attachment",
-        caption: "Look what I baked",
+        body: "Look what I baked",
+        hasAttachment: true,
       });
 
-      // A forward copies the caption with its attachment.
+      // A forward copies the text with its attachment.
       const { results } = yield* bob.client.chats.forwardMessage({
         params: { id: aliceBob.id, messageId: original.id },
         payload: { targetChatIds: [bobCarol.id] },
       });
       const copy = results[0]!.message!;
-      expect(copy.caption).toBe("Look what I baked");
-      expect(copy.content).toBe("bread.png");
+      expect(copy.body).toBe("Look what I baked");
       expect(copy.attachment!.id).not.toBe(upload.id);
       const [copyRow] = yield* Effect.promise(() =>
         db.select().from(messages).where(eq(messages.id, copy.id)),
       );
-      expect(copyRow!.caption).toBe("Look what I baked");
+      expect(copyRow!.body).toBe("Look what I baked");
 
-      // Editing the caption, keeping it, and clearing it.
+      // Editing the text, clearing it, and removing the attachment.
       const edited = yield* alice.client.chats.updateMessage({
         params: { id: aliceBob.id, messageId: original.id },
         payload: {
-          contentType: "attachment",
-          content: "bread.png",
           attachmentId: upload.id,
-          caption: "Baked, then eaten",
+          body: "Baked, then eaten",
         },
       });
-      expect(edited.caption).toBe("Baked, then eaten");
-      const kept = yield* alice.client.chats.updateMessage({
+      expect(edited.body).toBe("Baked, then eaten");
+      const cleared = yield* alice.client.chats.updateMessage({
         params: { id: aliceBob.id, messageId: original.id },
         payload: {
-          contentType: "attachment",
-          content: "bread.png",
+          body: "",
           attachmentId: upload.id,
         },
       });
-      expect(kept.caption).toBe("Baked, then eaten");
+      expect(cleared.body).toBe("");
       const toText = yield* alice.client.chats.updateMessage({
         params: { id: aliceBob.id, messageId: original.id },
-        payload: { contentType: "text", content: "nevermind" },
+        payload: { body: "nevermind" },
       });
-      expect(toText.caption).toBeNull();
+      expect(toText.attachment).toBeNull();
     }),
   ));
 
@@ -437,14 +394,12 @@ const makeAdmin = (username: string) =>
     return { user, accessToken, client: yield* makeAuthedClient(accessToken) };
   });
 
-const attachmentBody = (attachmentId: number, caption?: string) => ({
-  contentType: "attachment" as const,
-  content: "bread.png",
+const attachmentBody = (attachmentId: number, body = "") => ({
+  body,
   attachmentId,
-  ...(caption === undefined ? {} : { caption }),
 });
 
-test("an admin can edit the caption of someone else's attachment post and message", () =>
+test("an admin can edit the text of someone else's attachment post and message", () =>
   run(({ handler }) =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice");
@@ -457,7 +412,7 @@ test("an admin can edit the caption of someone else's attachment post and messag
         params: { id: post.id },
         payload: attachmentBody(upload.id, "Look what I baked"),
       });
-      expect(edited.caption).toBe("Look what I baked");
+      expect(edited.body).toBe("Look what I baked");
       expect(edited.attachment!.id).toBe(upload.id);
 
       const chat = yield* alice.client.chats.createDirectChat({
@@ -474,7 +429,7 @@ test("an admin can edit the caption of someone else's attachment post and messag
         params: { id: chat.id, messageId: message.id },
         payload: attachmentBody(messageUpload.id, "typo"),
       });
-      expect(editedMessage.caption).toBe("typo");
+      expect(editedMessage.body).toBe("typo");
       expect(editedMessage.attachment!.id).toBe(messageUpload.id);
 
       // A different file still has to be the admin's own.
@@ -506,11 +461,11 @@ test("an attachment already on a post or message can't go on another", () =>
         payload: attachmentBody(onMessage.id),
       });
       const otherPost = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "hi" },
+        payload: { body: "hi" },
       });
       const otherMessage = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi" },
+        payload: { body: "hi" },
       });
 
       for (const { id } of [onPost, onMessage]) {
@@ -556,8 +511,7 @@ test("a row that already shares its attachment stays editable, and a retried cre
       yield* Effect.promise(() =>
         db.insert(posts).values({
           authorId: alice.user.id,
-          contentType: "attachment",
-          content: "bread.png",
+          body: "",
           attachmentId: upload.id,
         }),
       );
@@ -565,6 +519,6 @@ test("a row that already shares its attachment stays editable, and a retried cre
         params: { id: post.id },
         payload: attachmentBody(upload.id, "still mine"),
       });
-      expect(edited.caption).toBe("still mine");
+      expect(edited.body).toBe("still mine");
     }),
   ));

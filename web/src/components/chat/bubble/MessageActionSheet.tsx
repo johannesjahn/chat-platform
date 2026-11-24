@@ -171,7 +171,7 @@ export function MessageActionSheet({
             onSelect={choose(onForward)}
           />
         )}
-        {(message.contentType === "text" || message.caption) && (
+        {message.body !== "" && (
           <SheetAction
             icon={Copy}
             label="Copy text"

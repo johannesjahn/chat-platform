@@ -87,8 +87,7 @@ export const seedMessages = (chatId: number, senderId: number, total: number) =>
           Array.from({ length: size }, (_, i) => ({
             chatId,
             senderId,
-            contentType: "text" as const,
-            content: `seeded ${start + i}`,
+            body: `seeded ${start + i}`,
             createdAt: now,
             updatedAt: now,
           })),
@@ -131,7 +130,7 @@ export const buryUnreadDirectChat = Effect.gen(function* () {
   for (const content of ["one", "two", "three"]) {
     yield* bob.client.chats.createMessage({
       params: { id: dm.id },
-      payload: { contentType: "text", content },
+      payload: { body: content },
     });
   }
   for (let i = 0; i < DEFAULT_CHATS_LIMIT; i++) {
@@ -140,7 +139,7 @@ export const buryUnreadDirectChat = Effect.gen(function* () {
     });
     const message = yield* bob.client.chats.createMessage({
       params: { id: group.id },
-      payload: { contentType: "text", content: `hello ${i}` },
+      payload: { body: `hello ${i}` },
     });
     yield* alice.client.chats.markRead({
       params: { id: group.id },

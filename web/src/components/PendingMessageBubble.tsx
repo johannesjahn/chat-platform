@@ -4,7 +4,7 @@ import { AttachmentPreview } from "@/components/AttachmentPreview";
 import { MentionText } from "@/components/MentionText";
 import { Button } from "@/components/ui/button";
 import { type Attachment, attachmentKind } from "@/lib/attachments";
-import { type MessageContentType, parentPreviewText } from "@/lib/chats";
+import { parentPreviewText } from "@/lib/chats";
 import { isLongText, MESSAGE_COLLAPSE } from "@/lib/longText";
 import type { OutboxReplyPreview } from "@/lib/outbox";
 import { cn } from "@/lib/utils";
@@ -18,11 +18,8 @@ export type PendingMessageStatus = "sending" | "pending" | "failed";
 
 type PendingMessageBubbleProps = {
   status: PendingMessageStatus;
-  contentType: MessageContentType;
-  content: string;
+  body: string;
   attachment?: Attachment;
-  // Text sent alongside the attachment (issue #765), shown under it.
-  caption?: string;
   replyPreview?: OutboxReplyPreview;
   createdAt: number;
   error?: string;
@@ -57,10 +54,8 @@ function PendingText({ text, failed }: { text: string; failed: boolean }) {
 // bubble turning into the real message doesn't shift the thread.
 export function PendingMessageBubble({
   status,
-  contentType,
-  content,
+  body,
   attachment,
-  caption,
   replyPreview,
   createdAt,
   error,
@@ -131,36 +126,22 @@ export function PendingMessageBubble({
             </div>
           )}
 
-          {contentType === "image_url" ? (
-            <img
-              src={content}
-              alt=""
-              loading="lazy"
-              className="max-h-72 w-72 max-w-full rounded-lg bg-muted object-cover"
+          {attachment && (
+            <AttachmentPreview
+              attachment={attachment}
+              className={
+                ["image", "video", "audio"].includes(
+                  attachmentKind(attachment.mimeType),
+                )
+                  ? "w-72 max-w-full"
+                  : undefined
+              }
             />
-          ) : (
-            <>
-              {contentType === "attachment" && attachment && (
-                <AttachmentPreview
-                  attachment={attachment}
-                  className={
-                    ["image", "video", "audio"].includes(
-                      attachmentKind(attachment.mimeType),
-                    )
-                      ? "w-72 max-w-full"
-                      : undefined
-                  }
-                />
-              )}
-              {(contentType !== "attachment" || caption) && (
-                // Clamped like a long `MessageBubble` text, so the real
-                // message doesn't snap shorter when it takes over.
-                <PendingText
-                  text={contentType === "attachment" ? caption! : content}
-                  failed={failed}
-                />
-              )}
-            </>
+          )}
+          {body !== "" && (
+            // Clamped like a long `MessageBubble` text, so the real
+            // message doesn't snap shorter when it takes over.
+            <PendingText text={body} failed={failed} />
           )}
 
           <div

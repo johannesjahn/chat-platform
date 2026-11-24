@@ -972,12 +972,10 @@ test("createMessage attaches an uploaded file the sender owns", () =>
       const message = yield* authedAlice.chats.createMessage({
         params: { id: chat.id },
         payload: {
-          contentType: "attachment",
-          content: "report.mp3",
+          body: "",
           attachmentId,
         },
       });
-      expect(message.contentType).toBe("attachment");
       expect(message.attachment).not.toBeNull();
       expect(message.attachment?.filename).toBe("report.mp3");
       // The original filename/content-type claim is kept as upload
@@ -1021,8 +1019,7 @@ test("createMessage rejects an attachmentId the sender doesn't own", () =>
         .createMessage({
           params: { id: chat.id },
           payload: {
-            contentType: "attachment",
-            content: "mine.mp3",
+            body: "",
             attachmentId,
           },
         })
@@ -1052,12 +1049,10 @@ test("createPost attaches an uploaded file", () =>
 
       const post = yield* authed.posts.createPost({
         payload: {
-          contentType: "attachment",
-          content: "clip.mp4",
+          body: "",
           attachmentId,
         },
       });
-      expect(post.contentType).toBe("attachment");
       expect(post.attachment?.filename).toBe("clip.mp4");
       // Stored bytes are transcoded to WebM regardless of the uploaded
       // container/codec — see VideoProcessing.ts.
@@ -1067,27 +1062,24 @@ test("createPost attaches an uploaded file", () =>
 
 // Schema-level checks for the requireAttachmentId cross-field filter — fast,
 // no server needed.
-test("CreateMessageBody rejects contentType attachment without attachmentId", () => {
+test("CreateMessageBody rejects an empty body without attachmentId", () => {
   const result = Schema.decodeUnknownResult(CreateMessageBody)({
-    contentType: "attachment",
-    content: "file.png",
+    body: "",
   });
   expect(result._tag).toBe("Failure");
 });
 
-test("CreateMessageBody rejects attachmentId set alongside contentType text", () => {
+test("CreateMessageBody accepts text beside an attachment", () => {
   const result = Schema.decodeUnknownResult(CreateMessageBody)({
-    contentType: "text",
-    content: "hello",
+    body: "hello",
     attachmentId: 1,
   });
-  expect(result._tag).toBe("Failure");
+  expect(result._tag).toBe("Success");
 });
 
 test("CreatePostBody accepts a well-formed attachment payload", () => {
   const result = Schema.decodeUnknownResult(CreatePostBody)({
-    contentType: "attachment",
-    content: "file.png",
+    body: "",
     attachmentId: 1,
   });
   expect(result._tag).toBe("Success");
@@ -1440,8 +1432,7 @@ test("deleteAccount removes the account's attachment objects from storage (issue
       yield* aliceClient.chats.createMessage({
         params: { id: chat.id },
         payload: {
-          contentType: "attachment",
-          content: "sent.png",
+          body: "",
           attachmentId: ids[0],
         },
       });

@@ -29,16 +29,18 @@ export type Chat = components["schemas"]["Chat"];
 export type ChatType = components["schemas"]["ChatType"];
 export type ChatParticipant = components["schemas"]["ChatParticipant"];
 export type ChatMessage = components["schemas"]["Message"];
-export type MessageContentType = components["schemas"]["MessageContentType"];
 
-// One-line preview of what a message holds — its text, or a stand-in for
-// non-text content (mirrors `parentPreviewText` in MessageBubble). Used by the
-// pinned bar and the chat details panel's pinned/starred lists.
+// One-line preview of what a message holds — its text, marked with a clip
+// beside an attachment, or a stand-in where there's none. Also what a reply's
+// quote shows (trimmed to a single line by the bubble's CSS).
+export function bodyPreview(body: string, hasAttachment: boolean): string {
+  if (body === "") return "📎 Attachment";
+  return hasAttachment ? `📎 ${body}` : body;
+}
+
+// Used by the pinned bar and the chat details panel's pinned/starred lists.
 export function messagePreview(message: ChatMessage): string {
-  if (message.contentType === "image_url") return "📷 Photo";
-  if (message.contentType === "attachment")
-    return `📎 ${message.caption || "Attachment"}`;
-  return message.content;
+  return bodyPreview(message.body, message.attachment !== null);
 }
 
 // Who sent a chat's last message, as its previews label it (issue #768):
@@ -62,10 +64,7 @@ export function lastMessageSender(
 export function lastMessageText(chat: Chat): string {
   const last = chat.lastMessage;
   if (!last) return "No messages yet";
-  if (last.contentType === "image_url") return "Photo";
-  // A captioned attachment previews as its caption (issue #765).
-  if (last.contentType === "attachment") return last.caption || "Attachment";
-  return last.content;
+  return last.body || "Attachment";
 }
 
 // The whole one-line preview, "Sender: text", for lists that render it as
@@ -76,10 +75,10 @@ export function lastMessagePreview(chat: Chat, currentUserId: number): string {
   return sender ? `${sender}: ${text}` : text;
 }
 
-// Kept in sync with the server-side caps (`MAX_MESSAGE_CONTENT_LENGTH`,
+// Kept in sync with the server-side caps (`MAX_MESSAGE_BODY_LENGTH`,
 // `MAX_GROUP_PARTICIPANTS` in src/Api.ts) so the UI can show live
 // counters/limits without a round-trip.
-export const MAX_MESSAGE_CONTENT_LENGTH = 4_000;
+export const MAX_MESSAGE_BODY_LENGTH = 4_000;
 export const MAX_GROUP_PARTICIPANTS = 20;
 
 import {
@@ -402,20 +401,11 @@ export function patchCachedMessage(
   );
 }
 
-// One-line label for what a quoted parent message holds — its text (trimmed
-// to a single line by the bubble's CSS), or a stand-in for non-text content
-// so a reply's quote reads "Photo"/"Attachment" rather than a raw
-// URL/filename.
 export function parentPreviewText(parent: {
-  contentType: MessageContentType;
-  content: string;
-  // The quoted attachment's caption (issue #765), shown after the clip.
-  caption?: string | null;
+  body: string;
+  hasAttachment: boolean;
 }): string {
-  if (parent.contentType === "image_url") return "📷 Photo";
-  if (parent.contentType === "attachment")
-    return `📎 ${parent.caption || "Attachment"}`;
-  return parent.content;
+  return bodyPreview(parent.body, parent.hasAttachment);
 }
 
 // Idempotency keys (`ChatMessage.clientId`) of messages this tab already

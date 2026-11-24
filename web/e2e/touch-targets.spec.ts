@@ -120,8 +120,7 @@ test("every target on the main pages is at least 24×24px on a phone", async ({
   const post = api(page, apiUrl, me);
 
   const { id: postId } = await post("/posts", {
-    contentType: "text",
-    content: "Touch targets\n\nA post with a threaded comment under it.",
+    body: "Touch targets\n\nA post with a threaded comment under it.",
   });
   for (const emoji of REACTIONS.slice(0, 3)) {
     await post(`/posts/${postId}/reactions`, { emoji });
@@ -134,8 +133,7 @@ test("every target on the main pages is at least 24×24px on a phone", async ({
     userId: other.session.user.id,
   });
   await post(`/chats/${chatId}/messages`, {
-    contentType: "text",
-    content: "Hello there!",
+    body: "Hello there!",
   });
   const { id: lobbyId } = await post("/games/typing/lobbies");
 
@@ -188,8 +186,7 @@ for (const width of [320, 412]) {
     const me = await signUp(page);
     const post = api(page, apiUrl, me);
     const { id: postId } = await post("/posts", {
-      contentType: "text",
-      content: "Everyone has a feeling about this one.",
+      body: "Everyone has a feeling about this one.",
     });
     for (const emoji of REACTIONS) {
       await post(`/posts/${postId}/reactions`, { emoji });
@@ -250,8 +247,7 @@ test("a long press opens a message's actions as labelled, finger-sized rows", as
     userId: other.session.user.id,
   });
   await post(`/chats/${chatId}/messages`, {
-    contentType: "text",
-    content: "Hold me down",
+    body: "Hold me down",
   });
 
   await page.goto(`/chats/${chatId}`);

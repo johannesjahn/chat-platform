@@ -30,13 +30,11 @@ const outbox = createOutbox({
     const result = await fetchClient.POST("/chats/{id}/messages", {
       params: { path: { id: String(entry.chatId) } },
       body: {
-        contentType: entry.contentType,
-        content: entry.content,
+        body: entry.body,
         clientId: entry.clientId,
         ...(entry.attachmentId !== undefined
           ? { attachmentId: entry.attachmentId }
           : {}),
-        ...(entry.caption !== undefined ? { caption: entry.caption } : {}),
         ...(entry.parentMessageId !== undefined
           ? { parentMessageId: entry.parentMessageId }
           : {}),
@@ -61,14 +59,13 @@ const outbox = createOutbox({
   // unreachable) wouldn't be replayed until the next connectivity change —
   // both stay in the outbox as "failed", with Retry.
   handOff(entry) {
-    if (entry.contentType === "attachment" || onlineManager.isOnline()) {
+    if (entry.attachmentId !== undefined || onlineManager.isOnline()) {
       return false;
     }
     enqueueMessage(
       entry.chatId,
       {
-        contentType: entry.contentType,
-        content: entry.content,
+        body: entry.body,
         parentMessageId: entry.parentMessageId,
       },
       entry.clientId,
@@ -79,13 +76,7 @@ const outbox = createOutbox({
 
 export type OutboxSend = Pick<
   OutboxMessage,
-  | "contentType"
-  | "content"
-  | "attachmentId"
-  | "attachment"
-  | "caption"
-  | "parentMessageId"
-  | "replyPreview"
+  "body" | "attachmentId" | "attachment" | "parentMessageId" | "replyPreview"
 >;
 
 export function sendViaOutbox(chatId: number, values: OutboxSend): void {

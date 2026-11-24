@@ -48,7 +48,7 @@ test("registering from a post's prompt returns to the post, even after hopping v
   const author = await createUser();
   const created = await request.post(`${apiUrl}/posts`, {
     headers: { Authorization: `Bearer ${author.session.accessToken}` },
-    data: { contentType: "text", content: "Worth signing up for" },
+    data: { body: "Worth signing up for" },
   });
   expect(created.ok()).toBe(true);
   const { id: postId } = await created.json();

@@ -57,7 +57,7 @@ async function seed(
   // A message makes Yusuf's chat the most recent beyond any doubt.
   const sent = await request.post(`${apiUrl}/chats/${yusufChat}/messages`, {
     headers: as(me),
-    data: { contentType: "text", content: "hi" },
+    data: { body: "hi" },
   });
   expect(sent.ok()).toBe(true);
   return { me, zara, yusuf, stranger, zaraChat, yusufChat };

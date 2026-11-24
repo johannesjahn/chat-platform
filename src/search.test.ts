@@ -109,10 +109,10 @@ test("searchPosts finds a matching text post and highlights the match", () =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "The quick brown fox jumps" },
+        payload: { body: "The quick brown fox jumps" },
       });
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "A totally unrelated note" },
+        payload: { body: "A totally unrelated note" },
       });
 
       const page = yield* alice.client.search.searchPosts({
@@ -134,7 +134,7 @@ test("searchPosts matches a fragment inside a word (contains, not whole-word)", 
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "a fragmentary thought" },
+        payload: { body: "a fragmentary thought" },
       });
       // "ragmen" is a whole word nowhere — only the trigram/substring branch
       // can find it.
@@ -151,7 +151,7 @@ test("searchPosts matches a half-typed word as a prefix", () =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "deployment notes for today" },
+        payload: { body: "deployment notes for today" },
       });
       const page = yield* alice.client.search.searchPosts({
         query: { q: "depl" },
@@ -165,10 +165,10 @@ test("searchPosts requires every token of a multi-word query to match", () =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "the quick brown fox" },
+        payload: { body: "the quick brown fox" },
       });
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "a quick note" },
+        payload: { body: "a quick note" },
       });
       const page = yield* alice.client.search.searchPosts({
         query: { q: "quick fox" },
@@ -183,7 +183,7 @@ test("searchPosts matches stemmed terms (english config)", () =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "I love running every day" },
+        payload: { body: "I love running every day" },
       });
       // "run" should match "running" once both are stemmed.
       const page = yield* alice.client.search.searchPosts({
@@ -194,30 +194,13 @@ test("searchPosts matches stemmed terms (english config)", () =>
     }),
   ));
 
-test("searchPosts ignores non-text posts (image URLs aren't searched)", () =>
-  run(
-    Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      yield* alice.client.posts.createPost({
-        payload: {
-          contentType: "image_url",
-          content: "https://imgur.com/quickfox.png",
-        },
-      });
-      const page = yield* alice.client.search.searchPosts({
-        query: { q: "quickfox" },
-      });
-      expect(page.results.length).toBe(0);
-    }),
-  ));
-
 test("searchPosts hides posts by a blocked or muted author", () =>
   run(
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const bob = yield* registerAndLogin("bob", "pw-testpass");
       yield* bob.client.posts.createPost({
-        payload: { contentType: "text", content: "a pineapple announcement" },
+        payload: { body: "a pineapple announcement" },
       });
 
       const before = yield* alice.client.search.searchPosts({
@@ -238,7 +221,7 @@ test("searchPosts hides posts by a blocked or muted author", () =>
       // Muting is the softer option, but it hides posts just the same.
       const carol = yield* registerAndLogin("carol", "pw-testpass");
       yield* carol.client.posts.createPost({
-        payload: { contentType: "text", content: "a pineapple sequel" },
+        payload: { body: "a pineapple sequel" },
       });
       yield* alice.client.users.setBlock({
         params: { id: carol.user.id },
@@ -260,7 +243,7 @@ test("searchPosts fills a page past hidden authors instead of coming back short"
       const visible: number[] = [];
       for (let i = 0; i < 3; i++) {
         const post = yield* carol.client.posts.createPost({
-          payload: { contentType: "text", content: `carol mango ${i}` },
+          payload: { body: `carol mango ${i}` },
         });
         visible.push(post.id);
       }
@@ -268,7 +251,7 @@ test("searchPosts fills a page past hidden authors instead of coming back short"
       // LIMIT would leave the first page empty.
       for (let i = 0; i < 3; i++) {
         yield* bob.client.posts.createPost({
-          payload: { contentType: "text", content: `bob mango ${i}` },
+          payload: { body: `bob mango ${i}` },
         });
       }
       yield* alice.client.users.setBlock({
@@ -296,7 +279,7 @@ test("searchPosts does not interpret query text as SQL or tsquery operators", ()
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "harmless content here" },
+        payload: { body: "harmless content here" },
       });
       // A malformed tsquery / injection attempt must not error — the
       // tokenizer strips every operator, so it just finds nothing.
@@ -317,10 +300,10 @@ test("searchPosts tokenizes away wildcards instead of matching everything", () =
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "alphabet soup" },
+        payload: { body: "alphabet soup" },
       });
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "beta release" },
+        payload: { body: "beta release" },
       });
       // "%" is not a token character, so it never reaches a LIKE pattern —
       // this searches for "alp" and "abet", not for "anything".
@@ -356,7 +339,7 @@ test("searchPosts snippet keeps HTML-like content inert (no raw markup)", () =>
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const content = "beware the <script>alert(1)</script> danger";
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content },
+        payload: { body: content },
       });
       const page = yield* alice.client.search.searchPosts({
         query: { q: "danger" },
@@ -380,7 +363,7 @@ test("searchPosts paginates newest-match-first with an opaque cursor", () =>
       const created: number[] = [];
       for (let i = 0; i < 3; i++) {
         const post = yield* alice.client.posts.createPost({
-          payload: { contentType: "text", content: `apple number ${i}` },
+          payload: { body: `apple number ${i}` },
         });
         created.push(post.id);
       }
@@ -411,8 +394,8 @@ const insertFillerPosts = (authorId: number, count: number) =>
     const db = yield* Db;
     yield* dbQuery(() =>
       db.execute(
-        sql`insert into posts (author_id, content_type, content, created_at, updated_at)
-            select ${authorId}, 'text', 'filler ' || g, now(), now()
+        sql`insert into posts (author_id, body, created_at, updated_at)
+            select ${authorId}, 'filler ' || g, now(), now()
             from generate_series(1, ${count}) g`,
       ),
     );
@@ -425,13 +408,13 @@ test("searchPosts finds matches older than the recent window, newest first acros
       const old: number[] = [];
       for (let i = 0; i < 3; i++) {
         const post = yield* alice.client.posts.createPost({
-          payload: { contentType: "text", content: `faded topic ${i}` },
+          payload: { body: `faded topic ${i}` },
         });
         old.push(post.id);
       }
       yield* insertFillerPosts(alice.user.id, SEARCH_RECENT_WINDOW + 50);
       const fresh = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "faded topic again" },
+        payload: { body: "faded topic again" },
       });
 
       // The word branch and the substring branch ("ade" inside "faded").
@@ -454,7 +437,7 @@ test("searchPosts finds only-old matches when the recent window has none", () =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const old = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "ancient history" },
+        payload: { body: "ancient history" },
       });
       yield* insertFillerPosts(alice.user.id, SEARCH_RECENT_WINDOW + 50);
 
@@ -471,7 +454,7 @@ test("searchComments finds a comment older than the recent window", () =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "a post" },
+        payload: { body: "a post" },
       });
       const old = yield* alice.client.comments.createComment({
         params: { id: post.id },
@@ -513,7 +496,7 @@ test("searchComments finds a matching comment", () =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "a post to comment on" },
+        payload: { body: "a post to comment on" },
       });
       yield* alice.client.comments.createComment({
         params: { id: post.id },
@@ -535,7 +518,7 @@ test("searchComments finds a matching reply and flags its parent", () =>
     Effect.gen(function* () {
       const alice = yield* registerAndLogin("alice", "pw-testpass");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "a post to comment on" },
+        payload: { body: "a post to comment on" },
       });
       const comment = yield* alice.client.comments.createComment({
         params: { id: post.id },
@@ -563,7 +546,7 @@ test("searchComments hides comments and replies by a blocked or muted author", (
       const bob = yield* registerAndLogin("bob", "pw-testpass");
       const carol = yield* registerAndLogin("carol", "pw-testpass");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "a post to comment on" },
+        payload: { body: "a post to comment on" },
       });
       const comment = yield* bob.client.comments.createComment({
         params: { id: post.id },
@@ -622,7 +605,7 @@ test("searchMessages only returns messages from the caller's own chats", () =>
       });
       yield* alice.client.chats.createMessage({
         params: { id: aliceBob.id },
-        payload: { contentType: "text", content: "let's meet at the harbor" },
+        payload: { body: "let's meet at the harbor" },
       });
 
       // Bob <-> Carol chat (Alice is NOT a participant) with the same term.
@@ -631,7 +614,7 @@ test("searchMessages only returns messages from the caller's own chats", () =>
       });
       yield* bob.client.chats.createMessage({
         params: { id: bobCarol.id },
-        payload: { contentType: "text", content: "secret harbor plans" },
+        payload: { body: "secret harbor plans" },
       });
 
       const page = yield* alice.client.search.searchMessages({
@@ -661,7 +644,7 @@ test("searchMessages with chatId pages through that chat only, and never one the
       const say = (from: typeof alice, id: number, content: string) =>
         from.client.chats.createMessage({
           params: { id },
-          payload: { contentType: "text", content },
+          payload: { body: content },
         });
       const withBob = yield* alice.client.chats.createDirectChat({
         payload: { userId: bob.user.id },
@@ -706,7 +689,7 @@ test("searchMessages finds a fragment inside a word", () =>
       });
       yield* bob.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "see you at the airport" },
+        payload: { body: "see you at the airport" },
       });
       const page = yield* alice.client.search.searchMessages({
         query: { q: "irpor" },
@@ -728,7 +711,7 @@ test("searchMessages finds nothing for a term only in someone else's chat", () =
       });
       yield* bob.client.chats.createMessage({
         params: { id: bobCarol.id },
-        payload: { contentType: "text", content: "confidential zebra intel" },
+        payload: { body: "confidential zebra intel" },
       });
       const page = yield* alice.client.search.searchMessages({
         query: { q: "zebra" },
@@ -867,7 +850,7 @@ test("searchAll returns people, posts, comments and messages in one request", ()
       const bob = yield* registerAndLogin("kumquatfan", "pw-testpass");
 
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "kumquat harvest is early" },
+        payload: { body: "kumquat harvest is early" },
       });
       yield* alice.client.comments.createComment({
         params: { id: post.id },
@@ -878,7 +861,7 @@ test("searchAll returns people, posts, comments and messages in one request", ()
       });
       yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "bringing kumquats tonight" },
+        payload: { body: "bringing kumquats tonight" },
       });
 
       const page = yield* alice.client.search.searchAll({
@@ -901,7 +884,7 @@ test("searchAll previews each section and hands over a cursor to continue", () =
       const created: number[] = [];
       for (let i = 0; i < 4; i++) {
         const post = yield* alice.client.posts.createPost({
-          payload: { contentType: "text", content: `apricot number ${i}` },
+          payload: { body: `apricot number ${i}` },
         });
         created.push(post.id);
       }
@@ -931,14 +914,14 @@ test("searchAll scopes messages to the caller and hides blocked authors", () =>
       const carol = yield* registerAndLogin("carol", "pw-testpass");
 
       yield* bob.client.posts.createPost({
-        payload: { contentType: "text", content: "blocked tangerine post" },
+        payload: { body: "blocked tangerine post" },
       });
       const bobCarol = yield* bob.client.chats.createDirectChat({
         payload: { userId: carol.user.id },
       });
       yield* bob.client.chats.createMessage({
         params: { id: bobCarol.id },
-        payload: { contentType: "text", content: "private tangerine chatter" },
+        payload: { body: "private tangerine chatter" },
       });
       yield* alice.client.users.setBlock({
         params: { id: bob.user.id },

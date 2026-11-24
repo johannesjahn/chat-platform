@@ -1,6 +1,6 @@
 import type { WebSocketRoute } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { fakeOnScreenKeyboard } from "./helpers";
+import { fakeOnScreenKeyboard, makeSolidPng } from "./helpers";
 
 test(
   "starting a direct chat, sending a message, and seeing it marked read",
@@ -645,7 +645,7 @@ test("infinite scroll stops requesting more messages once the oldest one is load
   for (let i = 0; i < totalMessages; i++) {
     const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: { contentType: "text", content: `Seeded message ${i}` },
+      data: { body: `Seeded message ${i}` },
     });
     expect(response.ok()).toBe(true);
   }
@@ -760,7 +760,7 @@ test("reopening an already-visited chat still paginates instead of loading its w
   for (let i = 0; i < totalMessages; i++) {
     const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: { contentType: "text", content: `Seeded message ${i}` },
+      data: { body: `Seeded message ${i}` },
     });
     expect(response.ok()).toBe(true);
   }
@@ -925,8 +925,7 @@ test(
         {
           headers: { Authorization: `Bearer ${session.accessToken}` },
           data: {
-            contentType: "text",
-            content: `Seeded message ${i} — long enough to wrap onto more than one line in the bubble.`,
+            body: `Seeded message ${i} — long enough to wrap onto more than one line in the bubble.`,
           },
         },
       );
@@ -1007,8 +1006,7 @@ test("switching chats and going Back/Forward always lands on the newest message"
       const response = await request.post(`${apiUrl}/chats/${id}/messages`, {
         headers,
         data: {
-          contentType: "text",
-          content: `${label} message ${i} — long enough to wrap onto more than one line in the bubble.`,
+          body: `${label} message ${i} — long enough to wrap onto more than one line in the bubble.`,
         },
       });
       expect(response.ok()).toBe(true);
@@ -1146,7 +1144,7 @@ test("the empty composer is one line tall and only grows once there's something 
 });
 
 test(
-  "the composer's extra send modes collapse into one attach button",
+  "the composer's attach button picks a file and backs out of it",
   { tag: "@layout" },
   async ({ page, createUser, signUp }) => {
     await signUp(page);
@@ -1162,8 +1160,6 @@ test(
       page.getByRole("main").getByText("No messages yet"),
     ).toBeVisible();
 
-    // The row of four permanently-visible mode buttons is gone; one trigger
-    // stands in for all of them.
     const attach = page.getByRole("button", { name: "Attach" });
     await expect(attach).toBeVisible();
     await expect(
@@ -1181,36 +1177,29 @@ test(
     ).toBeVisible();
     await page.fill("textarea", "");
 
-    // Tap one opens the sheet; tap two on "File" opens the OS file picker
-    // itself, rather than parking the user in front of a drop zone.
-    const menu = page.getByRole("menu", { name: "Attach" });
-    await attach.click();
-    await expect(menu).toBeVisible();
-    const chooser = page.waitForEvent("filechooser");
-    await menu.getByRole("menuitem", { name: /^File/ }).click();
-    await chooser;
-    await expect(menu).toHaveCount(0);
-
-    // Escape closes the sheet without picking anything.
-    await attach.click();
-    await expect(menu).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(menu).toHaveCount(0);
-
-    // "Photo" swaps the message field for a link field with the caret already
-    // in it, and the same trigger — now a cross — backs out of that mode.
+    // One tap opens the OS file picker itself, rather than parking the user
+    // in front of a drop zone.
     await page.fill("textarea", "a half-written message");
+    const chooser = page.waitForEvent("filechooser");
     await attach.click();
-    await menu.getByRole("menuitem", { name: /^Photo/ }).click();
-    const linkField = page.getByRole("textbox", { name: "Image link" });
-    await expect(linkField).toBeFocused();
-    await expect(linkField).toHaveValue("");
-    await page.getByRole("button", { name: "Cancel photo link" }).click();
-    // ...handing the half-written message back, rather than throwing away the
-    // draft the link field was borrowing its state from.
+    await (
+      await chooser
+    ).setFiles({
+      name: "photo.png",
+      mimeType: "image/png",
+      buffer: makeSolidPng(8, 8, [10, 20, 30]),
+    });
+
+    // The same trigger — now a cross — backs out of the file, keeping the
+    // text.
+    await expect(page.getByRole("textbox", { name: "Caption" })).toHaveValue(
+      "a half-written message",
+    );
+    await page.getByRole("button", { name: "Cancel attachment" }).click();
     await expect(page.locator("textarea")).toHaveValue(
       "a half-written message",
     );
+    await expect(attach).toBeVisible();
   },
 );
 
@@ -1314,7 +1303,7 @@ test("the on-screen keyboard leaves the thread readable instead of collapsing it
   for (let i = 0; i < 12; i++) {
     const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: { contentType: "text", content: `Seeded message ${i}` },
+      data: { body: `Seeded message ${i}` },
     });
     expect(response.ok()).toBe(true);
   }
@@ -1507,16 +1496,15 @@ test(
     await page.goto("/chats");
 
     const anchorText = "Which of these two dates works better for you?";
-    const anchor = await post({ contentType: "text", content: anchorText });
+    const anchor = await post({ body: anchorText });
     // Enough conversation between the anchor and its reply that the anchor
     // falls outside the 30-message page the chat opens with.
     for (let i = 1; i <= 31; i++) {
-      await post({ contentType: "text", content: `Filler message ${i}` });
+      await post({ body: `Filler message ${i}` });
     }
     const replyText = "The second one, definitely";
     await post({
-      contentType: "text",
-      content: replyText,
+      body: replyText,
       parentMessageId: anchor.id,
     });
 
@@ -1582,7 +1570,7 @@ test("a message's Copy link points straight back at it (issue #600)", async ({
   const post = async (content: string) => {
     const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: { contentType: "text", content },
+      data: { body: content },
     });
     expect(response.ok()).toBe(true);
     return (await response.json()) as { id: number };
@@ -1643,7 +1631,7 @@ test("another participant's edit, delete and read receipt reach an open conversa
   const send = async (headers: Record<string, string>, content: string) => {
     const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers,
-      data: { contentType: "text", content },
+      data: { body: content },
     });
     expect(response.ok()).toBe(true);
     return ((await response.json()) as { id: number }).id;
@@ -1662,7 +1650,7 @@ test("another participant's edit, delete and read receipt reach an open conversa
     `${apiUrl}/chats/${chatId}/messages/${toEdit}`,
     {
       headers: asBob,
-      data: { contentType: "text", content: "EDITED text from bob" },
+      data: { body: "EDITED text from bob" },
     },
   );
   expect(edited.ok()).toBe(true);
@@ -1719,7 +1707,7 @@ test("an open chat in a hidden tab leaves new messages unread until the tab is b
 
   const sent = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
     headers: bobHeaders,
-    data: { contentType: "text", content: "Sent while Alice was away" },
+    data: { body: "Sent while Alice was away" },
   });
   expect(sent.ok()).toBe(true);
   const { id: messageId } = (await sent.json()) as { id: number };

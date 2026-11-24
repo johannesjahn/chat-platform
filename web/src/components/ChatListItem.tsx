@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { Link } from "@tanstack/react-router";
-import { BellOff, Forward, ImageIcon, Pin, Users, UserX } from "lucide-react";
+import { BellOff, Forward, Pin, Users, UserX } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { PresenceDot } from "@/components/PresenceDot";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -200,9 +200,6 @@ export function ChatListItem({
                 aria-label="Forwarded"
                 data-testid="chat-list-forwarded"
               />
-            )}
-            {lastMessage?.contentType === "image_url" && (
-              <ImageIcon className="size-3.5 shrink-0" />
             )}
             <span className="truncate">{lastMessageText(chat)}</span>
           </span>

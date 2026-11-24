@@ -17,7 +17,7 @@ test("a new message starts unpinned and unstarred", () =>
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi bob" },
+        payload: { body: "hi bob" },
       });
       expect(message.pinned).toBe(false);
       expect(message.starred).toBe(false);
@@ -39,7 +39,7 @@ test("pinMessage/unpinMessage toggle chat-wide pin state, visible to every parti
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "important" },
+        payload: { body: "important" },
       });
 
       // Any participant may pin, not just the sender.
@@ -85,11 +85,11 @@ test("pinMessage is idempotent, and the pinned list is newest-pin-first", () =>
       });
       const first = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "first" },
+        payload: { body: "first" },
       });
       const second = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "second" },
+        payload: { body: "second" },
       });
 
       yield* alice.client.chats.pinMessage({
@@ -125,7 +125,7 @@ test("pinMessage is forbidden for non-participants and 404s for a message in ano
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi bob" },
+        payload: { body: "hi bob" },
       });
 
       const forbidden = yield* eve.client.chats
@@ -156,7 +156,7 @@ test("starMessage/unstarMessage are private per-user bookmarks", () =>
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "bookmark me" },
+        payload: { body: "bookmark me" },
       });
 
       const starred = yield* alice.client.chats.starMessage({
@@ -213,7 +213,7 @@ test("starMessage is idempotent and forbidden for non-participants", () =>
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi bob" },
+        payload: { body: "hi bob" },
       });
 
       yield* alice.client.chats.starMessage({
@@ -245,7 +245,7 @@ test("deleting a pinned-and-starred message removes it from both lists", () =>
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "temporary" },
+        payload: { body: "temporary" },
       });
       yield* alice.client.chats.pinMessage({
         params: { id: chat.id },

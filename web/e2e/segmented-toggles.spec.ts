@@ -24,11 +24,11 @@ test("segmented toggles expose the selected option to screen readers", async ({
 }) => {
   await signUp(page);
 
-  const postTypes = ["Text", "Image URL", "File"];
+  const postTypes = ["Text", "File"];
   await page.goto("/posts/new");
   await expectSelected(page, "Post type", postTypes, "Text");
-  await page.getByRole("button", { name: "Image URL", exact: true }).click();
-  await expectSelected(page, "Post type", postTypes, "Image URL");
+  await page.getByRole("button", { name: "File", exact: true }).click();
+  await expectSelected(page, "Post type", postTypes, "File");
 
   const filters = ["All", "People", "Posts", "Comments", "Messages"];
   await page.goto("/search?q=lorem");

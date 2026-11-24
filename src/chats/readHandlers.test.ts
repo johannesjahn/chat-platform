@@ -21,15 +21,15 @@ test("markRead marks messages up to a point as read and updates unreadCount + re
 
       const m1 = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "one" },
+        payload: { body: "one" },
       });
       const m2 = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "two" },
+        payload: { body: "two" },
       });
       yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "three" },
+        payload: { body: "three" },
       });
 
       const {
@@ -81,7 +81,7 @@ test(
           Effect.gen(function* () {
             const message = yield* bob.client.chats.createMessage({
               params: { id: chatId },
-              payload: { contentType: "text", content },
+              payload: { body: content },
             });
             return yield* reader.client.chats.markRead({
               params: { id: chatId },
@@ -149,7 +149,7 @@ test("markRead only moves the read watermark forward, and a repeat with nothing 
       const send = (content: string) =>
         alice.client.chats.createMessage({
           params: { id: chat.id },
-          payload: { contentType: "text", content },
+          payload: { body: content },
         });
       const m1 = yield* send("one");
       const m2 = yield* send("two");
@@ -210,7 +210,7 @@ test("rejoining a group keeps its history read, and only later messages count as
       for (let i = 0; i < 5; i++)
         last = (yield* alice.client.chats.createMessage({
           params: { id: chat.id },
-          payload: { contentType: "text", content: `m${i}` },
+          payload: { body: `m${i}` },
         })).id;
       const read = yield* bob.client.chats.markRead({
         params: { id: chat.id },
@@ -234,7 +234,7 @@ test("rejoining a group keeps its history read, and only later messages count as
 
       yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "after rejoin" },
+        payload: { body: "after rejoin" },
       });
       const after = yield* bob.client.chats.getChat({
         params: { id: chat.id },
@@ -256,7 +256,7 @@ test("joining a group with history, by invite or by being added, starts with not
       for (let i = 0; i < 3; i++)
         yield* alice.client.chats.createMessage({
           params: { id: chat.id },
-          payload: { contentType: "text", content: `m${i}` },
+          payload: { body: `m${i}` },
         });
 
       // Bob leaves on his own and comes back through an invite.
@@ -290,7 +290,7 @@ test("joining a group with history, by invite or by being added, starts with not
 
       yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "welcome" },
+        payload: { body: "welcome" },
       });
       for (const member of [bob, carol]) {
         const view = yield* member.client.chats.getChat({
@@ -313,7 +313,7 @@ test("markRead 404s for a missing chat or a message from a different chat", () =
       });
       const messageInAB = yield* alice.client.chats.createMessage({
         params: { id: chatAB.id },
-        payload: { contentType: "text", content: "hi bob" },
+        payload: { body: "hi bob" },
       });
 
       const missingChat = yield* alice.client.chats
@@ -329,7 +329,7 @@ test("markRead 404s for a missing chat or a message from a different chat", () =
       });
       const messageInAC = yield* alice.client.chats.createMessage({
         params: { id: chatAC.id },
-        payload: { contentType: "text", content: "hi carol" },
+        payload: { body: "hi carol" },
       });
 
       // messageInAC exists, but not in chatAB.
@@ -417,7 +417,7 @@ test("getUnreadChatCount sums across chats and only counts chats you're in", () 
       for (const [client, id] of sends) {
         yield* client.chats.createMessage({
           params: { id },
-          payload: { contentType: "text", content: "hi" },
+          payload: { body: "hi" },
         });
       }
 

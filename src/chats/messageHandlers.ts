@@ -25,7 +25,6 @@ import {
   buildMessageResponse,
   getReaders,
   getReadersForMessages,
-  messageCaption,
   resolveParentPreview,
   resolveParentPreviews,
   toApiMessage,
@@ -261,10 +260,8 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
             insertMessage(tx, {
               chatId: id,
               senderId: currentUser.id,
-              contentType: payload.contentType,
-              content: payload.content,
+              body: payload.body,
               attachmentId: payload.attachmentId ?? null,
-              caption: payload.caption ?? null,
               parentMessageId: payload.parentMessageId ?? null,
               clientId: payload.clientId ?? null,
               createdAt: now,
@@ -367,17 +364,8 @@ export const messageHandlers = ({ db, storage, connections }: ChatsDeps) =>
               await tx
                 .update(messages)
                 .set({
-                  contentType: payload.contentType,
-                  content: payload.content,
+                  body: payload.body,
                   attachmentId: payload.attachmentId ?? null,
-                  // Omitted keeps the current caption (see `UpdateMessageBody`);
-                  // only an attachment carries one.
-                  caption:
-                    payload.contentType !== "attachment"
-                      ? null
-                      : payload.caption === undefined
-                        ? messageCaption(existing)
-                        : payload.caption,
                   updatedAt: new Date(),
                 })
                 .where(eq(messages.id, messageId))

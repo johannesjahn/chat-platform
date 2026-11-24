@@ -11,11 +11,9 @@ import { sendViaOutbox, useOutboxMessages } from "@/lib/outbox";
 // and the bubbles shown for sends the server hasn't confirmed yet.
 
 export type ComposerSend = {
-  contentType: "text" | "image_url" | "attachment";
-  content: string;
+  body: string;
   attachmentId?: number;
   attachment?: Attachment;
-  caption?: string;
   parentMessageId?: number;
 };
 
@@ -30,10 +28,9 @@ export function sendFromComposer(
   // attachment message can't be queued this way (ChatComposer only lets
   // one through while online, since it needs an already-completed
   // upload), so it always goes out live below.
-  if (values.contentType !== "attachment" && !onlineManager.isOnline()) {
+  if (values.attachmentId === undefined && !onlineManager.isOnline()) {
     enqueueMessage(chatId, {
-      contentType: values.contentType,
-      content: values.content,
+      body: values.body,
       parentMessageId: values.parentMessageId,
     });
     return;
@@ -48,9 +45,8 @@ export function sendFromComposer(
       replyingTo && replyingTo.id === values.parentMessageId
         ? {
             senderName: replyingTo.senderName,
-            contentType: replyingTo.contentType,
-            content: replyingTo.content,
-            caption: replyingTo.caption,
+            body: replyingTo.body,
+            hasAttachment: replyingTo.hasAttachment,
           }
         : undefined,
   });

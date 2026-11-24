@@ -15,9 +15,7 @@ import {
   ReactionBody,
   ReactionState,
   ReactionSummary,
-  requireAllowedImageUrl,
-  requireAttachmentId,
-  requireCaptionOnlyWithAttachment,
+  requireBodyOrAttachment,
 } from "./posts.ts";
 import {
   AvatarTooLarge,
@@ -75,28 +73,18 @@ export const ChatParticipant = Schema.Struct({
 
 export type ChatParticipant = typeof ChatParticipant.Type;
 
-// Content types a message's body can hold — mirrors `PostContentType` but
-// kept as its own union so messages and posts can diverge later.
-export const MessageContentType = Schema.Literals([
-  "text",
-  "image_url",
-  "attachment",
-]).annotate({ identifier: "MessageContentType" });
-
-export type MessageContentType = typeof MessageContentType.Type;
-
 // Shorter than a post's cap — chat messages are conversational, not
 // long-form content, so a generous-but-bounded limit keeps bubbles sane.
-export const MAX_MESSAGE_CONTENT_LENGTH = 4_000;
+export const MAX_MESSAGE_BODY_LENGTH = 4_000;
 
-const MessageContent = Schema.Trimmed.check(Schema.isNonEmpty()).check(
-  Schema.isMaxLength(MAX_MESSAGE_CONTENT_LENGTH),
+const MessageBody = Schema.Trimmed.check(
+  Schema.isMaxLength(MAX_MESSAGE_BODY_LENGTH),
 );
 
-// How much of a quoted parent message's content is echoed in a reply's
+// How much of a quoted parent message's body is echoed in a reply's
 // `parentMessage` preview (issue #217). Chat bubbles show only a one-line
 // snippet of what's being replied to, so the full body (up to
-// MAX_MESSAGE_CONTENT_LENGTH) never needs to ride along on every reply — the
+// MAX_MESSAGE_BODY_LENGTH) never needs to ride along on every reply — the
 // backend truncates to this before sending (see `resolveParentPreviews`
 // in chats/messageViews.ts). Kept generous enough to fill a preview line at any
 // sensible width.
@@ -107,19 +95,15 @@ export const PARENT_MESSAGE_PREVIEW_LENGTH = 120;
 // embedding a full (potentially itself-a-reply) `Message` and recursing.
 // `senderName` is the parent sender's resolved display name (displayName ??
 // username), joined server-side so the client needn't have that user in hand
-// (they might have since left the chat). `content` is truncated to
-// PARENT_MESSAGE_PREVIEW_LENGTH; `contentType` lets the client show "Photo"/
-// "Attachment" instead of a raw URL/filename for non-text parents.
+// (they might have since left the chat). `body` is truncated to
+// PARENT_MESSAGE_PREVIEW_LENGTH; `hasAttachment` lets the client show
+// "Attachment" for a parent without text.
 export const ParentMessagePreview = Schema.Struct({
   id: Schema.Finite,
   senderId: Schema.Finite,
   senderName: Schema.String,
-  contentType: MessageContentType,
-  content: Schema.String,
-  // The quoted message's caption (issue #765), truncated like `content` —
-  // null unless it's a captioned attachment, so a quote can show the
-  // caption rather than only "Attachment".
-  caption: Schema.NullOr(Schema.String),
+  body: Schema.String,
+  hasAttachment: Schema.Boolean,
   // Whether the quoted message is itself a forward (issue #601), so the
   // quote can carry the same "Forwarded" marker as the bubble it points at.
   forwarded: Schema.Boolean,
@@ -149,13 +133,9 @@ export const Message = Schema.Struct({
   id: Schema.Finite,
   chatId: Schema.Finite,
   senderId: Schema.Finite,
-  contentType: MessageContentType,
-  content: Schema.String,
-  // Set only when contentType is "attachment" — see `Attachment`
-  // (api/attachments.ts).
+  // Empty for an attachment sent without text.
+  body: Schema.String,
   attachment: Schema.NullOr(Attachment),
-  // Text sent alongside an attachment (issue #765) — see `Post.caption`.
-  caption: Schema.NullOr(Schema.String),
   // The message this one is a reply to (issue #217), as a lightweight preview
   // — null for a normal (non-reply) message, or when the quoted message has
   // since been deleted (the FK is `set null`, see db/schema.ts).
@@ -406,14 +386,10 @@ export const ChatInvitePreview = Schema.Struct({
 export type ChatInvitePreview = typeof ChatInvitePreview.Type;
 
 export const CreateMessageBody = Schema.Struct({
-  contentType: MessageContentType,
-  content: MessageContent,
+  body: MessageBody,
   // Id of a previously-uploaded attachment (`POST /attachments`) owned by
-  // the caller — required exactly when contentType is "attachment".
+  // the caller.
   attachmentId: Schema.optional(Schema.Finite),
-  // Text sent alongside the attachment (issue #765) — see
-  // `CreatePostBody.caption`.
-  caption: Schema.optional(MessageContent),
   // Id of the message this one replies to (issue #217). Omitted for a normal
   // message. Validated server-side to reference a message in this same chat —
   // a parent from another chat (or a nonexistent one) 404s (see
@@ -424,25 +400,15 @@ export const CreateMessageBody = Schema.Struct({
   // this chat, that message is returned instead of creating a duplicate.
   clientId: Schema.optional(Schema.String.check(Schema.isMaxLength(64))),
 })
-  .check(
-    Schema.makeFilter(requireAllowedImageUrl),
-    Schema.makeFilter(requireAttachmentId),
-    Schema.makeFilter(requireCaptionOnlyWithAttachment),
-  )
+  .check(Schema.makeFilter(requireBodyOrAttachment))
   .annotate({ identifier: "CreateMessageBody" });
 
+// Replaces both, like `UpdatePostBody`.
 export const UpdateMessageBody = Schema.Struct({
-  contentType: MessageContentType,
-  content: MessageContent,
+  body: MessageBody,
   attachmentId: Schema.optional(Schema.Finite),
-  // Same set/clear/keep semantics as `UpdatePostBody.caption`.
-  caption: Schema.optional(Schema.NullOr(MessageContent)),
 })
-  .check(
-    Schema.makeFilter(requireAllowedImageUrl),
-    Schema.makeFilter(requireAttachmentId),
-    Schema.makeFilter(requireCaptionOnlyWithAttachment),
-  )
+  .check(Schema.makeFilter(requireBodyOrAttachment))
   .annotate({ identifier: "UpdateMessageBody" });
 
 // How many chats one forward may post into (issue #601). Each target is a

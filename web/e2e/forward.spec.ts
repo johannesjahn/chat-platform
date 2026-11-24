@@ -50,8 +50,7 @@ test("forwarding a text and an image to two chats labels both copies and confirm
     participantIds: [carol.session.user.id],
   });
   await api(request, `${apiUrl}/chats/${withBob.id}/messages`, bobToken, {
-    contentType: "text",
-    content: "Pass this along please",
+    body: "Pass this along please",
   });
   const upload = await request.post(`${apiUrl}/attachments`, {
     headers: { Authorization: `Bearer ${bobToken}` },
@@ -66,8 +65,7 @@ test("forwarding a text and an image to two chats labels both copies and confirm
   expect(upload.ok()).toBe(true);
   const attachment = (await upload.json()) as { id: number };
   await api(request, `${apiUrl}/chats/${withBob.id}/messages`, bobToken, {
-    contentType: "attachment",
-    content: "photo.png",
+    body: "",
     attachmentId: attachment.id,
   });
 

@@ -18,7 +18,7 @@ test("header search finds a post and highlights the match", async ({
   const seed = async (content: string) => {
     const response = await request.post(`${apiUrl}/posts`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: { contentType: "text", content },
+      data: { body: content },
     });
     expect(response.ok()).toBe(true);
   };
@@ -62,7 +62,7 @@ test("search matches a fragment inside a word and finds people", async ({
   );
   const response = await request.post(`${apiUrl}/posts`, {
     headers: { Authorization: `Bearer ${session.accessToken}` },
-    data: { contentType: "text", content: "notes on the fragmentary draft" },
+    data: { body: "notes on the fragmentary draft" },
   });
   expect(response.ok()).toBe(true);
 
@@ -114,7 +114,7 @@ test("a message search result opens the chat on the matching message", async ({
   const post = async (content: string) => {
     const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: { contentType: "text", content },
+      data: { body: content },
     });
     expect(response.ok()).toBe(true);
     return (await response.json()) as { id: number };
@@ -169,7 +169,7 @@ test("all-tab section counts mark a truncated preview with a plus", async ({
   const seed = async (content: string) => {
     const response = await request.post(`${apiUrl}/posts`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: { contentType: "text", content },
+      data: { body: content },
     });
     expect(response.ok()).toBe(true);
   };

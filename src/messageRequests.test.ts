@@ -38,7 +38,7 @@ type Member = Effect.Success<ReturnType<typeof registerAndLogin>>;
 const say = (from: Member, chatId: number, content: string) =>
   from.client.chats.createMessage({
     params: { id: chatId },
-    payload: { contentType: "text", content },
+    payload: { body: content },
   });
 
 const listIds = (member: Member, requests: boolean) =>
@@ -400,7 +400,7 @@ test("a pending request can't be sent, forwarded, reacted, pinned or typed into"
         params: { id: group.id },
         query: {},
       });
-      expect(seen.messages.map((m) => m.content)).toEqual(["buy now"]);
+      expect(seen.messages.map((m) => m.body)).toEqual(["buy now"]);
       expect(seen.messages[0]!.reactions.every((r) => r.count === 0)).toBe(
         true,
       );
@@ -487,7 +487,7 @@ test("accepting a request lets the recipient send, react, pin and forward into i
         params: { id: group.id },
         query: {},
       });
-      expect(seen.messages.map((m) => m.content)).toEqual([
+      expect(seen.messages.map((m) => m.body)).toEqual([
         "hi there",
         "hello!",
         "a note",
