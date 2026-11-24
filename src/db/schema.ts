@@ -407,8 +407,6 @@ export const chatParticipants = pgTable(
     // `markRead` only ever moves it forward. Null means nothing read yet.
     // Deliberately no FK: deleting the message it points at must not reset
     // the watermark (`set null` would make the whole history unread again).
-    // Back-filled from `message_reads` by migration 0035, which stays
-    // written alongside it until a contract migration drops it.
     lastReadMessageId: integer("last_read_message_id"),
     // Message requests (issue #785): true while this participant was put in
     // a group by someone they shared no (accepted) chat with, until they
@@ -607,35 +605,6 @@ export type NewDbMessage = typeof messages.$inferInsert;
 // per user rather than as a single "read" flag, so group chats can later
 // show "read by N of M" without a schema change.
 //
-// Superseded by `chat_participants.last_read_message_id` (issue #659): no
-// read path uses this table any more. `markRead` still writes the rows it
-// newly reads (only those, never the whole history) so replicas running the
-// previous release keep seeing reads mid-rollout; drop it in a later
-// contract migration.
-export const messageReads = pgTable(
-  "message_reads",
-  {
-    id: serial("id").primaryKey(),
-    messageId: integer("message_id")
-      .notNull()
-      .references(() => messages.id, { onDelete: "cascade" }),
-    userId: integer("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    readAt: timestamp("read_at", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  // The unique constraint below is backed by a composite (messageId,
-  // userId) btree index, whose leading column already serves `listMessages`'
-  // `inArray(messageReads.messageId, ...)` lookups — no separate index
-  // needed on messageId alone.
-  (table) => [unique().on(table.messageId, table.userId)],
-);
-
-export type DbMessageRead = typeof messageReads.$inferSelect;
-export type NewDbMessageRead = typeof messageReads.$inferInsert;
-
 // Chat-wide pinned messages (issue #223) — one row per pinned message,
 // visible to every participant of the chat. A message can be pinned at most
 // once (the unique index on `messageId`), so pinning is idempotent and

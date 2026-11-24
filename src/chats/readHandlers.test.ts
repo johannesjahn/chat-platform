@@ -1,8 +1,5 @@
 import { expect, test } from "bun:test";
-import { eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { Db } from "../Db.ts";
-import { messageReads } from "../db/schema.ts";
 import { makeTestRun } from "../testApi.ts";
 import {
   buryUnreadDirectChat,
@@ -193,75 +190,6 @@ test("markRead only moves the read watermark forward, and a repeat with nothing 
       expect(readers.get(m1.id)).toEqual(bothReaders);
       expect(readers.get(m2.id)).toEqual(bothReaders);
       expect(readers.get(m3.id)).toEqual([bob.user.id]);
-
-      // Expand phase: the previous release still reads receipts from
-      // `message_reads`, so markRead keeps writing exactly the newly read rows.
-      const db = yield* Db;
-      const rows = yield* Effect.tryPromise(() =>
-        db
-          .select({ messageId: messageReads.messageId })
-          .from(messageReads)
-          .where(eq(messageReads.userId, carol.user.id)),
-      ).pipe(Effect.orDie);
-      expect(rows.map((r) => r.messageId).sort((a, b) => a - b)).toEqual([
-        m1.id,
-        m2.id,
-      ]);
-    }),
-  ));
-
-test("migration 0035 back-fills each participant's read watermark from message_reads", () =>
-  run(
-    Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const chat = yield* alice.client.chats.createDirectChat({
-        payload: { userId: bob.user.id },
-      });
-      const m1 = yield* alice.client.chats.createMessage({
-        params: { id: chat.id },
-        payload: { contentType: "text", content: "one" },
-      });
-      const m2 = yield* alice.client.chats.createMessage({
-        params: { id: chat.id },
-        payload: { contentType: "text", content: "two" },
-      });
-      yield* alice.client.chats.createMessage({
-        params: { id: chat.id },
-        payload: { contentType: "text", content: "three" },
-      });
-
-      // The state a pre-0035 database is in: read rows, no watermark.
-      const db = yield* Db;
-      yield* Effect.tryPromise(() =>
-        db.insert(messageReads).values([
-          { messageId: m1.id, userId: bob.user.id },
-          { messageId: m2.id, userId: bob.user.id },
-        ]),
-      ).pipe(Effect.orDie);
-      const before = yield* bob.client.chats.getChat({
-        params: { id: chat.id },
-      });
-      expect(before.unreadCount).toBe(3);
-
-      const migration = yield* Effect.promise(() =>
-        Bun.file(
-          new URL("../../drizzle/0035_read_watermark.sql", import.meta.url),
-        ).text(),
-      );
-      const backfill = migration.split("--> statement-breakpoint")[1]!;
-      yield* Effect.tryPromise(() => db.execute(sql.raw(backfill))).pipe(
-        Effect.orDie,
-      );
-
-      const after = yield* bob.client.chats.getChat({
-        params: { id: chat.id },
-      });
-      expect(after.unreadCount).toBe(1);
-      const aliceView = yield* alice.client.chats.getChat({
-        params: { id: chat.id },
-      });
-      expect(aliceView.unreadCount).toBe(0);
     }),
   ));
 

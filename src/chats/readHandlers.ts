@@ -3,7 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import { NotFound } from "../Api.ts";
 import { CurrentUser } from "../Auth.ts";
-import { chatParticipants, messageReads, messages } from "../db/schema.ts";
+import { chatParticipants, messages } from "../db/schema.ts";
 import { type ChatsDeps, type ChatsHandlers } from "./handlerKit.ts";
 import { isAcceptedParticipant, loadChatAs } from "./access.ts";
 import {
@@ -87,20 +87,6 @@ export const readHandlers = ({ db, storage, connections }: ChatsDeps) =>
             db.select({ total: count() }).from(messages).where(newlyReadRange),
           );
           newlyRead = counted[0]?.total ?? 0;
-          // Expand phase: keep `message_reads` written for replicas still
-          // on the previous release, which read receipts from it. One
-          // INSERT … SELECT, so there's no bind-parameter limit to hit.
-          if (newlyRead > 0) {
-            yield* dbQuery(() =>
-              db.execute(sql`
-                  INSERT INTO ${messageReads} (message_id, user_id, read_at)
-                  SELECT ${messages.id}, ${currentUser.id}, now()
-                  FROM ${messages}
-                  WHERE ${newlyReadRange}
-                  ON CONFLICT DO NOTHING
-                `),
-            );
-          }
         }
 
         const participants = yield* getParticipants(db, id);

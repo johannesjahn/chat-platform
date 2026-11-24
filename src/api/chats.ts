@@ -884,8 +884,7 @@ export const ChatsGroup = HttpApiGroup.make("chats")
   )
   .add(
     // Deletes a message — the sender, the chat's owner/admin, or a
-    // site-wide admin (issue #220 extended this from sender-only). The
-    // `message_reads` rows cascade via the FK, so nothing else to clean up.
+    // site-wide admin (issue #220 extended this from sender-only).
     HttpApiEndpoint.delete("deleteMessage", "/chats/:id/messages/:messageId", {
       params: MessageIdPath,
       success: HttpApiSchema.NoContent,
