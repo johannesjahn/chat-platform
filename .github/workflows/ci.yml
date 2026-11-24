@@ -683,7 +683,9 @@ jobs:
     # that job can actually hit.
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.e2e_specs == 'true' && needs.build-web.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Enough for a PR that touches most specs: at 13 tests a minute, 34 specs
+    # (950 repetitions) take about 75 minutes.
+    timeout-minutes: 90
     # Same image as the e2e job — see the comment there.
     container:
       image: mcr.microsoft.com/playwright:v1.65.1-noble
