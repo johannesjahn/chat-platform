@@ -97,12 +97,10 @@ const attachmentBytes = (db: DrizzleDb): Effect.Effect<number> =>
       .from(attachments),
   ).pipe(Effect.map((rows) => rows[0]?.bytes ?? 0));
 
-// `YYYY-MM-DD` in UTC. `created_at` is a naive `timestamp` column holding
-// UTC instants (drizzle encodes Dates with `toISOString()` — see
-// db/schema.ts), so a plain `date_trunc` already truncates on UTC days and
-// needs no `at time zone` conversion.
+// `YYYY-MM-DD` in UTC. Explicitly: a day of a `timestamptz` otherwise follows
+// the session's time zone.
 const utcDay = (createdAt: PgColumn) =>
-  sql<string>`to_char(date_trunc('day', ${createdAt}), 'YYYY-MM-DD')`;
+  sql<string>`to_char(${createdAt} at time zone 'UTC', 'YYYY-MM-DD')`;
 
 // Rows per UTC day for one table, as a `YYYY-MM-DD` -> count map. Only days
 // that actually have rows come back; `buildTimeline` zero-fills the rest.

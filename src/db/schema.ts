@@ -57,7 +57,10 @@ export const users = pgTable(
     // rather than needing a background job to null the columns out.
     statusText: text("status_text"),
     statusEmoji: text("status_emoji"),
-    statusExpiresAt: timestamp("status_expires_at", { mode: "date" }),
+    statusExpiresAt: timestamp("status_expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     // Free-form "about" text shown on the profile page (issue #322), null
     // when unset. Length is bounded at the API (`MAX_BIO_LENGTH` in Api.ts),
     // not here, matching `displayName`/`statusText`. Nullable with no default,
@@ -89,7 +92,9 @@ export const users = pgTable(
     // default is what backfills existing rows, which means every account
     // that predates this migration reads as having signed up the moment it
     // ran — signup history is only meaningful from this deploy forward.
-    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
     // When this user last created content — a post, comment, like or
     // message — to within ACTIVITY_RESOLUTION, for the DAU/WAU/MAU counts
     // (ActiveUsersMetrics.ts, the admin dashboard). Those used to take the
@@ -102,7 +107,10 @@ export const users = pgTable(
     // holds less than the content rows it's derived from, which go with the
     // account. Null for anyone inactive since before the migration's
     // 31-day backfill.
-    lastActiveAt: timestamp("last_active_at", { mode: "date" }),
+    lastActiveAt: timestamp("last_active_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
   },
   (table) => [
     // Case-insensitive uniqueness: `Alice` and `alice` must not both be
@@ -135,11 +143,14 @@ export const refreshTokens = pgTable(
     // Shared by every token descended from the same login via rotation, so
     // reuse of one member of the chain can revoke the whole chain at once.
     familyId: text("family_id").notNull(),
-    expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
-    revokedAt: timestamp("revoked_at", { mode: "date" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [index("refresh_tokens_family_id_idx").on(table.familyId)],
 );
@@ -187,7 +198,7 @@ export const attachments = pgTable(
     // rows uploaded before this migration.
     waveform: jsonb("waveform").$type<number[]>(),
     durationMs: integer("duration_ms"),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -237,10 +248,10 @@ export const posts = pgTable(
     // a viewer who hid someone still gets a live count (see
     // `postCommentCounts` in posts.ts).
     commentCount: integer("comment_count").notNull().default(0),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
-    updatedAt: timestamp("updated_at", { mode: "date" })
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -287,10 +298,10 @@ export const comments = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
-    updatedAt: timestamp("updated_at", { mode: "date" })
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Set when a top-level comment is deleted while it still has replies
@@ -299,7 +310,7 @@ export const comments = pgTable(
     // `parent_comment_id` cascade would take other people's replies with it.
     // It's hard-deleted once its last reply goes. Not counted in
     // `posts.comment_count` (migration 0042).
-    deletedAt: timestamp("deleted_at", { mode: "date" }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
     // `listComments` filters + orders by (postId, id) for top-level comments;
@@ -343,12 +354,12 @@ export const chats = pgTable(
     directUserHigh: integer("direct_user_high").references(() => users.id, {
       onDelete: "set null",
     }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Bumped whenever a message is sent, so the chat list can sort by recent
     // activity with a plain ORDER BY instead of a per-row message subquery.
-    updatedAt: timestamp("updated_at", { mode: "date" })
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Monotonically incremented on every participant-visible change to this
@@ -400,7 +411,7 @@ export const chatParticipants = pgTable(
     userId: integer("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    joinedAt: timestamp("joined_at", { mode: "date" })
+    joinedAt: timestamp("joined_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Per-chat role (issue #220) — distinct from `users.role` (site-wide
@@ -447,9 +458,9 @@ export const chatParticipants = pgTable(
     // not muted, not archived, not pinned. `mutedUntil` in the past reads as
     // not muted, and `archivedAt` as archived only while it's after
     // `chats.updatedAt`, so a new message un-archives without a write here.
-    mutedUntil: timestamp("muted_until", { mode: "date" }),
-    archivedAt: timestamp("archived_at", { mode: "date" }),
-    pinnedAt: timestamp("pinned_at", { mode: "date" }),
+    mutedUntil: timestamp("muted_until", { withTimezone: true, mode: "date" }),
+    archivedAt: timestamp("archived_at", { withTimezone: true, mode: "date" }),
+    pinnedAt: timestamp("pinned_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
     unique().on(table.chatId, table.userId),
@@ -499,7 +510,10 @@ export const chatEvents = pgTable(
     }),
     // The new title, for "renamed".
     detail: text("detail"),
-    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
   },
   (table) => [
     index("chat_events_chat_id_idx").on(table.chatId, table.id),
@@ -573,10 +587,10 @@ export const messages = pgTable(
       { onDelete: "set null" },
     ),
     forwardedFromSenderName: text("forwarded_from_sender_name"),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
-    updatedAt: timestamp("updated_at", { mode: "date" })
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -643,7 +657,7 @@ export const pinnedMessages = pgTable(
     pinnedBy: integer("pinned_by").references(() => users.id, {
       onDelete: "set null",
     }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -679,7 +693,7 @@ export const starredMessages = pgTable(
     messageId: integer("message_id")
       .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -733,7 +747,7 @@ export const likes = pgTable(
     // additive/backward-compatible per the expand-contract note in CLAUDE.md)
     // still lands on a sensible value rather than NULL.
     emoji: text("emoji").notNull().default("👍"),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -798,18 +812,18 @@ export const chatInvites = pgTable(
     createdBy: integer("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Null means "never expires".
-    expiresAt: timestamp("expires_at", { mode: "date" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
     // Null means "unlimited uses".
     maxUses: integer("max_uses"),
     useCount: integer("use_count").notNull().default(0),
     // Null while still active; set (rather than deleting the row) when an
     // owner/admin revokes the invite, so revoked links leave an audit trail
     // instead of silently vanishing.
-    revokedAt: timestamp("revoked_at", { mode: "date" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
     uniqueIndex("chat_invites_code_idx").on(table.code),
@@ -851,7 +865,7 @@ export const userBlocks = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     type: text("type", { enum: ["block", "mute"] }).notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -907,11 +921,11 @@ export const gameLobbies = pgTable(
     // so nobody can rehearse it in the lobby. For Reflex Rush, the seed its
     // schedule is laid out from (see src/games/reflex.ts).
     passage: text("passage"),
-    startsAt: timestamp("starts_at", { mode: "date" }),
+    startsAt: timestamp("starts_at", { withTimezone: true, mode: "date" }),
     // For Sketchy, the *latest* the game can end (every stage running its
     // full timer) — the real end is derived from the submissions (see
     // src/games/drawing/timeline.ts).
-    endsAt: timestamp("ends_at", { mode: "date" }),
+    endsAt: timestamp("ends_at", { withTimezone: true, mode: "date" }),
     maxPlayers: integer("max_players").notNull(),
     // Game-specific lobby settings — Sketchy's theme packs and round count
     // (null for the typing race). jsonb rather than columns so a game's
@@ -923,13 +937,13 @@ export const gameLobbies = pgTable(
     // guarded on this column so it happens exactly once (see
     // `settleDrawingGame` in GamesHandler.ts).
     settledRound: integer("settled_round"),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Touched by every membership/phase change; the lobby browser hides
     // lobbies nobody has touched in a while (abandoned tabs) and creating a
     // lobby sweeps long-dead ones (see GamesHandler.ts).
-    updatedAt: timestamp("updated_at", { mode: "date" })
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -968,7 +982,7 @@ export const gameLobbyPlayers = pgTable(
     userId: integer("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    joinedAt: timestamp("joined_at", { mode: "date" })
+    joinedAt: timestamp("joined_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Server-measured time from `startsAt` to the accepted finish.
@@ -1009,7 +1023,7 @@ export const gameLobbyMessages = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     text: text("text").notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1042,7 +1056,7 @@ export const gameResults = pgTable(
     // Racers seated when this result was recorded — a "win" only counts
     // against at least one opponent (see the leaderboard query).
     playerCount: integer("player_count").notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1084,8 +1098,11 @@ export const gameDrawings = pgTable(
     shuffleSeed: integer("shuffle_seed").notNull(),
     // Null until submitted; a drawing nobody submitted plays out as blank.
     strokes: jsonb("strokes").$type<ReadonlyArray<DrawingStroke>>(),
-    submittedAt: timestamp("submitted_at", { mode: "date" }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    submittedAt: timestamp("submitted_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1113,7 +1130,7 @@ export const gameBluffs = pgTable(
     // `text` folded for comparison (see `normalizeTitle`) — two bluffs that
     // would read as the same ballot entry can't both land.
     normalized: text("normalized").notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1140,7 +1157,7 @@ export const gameVotes = pgTable(
     bluffId: integer("bluff_id").references(() => gameBluffs.id, {
       onDelete: "cascade",
     }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1195,8 +1212,8 @@ export const notifications = pgTable(
     // Api.ts) and, for an invite, the lobby it points at.
     game: text("game"),
     lobbyId: integer("lobby_id"),
-    readAt: timestamp("read_at", { mode: "date" }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    readAt: timestamp("read_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1243,6 +1260,9 @@ export const notificationPreferences = pgTable(
 // job share its output (the active-users counts) with the others.
 export const scheduledJobs = pgTable("scheduled_jobs", {
   name: text("name").primaryKey(),
-  lastRunAt: timestamp("last_run_at", { mode: "date" }).notNull(),
+  lastRunAt: timestamp("last_run_at", {
+    withTimezone: true,
+    mode: "date",
+  }).notNull(),
   result: jsonb("result"),
 });

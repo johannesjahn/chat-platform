@@ -63,8 +63,7 @@ export type AdminActivityWindow = typeof AdminActivityWindow.Type;
 // with no activity are still present (zero-filled server-side) so the chart
 // can render a continuous axis without reconstructing the calendar itself.
 export const AdminTimelinePoint = Schema.Struct({
-  // `YYYY-MM-DD`, UTC — the day boundary matches `date_trunc('day', ...)`
-  // over the naive-UTC `created_at` columns (see db/schema.ts).
+  // `YYYY-MM-DD`, UTC, whatever time zone the database session is in.
   date: Schema.String,
   signups: Schema.Finite,
   posts: Schema.Finite,

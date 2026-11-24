@@ -123,6 +123,31 @@ describeIfPostgres("chat transactions on real Postgres", () => {
       }),
     ));
 
+  // Not a race either: the wire driver must read back the instant it wrote,
+  // and the one the database writes itself, whatever the session's time zone
+  // (issue #939).
+  test("timestamps are the same instants in any session time zone", async () => {
+    const written = new Date("2026-03-29T00:30:00.123Z");
+    await db.transaction(async (tx) => {
+      await tx.execute("set local time zone 'Pacific/Kiritimati'");
+      const before = Date.now();
+      const [user] = await tx
+        .insert(users)
+        .values({
+          username: "kiri",
+          passwordHash: "unused",
+          lastActiveAt: written,
+        })
+        .returning();
+      expect(user!.lastActiveAt).toEqual(written);
+      const age = user!.createdAt!.getTime() - before;
+      expect(Math.abs(age)).toBeLessThan(60_000);
+      expect(await tx.$count(users, eq(users.lastActiveAt, written))).toBe(1);
+    });
+    const [read] = await db.select().from(users);
+    expect(read!.lastActiveAt).toEqual(written);
+  });
+
   // Claims of one attachment take turns on its row lock, across posts and
   // messages (issue #896).
   test("concurrent posts and messages with one attachment store it once", () =>

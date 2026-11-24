@@ -351,6 +351,13 @@
       "when": 1795536952081,
       "tag": "0049_direct_chat_pair",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795537034840,
+      "tag": "0050_timestamptz",
+      "breakpoints": true
     }
   ]
 }
