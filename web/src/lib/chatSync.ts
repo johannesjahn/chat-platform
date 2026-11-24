@@ -1,7 +1,9 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { components } from "./api-types";
 import type { Chat, ChatMessage, ChatMessagesPage } from "./chats";
+import { countsTowardUnread, hasLapsedMute } from "./chatMute";
 import {
+  archivedChatsListQueryKey,
   chatDetailQueryKey,
   chatMessagesQueryKey,
   chatsListQueryKey,
@@ -210,6 +212,7 @@ function countUnread(queryClient: QueryClient, chatId: number): boolean {
     chatsUnreadCountQueryKey,
   );
   if (!total?.data || total.fetchStatus === "fetching") return false;
+  if (hasLapsedMute(listed)) return false;
 
   const bump = (chat: Chat): Chat => ({
     ...chat,
@@ -219,6 +222,8 @@ function countUnread(queryClient: QueryClient, chatId: number): boolean {
   queryClient.setQueryData<Chat>(chatDetailQueryKey(chatId), (chat) =>
     chat ? bump(chat) : chat,
   );
+  // A muted chat's count is its own (issue #900).
+  if (!countsTowardUnread(listed)) return true;
   queryClient.setQueryData<UnreadChatCount>(chatsUnreadCountQueryKey, {
     count: total.data.count + 1,
     chats: total.data.chats + (listed.unreadCount === 0 ? 1 : 0),
@@ -318,7 +323,9 @@ function patchListedChat(
   queryClient.setQueriesData<unknown>(
     { queryKey: chatsListQueryKey },
     (data: unknown) => {
-      if (!isChatsList(data)) return data;
+      // The unread total shares the prefix: `undefined` leaves it untouched,
+      // where writing it back would clear a pending invalidation.
+      if (!isChatsList(data)) return undefined;
       let changed = false;
       const pages = data.pages.map((page) => {
         const chats = page.chats.map((chat) => {
@@ -367,7 +374,7 @@ export function patchReadReceipt(
 
 // Puts `chat` into every cached chat list. A chat whose `updatedAt` moved
 // (a new message) goes back to where the server would list it — the lists
-// are ordered newest activity first — and otherwise stays where it is.
+// are ordered pinned first, then newest activity first — and otherwise stays where it is.
 // One the full list hasn't loaded is left for that list's next refetch,
 // unless it now sorts into the loaded range, where it's refetched now.
 function upsertListedChat(queryClient: QueryClient, chat: Chat): void {
@@ -378,8 +385,19 @@ function upsertListedChat(queryClient: QueryClient, chat: Chat): void {
     patchListedChat(queryClient, chat.id, () => chat);
     return;
   }
-  const sortsBefore = (a: Chat, b: Chat) =>
-    a.updatedAt > b.updatedAt || (a.updatedAt === b.updatedAt && a.id > b.id);
+  // An archived chat (issue #900) isn't in the main list either, and leaves
+  // the archived one once a message brings it back.
+  if (chat.archived) {
+    patchListedChat(queryClient, chat.id, () => chat);
+    return;
+  }
+  dropArchivedChat(queryClient, chat.id);
+  const sortsBefore = (a: Chat, b: Chat) => {
+    if (!!a.pinned !== !!b.pinned) return !!a.pinned;
+    return (
+      a.updatedAt > b.updatedAt || (a.updatedAt === b.updatedAt && a.id > b.id)
+    );
+  };
   let missing = false;
   queryClient.setQueryData<InfiniteData<ChatsPage>>(
     chatsListQueryKey,
@@ -397,6 +415,22 @@ function upsertListedChat(queryClient: QueryClient, chat: Chat): void {
     });
 }
 
+function dropArchivedChat(queryClient: QueryClient, chatId: number): void {
+  queryClient.setQueryData<InfiniteData<ChatsPage>>(
+    archivedChatsListQueryKey,
+    (data) =>
+      data?.pages.some((page) => page.chats.some((c) => c.id === chatId))
+        ? {
+            ...data,
+            pages: data.pages.map((page) => ({
+              ...page,
+              chats: page.chats.filter((c) => c.id !== chatId),
+            })),
+          }
+        : data,
+  );
+}
+
 function placeChat(
   data: InfiniteData<ChatsPage>,
   chat: Chat,
@@ -405,7 +439,11 @@ function placeChat(
 ): InfiniteData<ChatsPage> {
   const listed = data.pages.flatMap((page) => page.chats);
   const existing = listed.find((c) => c.id === chat.id);
-  if (existing && existing.updatedAt === chat.updatedAt) {
+  if (
+    existing &&
+    existing.updatedAt === chat.updatedAt &&
+    !!existing.pinned === !!chat.pinned
+  ) {
     return {
       ...data,
       pages: data.pages.map((page) => ({
@@ -448,11 +486,11 @@ function placeChat(
 export function applyMarkedRead(queryClient: QueryClient, chat: Chat): void {
   const detailKey = chatDetailQueryKey(chat.id);
   const before =
-    queryClient.getQueryData<Chat>(detailKey)?.unreadCount ??
+    queryClient.getQueryData<Chat>(detailKey) ??
     queryClient
       .getQueryData<InfiniteData<ChatsPage>>(chatsListQueryKey)
       ?.pages.flatMap((page) => page.chats)
-      .find((c) => c.id === chat.id)?.unreadCount;
+      .find((c) => c.id === chat.id);
 
   recordChatVersion(chat.id, chat.version);
   const detailFetching =
@@ -474,13 +512,21 @@ export function applyMarkedRead(queryClient: QueryClient, chat: Chat): void {
     chatsUnreadCountQueryKey,
   );
   if (!total?.data) return;
-  if (before === undefined || total.fetchStatus === "fetching") {
+  if (
+    before === undefined ||
+    total.fetchStatus === "fetching" ||
+    // It came out of a mute or the archive (or went in) since the total was
+    // fetched, so the difference says nothing about it.
+    hasLapsedMute(before) ||
+    countsTowardUnread(before) !== countsTowardUnread(chat)
+  ) {
     void queryClient.invalidateQueries({ queryKey: chatsUnreadCountQueryKey });
     return;
   }
-  const read = before - chat.unreadCount;
+  if (!countsTowardUnread(chat)) return;
+  const read = before.unreadCount - chat.unreadCount;
   if (read === 0) return;
-  const clearedChat = before > 0 && chat.unreadCount === 0 ? 1 : 0;
+  const clearedChat = before.unreadCount > 0 && chat.unreadCount === 0 ? 1 : 0;
   queryClient.setQueryData<UnreadChatCount>(chatsUnreadCountQueryKey, {
     count: Math.max(0, total.data.count - read),
     chats: Math.max(0, total.data.chats - clearedChat),
@@ -534,6 +580,8 @@ function withNewestMessage(
     lastMessage: message,
     updatedAt: Math.max(chat.updatedAt, message.createdAt),
     version: Math.max(chat.version, version ?? chat.version),
+    // A new message un-archives it (issue #900).
+    archived: false,
   };
 }
 
@@ -557,6 +605,9 @@ function placeNewestMessage(
   }
   const base = listedIn(queryClient, chatsListQueryKey, chatId) ?? detail;
   if (!base) return false;
+  // Back from the archive, everything unread in it counts again.
+  if (base.archived)
+    void queryClient.invalidateQueries({ queryKey: chatsUnreadCountQueryKey });
   upsertListedChat(queryClient, withNewestMessage(base, message, version));
   return true;
 }

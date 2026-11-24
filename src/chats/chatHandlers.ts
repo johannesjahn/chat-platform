@@ -17,28 +17,57 @@ import {
   publishChatChange,
 } from "./chatState.ts";
 import { getLastMessagesForChats } from "./messageViews.ts";
+import {
+  isArchived,
+  isPinned,
+  toChatPreferences,
+  unpinnedOnly,
+} from "./preferences.ts";
 import { getUnreadCountsForChats, hasUnreadFor } from "./unread.ts";
 import { dbQuery } from "../Db.ts";
 import { storeAvatarUpload } from "../avatarUpload.ts";
 
-// Keyset cursor for `listChats` over its `updated_at desc, id desc` sort —
+// Keyset cursor for `listChats` over its `pinned desc, updated_at desc,
+// id desc` sort —
 // see `ChatsPageQuery` in Api.ts for why this is a cursor rather than an
-// offset. Encodes the last row of a page as `<updatedAtMs>:<id>`,
+// offset. Encodes the last row of a page as `<updatedAtMs>:<id>`, with a
+// trailing `:p` if it's pinned (so an unpinned row's cursor stays one that
+// replicas predating pinning understand),
 // base64url'd (same encoding `Jwt.ts` uses for its segments) so it survives
 // round-tripping through a URL query value.
-const encodeChatsCursor = (row: { updatedAt: Date; id: number }): string =>
-  Buffer.from(`${row.updatedAt.getTime()}:${row.id}`).toString("base64url");
+interface ChatsCursor {
+  readonly updatedAt: Date;
+  readonly id: number;
+  readonly pinned: boolean;
+}
 
-const decodeChatsCursor = (
-  cursor: string,
-): { updatedAt: Date; id: number } | null => {
-  const decoded = Buffer.from(cursor, "base64url").toString();
-  const separator = decoded.indexOf(":");
-  if (separator === -1) return null;
-  const updatedAtMs = Number(decoded.slice(0, separator));
-  const id = Number(decoded.slice(separator + 1));
-  if (!Number.isInteger(updatedAtMs) || !Number.isInteger(id)) return null;
-  return { updatedAt: new Date(updatedAtMs), id };
+const encodeChatsCursor = (row: ChatsCursor): string =>
+  Buffer.from(
+    `${row.updatedAt.getTime()}:${row.id}${row.pinned ? ":p" : ""}`,
+  ).toString("base64url");
+
+const decodeChatsCursor = (cursor: string): ChatsCursor | null => {
+  const match = /^(\d+):(\d+)(:p)?$/.exec(
+    Buffer.from(cursor, "base64url").toString(),
+  );
+  if (!match) return null;
+  return {
+    updatedAt: new Date(Number(match[1])),
+    id: Number(match[2]),
+    pinned: match[3] !== undefined,
+  };
+};
+
+// Rows that sort after the cursor's: less recent ones, and, after a pinned
+// row, every unpinned one too.
+const listedAfter = (after: ChatsCursor) => {
+  const lessRecent = or(
+    lt(chats.updatedAt, after.updatedAt),
+    and(eq(chats.updatedAt, after.updatedAt), lt(chats.id, after.id)),
+  );
+  return after.pinned
+    ? or(unpinnedOnly, lessRecent)
+    : and(unpinnedOnly, lessRecent);
 };
 
 export const chatHandlers = ({
@@ -53,7 +82,7 @@ export const chatHandlers = ({
         const currentUser = yield* CurrentUser;
         const limit = urlParams.limit ?? DEFAULT_CHATS_LIMIT;
 
-        let after: { updatedAt: Date; id: number } | null = null;
+        let after: ChatsCursor | null = null;
         if (urlParams.cursor !== undefined) {
           after = decodeChatsCursor(urlParams.cursor);
           if (!after)
@@ -79,6 +108,9 @@ export const chatHandlers = ({
               avatarLargeKey: chats.avatarLargeKey,
               requestPending: chatParticipants.requestPending,
               addedBy: chatParticipants.addedBy,
+              mutedUntil: chatParticipants.mutedUntil,
+              archivedAt: chatParticipants.archivedAt,
+              pinnedAt: chatParticipants.pinnedAt,
             })
             .from(chats)
             .innerJoin(
@@ -95,28 +127,27 @@ export const chatHandlers = ({
                   chatParticipants.requestPending,
                   urlParams.requests === "true",
                 ),
-                after
-                  ? or(
-                      lt(chats.updatedAt, after.updatedAt),
-                      and(
-                        eq(chats.updatedAt, after.updatedAt),
-                        lt(chats.id, after.id),
-                      ),
-                    )
-                  : undefined,
+                // So are archived chats (issue #900).
+                eq(isArchived, urlParams.archived === "true"),
+                after ? listedAfter(after) : undefined,
                 urlParams.unread === "true"
                   ? hasUnreadFor(currentUser.id)
                   : undefined,
               ),
             )
-            .orderBy(desc(chats.updatedAt), desc(chats.id))
+            .orderBy(desc(isPinned), desc(chats.updatedAt), desc(chats.id))
             .limit(limit + 1),
         );
         const hasMore = fetched.length > limit;
         const rows = fetched.slice(0, limit);
         const lastRow = rows[rows.length - 1];
         const nextCursor =
-          hasMore && lastRow ? encodeChatsCursor(lastRow) : null;
+          hasMore && lastRow
+            ? encodeChatsCursor({
+                ...lastRow,
+                pinned: lastRow.pinnedAt !== null,
+              })
+            : null;
 
         const chatIds = rows.map((row) => row.id);
         const [participantsByChat, lastMessageByChat, unreadByChat] =
@@ -140,6 +171,7 @@ export const chatHandlers = ({
             unreadCount: unreadByChat.get(row.id) ?? 0,
             avatarVariants: toAvatarVariants(row),
             messageRequest: toMessageRequest(row),
+            ...toChatPreferences(row, row.updatedAt),
           })),
           limit,
           nextCursor,

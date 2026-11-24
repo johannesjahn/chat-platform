@@ -7,12 +7,14 @@ import {
 } from "react";
 import { Link } from "@tanstack/react-router";
 import {
+  Archive,
   ChevronRight,
   Inbox,
   Link2,
   Loader2,
   MessagesSquare,
   PlusCircle,
+  type LucideIcon,
 } from "lucide-react";
 import { ChatListItem, ChatListItemSkeleton } from "@/components/ChatListItem";
 import { EmptyState } from "@/components/EmptyState";
@@ -76,13 +78,50 @@ function useFrozenOrder(chats: Chat[]) {
  */
 function MessageRequestsEntry({ pane }: { pane: boolean }) {
   const { data } = useChatsList(true, { requestsOnly: true });
-  const count =
-    data?.pages.reduce((sum, page) => sum + page.chats.length, 0) ?? 0;
-  if (!data || count === 0) return null;
-  const more = data.pages[data.pages.length - 1]?.nextCursor != null;
+  return (
+    <ListEntry
+      to="/chats/requests"
+      icon={Inbox}
+      label="Message requests"
+      pages={data?.pages}
+      pane={pane}
+    />
+  );
+}
+
+/** The way into the archived chats (issue #900), while there are some. */
+function ArchivedEntry({ pane }: { pane: boolean }) {
+  const { data } = useChatsList(true, { archivedOnly: true });
+  return (
+    <ListEntry
+      to="/chats/archived"
+      icon={Archive}
+      label="Archived"
+      pages={data?.pages}
+      pane={pane}
+    />
+  );
+}
+
+function ListEntry({
+  to,
+  icon: Icon,
+  label,
+  pages,
+  pane,
+}: {
+  to: "/chats/requests" | "/chats/archived";
+  icon: LucideIcon;
+  label: string;
+  pages: { chats: Chat[]; nextCursor: string | null }[] | undefined;
+  pane: boolean;
+}) {
+  const count = pages?.reduce((sum, page) => sum + page.chats.length, 0) ?? 0;
+  if (!pages || count === 0) return null;
+  const more = pages[pages.length - 1]?.nextCursor != null;
   return (
     <Link
-      to="/chats/requests"
+      to={to}
       className={cn(
         "flex w-full items-center gap-3 text-sm transition-colors hover:bg-muted/60",
         pane
@@ -90,8 +129,8 @@ function MessageRequestsEntry({ pane }: { pane: boolean }) {
           : "rounded-lg border border-border bg-background/40 px-3 py-3",
       )}
     >
-      <Inbox className="size-4 shrink-0 text-muted-foreground" />
-      <span className="font-medium">Message requests</span>
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="font-medium">{label}</span>
       <span className="ml-auto text-muted-foreground">
         {count}
         {more ? "+" : ""}
@@ -116,6 +155,7 @@ export function ChatList({
   filter,
   scrollRoot,
   requests = false,
+  archived = false,
 }: {
   session: Session;
   variant?: "page" | "pane";
@@ -126,9 +166,12 @@ export function ChatList({
   scrollRoot?: RefObject<HTMLElement | null>;
   // The message requests list (issue #785) instead of the chats.
   requests?: boolean;
+  // Or the archived chats (issue #900).
+  archived?: boolean;
 }) {
   const isOnline = useOnlineStatus();
-  const unreadOnly = !requests && filter?.show === "unread";
+  const main = !requests && !archived;
+  const unreadOnly = main && filter?.show === "unread";
   const {
     data,
     isLoading,
@@ -136,7 +179,11 @@ export function ChatList({
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useChatsList(true, { unreadOnly, requestsOnly: requests });
+  } = useChatsList(true, {
+    unreadOnly,
+    requestsOnly: requests,
+    archivedOnly: archived,
+  });
   const chats = data?.pages.flatMap((page) => page.chats) ?? [];
   const { ordered, freeze, release } = useFrozenOrder(chats);
   const pane = variant === "pane";
@@ -198,6 +245,14 @@ export function ChatList({
         description="When someone you haven't chatted with adds you to a group, it waits here until you accept it."
       />
     );
+  } else if (chats.length === 0 && archived) {
+    body = (
+      <EmptyState
+        icon={Archive}
+        title="No archived chats"
+        description="Archive a chat from its details to keep it out of your list until the next message."
+      />
+    );
   } else if (chats.length === 0 && !unreadOnly) {
     // An empty Unread list isn't "no conversations" — it's handled below.
     body = (
@@ -253,7 +308,8 @@ export function ChatList({
 
   return (
     <>
-      {!requests && <MessageRequestsEntry pane={pane} />}
+      {main && <MessageRequestsEntry pane={pane} />}
+      {main && <ArchivedEntry pane={pane} />}
       {body}
       <div
         ref={sentinelRef}

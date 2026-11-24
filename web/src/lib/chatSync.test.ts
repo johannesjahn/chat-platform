@@ -4,6 +4,7 @@ import { type InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { components } from "./api-types";
 import type { Chat, ChatMessage, ChatMessagesPage } from "./chats";
 import {
+  archivedChatsListQueryKey,
   chatDetailQueryKey,
   chatMessagesQueryKey,
   chatRequestsListQueryKey,
@@ -428,6 +429,11 @@ const newMessageWithBody = (
   return { ...event, message: message(event.messageId, chatId, senderId) };
 };
 
+const listOf = (chats: Chat[]): InfiniteData<ChatsPage> => ({
+  pages: [{ chats, limit: 20, nextCursor: null }],
+  pageParams: [undefined],
+});
+
 test("a message the event carries becomes the listed chat's preview and moves it to the top, with no list refetch", () => {
   const chatId = nextChatId++;
   const other = chatOf(nextChatId++, { updatedAt: 5000 });
@@ -522,10 +528,6 @@ test("our own message from another device, carried, becomes the preview without 
 test("a carried message leaves the requests list alone, and an Unread list that already has the chat", () => {
   const chatId = nextChatId++;
   const client = seed(chatId);
-  const listOf = (chats: Chat[]): InfiniteData<ChatsPage> => ({
-    pages: [{ chats, limit: 20, nextCursor: null }],
-    pageParams: [undefined],
-  });
   const unreadChat = chatOf(chatId, { unreadCount: 1 });
   client.setQueryData(unreadChatsListQueryKey, listOf([unreadChat]));
   client.setQueryData(chatRequestsListQueryKey, listOf([]));
@@ -544,4 +546,113 @@ test("a carried message leaves the requests list alone, and an Unread list that 
     unreadChatsListQueryKey,
   )!;
   expect(unread.pages[0]!.chats[0]!.lastMessage).toEqual(event.message);
+});
+
+// Mute, archive and pin (issue #900).
+function setChat(
+  client: QueryClient,
+  chatId: number,
+  overrides: Partial<Chat>,
+): void {
+  const update = (chat: Chat): Chat => ({ ...chat, ...overrides });
+  client.setQueryData<Chat>(chatDetailQueryKey(chatId), (c) => c && update(c));
+  client.setQueryData<InfiniteData<ChatsPage>>(
+    chatsListQueryKey,
+    (data) =>
+      data && {
+        ...data,
+        pages: data.pages.map((page) => ({
+          ...page,
+          chats: page.chats.map((c) => (c.id === chatId ? update(c) : c)),
+        })),
+      },
+  );
+}
+
+test("a message in a muted chat counts in the chat but not the total", () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  setChat(client, chatId, { mutedUntil: Date.now() + 60_000 });
+  applyChatUpdated(client, newMessage(chatId, 2), ME);
+
+  expect(listedChat(client, chatId)?.unreadCount).toBe(1);
+  expect(client.getQueryData(chatsUnreadCountQueryKey)).toEqual({
+    count: 4,
+    chats: 2,
+  });
+  expect(client.getQueryState(chatsUnreadCountQueryKey)?.isInvalidated).toBe(
+    false,
+  );
+
+  // Reading it takes nothing off the total either.
+  const detail = client.getQueryData<Chat>(chatDetailQueryKey(chatId))!;
+  applyMarkedRead(client, { ...detail, unreadCount: 0, version: 3 });
+  expect(client.getQueryData(chatsUnreadCountQueryKey)).toEqual({
+    count: 4,
+    chats: 2,
+  });
+});
+
+test("once a mute has run out, the total is refetched rather than patched", () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  setChat(client, chatId, { mutedUntil: Date.now() - 1 });
+  applyChatUpdated(client, newMessage(chatId, 2), ME);
+  expect(client.getQueryState(chatsUnreadCountQueryKey)?.isInvalidated).toBe(
+    true,
+  );
+});
+
+test("a message brings an archived chat back to the main list", () => {
+  const chatId = nextChatId++;
+  const archivedId = nextChatId++;
+  const client = seed(chatId);
+  recordChatVersion(archivedId, 1);
+  client.setQueryData<InfiniteData<ChatsPage>>(
+    archivedChatsListQueryKey,
+    listOf([chatOf(archivedId, { archived: true, unreadCount: 2 })]),
+  );
+  applyChatUpdated(client, newMessageWithBody(archivedId, 2), ME);
+
+  const inList = (key: readonly unknown[]) =>
+    client
+      .getQueryData<InfiniteData<ChatsPage>>(key)!
+      .pages.flatMap((page) => page.chats)
+      .find((c) => c.id === archivedId);
+  expect(inList(archivedChatsListQueryKey)).toBeUndefined();
+  expect(inList(chatsListQueryKey)?.archived).toBe(false);
+  expect(client.getQueryState(chatsUnreadCountQueryKey)?.isInvalidated).toBe(
+    true,
+  );
+});
+
+test("reading an archived chat leaves it out of the main list", () => {
+  const chatId = nextChatId++;
+  const archivedId = nextChatId++;
+  const client = seed(chatId);
+  applyMarkedRead(
+    client,
+    chatOf(archivedId, { archived: true, updatedAt: 9_000_000 }),
+  );
+  expect(listedChat(client, archivedId)).toBeUndefined();
+});
+
+test("a new message doesn't move a chat above a pinned one", () => {
+  const chatId = nextChatId++;
+  const pinnedId = nextChatId++;
+  const client = seed(chatId);
+  client.setQueryData<InfiniteData<ChatsPage>>(
+    chatsListQueryKey,
+    listOf([
+      chatOf(pinnedId, { pinned: true, updatedAt: 1 }),
+      chatOf(nextChatId++, { updatedAt: 4000 }),
+      chatOf(chatId, { updatedAt: 3000 }),
+    ]),
+  );
+  applyChatUpdated(client, newMessageWithBody(chatId, 2), ME);
+  const ids = client
+    .getQueryData<InfiniteData<ChatsPage>>(chatsListQueryKey)!
+    .pages.flatMap((page) => page.chats)
+    .map((c) => c.id);
+  expect(ids.slice(0, 2)).toEqual([pinnedId, chatId]);
 });

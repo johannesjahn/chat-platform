@@ -309,6 +309,13 @@
       "when": 1795400857875,
       "tag": "0043_revoke_orphaned_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795491886650,
+      "tag": "0044_chat_preferences",
+      "breakpoints": true
     }
   ]
 }

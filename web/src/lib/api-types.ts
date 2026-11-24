@@ -516,6 +516,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chats/{id}/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["chats.updateChatPreferences"];
+        trace?: never;
+    };
     "/chats/{id}/leave": {
         parameters: {
             query?: never;
@@ -1757,6 +1773,9 @@ export interface components {
             unreadCount: number;
             avatarVariants: components["schemas"]["AvatarVariants"] | null;
             messageRequest: components["schemas"]["MessageRequest"] | null;
+            mutedUntil: number | null;
+            archived: boolean;
+            pinned: boolean;
         };
         MessageRequest: {
             addedBy: number | null;
@@ -1894,6 +1913,13 @@ export interface components {
         TransferOwnershipBody: {
             userId: number;
         };
+        UpdateChatPreferencesBody: {
+            mute?: components["schemas"]["ChatMuteDuration"] | null;
+            archived?: boolean | null;
+            pinned?: boolean | null;
+        };
+        /** @enum {string} */
+        ChatMuteDuration: "8h" | "1w" | "always";
         AddParticipantsBody: {
             participantIds: number[];
         };
@@ -3980,6 +4006,7 @@ export interface operations {
                 limit?: string;
                 unread?: "true" | "false";
                 requests?: "true" | "false";
+                archived?: "true" | "false";
             };
             header?: never;
             path?: never;
@@ -4616,6 +4643,68 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Chat */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Chat"];
+                };
+            };
+            /** @description HttpApiDecodeError */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFoundEncoded"];
+                };
+            };
+        };
+    };
+    "chats.updateChatPreferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateChatPreferencesBody"];
+            };
+        };
         responses: {
             /** @description Chat */
             200: {

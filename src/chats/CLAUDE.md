@@ -49,6 +49,22 @@ accepted with `POST /chats/:id/accept`, declined with `/leave`.
 - Client: `MessageRequestBar` replaces the composer; "Decline and block"
   blocks `messageRequest.addedBy`.
 
+## Mute, archive, pin
+
+`PATCH /chats/:id/preferences` (issue #900, `preferenceHandlers.ts`) sets the
+caller's own `muted_until`/`archived_at`/`pinned_at` on `chat_participants`
+(`0044`); every rule about them is in `preferences.ts`.
+
+- **Archived is derived**: `archived_at > chats.updated_at`, so a new message
+  un-archives without the send path writing participant rows. Only a message
+  may move `chats.updated_at`.
+- **Muted and archived chats leave `/chats/unread-count`** but keep their own
+  `unreadCount`; the client mirrors that with `countsTowardUnread`
+  (`web/src/lib/chatMute.ts`) wherever it patches the total.
+- **Pinned sorts first**, so it's part of the `listChats` cursor and of
+  `upsertListedChat`'s order in `chatSync.ts`.
+- Told only to the caller, as `chat_preferences_changed`; never a version bump.
+
 ## Forwarding
 
 `POST /chats/:id/messages/:messageId/forward` (issue #601, `forwardMessage`

@@ -427,6 +427,14 @@ export const chatParticipants = pgTable(
     addedBy: integer("added_by").references(() => users.id, {
       onDelete: "set null",
     }),
+    // This participant's own settings for the chat (issue #900), private to
+    // them; see chats/preferences.ts. Null for all three is the default:
+    // not muted, not archived, not pinned. `mutedUntil` in the past reads as
+    // not muted, and `archivedAt` as archived only while it's after
+    // `chats.updatedAt`, so a new message un-archives without a write here.
+    mutedUntil: timestamp("muted_until", { mode: "date" }),
+    archivedAt: timestamp("archived_at", { mode: "date" }),
+    pinnedAt: timestamp("pinned_at", { mode: "date" }),
   },
   (table) => [
     unique().on(table.chatId, table.userId),

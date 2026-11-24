@@ -82,6 +82,13 @@ export type ChatDeletedEvent = {
   readonly chatId: number;
 };
 
+// Pushed to a user's own sockets when they mute, archive or pin a chat (issue
+// #900), so their other tabs and devices refetch it. Nobody else is told.
+export type ChatPreferencesEvent = {
+  readonly type: "chat_preferences_changed";
+  readonly chatId: number;
+};
+
 // Pushed to every connected user whenever a post is created, edited, or
 // deleted — the feed has no notion of "participants", so unlike chat events
 // this goes out to everyone, not a filtered subset.
@@ -319,6 +326,7 @@ export type NotificationsEvent = {
 export type RealtimeEvent =
   | ChatEvent
   | ChatDeletedEvent
+  | ChatPreferencesEvent
   | PostEvent
   | FeedHeadEvent
   | PostReactionsEvent

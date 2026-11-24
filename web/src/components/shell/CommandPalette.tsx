@@ -28,6 +28,7 @@ import { Avatar } from "@/components/Avatar";
 import { SearchHighlight } from "@/components/SearchHighlight";
 import { MIN_USER_SEARCH_QUERY_LENGTH } from "@/lib/api";
 import { useSession } from "@/lib/auth";
+import { unreadBadgeTone } from "@/lib/chatMute";
 import { chatDisplayName, useChatsList, type Chat } from "@/lib/chats";
 import { filterContacts, useContacts } from "@/lib/contacts";
 import { isImeComposing } from "@/lib/ime";
@@ -162,7 +163,12 @@ function PaletteBody() {
       text: chatDisplayName(chat, me),
       hint:
         chat.unreadCount > 0 ? (
-          <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
+          <span
+            className={cn(
+              "rounded-full px-1.5 text-[10px] font-semibold",
+              unreadBadgeTone(chat),
+            )}
+          >
             {chat.unreadCount}
           </span>
         ) : undefined,

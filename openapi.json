@@ -2638,6 +2638,18 @@
               ]
             },
             "required": false
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false
           }
         ],
         "security": [
@@ -3606,6 +3618,92 @@
               }
             }
           }
+        }
+      }
+    },
+    "/chats/{id}/preferences": {
+      "patch": {
+        "tags": [
+          "chats"
+        ],
+        "operationId": "chats.updateChatPreferences",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[Ee][+-]?\\d+)?$"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Chat",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Chat"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "HttpApiDecodeError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HttpApiDecodeErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedEncoded"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenEncoded"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFound",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundEncoded"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateChatPreferencesBody"
+              }
+            }
+          },
+          "required": true
         }
       }
     },
@@ -10467,6 +10565,22 @@
                 "type": "null"
               }
             ]
+          },
+          "mutedUntil": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -10481,7 +10595,10 @@
           "lastMessage",
           "unreadCount",
           "avatarVariants",
-          "messageRequest"
+          "messageRequest",
+          "mutedUntil",
+          "archived",
+          "pinned"
         ],
         "additionalProperties": false
       },
@@ -11273,6 +11390,53 @@
           "userId"
         ],
         "additionalProperties": false
+      },
+      "UpdateChatPreferencesBody": {
+        "type": "object",
+        "properties": {
+          "mute": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatMuteDuration"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pinned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChatMuteDuration": {
+        "type": "string",
+        "enum": [
+          "8h",
+          "1w",
+          "always"
+        ]
       },
       "AddParticipantsBody": {
         "type": "object",

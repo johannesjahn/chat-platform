@@ -10,7 +10,7 @@ import {
   lastMessagePreview,
   lastMessageSender,
   lastMessageText,
-  loadedUnreadCount,
+  takeNewlyUnread,
   parentPreviewText,
   unreadChatsListQueryKey,
   chatRequestsListQueryKey,
@@ -56,12 +56,26 @@ test("invalidating the chat list also invalidates the unread total and the Unrea
   }
 });
 
-test("loadedUnreadCount sums the unread counts of the loaded pages", () => {
-  const chat = (unreadCount: number) => ({ unreadCount }) as Chat;
-  expect(loadedUnreadCount([])).toBe(0);
-  expect(
-    loadedUnreadCount([{ chats: [chat(2), chat(0)] }, { chats: [chat(1)] }]),
-  ).toBe(3);
+test("takeNewlyUnread picks chats whose own count rose, newest first", () => {
+  const chat = (
+    id: number,
+    unreadCount: number,
+    overrides: Partial<Chat> = {},
+  ) => ({ id, unreadCount, updatedAt: id, ...overrides }) as Chat;
+  const ids = (chats: Chat[]) => chats.map((c) => c.id);
+  const seen = new Map<number, number>();
+  takeNewlyUnread(seen, [chat(1, 2), chat(2, 0)]);
+
+  expect(ids(takeNewlyUnread(seen, [chat(1, 2), chat(2, 0)]))).toEqual([]);
+  expect(ids(takeNewlyUnread(seen, [chat(1, 3), chat(2, 1)]))).toEqual([2, 1]);
+  // Muted: not while muted, and not for the backlog once it's over (#900).
+  const mutedUntil = Date.now() + 60_000;
+  expect(takeNewlyUnread(seen, [chat(1, 4, { mutedUntil })])).toEqual([]);
+  expect(takeNewlyUnread(seen, [chat(1, 4)])).toEqual([]);
+  expect(ids(takeNewlyUnread(seen, [chat(1, 5)]))).toEqual([1]);
+  // Reading it starts over.
+  takeNewlyUnread(seen, [chat(1, 0)]);
+  expect(ids(takeNewlyUnread(seen, [chat(1, 1)]))).toEqual([1]);
 });
 
 // Issue #768: every chat list previews the last message with its sender —

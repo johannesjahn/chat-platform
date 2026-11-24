@@ -236,9 +236,40 @@ export const Chat = Schema.Struct({
   // `unreadCount` stays 0 and it adds nothing to `/chats/unread-count`.
   // Declining is just leaving (`POST /chats/:id/leave`).
   messageRequest: Schema.NullOr(MessageRequest),
+  // The viewer's own settings for this chat (issue #900), set with
+  // `PATCH /chats/:id/preferences` and never shown to anyone else.
+  //
+  // When the mute ends, null when not muted; `MUTED_FOREVER_MS` for one that
+  // doesn't. A muted chat keeps its own `unreadCount` but adds nothing to
+  // `/chats/unread-count`.
+  mutedUntil: Schema.NullOr(Schema.Finite),
+  // Listed by `GET /chats?archived=true` instead of the default list, and
+  // out of `/chats/unread-count`, until a new message arrives.
+  archived: Schema.Boolean,
+  // Listed ahead of every unpinned chat.
+  pinned: Schema.Boolean,
 }).annotate({ identifier: "Chat" });
 
 export type Chat = typeof Chat.Type;
+
+export const ChatMuteDuration = Schema.Literals([
+  "8h",
+  "1w",
+  "always",
+]).annotate({ identifier: "ChatMuteDuration" });
+
+export type ChatMuteDuration = typeof ChatMuteDuration.Type;
+
+// `Chat.mutedUntil` of a chat muted "always": the end of the year 9999.
+export const MUTED_FOREVER_MS = Date.UTC(9999, 11, 31);
+
+// Omitted fields keep their value. `mute: null` unmutes. Archiving unpins
+// and pinning un-archives; asking for both archives.
+export const UpdateChatPreferencesBody = Schema.Struct({
+  mute: Schema.optional(Schema.NullOr(ChatMuteDuration)),
+  archived: Schema.optional(Schema.Boolean),
+  pinned: Schema.optional(Schema.Boolean),
+}).annotate({ identifier: "UpdateChatPreferencesBody" });
 
 export const CreateDirectChatBody = Schema.Struct({
   userId: Schema.Finite,
@@ -522,6 +553,10 @@ export const MAX_CHATS_LIMIT = 100;
 //
 // `requests=true` (issue #785) lists the caller's pending message requests
 // instead — chats the default list leaves out until they're accepted.
+//
+// `archived=true` (issue #900) lists the caller's archived chats instead,
+// which every other list leaves out. Pinned chats come first in the sort
+// (`pinned desc, updated_at desc, id desc`).
 export const ChatsPageQuery = Schema.Struct({
   cursor: Schema.optional(Schema.String),
   limit: Schema.optional(
@@ -531,16 +566,18 @@ export const ChatsPageQuery = Schema.Struct({
   ),
   unread: Schema.optional(Schema.Literals(["true", "false"])),
   requests: Schema.optional(Schema.Literals(["true", "false"])),
+  archived: Schema.optional(Schema.Literals(["true", "false"])),
 });
 
 // The caller's unread total across every chat they're in (issue #756) —
 // what the Chats badge and the tab title show. Summed on the server because
 // the client only ever has some pages of the chat list loaded.
 export const UnreadChatCount = Schema.Struct({
-  // Unread messages over every chat: what each chat's `unreadCount` would
-  // add up to with the whole list loaded.
+  // Unread messages over every chat that's neither muted nor archived
+  // (issue #900): what those chats' `unreadCount`s would add up to with the
+  // whole list loaded.
   count: Schema.Finite,
-  // How many chats have at least one unread message.
+  // How many of those chats have at least one unread message.
   chats: Schema.Finite,
 }).annotate({ identifier: "UnreadChatCount" });
 
@@ -555,7 +592,8 @@ export const ChatsPage = Schema.Struct({
 
 export const ChatsGroup = HttpApiGroup.make("chats")
   .add(
-    // All chats the current user participates in, newest-activity-first,
+    // All chats the current user participates in, pinned ones first, then
+    // newest-activity-first,
     // each carrying its own unread count and last-message preview so the
     // chat list never needs a request per row. Cursor-paginated (see
     // `ChatsPageQuery`) rather than returning the full set.
@@ -672,6 +710,16 @@ export const ChatsGroup = HttpApiGroup.make("chats")
     // with its members from now on. A no-op for a chat that isn't a request.
     HttpApiEndpoint.post("acceptChatRequest", "/chats/:id/accept", {
       params: ChatIdPath,
+      success: Chat,
+      error: [NotFound, Forbidden],
+    }).middleware(Authentication),
+  )
+  .add(
+    // The caller's own mute/archive/pin for this chat (issue #900). Not for
+    // a pending message request, which is already out of the list and badge.
+    HttpApiEndpoint.patch("updateChatPreferences", "/chats/:id/preferences", {
+      params: ChatIdPath,
+      payload: UpdateChatPreferencesBody,
       success: Chat,
       error: [NotFound, Forbidden],
     }).middleware(Authentication),

@@ -8,6 +8,7 @@ import { UserStatusBadge } from "@/components/UserStatusBadge";
 import { Button } from "@/components/ui/button";
 import type { Session } from "@/lib/api";
 import { openDockedChat } from "@/lib/chatDock";
+import { unreadBadgeTone } from "@/lib/chatMute";
 import {
   chatDisplayName,
   lastMessagePreview,
@@ -219,7 +220,12 @@ function RecentChat({
         </span>
       </span>
       {chat.unreadCount > 0 && (
-        <span className="flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
+        <span
+          className={cn(
+            "flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[10px] font-semibold",
+            unreadBadgeTone(chat),
+          )}
+        >
           {chat.unreadCount > 99 ? "99+" : chat.unreadCount}
         </span>
       )}

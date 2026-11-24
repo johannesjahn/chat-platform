@@ -344,3 +344,28 @@ test("a change with no narrower meaning still goes out without one", () =>
       }
     }),
   ));
+
+test("muting, archiving or pinning a chat tells only the one who did it", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice");
+      const bob = yield* registerAndLogin("bob");
+      const chat = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const mark = published.length;
+      const updated = yield* alice.client.chats.updateChatPreferences({
+        params: { id: chat.id },
+        payload: { pinned: true },
+      });
+      expect(updated.version).toBe(chat.version);
+      expect(
+        published.slice(mark).map(({ userIds, event }) => ({ userIds, event })),
+      ).toEqual([
+        {
+          userIds: [alice.user.id],
+          event: { type: "chat_preferences_changed", chatId: chat.id },
+        },
+      ]);
+    }),
+  ));
