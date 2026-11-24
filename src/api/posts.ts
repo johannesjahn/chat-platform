@@ -2,7 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api";
 import { Schema } from "effect";
 import { Authentication } from "../Auth.ts";
 import { Attachment } from "./attachments.ts";
-import { AvatarVariants, IdParam, isAllowedImageUrl } from "./common.ts";
+import { AvatarVariants, IdParam } from "./common.ts";
 import {
   AttachmentInUse,
   Forbidden,
@@ -12,32 +12,12 @@ import {
   TooManyRequests,
 } from "./errors.ts";
 
-// Content types a post's body can hold. Extend this union (and the handler's
-// per-type validation, if any is ever needed) to support new post kinds.
-export const PostContentType = Schema.Literals([
-  "text",
-  "image_url",
-  "attachment",
-]).annotate({
-  identifier: "PostContentType",
-});
-
-export type PostContentType = typeof PostContentType.Type;
-
 // Generous but bounded — prevents unbounded payloads while comfortably
-// fitting a long-form text post or an image URL.
-const MAX_POST_CONTENT_LENGTH = 10_000;
+// fitting a long-form text post.
+const MAX_POST_BODY_LENGTH = 10_000;
 
-const PostContent = Schema.Trimmed.check(Schema.isNonEmpty()).check(
-  Schema.isMaxLength(MAX_POST_CONTENT_LENGTH),
-);
-
-// `content` is rendered directly as an `<img src>` (MessageBubble.tsx,
-// PostCard.tsx) when `contentType` is "image_url" — validated against the
-// same host allowlist as `avatarUrl` (see `ALLOWED_IMAGE_HOST_DOMAINS`
-// in api/common.ts), for the same reasons (issue #47).
-const IMAGE_URL_FILTER_MESSAGE =
-  "content must be an https:// URL from an allowed image-hosting domain";
+// May be empty beside an attachment, see `requireBodyOrAttachment`.
+const PostBody = Schema.Trimmed.check(Schema.isMaxLength(MAX_POST_BODY_LENGTH));
 
 // Who wrote a post or comment, embedded in `Post.author`/`Comment.author`
 // (issue #750) so a feed or a thread can label every row without a
@@ -54,16 +34,6 @@ export const AuthorSummary = Schema.Struct({
 }).annotate({ identifier: "AuthorSummary" });
 
 export type AuthorSummary = typeof AuthorSummary.Type;
-
-// Cross-field check shared by post/message create+update bodies: only
-// applies when `contentType` is "image_url" — text content is unaffected.
-export const requireAllowedImageUrl = (body: {
-  readonly contentType: string;
-  readonly content: string;
-}): string | undefined =>
-  body.contentType === "image_url" && !isAllowedImageUrl(body.content)
-    ? IMAGE_URL_FILTER_MESSAGE
-    : undefined;
 
 // The standard emoji reaction set (issue #215, widening the original binary
 // "like" from issue #67). A `Schema.Literal` rather than a plain string so
@@ -92,32 +62,14 @@ export const ReactionSummary = Schema.Struct({
 
 export type ReactionSummary = typeof ReactionSummary.Type;
 
-// Cross-field check shared by post/message create+update bodies:
-// `attachmentId` must be set exactly when `contentType` is "attachment" —
-// never alongside "text"/"image_url", and never missing for "attachment".
-export const requireAttachmentId = (body: {
-  readonly contentType: string;
+// Cross-field check shared by post/message create+update bodies: there has
+// to be something to show.
+export const requireBodyOrAttachment = (payload: {
+  readonly body: string;
   readonly attachmentId?: number | undefined;
-}): string | undefined => {
-  if (body.contentType === "attachment" && body.attachmentId === undefined)
-    return `attachmentId is required when contentType is "attachment"`;
-  if (body.contentType !== "attachment" && body.attachmentId !== undefined)
-    return `attachmentId may only be set when contentType is "attachment"`;
-  return undefined;
-};
-
-// Cross-field check shared by post/message create+update bodies: a `caption`
-// (issue #765) is the text sent alongside an attachment, so it may only be set
-// when `contentType` is "attachment". (On update, `null` — "clear it" — is
-// always fine.)
-export const requireCaptionOnlyWithAttachment = (body: {
-  readonly contentType: string;
-  readonly caption?: string | null | undefined;
 }): string | undefined =>
-  body.contentType !== "attachment" &&
-  body.caption !== undefined &&
-  body.caption !== null
-    ? `caption may only be set when contentType is "attachment"`
+  payload.body === "" && payload.attachmentId === undefined
+    ? "body may only be empty when there is an attachment"
     : undefined;
 
 export const Post = Schema.Struct({
@@ -125,17 +77,9 @@ export const Post = Schema.Struct({
   authorId: Schema.Finite,
   // Additive (issue #750): `authorId` stays, and always equals `author.id`.
   author: AuthorSummary,
-  contentType: PostContentType,
-  content: Schema.String,
-  // Set only when contentType is "attachment" — see `Attachment`
-  // (api/attachments.ts).
+  // Empty for an attachment posted without text.
+  body: Schema.String,
   attachment: Schema.NullOr(Attachment),
-  // The text posted alongside an attachment (issue #765), rendered like a
-  // text post's content (mentions and links). Null for every other content
-  // type and for an attachment posted without one. Additive: for an
-  // "attachment" post `content` still holds the filename, as it always has,
-  // so a client that predates this field renders the post exactly as before.
-  caption: Schema.NullOr(Schema.String),
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
   // Engagement computed on read (see EngagementHandler.ts / PostsHandler.ts)
@@ -154,43 +98,25 @@ export const Post = Schema.Struct({
 export type Post = typeof Post.Type;
 
 export const CreatePostBody = Schema.Struct({
-  contentType: PostContentType,
-  content: PostContent,
+  body: PostBody,
   // Id of a previously-uploaded attachment (`POST /attachments`) owned by
-  // the caller — required exactly when contentType is "attachment".
+  // the caller.
   attachmentId: Schema.optional(Schema.Finite),
-  // Text to post alongside the attachment (issue #765) — only allowed when
-  // contentType is "attachment" (`content` is still its filename). Omit it
-  // for an attachment without a caption.
-  caption: Schema.optional(PostContent),
   // Idempotency key (issue #657, mirroring `CreateMessageBody.clientId`): a
   // client-generated id, reused when a create is retried. If this author
   // already stored a post with the same key, that post is returned instead of
   // creating a duplicate.
   clientId: Schema.optional(Schema.String.check(Schema.isMaxLength(64))),
 })
-  .check(
-    Schema.makeFilter(requireAllowedImageUrl),
-    Schema.makeFilter(requireAttachmentId),
-    Schema.makeFilter(requireCaptionOnlyWithAttachment),
-  )
+  .check(Schema.makeFilter(requireBodyOrAttachment))
   .annotate({ identifier: "CreatePostBody" });
 
+// Replaces both: leaving `attachmentId` out removes the attachment.
 export const UpdatePostBody = Schema.Struct({
-  contentType: PostContentType,
-  content: PostContent,
+  body: PostBody,
   attachmentId: Schema.optional(Schema.Finite),
-  // The attachment's caption (issue #765): a string sets it, `null` clears
-  // it, and omitting it keeps the current one — so an edit from a client that
-  // predates captions never wipes one. An edit to any other content type
-  // drops it.
-  caption: Schema.optional(Schema.NullOr(PostContent)),
 })
-  .check(
-    Schema.makeFilter(requireAllowedImageUrl),
-    Schema.makeFilter(requireAttachmentId),
-    Schema.makeFilter(requireCaptionOnlyWithAttachment),
-  )
+  .check(Schema.makeFilter(requireBodyOrAttachment))
   .annotate({ identifier: "UpdatePostBody" });
 
 export const DEFAULT_POSTS_LIMIT = 20;

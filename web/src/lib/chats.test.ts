@@ -93,7 +93,7 @@ const withLast = (
       participant(2, "bob"),
       { ...participant(3, "carol"), displayName: "Carol" },
     ],
-    lastMessage: last && { contentType: "text", content: "hi", ...last },
+    lastMessage: last && { body: "hi", ...last },
   }) as Chat;
 
 test("the preview names your own last message as yours", () => {
@@ -122,39 +122,28 @@ test("non-text and missing last messages preview as a stand-in", () => {
     "No messages yet",
   );
   expect(lastMessageSender(withLast("direct", null), 1)).toBeUndefined();
-  expect(
-    lastMessagePreview(
-      withLast("group", { senderId: 2, contentType: "image_url" }),
-      1,
-    ),
-  ).toBe("@bob: Photo");
-  expect(
-    lastMessageText(withLast("direct", { contentType: "attachment" })),
-  ).toBe("Attachment");
+  expect(lastMessageText(withLast("direct", { body: "" }))).toBe("Attachment");
 });
 
-test("a captioned attachment previews as its caption (issue #765)", () => {
+test("an attachment with text previews as its text (issue #765)", () => {
   expect(
     lastMessagePreview(
       withLast("group", {
         senderId: 2,
-        contentType: "attachment",
-        content: "bread.png",
-        caption: "Look what I baked",
+        body: "Look what I baked",
       }),
       1,
     ),
   ).toBe("@bob: Look what I baked");
   expect(
-    parentPreviewText({
-      contentType: "attachment",
-      content: "bread.png",
-      caption: "Look what I baked",
-    }),
+    parentPreviewText({ body: "Look what I baked", hasAttachment: true }),
   ).toBe("📎 Look what I baked");
-  expect(
-    parentPreviewText({ contentType: "attachment", content: "bread.png" }),
-  ).toBe("📎 Attachment");
+  expect(parentPreviewText({ body: "", hasAttachment: true })).toBe(
+    "📎 Attachment",
+  );
+  expect(parentPreviewText({ body: "plain", hasAttachment: false })).toBe(
+    "plain",
+  );
 });
 
 // Issue #898: the chat list said "Jul 26" for a chat last active in a

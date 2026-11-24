@@ -24,7 +24,7 @@ test("a direct chat turns read-only, live, once the other account is deleted", a
   const chat = (await chatResponse.json()) as { id: number };
   const sent = await request.post(`${apiUrl}/chats/${chat.id}/messages`, {
     headers: auth,
-    data: { contentType: "text", content: "Goodbye for now" },
+    data: { body: "Goodbye for now" },
   });
   expect(sent.ok()).toBe(true);
 

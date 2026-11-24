@@ -64,7 +64,7 @@ test("deleteAccount removes the account, cascading to its posts, and prevents fu
       });
       const authed = yield* makeAuthedClient(accessToken);
       const post = yield* authed.posts.createPost({
-        payload: { contentType: "text", content: "hello world" },
+        payload: { body: "hello world" },
       });
 
       yield* authed.users.deleteAccount({
@@ -404,7 +404,7 @@ test("deleteUser removes the target, cascading to its posts, and invalidates its
       });
       const targetAuthed = yield* makeAuthedClient(targetSession.accessToken);
       const post = yield* targetAuthed.posts.createPost({
-        payload: { contentType: "text", content: "about to be deleted" },
+        payload: { body: "about to be deleted" },
       });
 
       const { accessToken: adminToken } = yield* c.users.login({

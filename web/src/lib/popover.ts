@@ -4,8 +4,7 @@ import { useTransitionState } from "./motion";
 
 /**
  * The open/close plumbing for a trigger-anchored popover (the desktop account
- * menu, the notifications panel): what ComposerAttachMenu does inline, made
- * reusable.
+ * menu, the notifications panel).
  *
  * - It remembers the location it was opened on rather than a bare boolean —
  *   the phone menu's trick in __root.tsx — so any navigation, including one

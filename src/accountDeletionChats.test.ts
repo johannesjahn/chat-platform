@@ -195,7 +195,7 @@ for (const endpoint of ENDPOINTS) {
         const send = yield* alice.client.chats
           .createMessage({
             params: { id: direct.id },
-            payload: { contentType: "text", content: "anyone there?" },
+            payload: { body: "anyone there?" },
           })
           .pipe(Effect.flip);
         expect(send._tag).toBe("Forbidden");
@@ -212,7 +212,7 @@ test("a forward into a direct chat with a deleted account is that target's unava
       const { eve, alice, group, direct } = yield* eveWithChats;
       const source = yield* alice.client.chats.createMessage({
         params: { id: group.id },
-        payload: { contentType: "text", content: "pass it on" },
+        payload: { body: "pass it on" },
       });
       yield* eve.client.users.deleteAccount({ payload: { password } });
 

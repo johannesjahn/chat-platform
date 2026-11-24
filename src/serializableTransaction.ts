@@ -2,7 +2,7 @@ import { Duration, Effect, Metric, Schedule } from "effect";
 import { type DrizzleDb, timedDbCall } from "./Db.ts";
 import { dbQueryErrorsTotal } from "./Metrics.ts";
 
-// A few handlers (createDirectChat, addParticipants, joinViaInvite) run a
+// A few handlers (addParticipants, joinChatViaInvite) run a
 // check-then-write in a `serializable` transaction so concurrent requests
 // can't both pass the check. Postgres enforces that by aborting one side with
 // a serialization failure (SQLSTATE 40001), and its docs are explicit that
@@ -10,11 +10,12 @@ import { dbQueryErrorsTotal } from "./Metrics.ts";
 // abort reached the client as a 500 — and not only for genuine races:
 // serializable isolation tracks reads by index page, not by row, so it also
 // aborts transactions touching *unrelated* rows. A load test creating direct
-// chats for 20 different pairs at once lost 14 of them that way.
+// chats (when those still worked this way) for 20 different pairs at once
+// lost 14 of them.
 //
 // A retry reruns the whole transaction from a fresh snapshot, so its checks
-// see whatever the winner committed — e.g. a losing createDirectChat for the
-// same pair now finds and returns the chat the other request created.
+// see whatever the winner committed — e.g. the second of two joins via one
+// invite now finds the membership the first one created.
 
 export type Transaction = Parameters<
   Parameters<DrizzleDb["transaction"]>[0]

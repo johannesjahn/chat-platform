@@ -4,7 +4,7 @@ import { OpenApi } from "effect/http-api";
 import {
   ChatApi,
   MAX_COMMENT_CONTENT_LENGTH,
-  MAX_MESSAGE_CONTENT_LENGTH,
+  MAX_MESSAGE_BODY_LENGTH,
   MAX_PASSWORD_LENGTH,
   MAX_SEARCH_QUERY_LENGTH,
   MAX_USERNAME_LENGTH,
@@ -125,9 +125,9 @@ test("openapi.json reports the length bounds Api.ts enforces", () => {
     minLength: 1,
     maxLength: MAX_COMMENT_CONTENT_LENGTH,
   });
-  expect(field("CreateMessageBody", "content")).toEqual({
-    minLength: 1,
-    maxLength: MAX_MESSAGE_CONTENT_LENGTH,
+  expect(field("CreateMessageBody", "body")).toEqual({
+    minLength: undefined,
+    maxLength: MAX_MESSAGE_BODY_LENGTH,
   });
 });
 

@@ -93,8 +93,7 @@ const seedActivity = Effect.gen(function* () {
       .insert(posts)
       .values({
         authorId: fresh!.id,
-        contentType: "text",
-        content: "hello",
+        body: "hello",
         createdAt: daysAgo(0.5),
         updatedAt: daysAgo(0.5),
       })
@@ -132,8 +131,7 @@ const seedActivity = Effect.gen(function* () {
     db.insert(messages).values({
       chatId: chat!.id,
       senderId: fresh!.id,
-      contentType: "text",
-      content: "hi",
+      body: "hi",
       createdAt: daysAgo(10),
       updatedAt: daysAgo(10),
     }),
@@ -281,6 +279,54 @@ test("getAdminStats returns a zero-filled daily timeline ending today", () =>
       expect(sum("comments")).toBe(1);
       expect(sum("messages")).toBe(0); // 10 days ago, outside a 7-day window
       expect(sum("signups")).toBe(3); // seed-fresh, seed-recent, the admin
+    }),
+  ));
+
+// Both ends of what a naive `timestamp` got wrong: a value the database
+// writes itself (`users.created_at` defaults to now()), and day buckets.
+// Kiritimati is UTC+14, so its day differs from UTC's for most of the day,
+// and 23:30 UTC is always its next one.
+test("a session in another time zone changes neither created_at nor the timeline's days", () =>
+  run(
+    Effect.gen(function* () {
+      const db = yield* Db;
+      yield* Effect.promise(() =>
+        db.execute("set time zone 'Pacific/Kiritimati'"),
+      );
+      yield* Effect.gen(function* () {
+        const before = Date.now();
+        const { accessToken, user } = yield* registerAdmin("root", "s3cret-pw");
+        const [row] = yield* Effect.promise(() =>
+          db
+            .select({ createdAt: users.createdAt })
+            .from(users)
+            .where(eq(users.id, user.id)),
+        );
+        const age = row!.createdAt!.getTime() - before;
+        expect(age).toBeGreaterThanOrEqual(-1000);
+        expect(age).toBeLessThan(60_000);
+
+        const day = daysAgo(2).toISOString().slice(0, 10);
+        const late = new Date(`${day}T23:30:00.000Z`);
+        yield* Effect.promise(() =>
+          db.insert(posts).values({
+            authorId: user.id,
+            body: "late",
+            createdAt: late,
+            updatedAt: late,
+          }),
+        );
+        const c = yield* makeAuthedClient(accessToken);
+        const { timeline } = yield* c.admin.getAdminStats({
+          query: { days: 7 },
+        });
+        expect(timeline.filter((p) => p.posts > 0).map((p) => p.date)).toEqual([
+          day,
+        ]);
+      }).pipe(
+        // The instance is shared with the rest of this file.
+        Effect.ensuring(Effect.promise(() => db.execute("reset time zone"))),
+      );
     }),
   ));
 

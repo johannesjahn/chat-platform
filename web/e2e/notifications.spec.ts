@@ -82,7 +82,7 @@ test("the inbox preview highlights a reply in its thread; ↑/↓ and Enter work
   // comment — two notifications for Alice, the reply newest.
   const post = await request.post(`${apiUrl}/posts`, {
     headers: as(alice),
-    data: { contentType: "text", content: "A post to talk about" },
+    data: { body: "A post to talk about" },
   });
   const { id: postId } = await post.json();
   const own = await request.post(`${apiUrl}/posts/${postId}/comments`, {
@@ -144,7 +144,7 @@ test("below xl a notification still navigates on click", async ({
   const bob = await createUser();
   const post = await request.post(`${apiUrl}/posts`, {
     headers: { Authorization: `Bearer ${bob.session.accessToken}` },
-    data: { contentType: "text", content: `Ping @${alice.username}` },
+    data: { body: `Ping @${alice.username}` },
   });
   const { id: postId } = await post.json();
 

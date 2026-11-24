@@ -112,7 +112,7 @@ test("forwardMessage posts a labelled copy, owned by the forwarder, into each ta
       });
       const original = yield* alice.client.chats.createMessage({
         params: { id: aliceBob.id },
-        payload: { contentType: "text", content: "hello @carol" },
+        payload: { body: "hello @carol" },
       });
 
       const { results } = yield* bob.client.chats.forwardMessage({
@@ -133,7 +133,7 @@ test("forwardMessage posts a labelled copy, owned by the forwarder, into each ta
         expect(copy.chatId).toBe(result.chatId);
         expect(copy.id).not.toBe(original.id);
         expect(copy.senderId).toBe(bob.user.id);
-        expect(copy.content).toBe("hello @carol");
+        expect(copy.body).toBe("hello @carol");
         expect(copy.forwardedFrom).toEqual({
           senderId: alice.user.id,
           senderName: "alice",
@@ -159,7 +159,7 @@ test("forwardMessage posts a labelled copy, owned by the forwarder, into each ta
       const copyId = results[0]!.message!.id;
       const edited = yield* bob.client.chats.updateMessage({
         params: { id: bobCarol.id, messageId: copyId },
-        payload: { contentType: "text", content: "edited copy" },
+        payload: { body: "edited copy" },
       });
       expect(edited.forwardedFrom?.senderName).toBe("alice");
       yield* bob.client.chats.deleteMessage({
@@ -183,7 +183,7 @@ test("forwardMessage 404s for a chat the caller isn't in, or a message from anot
       });
       const secret = yield* alice.client.chats.createMessage({
         params: { id: aliceBob.id },
-        payload: { contentType: "text", content: "between us" },
+        payload: { body: "between us" },
       });
 
       // Carol isn't in Alice<->Bob: 404, not 403.
@@ -256,7 +256,7 @@ test("forwardMessage fails only the targets the caller can't post into", () =>
 
       const message = yield* alice.client.chats.createMessage({
         params: { id: aliceBob.id },
-        payload: { contentType: "text", content: "news" },
+        payload: { body: "news" },
       });
       const { results } = yield* alice.client.chats.forwardMessage({
         params: { id: aliceBob.id, messageId: message.id },
@@ -277,8 +277,8 @@ test("forwardMessage fails only the targets the caller can't post into", () =>
       expect(byChat.get(leftGroup.id)?.error?.reason).toBe("unavailable");
       expect(byChat.get(99999)?.error?.reason).toBe("unavailable");
       // A mute never stops a send, forwarded or not.
-      expect(byChat.get(aliceDave.id)?.message?.content).toBe("news");
-      expect(byChat.get(aliceErin.id)?.message?.content).toBe("news");
+      expect(byChat.get(aliceDave.id)?.message?.body).toBe("news");
+      expect(byChat.get(aliceErin.id)?.message?.body).toBe("news");
 
       // Nothing was written into the chats that failed.
       const bobsGroup = yield* bob.client.chats.listMessages({
@@ -307,8 +307,7 @@ test("a forwarded attachment is a copy the forwarder owns, and outlives the orig
       const original = yield* alice.client.chats.createMessage({
         params: { id: aliceBob.id },
         payload: {
-          contentType: "attachment",
-          content: "photo.png",
+          body: "",
           attachmentId: upload.id,
         },
       });
@@ -318,7 +317,6 @@ test("a forwarded attachment is a copy the forwarder owns, and outlives the orig
         payload: { targetChatIds: [bobCarol.id] },
       });
       const copy = results[0]!.message!;
-      expect(copy.contentType).toBe("attachment");
       expect(copy.attachment).not.toBeNull();
       expect(copy.attachment!.id).not.toBe(upload.id);
       // Every bit of metadata carries over.
@@ -376,7 +374,7 @@ test("a forward is a snapshot: editing or deleting the original leaves it alone"
       });
       const original = yield* alice.client.chats.createMessage({
         params: { id: aliceBob.id },
-        payload: { contentType: "text", content: "first draft" },
+        payload: { body: "first draft" },
       });
       const { results } = yield* bob.client.chats.forwardMessage({
         params: { id: aliceBob.id, messageId: original.id },
@@ -389,13 +387,13 @@ test("a forward is a snapshot: editing or deleting the original leaves it alone"
       });
       yield* alice.client.chats.updateMessage({
         params: { id: aliceBob.id, messageId: original.id },
-        payload: { contentType: "text", content: "second draft" },
+        payload: { body: "second draft" },
       });
       let page = yield* carol.client.chats.listMessages({
         params: { id: bobCarol.id },
         query: {},
       });
-      expect(page.messages[0]!.content).toBe("first draft");
+      expect(page.messages[0]!.body).toBe("first draft");
       expect(page.messages[0]!.forwardedFrom?.senderName).toBe("alice");
 
       yield* alice.client.chats.deleteMessage({
@@ -406,7 +404,7 @@ test("a forward is a snapshot: editing or deleting the original leaves it alone"
         query: {},
       });
       expect(page.messages.map((m) => m.id)).toEqual([copy.id]);
-      expect(page.messages[0]!.content).toBe("first draft");
+      expect(page.messages[0]!.body).toBe("first draft");
     }),
   ));
 
@@ -429,13 +427,12 @@ test("forwarding a forward credits the original author, and a reply's quote isn'
       });
       const question = yield* bob.client.chats.createMessage({
         params: { id: aliceBob.id },
-        payload: { contentType: "text", content: "lunch?" },
+        payload: { body: "lunch?" },
       });
       const reply = yield* alice.client.chats.createMessage({
         params: { id: aliceBob.id },
         payload: {
-          contentType: "text",
-          content: "yes, noon",
+          body: "yes, noon",
           parentMessageId: question.id,
         },
       });
@@ -463,8 +460,7 @@ test("forwarding a forward credits the original author, and a reply's quote isn'
       const quoting = yield* dave.client.chats.createMessage({
         params: { id: carolDave.id },
         payload: {
-          contentType: "text",
-          content: "noted",
+          body: "noted",
           parentMessageId: twoHops.id,
         },
       });
@@ -491,7 +487,7 @@ test("replaying a forward's clientId creates no duplicates and fills in only the
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: aliceBob.id },
-        payload: { contentType: "text", content: "pass it on" },
+        payload: { body: "pass it on" },
       });
       const forward = {
         params: { id: aliceBob.id, messageId: message.id },
@@ -514,7 +510,7 @@ test("replaying a forward's clientId creates no duplicates and fills in only the
       expect(replay.results[0]!.message!.id).toBe(
         first.results[0]!.message!.id,
       );
-      expect(replay.results[1]!.message?.content).toBe("pass it on");
+      expect(replay.results[1]!.message?.body).toBe("pass it on");
 
       const again = yield* alice.client.chats.forwardMessage(forward);
       expect(again.results.map((r) => r.message?.id)).toEqual(
@@ -542,7 +538,7 @@ test("forwardMessage rejects an empty or oversized target list with a 400", () =
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi" },
+        payload: { body: "hi" },
       });
 
       const empty = yield* postForward(
@@ -570,7 +566,7 @@ test("forwardMessage rejects an empty or oversized target list with a 400", () =
     }),
   ));
 
-test("an image URL whose host is no longer allowed fails every target", () =>
+test("a message left empty by losing its attachment fails every target", () =>
   run(
     Effect.gen(function* () {
       const db = yield* Db;
@@ -583,16 +579,14 @@ test("an image URL whose host is no longer allowed fails every target", () =>
       const aliceCarol = yield* alice.client.chats.createDirectChat({
         payload: { userId: carol.user.id },
       });
-      // Stored before the allowlist changed — written directly, since the
-      // API would now refuse it.
+      // Written directly, as the `set null` on its attachment leaves it.
       const [stale] = yield* Effect.promise(() =>
         db
           .insert(messages)
           .values({
             chatId: aliceBob.id,
             senderId: alice.user.id,
-            contentType: "image_url",
-            content: "https://no-longer-allowed.example/cat.png",
+            body: "",
           })
           .returning(),
       );
@@ -620,7 +614,7 @@ test("forwarded text is searchable by the target chat's members only", () =>
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: aliceBob.id },
-        payload: { contentType: "text", content: "the zeppelin lands" },
+        payload: { body: "the zeppelin lands" },
       });
       yield* bob.client.chats.forwardMessage({
         params: { id: aliceBob.id, messageId: message.id },
@@ -655,8 +649,7 @@ test("a forwarded attachment counts toward the forwarder's quota, failing only t
       const original = yield* alice.client.chats.createMessage({
         params: { id: aliceBob.id },
         payload: {
-          contentType: "attachment",
-          content: "photo.png",
+          body: "",
           attachmentId: upload.id,
         },
       });

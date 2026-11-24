@@ -28,8 +28,8 @@ export const isMinLength = (minLength: number) =>
             : [{}, true],
   });
 
-// Hosting domains an image URL (avatar or post/message `image_url` content)
-// is allowed to point at (issue #47): rendered directly as an `<img src>`,
+// Hosting domains an external avatar URL is allowed to point at (issue
+// #47): rendered directly as an `<img src>`,
 // so without this an author could embed a `javascript:`/`data:` URL, track
 // viewers via an arbitrary third-party host, or serve mixed (non-https)
 // content. Matches the domain itself or any subdomain, e.g. "i.imgur.com"
@@ -71,13 +71,12 @@ export const isAllowedImageUrl = (value: string): boolean => {
   return url.protocol === "https:" && isAllowedImageHost(url.hostname);
 };
 
-// Self-contained `data:image/webp;base64,...` URLs for the 3 fixed sizes an
-// uploaded-and-cropped avatar is stored/served at (issue #269) — see
-// `processAvatar`/`AVATAR_VARIANT_PX` in ImageProcessing.ts for how they're
-// produced, and the comment on `users.avatarSmall` (db/schema.ts) for why
-// they're embedded directly rather than resolved via a presigned URL like
-// `Attachment.url`. Mutually exclusive with `avatarUrl` on `User`
-// (api/users.ts) — exactly one of the two is ever non-null.
+// URLs of the 3 fixed sizes an uploaded-and-cropped avatar is served at
+// (issue #269) — see `processAvatar`/`AVATAR_VARIANT_PX` in
+// ImageProcessing.ts for how they're produced, and the comment on
+// `users.avatarSmallKey` (db/schema.ts) for how they're stored. Mutually
+// exclusive with `avatarUrl` on `User` (api/users.ts) — exactly one of the
+// two is ever non-null.
 export const AvatarVariants = Schema.Struct({
   small: Schema.String,
   medium: Schema.String,

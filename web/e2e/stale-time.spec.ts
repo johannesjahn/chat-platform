@@ -56,8 +56,7 @@ async function seed(
     apiUrl,
     other,
   )("/posts", {
-    contentType: "text",
-    content: "A post to come back to",
+    body: "A post to come back to",
   });
   const { id: chatId } = await api(
     request,
@@ -71,8 +70,7 @@ async function seed(
     apiUrl,
     me,
   )(`/chats/${chatId}/messages`, {
-    contentType: "text",
-    content: "Hi!",
+    body: "Hi!",
   });
 }
 

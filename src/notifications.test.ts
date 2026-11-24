@@ -72,7 +72,7 @@ test("commenting on someone's post notifies its author, with an excerpt", () =>
       const alice = yield* setup("alice");
       const bob = yield* setup("bob");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "hello world" },
+        payload: { body: "hello world" },
       });
       const comment = yield* bob.client.comments.createComment({
         params: { id: post.id },
@@ -100,7 +100,7 @@ test("commenting on your own post doesn't notify you", () =>
     Effect.gen(function* () {
       const alice = yield* setup("alice");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "mine" },
+        payload: { body: "mine" },
       });
       yield* alice.client.comments.createComment({
         params: { id: post.id },
@@ -117,7 +117,7 @@ test("a reply notifies the parent comment's author (and the post author only via
       const bob = yield* setup("bob");
       const carol = yield* setup("carol");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "post" },
+        payload: { body: "post" },
       });
       const comment = yield* bob.client.comments.createComment({
         params: { id: post.id },
@@ -145,7 +145,7 @@ test("reacting notifies the author, and un-reacting takes it back", () =>
       const alice = yield* setup("alice");
       const bob = yield* setup("bob");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "react to me" },
+        payload: { body: "react to me" },
       });
       const comment = yield* alice.client.comments.createComment({
         params: { id: post.id },
@@ -194,8 +194,7 @@ test("@mentions in posts and comments notify the named users, case-insensitively
       const carol = yield* setup("carol");
       const post = yield* alice.client.posts.createPost({
         payload: {
-          contentType: "text",
-          content: "hey @bob and @nobody, mail me at alice@example.com",
+          body: "hey @bob and @nobody, mail me at alice@example.com",
         },
       });
       const bobInbox = yield* inbox(bob.client);
@@ -242,11 +241,11 @@ test("editing only pings names the edit added", () =>
       const bob = yield* setup("bob");
       const carol = yield* setup("carol");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "hi @bob" },
+        payload: { body: "hi @bob" },
       });
       yield* alice.client.posts.updatePost({
         params: { id: post.id },
-        payload: { contentType: "text", content: "hi @bob and @carol" },
+        payload: { body: "hi @bob and @carol" },
       });
       expect((yield* inbox(bob.client)).notifications).toHaveLength(1);
       expect((yield* inbox(carol.client)).notifications).toHaveLength(1);
@@ -271,7 +270,7 @@ test("deleting a comment takes its notifications with it", () =>
       const alice = yield* setup("alice");
       const bob = yield* setup("bob");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "post" },
+        payload: { body: "post" },
       });
       const comment = yield* bob.client.comments.createComment({
         params: { id: post.id },
@@ -291,7 +290,7 @@ test("blocking or muting someone silences their notifications, past and future",
       const alice = yield* setup("alice");
       const bob = yield* setup("bob");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "post" },
+        payload: { body: "post" },
       });
       yield* bob.client.comments.createComment({
         params: { id: post.id },
@@ -326,7 +325,7 @@ test("mark one / mark all read, and someone else's id is a 404", () =>
       const alice = yield* setup("alice");
       const bob = yield* setup("bob");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "post" },
+        payload: { body: "post" },
       });
       for (const content of ["one", "two", "three"]) {
         yield* bob.client.comments.createComment({
@@ -374,7 +373,7 @@ test("the inbox pages newest-first with a keyset cursor", () =>
       const alice = yield* setup("alice");
       const bob = yield* setup("bob");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "post" },
+        payload: { body: "post" },
       });
       for (let i = 1; i <= 5; i++) {
         yield* bob.client.comments.createComment({
@@ -549,10 +548,10 @@ test("a type that's turned off creates no notification, for that user only", () 
       const alice = yield* setup("alice");
       const bob = yield* setup("bob");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "hello" },
+        payload: { body: "hello" },
       });
       const bobsPost = yield* bob.client.posts.createPost({
-        payload: { contentType: "text", content: "hello" },
+        payload: { body: "hello" },
       });
       const all =
         yield* alice.client.notifications.getNotificationPreferences();
@@ -595,7 +594,7 @@ test("with comments off, a comment that mentions the author still notifies the m
       const alice = yield* setup("alice");
       const bob = yield* setup("bob");
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "hello" },
+        payload: { body: "hello" },
       });
       yield* alice.client.notifications.updateNotificationPreferences({
         payload: { comment: false },

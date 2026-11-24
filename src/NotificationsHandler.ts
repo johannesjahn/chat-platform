@@ -146,9 +146,7 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
                 lobbyId: notifications.lobbyId,
                 readAt: notifications.readAt,
                 createdAt: notifications.createdAt,
-                postContentType: posts.contentType,
-                postContent: posts.content,
-                postCaption: posts.caption,
+                postBody: posts.body,
                 commentContent: comments.content,
                 actor: {
                   id: actors.id,
@@ -192,15 +190,7 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
               game: row.game as GameId | null,
               lobbyId: row.lobbyId,
               excerpt: toExcerpt(
-                row.commentId !== null
-                  ? row.commentContent
-                  : row.postContentType === "text"
-                    ? row.postContent
-                    : // An attachment post's excerpt is its caption (issue
-                      // #765), never its filename.
-                      row.postContentType === "attachment"
-                      ? row.postCaption
-                      : null,
+                row.commentId !== null ? row.commentContent : row.postBody,
               ),
               read: row.readAt !== null,
               createdAt: row.createdAt.getTime(),

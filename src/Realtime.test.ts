@@ -211,13 +211,13 @@ test("broadcastAll reaches every connected user regardless of chat participation
       yield* connections.broadcastAll({
         type: "post_changed",
         postId: 99,
-        change: "created",
+        change: "updated",
       });
 
       const expected = JSON.stringify({
         type: "post_changed",
         postId: 99,
-        change: "created",
+        change: "updated",
       });
       expect(alice.received).toEqual([expected]);
       expect(bob.received).toEqual([expected]);
@@ -237,7 +237,7 @@ test("broadcastAll doesn't reach a user who has since unregistered", async () =>
       yield* connections.broadcastAll({
         type: "post_changed",
         postId: 1,
-        change: "created",
+        change: "updated",
       });
 
       expect(alice.received).toEqual([]);
@@ -1073,7 +1073,7 @@ test("a disconnected user's sockets stop receiving events before their close lan
       yield* connections.broadcastAll({
         type: "post_changed",
         postId: 9,
-        change: "created",
+        change: "updated",
       });
 
       expect(alice.received).toEqual([]);
@@ -1224,52 +1224,6 @@ test("an event for users connected nowhere publishes nothing to any instance", a
   );
 });
 
-test("a routed copy an instance mid-rollout puts on the shared channel is skipped, not delivered twice", async () => {
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      const { a, pubsub } = yield* twoInstances();
-      const socket = recordingWriter();
-      yield* a.register(1, socket.write);
-      socket.received.length = 0;
-      // What 0.41.5–0.41.9 published next to the routed copy.
-      yield* pubsub.publish(
-        "chat-platform:realtime",
-        `{"routed":true,${JSON.stringify({ scope: "users", userIds: [1], event: chatEvent }).slice(1)}`,
-      );
-      expect(socket.received).toEqual([]);
-    }),
-  );
-});
-
-test("an event published the old way on the shared channel still reaches the user (mid-rollout)", async () => {
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      const base = yield* Effect.service(PubSub).pipe(
-        Effect.provide(InMemoryPubSubLive),
-      );
-      const connections = yield* Effect.service(RealtimeConnections).pipe(
-        Effect.provide(
-          RealtimeConnectionsLive.pipe(
-            Layer.provide(Layer.succeed(PubSub, base)),
-            Layer.provide(InMemoryUserLocatorLive),
-            Layer.provide(InMemoryPresenceStoreLive),
-            Layer.provide(staticPresenceAudience([])),
-          ),
-        ),
-      );
-      const socket = recordingWriter();
-      yield* connections.register(1, socket.write);
-      socket.received.length = 0;
-      // What an instance that predates routing publishes.
-      yield* base.publish(
-        "chat-platform:realtime",
-        JSON.stringify({ scope: "users", userIds: [1], event: chatEvent }),
-      );
-      expect(socket.received).toEqual([JSON.stringify(chatEvent)]);
-    }),
-  );
-});
-
 const ROOM_LINGER_MS = 30;
 const shortLinger = Layer.succeed(
   RoomChannelLinger,
@@ -1399,38 +1353,6 @@ test("a closed socket releases the post and room channels it held", async () => 
         "-chat-platform:realtime:post:5",
         "-chat-platform:realtime:room:game-hub:typing",
       ]);
-    }),
-  );
-});
-
-test("a post event published the old way on the shared channel still reaches its viewers (mid-rollout)", async () => {
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      const base = yield* Effect.service(PubSub).pipe(
-        Effect.provide(InMemoryPubSubLive),
-      );
-      const connections = yield* Effect.service(RealtimeConnections).pipe(
-        Effect.provide(
-          RealtimeConnectionsLive.pipe(
-            Layer.provide(Layer.succeed(PubSub, base)),
-            Layer.provide(InMemoryUserLocatorLive),
-            Layer.provide(InMemoryPresenceStoreLive),
-            Layer.provide(staticPresenceAudience([])),
-          ),
-        ),
-      );
-      const card = recordingWriter();
-      yield* connections.watchPost(5, card.write);
-      const event = {
-        type: "post_changed",
-        postId: 5,
-        change: "deleted",
-      } as const;
-      yield* base.publish(
-        "chat-platform:realtime",
-        JSON.stringify({ scope: "post_viewers", postId: 5, event }),
-      );
-      expect(card.received).toEqual([JSON.stringify(event)]);
     }),
   );
 });

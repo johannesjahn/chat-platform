@@ -1,6 +1,7 @@
 import {
   type AnyPgColumn,
   bigint,
+  bigserial,
   boolean,
   check,
   doublePrecision,
@@ -29,10 +30,9 @@ export const users = pgTable(
     // to `username` (display name) or initials (avatar) in the UI.
     displayName: text("display_name"),
     avatarUrl: text("avatar_url"),
-    // Uploaded-and-cropped avatar (issue #269). Originally three fixed-size
-    // `data:image/webp;base64,...` strings embedded directly in the row; as of
-    // issue #289 the processed variants live in the S3-compatible object store
-    // (see `processAvatar`/`AVATAR_VARIANT_PX` in ImageProcessing.ts and
+    // Uploaded-and-cropped avatar (issue #269). The processed variants live
+    // in the S3-compatible object store (issue #289; see
+    // `processAvatar`/`AVATAR_VARIANT_PX` in ImageProcessing.ts and
     // `AttachmentStorage.ts`) exactly like every other uploaded image, and
     // these columns hold only a short random token per variant. The token is
     // both the object's storage key suffix (`avatars/<token>`, see
@@ -40,15 +40,6 @@ export const users = pgTable(
     // returns (`GET /avatars/:token`, see src/AvatarRoute.ts) — so a re-upload
     // mints new tokens and thus fresh, cache-busted URLs. Mutually exclusive
     // with `avatarUrl`: setting one clears the other (see UsersHandler.ts).
-    //
-    // Expand-contract migration (see CLAUDE.md): the old base64 `avatar_small`/
-    // `avatar_medium`/`avatar_large` columns are kept here (still selectable by
-    // old replicas mid-rollout) while a standalone backfill moves their bytes
-    // into object storage (`scripts/backfill-avatars.ts`); a later migration
-    // drops them once every replica reads the `*_key` columns below.
-    avatarSmall: text("avatar_small"),
-    avatarMedium: text("avatar_medium"),
-    avatarLarge: text("avatar_large"),
     avatarSmallKey: text("avatar_small_key"),
     avatarMediumKey: text("avatar_medium_key"),
     avatarLargeKey: text("avatar_large_key"),
@@ -67,7 +58,10 @@ export const users = pgTable(
     // rather than needing a background job to null the columns out.
     statusText: text("status_text"),
     statusEmoji: text("status_emoji"),
-    statusExpiresAt: timestamp("status_expires_at", { mode: "date" }),
+    statusExpiresAt: timestamp("status_expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     // Free-form "about" text shown on the profile page (issue #322), null
     // when unset. Length is bounded at the API (`MAX_BIO_LENGTH` in Api.ts),
     // not here, matching `displayName`/`statusText`. Nullable with no default,
@@ -78,41 +72,32 @@ export const users = pgTable(
     // upload quota check (`enforceUploadQuota` in attachments.ts) is a
     // single-row read instead of a `SUM` over every attachment the user ever
     // uploaded (issue #326). The app never writes it: a trigger on
-    // `attachments` (migration 0033) adjusts it on every insert, delete and
+    // `attachments` adjusts it on every insert, delete and
     // size/uploader change, so it can't drift — not via the cleanup sweep, a
-    // cascade, a direct insert in a test, or a replica still running code
-    // from before the column existed. The DB default is what makes adding it
-    // expand-only; the migration backfills existing users from the real sum.
+    // cascade, or a direct insert in a test.
     storageUsedBytes: bigint("storage_used_bytes", { mode: "number" })
       .notNull()
       .default(0),
-    // Signup time. Added for the admin dashboard (signup timeline and the
-    // "new users" activity windows) — until then nothing recorded when an
-    // account was created, and `id` ordering only gives relative order, not
-    // a date.
-    //
-    // Unlike every other `created_at` in this file this one carries a *DB*
-    // default rather than an app-side `$defaultFn`, and that's load-bearing
-    // for the expand-contract rule in CLAUDE.md: mid-rollout, replicas still
-    // running the old code insert users without this column, so the database
-    // itself has to fill it or the insert would violate NOT NULL. The same
-    // default is what backfills existing rows, which means every account
-    // that predates this migration reads as having signed up the moment it
-    // ran — signup history is only meaningful from this deploy forward.
-    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    // Signup time, for the admin dashboard (signup timeline and the "new
+    // users" activity windows). Filled by the database, unlike every other
+    // `created_at` in this file.
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .defaultNow(),
     // When this user last created content — a post, comment, like or
     // message — to within ACTIVITY_RESOLUTION, for the DAU/WAU/MAU counts
     // (ActiveUsersMetrics.ts, the admin dashboard). Those used to take the
     // distinct authors of every content table's window, which grows with
     // history (issue #831); counting this column costs one pass over
     // `users`. Never set by the app: insert triggers on the four tables
-    // move it forward (migration 0041), so old replicas' inserts count too,
-    // and only once it's ACTIVITY_RESOLUTION behind the new row — most
+    // move it forward and only once it's ACTIVITY_RESOLUTION behind the new row — most
     // inserts update nothing. Internal only: no API view exposes it, and it
     // holds less than the content rows it's derived from, which go with the
-    // account. Null for anyone inactive since before the migration's
-    // 31-day backfill.
-    lastActiveAt: timestamp("last_active_at", { mode: "date" }),
+    // account. Null for anyone who has created nothing.
+    lastActiveAt: timestamp("last_active_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
   },
   (table) => [
     // Case-insensitive uniqueness: `Alice` and `alice` must not both be
@@ -145,11 +130,14 @@ export const refreshTokens = pgTable(
     // Shared by every token descended from the same login via rotation, so
     // reuse of one member of the chain can revoke the whole chain at once.
     familyId: text("family_id").notNull(),
-    expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
-    revokedAt: timestamp("revoked_at", { mode: "date" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [index("refresh_tokens_family_id_idx").on(table.familyId)],
 );
@@ -197,7 +185,7 @@ export const attachments = pgTable(
     // rows uploaded before this migration.
     waveform: jsonb("waveform").$type<number[]>(),
     durationMs: integer("duration_ms"),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -214,43 +202,32 @@ export const posts = pgTable(
     authorId: integer("author_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    contentType: text("content_type", {
-      enum: ["text", "image_url", "attachment"],
-    }).notNull(),
-    content: text("content").notNull(),
-    // Set only when contentType is "attachment" — null'd out (rather than
-    // cascading the post's own deletion) if the attachment row it points at
+    // May be empty when there is an attachment; the API requires one of the
+    // two. Not a CHECK: the `set null` below would then fail for a post with
+    // an empty body.
+    body: text("body").notNull(),
+    // Null'd out (rather than cascading the post's own deletion) if the attachment row it points at
     // is ever removed independently, since a post should outlive that.
     attachmentId: integer("attachment_id").references(() => attachments.id, {
       onDelete: "set null",
     }),
-    // Text shown alongside an attachment (issue #765, migration 0037) — only
-    // meaningful when contentType is "attachment", null otherwise or when the
-    // post has no caption. A column of its own rather than a reuse of
-    // `content`, which keeps holding the filename for attachment rows: rows
-    // written before this (and by old replicas mid-rollout) only ever have the
-    // filename there, so reading `content` as a caption would print every old
-    // attachment's filename as its text, and an old replica reading a new row
-    // would show the caption where it expects a filename.
-    caption: text("caption"),
     // Client-generated idempotency key (issue #657, like
     // `messages.clientId`): a retried create carrying the same key from the
     // same author returns the stored post instead of inserting another. Null
     // for posts created without one, which are never deduplicated.
     clientId: text("client_id"),
     // Comments and replies on the post, kept by a database trigger on
-    // `comments` (migration 0040, issue #835) rather than counted on every
-    // feed read. A trigger, not app code, so every path that adds or removes
-    // a comment — cascades from a deleted comment or account included, and
-    // old replicas mid-rollout — keeps it right. The database default covers
-    // old replicas inserting posts without the column. Only the plain total:
+    // `comments` (issue #835) rather than counted on every feed
+    // read. A trigger, not app code, so every path that adds or removes a
+    // comment — cascades from a deleted comment or account included — keeps
+    // it right. Only the plain total:
     // a viewer who hid someone still gets a live count (see
     // `postCommentCounts` in posts.ts).
     commentCount: integer("comment_count").notNull().default(0),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
-    updatedAt: timestamp("updated_at", { mode: "date" })
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -297,10 +274,10 @@ export const comments = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     content: text("content").notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
-    updatedAt: timestamp("updated_at", { mode: "date" })
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Set when a top-level comment is deleted while it still has replies
@@ -308,8 +285,8 @@ export const comments = pgTable(
     // "Comment deleted" placeholder those replies hang off, since the
     // `parent_comment_id` cascade would take other people's replies with it.
     // It's hard-deleted once its last reply goes. Not counted in
-    // `posts.comment_count` (migration 0042).
-    deletedAt: timestamp("deleted_at", { mode: "date" }),
+    // `posts.comment_count`.
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
     // `listComments` filters + orders by (postId, id) for top-level comments;
@@ -327,49 +304,75 @@ export const comments = pgTable(
 export type DbComment = typeof comments.$inferSelect;
 export type NewDbComment = typeof comments.$inferInsert;
 
-export const chats = pgTable("chats", {
-  id: serial("id").primaryKey(),
-  type: text("type", { enum: ["direct", "group"] }).notNull(),
-  // Only set (and editable) for group chats — a direct chat's "name" is
-  // always derived client-side from the other participant.
-  title: text("title"),
-  // Nullable + set null (not cascade): if the creator's account is ever
-  // deleted, the chat and everyone else's messages should survive — it just
-  // becomes un-renameable/un-manageable rather than vanishing for every
-  // other participant.
-  createdBy: integer("created_by").references(() => users.id, {
-    onDelete: "set null",
-  }),
-  createdAt: timestamp("created_at", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  // Bumped whenever a message is sent, so the chat list can sort by recent
-  // activity with a plain ORDER BY instead of a per-row message subquery.
-  updatedAt: timestamp("updated_at", { mode: "date" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-  // Monotonically incremented on every participant-visible change to this
-  // chat (message sent/edited/deleted, read receipts advancing, rename,
-  // participants added) — see `bumpChatVersion` in chats/chatState.ts.
-  // Carried on the `chat_updated` realtime event and in the `Chat` API
-  // response so clients can tell exactly when they've missed an event (the
-  // version they observe jumps by more than one) instead of only being able
-  // to guess from a dropped/delayed socket message (issue #55).
-  version: integer("version").notNull().default(1),
-  // Uploaded-and-cropped group avatar (only set for `type: "group"` chats),
-  // stored and served exactly like an uploaded user avatar (issue #269/#289)
-  // — see the comment on `users.avatarSmall` above for the full rationale.
-  // Each column holds a short random token: both the object's storage key
-  // suffix (`avatars/<token>`, src/avatars.ts) and the path segment of the
-  // long-cache proxy URL returned to clients (`GET /avatars/:token`, see
-  // src/AvatarRoute.ts). Unlike `users`, there's no external-URL alternative
-  // (no `avatarUrl` column) or legacy base64 columns to carry — this table
-  // goes straight to the current object-storage pattern since it's a new
-  // column, not a migration of pre-existing data.
-  avatarSmallKey: text("avatar_small_key"),
-  avatarMediumKey: text("avatar_medium_key"),
-  avatarLargeKey: text("avatar_large_key"),
-});
+export const chats = pgTable(
+  "chats",
+  {
+    id: serial("id").primaryKey(),
+    type: text("type", { enum: ["direct", "group"] }).notNull(),
+    // Only set (and editable) for group chats — a direct chat's "name" is
+    // always derived client-side from the other participant.
+    title: text("title"),
+    // Nullable + set null (not cascade): if the creator's account is ever
+    // deleted, the chat and everyone else's messages should survive — it just
+    // becomes un-renameable/un-manageable rather than vanishing for every
+    // other participant.
+    createdBy: integer("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    // The pair a direct chat is between, lower user id first; null for a group.
+    // The unique index on them is what allows only one direct chat per pair,
+    // whoever starts it. Set null, so the chat outlives a deleted account
+    // (read-only, see `directChatClosed`): a null never collides, and nobody
+    // can be that user again.
+    directUserLow: integer("direct_user_low").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    directUserHigh: integer("direct_user_high").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    // Bumped whenever a message is sent, so the chat list can sort by recent
+    // activity with a plain ORDER BY instead of a per-row message subquery.
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+    // Monotonically incremented on every participant-visible change to this
+    // chat (message sent/edited/deleted, read receipts advancing, rename,
+    // participants added) — see `bumpChatVersion` in chats/chatState.ts.
+    // Carried on the `chat_updated` realtime event and in the `Chat` API
+    // response so clients can tell exactly when they've missed an event (the
+    // version they observe jumps by more than one) instead of only being able
+    // to guess from a dropped/delayed socket message (issue #55).
+    version: integer("version").notNull().default(1),
+    // Uploaded-and-cropped group avatar (only set for `type: "group"` chats),
+    // stored and served exactly like an uploaded user avatar (issue #269/#289)
+    // — see the comment on `users.avatarSmallKey` above for the full rationale.
+    // Each column holds a short random token: both the object's storage key
+    // suffix (`avatars/<token>`, src/avatars.ts) and the path segment of the
+    // long-cache proxy URL returned to clients (`GET /avatars/:token`, see
+    // src/AvatarRoute.ts). Unlike `users`, there's no external-URL alternative
+    // (no `avatarUrl` column) or legacy base64 columns to carry — this table
+    // goes straight to the current object-storage pattern since it's a new
+    // column, not a migration of pre-existing data.
+    avatarSmallKey: text("avatar_small_key"),
+    avatarMediumKey: text("avatar_medium_key"),
+    avatarLargeKey: text("avatar_large_key"),
+  },
+  (table) => [
+    uniqueIndex("chats_direct_pair_idx").on(
+      table.directUserLow,
+      table.directUserHigh,
+    ),
+    // Serves the set-null FK; the index above serves the other one.
+    index("chats_direct_user_high_idx").on(table.directUserHigh),
+    check(
+      "chats_direct_pair_ordered",
+      sql`${table.directUserLow} < ${table.directUserHigh}`,
+    ),
+  ],
+);
 
 export type DbChat = typeof chats.$inferSelect;
 export type NewDbChat = typeof chats.$inferInsert;
@@ -384,7 +387,7 @@ export const chatParticipants = pgTable(
     userId: integer("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    joinedAt: timestamp("joined_at", { mode: "date" })
+    joinedAt: timestamp("joined_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Per-chat role (issue #220) — distinct from `users.role` (site-wide
@@ -407,9 +410,7 @@ export const chatParticipants = pgTable(
     // `markRead` only ever moves it forward. Null means nothing read yet.
     // Deliberately no FK: deleting the message it points at must not reset
     // the watermark (`set null` would make the whole history unread again).
-    // Back-filled from `message_reads` by migration 0035, which stays
-    // written alongside it until a contract migration drops it.
-    lastReadMessageId: integer("last_read_message_id"),
+    lastReadMessageId: bigint("last_read_message_id", { mode: "number" }),
     // Message requests (issue #785): true while this participant was put in
     // a group by someone they shared no (accepted) chat with, until they
     // accept. A pending row is kept out of the participant's chat list and
@@ -417,13 +418,10 @@ export const chatParticipants = pgTable(
     // `isMessageRequestFor` in chats/chatState.ts — and out of message
     // search, with every write others would see (sends, forwards in,
     // reactions, pins, typing, edits, read receipts) refused until accepted
-    // (issue #808, `requireAcceptedParticipant`). A database default (not an
-    // app-side one) for the same rollout reason as `users.created_at`: old
-    // replicas insert participants without the column, and those must read
-    // as accepted, which is how every row predating the migration reads.
+    // (issue #808, `requireAcceptedParticipant`).
     requestPending: boolean("request_pending").notNull().default(false),
     // Who added this participant — null for a creator, an invite-link join,
-    // a direct chat, every row predating migration 0037, or once the adder's
+    // a direct chat, or once the adder's
     // account is gone. Lets a declined request offer to block the adder.
     addedBy: integer("added_by").references(() => users.id, {
       onDelete: "set null",
@@ -433,9 +431,9 @@ export const chatParticipants = pgTable(
     // not muted, not archived, not pinned. `mutedUntil` in the past reads as
     // not muted, and `archivedAt` as archived only while it's after
     // `chats.updatedAt`, so a new message un-archives without a write here.
-    mutedUntil: timestamp("muted_until", { mode: "date" }),
-    archivedAt: timestamp("archived_at", { mode: "date" }),
-    pinnedAt: timestamp("pinned_at", { mode: "date" }),
+    mutedUntil: timestamp("muted_until", { withTimezone: true, mode: "date" }),
+    archivedAt: timestamp("archived_at", { withTimezone: true, mode: "date" }),
+    pinnedAt: timestamp("pinned_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
     unique().on(table.chatId, table.userId),
@@ -462,7 +460,7 @@ export const chatEvents = pgTable(
     chatId: integer("chat_id")
       .notNull()
       .references(() => chats.id, { onDelete: "cascade" }),
-    afterMessageId: integer("after_message_id").notNull(),
+    afterMessageId: bigint("after_message_id", { mode: "number" }).notNull(),
     type: text("type", {
       enum: [
         "member_added",
@@ -485,7 +483,10 @@ export const chatEvents = pgTable(
     }),
     // The new title, for "renamed".
     detail: text("detail"),
-    createdAt: timestamp("created_at", { mode: "date" }).notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
   },
   (table) => [
     index("chat_events_chat_id_idx").on(table.chatId, table.id),
@@ -501,25 +502,21 @@ export type NewDbChatEvent = typeof chatEvents.$inferInsert;
 export const messages = pgTable(
   "messages",
   {
-    id: serial("id").primaryKey(),
+    // 64-bit, as are the columns holding it: one of the tables that grow
+    // fastest (issue #940). In raw SQL, `mapWith(Number)`: Bun.sql reads a
+    // bigint as a string.
+    id: bigserial("id", { mode: "number" }).primaryKey(),
     chatId: integer("chat_id")
       .notNull()
       .references(() => chats.id, { onDelete: "cascade" }),
     senderId: integer("sender_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    contentType: text("content_type", {
-      enum: ["text", "image_url", "attachment"],
-    }).notNull(),
-    content: text("content").notNull(),
-    // Mirrors `posts.attachmentId` — set only when contentType is
-    // "attachment".
+    // Mirror `posts.body` and `posts.attachmentId`.
+    body: text("body").notNull(),
     attachmentId: integer("attachment_id").references(() => attachments.id, {
       onDelete: "set null",
     }),
-    // Mirrors `posts.caption` (issue #765) — text sent alongside an
-    // attachment; `content` keeps the filename.
-    caption: text("caption"),
     // Threaded/quoted replies (issue #217) — null for a normal message, set to
     // the id of the message this one is replying to. Validated at create time
     // (`createMessage` in chats/messageHandlers.ts) to reference a message in
@@ -530,7 +527,7 @@ export const messages = pgTable(
     // replies in place — the quoted preview just falls back to "message
     // unavailable" client-side — rather than silently removing every reply
     // along with it.
-    parentMessageId: integer("parent_message_id").references(
+    parentMessageId: bigint("parent_message_id", { mode: "number" }).references(
       (): AnyPgColumn => messages.id,
       { onDelete: "set null" },
     ),
@@ -550,19 +547,18 @@ export const messages = pgTable(
     // three through unchanged, so the label always credits the original
     // author and chains never nest. All nullable with no default, so the
     // migration is expand-only.
-    forwardedFromMessageId: integer("forwarded_from_message_id").references(
-      (): AnyPgColumn => messages.id,
-      { onDelete: "set null" },
-    ),
+    forwardedFromMessageId: bigint("forwarded_from_message_id", {
+      mode: "number",
+    }).references((): AnyPgColumn => messages.id, { onDelete: "set null" }),
     forwardedFromSenderId: integer("forwarded_from_sender_id").references(
       () => users.id,
       { onDelete: "set null" },
     ),
     forwardedFromSenderName: text("forwarded_from_sender_name"),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
-    updatedAt: timestamp("updated_at", { mode: "date" })
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -603,39 +599,6 @@ export const messages = pgTable(
 export type DbMessage = typeof messages.$inferSelect;
 export type NewDbMessage = typeof messages.$inferInsert;
 
-// One row per (message, reader) — the read state of a message is tracked
-// per user rather than as a single "read" flag, so group chats can later
-// show "read by N of M" without a schema change.
-//
-// Superseded by `chat_participants.last_read_message_id` (issue #659): no
-// read path uses this table any more. `markRead` still writes the rows it
-// newly reads (only those, never the whole history) so replicas running the
-// previous release keep seeing reads mid-rollout; drop it in a later
-// contract migration.
-export const messageReads = pgTable(
-  "message_reads",
-  {
-    id: serial("id").primaryKey(),
-    messageId: integer("message_id")
-      .notNull()
-      .references(() => messages.id, { onDelete: "cascade" }),
-    userId: integer("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    readAt: timestamp("read_at", { mode: "date" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  // The unique constraint below is backed by a composite (messageId,
-  // userId) btree index, whose leading column already serves `listMessages`'
-  // `inArray(messageReads.messageId, ...)` lookups — no separate index
-  // needed on messageId alone.
-  (table) => [unique().on(table.messageId, table.userId)],
-);
-
-export type DbMessageRead = typeof messageReads.$inferSelect;
-export type NewDbMessageRead = typeof messageReads.$inferInsert;
-
 // Chat-wide pinned messages (issue #223) — one row per pinned message,
 // visible to every participant of the chat. A message can be pinned at most
 // once (the unique index on `messageId`), so pinning is idempotent and
@@ -652,13 +615,13 @@ export const pinnedMessages = pgTable(
     chatId: integer("chat_id")
       .notNull()
       .references(() => chats.id, { onDelete: "cascade" }),
-    messageId: integer("message_id")
+    messageId: bigint("message_id", { mode: "number" })
       .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
     pinnedBy: integer("pinned_by").references(() => users.id, {
       onDelete: "set null",
     }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -691,10 +654,10 @@ export const starredMessages = pgTable(
     userId: integer("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    messageId: integer("message_id")
+    messageId: bigint("message_id", { mode: "number" })
       .notNull()
       .references(() => messages.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -730,7 +693,7 @@ export type NewDbStarredMessage = typeof starredMessages.$inferInsert;
 export const likes = pgTable(
   "likes",
   {
-    id: serial("id").primaryKey(),
+    id: bigserial("id", { mode: "number" }).primaryKey(),
     userId: integer("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -740,15 +703,18 @@ export const likes = pgTable(
     commentId: integer("comment_id").references(() => comments.id, {
       onDelete: "cascade",
     }),
-    messageId: integer("message_id").references(() => messages.id, {
-      onDelete: "cascade",
-    }),
+    messageId: bigint("message_id", { mode: "number" }).references(
+      () => messages.id,
+      {
+        onDelete: "cascade",
+      },
+    ),
     // Defaults to the original binary "like" emoji so a row inserted without
     // specifying one (shouldn't happen post-migration, but keeps the column
     // additive/backward-compatible per the expand-contract note in CLAUDE.md)
     // still lands on a sensible value rather than NULL.
     emoji: text("emoji").notNull().default("👍"),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -813,18 +779,18 @@ export const chatInvites = pgTable(
     createdBy: integer("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Null means "never expires".
-    expiresAt: timestamp("expires_at", { mode: "date" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
     // Null means "unlimited uses".
     maxUses: integer("max_uses"),
     useCount: integer("use_count").notNull().default(0),
     // Null while still active; set (rather than deleting the row) when an
     // owner/admin revokes the invite, so revoked links leave an audit trail
     // instead of silently vanishing.
-    revokedAt: timestamp("revoked_at", { mode: "date" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
     uniqueIndex("chat_invites_code_idx").on(table.code),
@@ -866,7 +832,7 @@ export const userBlocks = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     type: text("type", { enum: ["block", "mute"] }).notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -922,11 +888,11 @@ export const gameLobbies = pgTable(
     // so nobody can rehearse it in the lobby. For Reflex Rush, the seed its
     // schedule is laid out from (see src/games/reflex.ts).
     passage: text("passage"),
-    startsAt: timestamp("starts_at", { mode: "date" }),
+    startsAt: timestamp("starts_at", { withTimezone: true, mode: "date" }),
     // For Sketchy, the *latest* the game can end (every stage running its
     // full timer) — the real end is derived from the submissions (see
     // src/games/drawing/timeline.ts).
-    endsAt: timestamp("ends_at", { mode: "date" }),
+    endsAt: timestamp("ends_at", { withTimezone: true, mode: "date" }),
     maxPlayers: integer("max_players").notNull(),
     // Game-specific lobby settings — Sketchy's theme packs and round count
     // (null for the typing race). jsonb rather than columns so a game's
@@ -938,13 +904,13 @@ export const gameLobbies = pgTable(
     // guarded on this column so it happens exactly once (see
     // `settleDrawingGame` in GamesHandler.ts).
     settledRound: integer("settled_round"),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Touched by every membership/phase change; the lobby browser hides
     // lobbies nobody has touched in a while (abandoned tabs) and creating a
     // lobby sweeps long-dead ones (see GamesHandler.ts).
-    updatedAt: timestamp("updated_at", { mode: "date" })
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -983,7 +949,7 @@ export const gameLobbyPlayers = pgTable(
     userId: integer("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    joinedAt: timestamp("joined_at", { mode: "date" })
+    joinedAt: timestamp("joined_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
     // Server-measured time from `startsAt` to the accepted finish.
@@ -1024,7 +990,7 @@ export const gameLobbyMessages = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     text: text("text").notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1057,7 +1023,7 @@ export const gameResults = pgTable(
     // Racers seated when this result was recorded — a "win" only counts
     // against at least one opponent (see the leaderboard query).
     playerCount: integer("player_count").notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1099,8 +1065,11 @@ export const gameDrawings = pgTable(
     shuffleSeed: integer("shuffle_seed").notNull(),
     // Null until submitted; a drawing nobody submitted plays out as blank.
     strokes: jsonb("strokes").$type<ReadonlyArray<DrawingStroke>>(),
-    submittedAt: timestamp("submitted_at", { mode: "date" }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    submittedAt: timestamp("submitted_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1128,7 +1097,7 @@ export const gameBluffs = pgTable(
     // `text` folded for comparison (see `normalizeTitle`) — two bluffs that
     // would read as the same ballot entry can't both land.
     normalized: text("normalized").notNull(),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1155,7 +1124,7 @@ export const gameVotes = pgTable(
     bluffId: integer("bluff_id").references(() => gameBluffs.id, {
       onDelete: "cascade",
     }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1190,7 +1159,7 @@ export type DbGameVote = typeof gameVotes.$inferSelect;
 export const notifications = pgTable(
   "notifications",
   {
-    id: serial("id").primaryKey(),
+    id: bigserial("id", { mode: "number" }).primaryKey(),
     userId: integer("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -1210,8 +1179,8 @@ export const notifications = pgTable(
     // Api.ts) and, for an invite, the lobby it points at.
     game: text("game"),
     lobbyId: integer("lobby_id"),
-    readAt: timestamp("read_at", { mode: "date" }),
-    createdAt: timestamp("created_at", { mode: "date" })
+    readAt: timestamp("read_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .notNull()
       .$defaultFn(() => new Date()),
   },
@@ -1258,6 +1227,9 @@ export const notificationPreferences = pgTable(
 // job share its output (the active-users counts) with the others.
 export const scheduledJobs = pgTable("scheduled_jobs", {
   name: text("name").primaryKey(),
-  lastRunAt: timestamp("last_run_at", { mode: "date" }).notNull(),
+  lastRunAt: timestamp("last_run_at", {
+    withTimezone: true,
+    mode: "date",
+  }).notNull(),
   result: jsonb("result"),
 });

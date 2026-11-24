@@ -6,7 +6,7 @@ The arcade under `/games`: endpoints in `src/api/games.ts`, combined in
 keyed by a game slug (`GameId`).
 
 - **Lobbies are rows, phases are derived.** `game_lobbies` /
-  `game_lobby_players` (`0026`) record only what players did (host started
+  `game_lobby_players` record only what players did (host started
   at `startsAt`, a player finished in `durationMs`). The phase (waiting →
   countdown → racing → finished) is computed from the clock at read time
   (`lobbyPhase`), so every replica agrees and no instance owns a lobby.
@@ -45,7 +45,7 @@ system" in `web/src/styles.css`).
 Every lobby page has a chat and a reaction bar (`LobbyChat`,
 `ReactionStream`), for players and spectators.
 
-- **Chat is persisted per lobby**: `game_lobby_messages` (`0029`) cascades
+- **Chat is persisted per lobby**: `game_lobby_messages` cascades
   with its lobby. `GET/POST /games/lobbies/:id/chat` read the newest
   `GAME_CHAT_PAGE_SIZE` lines (hiding authors the reader blocked/muted) and
   post one (rate-limited); a post publishes an id-only `game_chat` event.
@@ -76,7 +76,7 @@ to six. Rules and scoring: `reflex.ts`; client:
   since it can only cost points.
 - **Places settle at the end** via the lazy, `settled_round`-guarded
   `settleIfOver`, once everyone's in or `endsAt` passes. Per-round detail is
-  in `game_lobby_players.detail` (`0030`).
+  in `game_lobby_players.detail`.
 - **Live rows ride `game_progress`**: `(round + 1) * 1000 + code`
   (`encodeLiveResult`), display only. The client mirrors the scoring
   constants; keep them in step.

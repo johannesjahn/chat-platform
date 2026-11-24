@@ -31,7 +31,7 @@ import { gameChatQueryKey } from "./games/chat";
 import { noteGameReaction } from "./games/reactions";
 import { noteGameProgress, setGameRoomsSocket } from "./games/rooms";
 import { notificationsQueryKeyRoot } from "./notifications";
-import { OWN_POST_SCOPE, ownCommentScope, ownWrites } from "./ownWrites";
+import { ownCommentScope, ownWrites } from "./ownWrites";
 import { noteFeedHead } from "./feedHead";
 import { setRealtimeSocket } from "./postRooms";
 import {
@@ -59,8 +59,7 @@ type RealtimeSocketEvent =
   | {
       type: "post_changed";
       postId: number;
-      // Absent from a server that predates it (see PostChange).
-      change?: PostChange;
+      change: PostChange;
     }
   | { type: "feed_head"; postIds: number[] }
   | {
@@ -71,15 +70,14 @@ type RealtimeSocketEvent =
       }>;
     }
   | { type: "comment_changed"; postId: number; commentId: number }
-  | {
+  | ({
       type: "reaction_changed";
-      targetType: "post" | "comment" | "message";
       targetId: number;
-      chatId?: number;
-      // A comment's post. Absent from a server that predates it.
-      postId?: number;
       reactions: ReadonlyArray<{ emoji: string; count: number }>;
-    }
+    } & (
+      | { targetType: "comment"; postId: number }
+      | { targetType: "message"; chatId: number }
+    ))
   | {
       type: "message_pin_changed";
       chatId: number;
@@ -135,9 +133,8 @@ function realtimeSocketUrl(ticket: string): string {
 // session, that invalidates exactly the queries affected by each event.
 //
 // `chat_updated` is scoped server-side to a chat's participants, so this
-// hook doesn't need to filter it. `post_changed` goes out to every connected
-// user — the feed has no notion of participants, anyone signed in sees it —
-// so it's applied to the one post it names, never as a feed-wide refetch.
+// hook doesn't need to filter it. `post_changed` reaches whoever shows that post, and
+// is applied to the one post it names, never as a feed-wide refetch.
 // `presence`/`typing`/`status_changed` don't touch React Query at all — they
 // update the standalone stores in lib/presence.ts, lib/typing.ts, and
 // lib/status.ts instead, since there's no REST resource behind any of them to
@@ -272,22 +269,12 @@ export function useRealtimeSocket(enabled: boolean): void {
           // Arrives only while a card shows the post (its room — see
           // usePostRoom, issue #828), and touches only that post — at most
           // one request — rather than invalidating every loaded feed page
-          // (issue #662; see syncChangedPost). A "created" only comes from a
-          // server that predates `feed_head`; the echo of this client's own
-          // create is dropped: the create already put the post in the cache
-          // (issue #753; see ownWrites.ts).
-          if (parsed.change === "updated" || parsed.change === "deleted") {
-            void syncChangedPost(queryClient, parsed.postId, parsed.change);
-          } else {
-            const { postId, change } = parsed;
-            ownWrites.intercept(OWN_POST_SCOPE, postId, () => {
-              void syncChangedPost(queryClient, postId, change);
-            });
-          }
+          // (issue #662; see syncChangedPost).
+          void syncChangedPost(queryClient, parsed.postId, parsed.change);
           break;
         case "post_reactions":
           // The latest counts of posts this client shows, batched
-          // server-side (issue #828). Patched in like a post's
+          // server-side (issue #828). Patched in like a
           // `reaction_changed`: `reactedByMe` is kept, never trusted from
           // the event (see mergeReactionCounts).
           for (const { postId, reactions } of parsed.posts) {
@@ -327,42 +314,26 @@ export function useRealtimeSocket(enabled: boolean): void {
           break;
         }
         case "reaction_changed":
-          // A post reaction only arrives this way from a server that
-          // predates `post_reactions` (which sent it to *every* client).
-          // Patch the affected post's counts in place from the event's
-          // `reactions` (that's exactly why it's on the wire — see
-          // ReactionEvent in src/Realtime.ts) instead of invalidating the
-          // whole feed. `reactedByMe` is preserved rather
-          // than trusted from the event: it doesn't change for a
-          // non-actor, and the actor already reconciled it from its own
-          // mutation response (see mergeReactionCounts). A comment
-          // reaction arrives scoped to its post's room and names that
-          // `postId`, so it's patched into only that post's cached
-          // comments (issue #810). A message reaction
-          // arrives scoped to the message's chat participants and carries
-          // `chatId` (see ReactionEvent in src/Realtime.ts), so it's patched
-          // in place too, the same way a post reaction is.
-          if (parsed.targetType === "post") {
-            patchCachedPost(queryClient, parsed.targetId, (post) => ({
-              ...post,
-              reactions: mergeReactionCounts(post.reactions, parsed.reactions),
-            }));
-          } else if (parsed.targetType === "message") {
-            if (parsed.chatId != null) {
-              patchCachedMessage(
-                queryClient,
-                parsed.chatId,
-                parsed.targetId,
-                (message) => ({
-                  ...message,
-                  reactions: mergeReactionCounts(
-                    message.reactions,
-                    parsed.reactions,
-                  ),
-                }),
-              );
-            }
-          } else if (parsed.postId != null) {
+          // Patched in place from the event's counts (that's exactly why
+          // they're on the wire — see ReactionEvent in src/Realtime.ts).
+          // `reactedByMe` is preserved rather than trusted from the event:
+          // it doesn't change for a non-actor, and the actor already
+          // reconciled it from its own mutation response (see
+          // mergeReactionCounts). A post's arrive as `post_reactions`.
+          if (parsed.targetType === "message") {
+            patchCachedMessage(
+              queryClient,
+              parsed.chatId,
+              parsed.targetId,
+              (message) => ({
+                ...message,
+                reactions: mergeReactionCounts(
+                  message.reactions,
+                  parsed.reactions,
+                ),
+              }),
+            );
+          } else {
             patchCachedComment(
               queryClient,
               parsed.postId,
@@ -375,12 +346,6 @@ export function useRealtimeSocket(enabled: boolean): void {
                 ),
               }),
             );
-          } else {
-            // From a server that predates `postId` (issue #810): no way to
-            // tell which post's comments it's about.
-            void queryClient.invalidateQueries({
-              queryKey: commentsQueryKeyRoot,
-            });
           }
           break;
         case "message_pin_changed":

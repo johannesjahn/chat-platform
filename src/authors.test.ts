@@ -116,14 +116,14 @@ test("listPosts embeds every author, in one lookup for the whole page", () =>
         [alice, "a2"],
       ] as const)
         yield* who.client.posts.createPost({
-          payload: { contentType: "text", content },
+          payload: { body: content },
         });
 
       const { result: page, lookups } = yield* countAuthorLookups(
         carol.client.posts.listPosts({ query: {} }),
       );
       expect(lookups).toBe(1);
-      expect(page.posts.map((p) => [p.content, p.author])).toEqual([
+      expect(page.posts.map((p) => [p.body, p.author])).toEqual([
         ["a2", expected.alice(alice.user.id)],
         ["c1", expected.carol(carol.user.id)],
         ["b1", expected.bob(bob.user.id)],
@@ -138,7 +138,7 @@ test("getPost, createPost and updatePost embed the post's author", () =>
     Effect.gen(function* () {
       const { alice, bob } = yield* seedAuthors;
       const created = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "hello" },
+        payload: { body: "hello" },
       });
       expect(created.author).toEqual(expected.alice(alice.user.id));
 
@@ -161,7 +161,7 @@ test("getPost, createPost and updatePost embed the post's author", () =>
       const admin = yield* makeAuthedClient(accessToken);
       const updated = yield* admin.posts.updatePost({
         params: { id: created.id },
-        payload: { contentType: "text", content: "edited" },
+        payload: { body: "edited" },
       });
       expect(updated.author).toEqual(expected.alice(alice.user.id));
     }),
@@ -172,7 +172,7 @@ test("an author's profile change shows through on their existing posts", () =>
     Effect.gen(function* () {
       const { alice, bob } = yield* seedAuthors;
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "hello" },
+        payload: { body: "hello" },
       });
       yield* alice.client.users.updateProfile({
         payload: { displayName: "Renamed", avatarUrl: null },
@@ -190,10 +190,10 @@ test("listUserPosts embeds the profile's author", () =>
     Effect.gen(function* () {
       const { alice, bob } = yield* seedAuthors;
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "one" },
+        payload: { body: "one" },
       });
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "two" },
+        payload: { body: "two" },
       });
       const page = yield* bob.client.users.listUserPosts({
         params: { id: alice.user.id },
@@ -211,7 +211,7 @@ test("comments and replies embed their authors, one lookup per page", () =>
     Effect.gen(function* () {
       const { alice, bob, carol } = yield* seedAuthors;
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "post" },
+        payload: { body: "post" },
       });
       const fromBob = yield* bob.client.comments.createComment({
         params: { id: post.id },
@@ -270,10 +270,10 @@ test("a blocked author's posts and comments stay hidden", () =>
     Effect.gen(function* () {
       const { alice, bob, carol } = yield* seedAuthors;
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "by alice" },
+        payload: { body: "by alice" },
       });
       yield* bob.client.posts.createPost({
-        payload: { contentType: "text", content: "by bob" },
+        payload: { body: "by bob" },
       });
       yield* bob.client.comments.createComment({
         params: { id: post.id },
@@ -299,10 +299,10 @@ test("a deleted account's posts and comments leave the feed and the thread", () 
     Effect.gen(function* () {
       const { alice, bob } = yield* seedAuthors;
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "by alice" },
+        payload: { body: "by alice" },
       });
       yield* bob.client.posts.createPost({
-        payload: { contentType: "text", content: "by bob" },
+        payload: { body: "by bob" },
       });
       yield* bob.client.comments.createComment({
         params: { id: post.id },

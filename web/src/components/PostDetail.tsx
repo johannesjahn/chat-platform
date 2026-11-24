@@ -9,7 +9,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { $api } from "@/lib/api";
 import { useSession } from "@/lib/auth";
 import { errorMessage, isNotFoundError } from "@/lib/errors";
-import { postsFeedQueryKey, postText } from "@/lib/posts";
+import { postsFeedQueryKey } from "@/lib/posts";
 import { refetchUnlessWarmed } from "@/lib/routeLoader";
 import { userLabel } from "@/lib/users";
 import { usePageTitle, titleExcerpt } from "@/lib/title";
@@ -53,10 +53,8 @@ export function PostDetail({
   );
 
   const authorName = post?.author ? userLabel(post.author) : undefined;
-  // Text posts (and captioned attachments) are titled by their opening words;
-  // an image post or an uncaptioned attachment by who posted it.
-  const postBody = post ? postText(post) : null;
-  const excerpt = postBody !== null ? titleExcerpt(postBody) : "";
+  // Titled by its opening words, or without text by who posted it.
+  const excerpt = post ? titleExcerpt(post.body) : "";
   const title = excerpt || (authorName ? `Post by ${authorName}` : "Post");
   // Deleted posts are a normal case (stale notification, search result or
   // shared link), so a missing post gets a proper not-found state rather

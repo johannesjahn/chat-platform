@@ -32,7 +32,7 @@ test("group changes appear in the open conversation", async ({
   const rows = thread.getByTestId("chat-event");
   await expect(rows).toHaveText([/^You added /]);
 
-  await post(`/chats/${id}/messages`, { contentType: "text", content: "hi" });
+  await post(`/chats/${id}/messages`, { body: "hi" });
   await expect(thread.getByText("hi", { exact: true })).toBeVisible();
   const left = await request.post(`${apiUrl}/chats/${id}/leave`, {
     headers: { Authorization: `Bearer ${added.session.accessToken}` },
@@ -68,8 +68,7 @@ test("activity that loads after the messages doesn't remount them", async ({
     participantIds: [added.session.user.id],
   });
   await post(`/chats/${id}/messages`, {
-    contentType: "text",
-    content: "hello",
+    body: "hello",
   });
 
   let release = () => {};

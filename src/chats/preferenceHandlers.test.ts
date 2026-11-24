@@ -16,7 +16,7 @@ type Account = Effect.Success<ReturnType<typeof registerAndLogin>>;
 const send = (from: Account, chatId: number, content = "hi") =>
   from.client.chats.createMessage({
     params: { id: chatId },
-    payload: { contentType: "text", content },
+    payload: { body: content },
   });
 
 const aliceAndBob = Effect.gen(function* () {

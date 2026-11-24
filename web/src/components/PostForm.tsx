@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { ImageIcon, Loader2, Paperclip, Type } from "lucide-react";
+import { Loader2, Paperclip, Type } from "lucide-react";
 import { AttachmentUploadField } from "@/components/AttachmentUploadField";
 import { MentionTextarea } from "@/components/MentionTextarea";
 import { BackButton } from "@/components/BackButton";
@@ -12,14 +12,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Attachment } from "@/lib/attachments";
 import { errorMessage } from "@/lib/errors";
-import { isAllowedImageUrl } from "@/lib/imageHosts";
 import { useOnlineStatus } from "@/lib/online";
-import { MAX_POST_CONTENT_LENGTH, type PostContentType } from "@/lib/posts";
+import { MAX_POST_BODY_LENGTH } from "@/lib/posts";
 
 // Structural placeholder shown while an existing post is being fetched for
 // editing — mirrors PostForm's card/field layout so the form doesn't pop into
@@ -57,18 +55,9 @@ type PostFormProps = {
   title: string;
   description: string;
   submitLabel: string;
-  initialContentType?: PostContentType;
-  initialContent?: string;
+  initialBody?: string;
   initialAttachment?: Attachment | null;
-  initialCaption?: string | null;
-  onSubmit: (values: {
-    contentType: PostContentType;
-    content: string;
-    attachmentId?: number;
-    // An attachment's caption (issue #765): null when it has none, so an
-    // edit can clear one; never set for the other post kinds.
-    caption?: string | null;
-  }) => Promise<void>;
+  onSubmit: (values: { body: string; attachmentId?: number }) => Promise<void>;
   footer?: ReactNode;
   // Where "Back" goes when there's no in-app page to return to (a direct
   // load): a `<Link>` with an arrow and its label. See `BackButton`.
@@ -86,54 +75,33 @@ export function PostForm({
   title,
   description,
   submitLabel,
-  initialContentType = "text",
-  initialContent = "",
+  initialBody = "",
   initialAttachment = null,
-  initialCaption = null,
   onSubmit,
   footer,
   backFallback,
   allowOfflineQueue = false,
 }: PostFormProps) {
-  const [contentType, setContentType] =
-    useState<PostContentType>(initialContentType);
-  // Each typed post kind keeps its own draft, so switching type neither
-  // carries text into the URL field (where it'd be flagged invalid) nor a
-  // URL into the text body (where it'd be posted as text) — issue #524.
-  const [textContent, setTextContent] = useState(
-    initialContentType === "text" ? initialContent : "",
-  );
-  const [imageUrl, setImageUrl] = useState(
-    initialContentType === "image_url" ? initialContent : "",
-  );
+  const [withFile, setWithFile] = useState(initialAttachment !== null);
+  const [body, setBody] = useState(initialBody);
   const [attachment, setAttachment] = useState<Attachment | null>(
     initialAttachment,
   );
-  const [caption, setCaption] = useState(initialCaption ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const isOnline = useOnlineStatus();
 
-  const content = contentType === "image_url" ? imageUrl : textContent;
-  const trimmed = content.trim();
-  const overLimit = trimmed.length > MAX_POST_CONTENT_LENGTH;
-  const trimmedCaption = caption.trim();
-  const captionOverLimit = trimmedCaption.length > MAX_POST_CONTENT_LENGTH;
-  const invalidImageUrl =
-    contentType === "image_url" &&
-    trimmed.length > 0 &&
-    !isAllowedImageUrl(trimmed);
+  const trimmed = body.trim();
+  const overLimit = trimmed.length > MAX_POST_BODY_LENGTH;
   // An attachment post can't be offline-queued (see PostForm's caller,
   // routes/posts/new.tsx) — it needs an already-completed upload, which
   // needs a live connection — so it always requires being online.
   const canSubmit =
-    contentType === "attachment"
-      ? attachment !== null && !captionOverLimit && !pending && isOnline
-      : trimmed.length > 0 &&
-        !overLimit &&
-        !invalidImageUrl &&
-        !pending &&
-        (isOnline || allowOfflineQueue);
+    !overLimit &&
+    !pending &&
+    (withFile
+      ? attachment !== null && isOnline
+      : trimmed.length > 0 && (isOnline || allowOfflineQueue));
 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col gap-6 px-4 py-10">
@@ -161,16 +129,10 @@ export function PostForm({
               setError(null);
               setPending(true);
               try {
-                await onSubmit(
-                  contentType === "attachment"
-                    ? {
-                        contentType,
-                        content: attachment!.filename,
-                        attachmentId: attachment!.id,
-                        caption: trimmedCaption !== "" ? trimmedCaption : null,
-                      }
-                    : { contentType, content: trimmed },
-                );
+                await onSubmit({
+                  body: trimmed,
+                  attachmentId: withFile ? attachment?.id : undefined,
+                });
               } catch (err) {
                 setError(errorMessage(err));
               } finally {
@@ -183,9 +145,9 @@ export function PostForm({
               <div role="group" aria-label="Post type" className="flex gap-2">
                 <Button
                   type="button"
-                  variant={contentType === "text" ? "default" : "outline"}
-                  aria-pressed={contentType === "text"}
-                  onClick={() => setContentType("text")}
+                  variant={!withFile ? "default" : "outline"}
+                  aria-pressed={!withFile}
+                  onClick={() => setWithFile(false)}
                   className="flex-1"
                 >
                   <Type className="size-4" />
@@ -193,19 +155,9 @@ export function PostForm({
                 </Button>
                 <Button
                   type="button"
-                  variant={contentType === "image_url" ? "default" : "outline"}
-                  aria-pressed={contentType === "image_url"}
-                  onClick={() => setContentType("image_url")}
-                  className="flex-1"
-                >
-                  <ImageIcon className="size-4" />
-                  Image URL
-                </Button>
-                <Button
-                  type="button"
-                  variant={contentType === "attachment" ? "default" : "outline"}
-                  aria-pressed={contentType === "attachment"}
-                  onClick={() => setContentType("attachment")}
+                  variant={withFile ? "default" : "outline"}
+                  aria-pressed={withFile}
+                  onClick={() => setWithFile(true)}
                   className="flex-1"
                 >
                   <Paperclip className="size-4" />
@@ -214,7 +166,7 @@ export function PostForm({
               </div>
             </div>
 
-            {contentType === "attachment" ? (
+            {withFile && (
               <div className="flex flex-col gap-2">
                 <Label>File</Label>
                 <AttachmentUploadField
@@ -229,101 +181,45 @@ export function PostForm({
                     connection to upload and send.
                   </p>
                 )}
-                <Label htmlFor="caption" className="mt-2">
-                  Caption (optional)
-                </Label>
-                <MentionTextarea
-                  id="caption"
-                  value={caption}
-                  onValueChange={setCaption}
-                  placeholder="Say something about it…"
-                  rows={3}
-                  aria-invalid={captionOverLimit}
-                />
-                {trimmedCaption.length > MAX_POST_CONTENT_LENGTH * 0.8 && (
-                  <span
-                    className={
-                      captionOverLimit
-                        ? "self-end text-xs text-destructive"
-                        : "self-end text-xs text-muted-foreground"
-                    }
-                  >
-                    {trimmedCaption.length}/{MAX_POST_CONTENT_LENGTH}
-                  </span>
-                )}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="content">
-                  {contentType === "text" ? "Text" : "Image URL"}
-                </Label>
-                {contentType === "text" ? (
-                  <MentionTextarea
-                    id="content"
-                    value={textContent}
-                    onValueChange={setTextContent}
-                    placeholder="What's on your mind?"
-                    rows={6}
-                    required
-                    aria-invalid={overLimit}
-                  />
-                ) : (
-                  <Input
-                    id="content"
-                    type="url"
-                    value={imageUrl}
-                    onChange={(e) => setImageUrl(e.target.value)}
-                    placeholder="https://picsum.photos/id/1/600/800"
-                    required
-                    aria-invalid={invalidImageUrl}
-                  />
-                )}
-                {invalidImageUrl && (
-                  <p className="text-xs text-destructive">
-                    Image URLs must be https:// links from a supported image
-                    host (e.g. picsum.photos, imgur.com, unsplash.com).
-                  </p>
-                )}
-                {contentType === "text" && (
-                  <span
-                    className={
-                      overLimit
-                        ? "self-end text-xs text-destructive"
-                        : "self-end text-xs text-muted-foreground"
-                    }
-                  >
-                    {trimmed.length}/{MAX_POST_CONTENT_LENGTH}
-                  </span>
-                )}
-                {contentType === "image_url" &&
-                  trimmed &&
-                  !overLimit &&
-                  !invalidImageUrl && (
-                    <img
-                      // Re-parsed rather than passed through raw: `invalidImageUrl`
-                      // already proved `trimmed` is an https:// URL on the
-                      // allowlist (see isAllowedImageUrl), but `.href` also
-                      // canonicalizes/percent-encodes it so the DOM never sees
-                      // the user's original unescaped input verbatim.
-                      src={new URL(trimmed).href}
-                      alt="Preview"
-                      className="aspect-4/5 w-full rounded-md border border-border bg-muted object-cover"
-                    />
-                  )}
               </div>
             )}
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="content">
+                {withFile ? "Caption (optional)" : "Text"}
+              </Label>
+              <MentionTextarea
+                id="content"
+                value={body}
+                onValueChange={setBody}
+                placeholder={
+                  withFile ? "Say something about it…" : "What's on your mind?"
+                }
+                rows={withFile ? 3 : 6}
+                required={!withFile}
+                aria-invalid={overLimit}
+              />
+              <span
+                className={
+                  overLimit
+                    ? "self-end text-xs text-destructive"
+                    : "self-end text-xs text-muted-foreground"
+                }
+              >
+                {trimmed.length}/{MAX_POST_BODY_LENGTH}
+              </span>
+            </div>
 
             <Button type="submit" className="mt-1 w-full" disabled={!canSubmit}>
               {pending && <Loader2 className="size-4 animate-spin" />}
               {!isOnline
-                ? allowOfflineQueue && contentType !== "attachment"
+                ? allowOfflineQueue && !withFile
                   ? "Queue for sending"
                   : "You're offline"
                 : pending
                   ? "Please wait…"
                   : submitLabel}
             </Button>
-            {!isOnline && allowOfflineQueue && contentType !== "attachment" && (
+            {!isOnline && allowOfflineQueue && !withFile && (
               <p className="-mt-2 self-end text-xs text-muted-foreground">
                 You&apos;re offline — this will be queued and posted once
                 you&apos;re back online.

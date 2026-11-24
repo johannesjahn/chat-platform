@@ -39,7 +39,7 @@ async function send(
 ) {
   const response = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
     headers: as(from),
-    data: { contentType: "text", content },
+    data: { body: content },
   });
   expect(response.ok()).toBe(true);
   return (await response.json()) as { id: number };
@@ -381,7 +381,7 @@ async function seedPosts(
   for (let i = 1; i <= count; i++) {
     const response = await request.post(`${apiUrl}/posts`, {
       headers: as(author),
-      data: { contentType: "text", content: `Feed post number ${i}` },
+      data: { body: `Feed post number ${i}` },
     });
     expect(response.ok()).toBe(true);
     ids.push(((await response.json()) as { id: number }).id);

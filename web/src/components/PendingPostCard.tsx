@@ -72,18 +72,9 @@ export function PendingPostCard({
         </div>
       </CardHeader>
       <CardContent className="px-6 py-6">
-        {item.contentType === "image_url" ? (
-          <img
-            src={item.content}
-            alt=""
-            loading="lazy"
-            className="aspect-4/5 w-full rounded-md bg-muted object-cover"
-          />
-        ) : (
-          <p className="whitespace-pre-wrap break-words text-base leading-relaxed">
-            {item.content}
-          </p>
-        )}
+        <p className="whitespace-pre-wrap break-words text-base leading-relaxed">
+          {item.body}
+        </p>
       </CardContent>
     </Card>
   );

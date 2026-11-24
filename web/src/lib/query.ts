@@ -160,9 +160,9 @@ export const persistOptions: PersistQueryClientOptions = {
   maxAge: PERSIST_MAX_AGE_MS,
   // Bumped when a persisted payload's shape changes, so a snapshot saved by
   // an older build is discarded on restore instead of rendered against types
-  // it no longer matches. "750": posts gained their embedded `author` (issue
-  // #750) — an older snapshot would label every card `user #N`.
-  buster: "750",
+  // it no longer matches. "941": posts and messages have one `body` (issue
+  // #941), which an older snapshot lacks.
+  buster: "941",
   // Only queries that have data are persisted. A still-pending query is
   // dehydrated together with its in-flight promise, which logs "dehydrated
   // as pending ended up rejecting" whenever that fetch is later cancelled,

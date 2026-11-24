@@ -91,7 +91,7 @@ test("commenting and replying send the write and at most one read", async ({
   const author = await createUser();
   const post = await request.post(`${apiUrl}/posts`, {
     headers: { Authorization: `Bearer ${author.session.accessToken}` },
-    data: { contentType: "text", content: "A post to comment on" },
+    data: { body: "A post to comment on" },
   });
   const { id: postId } = await post.json();
 
@@ -153,7 +153,7 @@ test("a comment on one post doesn't refetch another post's open comments", async
   for (const content of ["Post A", "Post B"]) {
     const post = await request.post(`${apiUrl}/posts`, {
       headers: as,
-      data: { contentType: "text", content },
+      data: { body: content },
     });
     ids.push((await post.json()).id);
   }
@@ -198,7 +198,7 @@ test("a reaction on one post's comment refetches no comments", async ({
   for (const content of ["Post A", "Post B"]) {
     const post = await request.post(`${apiUrl}/posts`, {
       headers: as,
-      data: { contentType: "text", content },
+      data: { body: content },
     });
     const postId = (await post.json()).id as number;
     const comment = await request.post(`${apiUrl}/posts/${postId}/comments`, {

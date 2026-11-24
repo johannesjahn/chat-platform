@@ -83,7 +83,7 @@ export const dbQuery = <A>(run: () => PromiseLike<A>): Effect.Effect<A> =>
 
 // PGlite ships contrib extensions as separate WASM bundles that have to be
 // registered when the instance is created — `CREATE EXTENSION pg_trgm` in
-// migration 0023 fails on an instance that wasn't told about it. A real
+// the baseline migration fails on an instance that wasn't told about it. A real
 // Postgres (DATABASE_URL) needs nothing here: the extension is trusted, so
 // the migration creates it on its own. Mirrored in src/testDb.ts.
 export const createPglite = () =>

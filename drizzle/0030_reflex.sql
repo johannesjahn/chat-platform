@@ -1,1 +1,0 @@
-ALTER TABLE "game_lobby_players" ADD COLUMN "detail" jsonb;

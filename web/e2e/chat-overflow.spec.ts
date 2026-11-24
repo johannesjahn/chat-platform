@@ -33,7 +33,7 @@ test("chat thread never scrolls horizontally on a phone", async ({
     const response = await fetch(`${apiUrl}/chats/${chat.id}/messages`, {
       method: "POST",
       headers: headers(token),
-      body: JSON.stringify({ contentType: "text", content }),
+      body: JSON.stringify({ body: content }),
     });
     expect(response.ok).toBe(true);
   };

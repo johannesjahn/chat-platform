@@ -199,7 +199,7 @@ export const enforceUploadQuota = (
 ) =>
   Effect.gen(function* () {
     // A single-row read of the running total a trigger on `attachments`
-    // keeps up to date (migration 0033), rather than re-summing every
+    // keeps up to date, rather than re-summing every
     // attachment the user has ever kept (issue #326).
     const rows = yield* dbQuery(() =>
       db

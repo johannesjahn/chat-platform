@@ -94,7 +94,7 @@ export default function (data) {
   group("posts", () => {
     const createRes = http.post(
       `${BASE_URL}/posts`,
-      JSON.stringify({ contentType: "text", content: randomText("post") }),
+      JSON.stringify({ body: randomText("post") }),
       { headers, tags: { name: "createPost" } },
     );
     check(createRes, { "post created": (r) => r.status === 201 });
@@ -126,7 +126,7 @@ export default function (data) {
   group("chat", () => {
     const messageRes = http.post(
       `${BASE_URL}/chats/${data.chatId}/messages`,
-      JSON.stringify({ contentType: "text", content: randomText("msg", 20) }),
+      JSON.stringify({ body: randomText("msg", 20) }),
       { headers, tags: { name: "createMessage" } },
     );
     check(messageRes, { "message sent": (r) => r.status === 201 });

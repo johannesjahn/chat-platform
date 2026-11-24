@@ -10,27 +10,12 @@ import { postsFeedQueryKey } from "./postPages";
 import { refetchUnlessWarmed } from "./routeLoader";
 
 export type Post = components["schemas"]["Post"];
-export type PostContentType = components["schemas"]["PostContentType"];
 type PostsPage = components["schemas"]["PostsPage"];
 type UserPostsPage = components["schemas"]["UserPostsPage"];
 
-// Content is capped server-side (`MAX_POST_CONTENT_LENGTH` in src/Api.ts) —
+// Content is capped server-side (`MAX_POST_BODY_LENGTH` in src/Api.ts) —
 // kept in sync here so the form can show a live counter/limit client-side.
-export const MAX_POST_CONTENT_LENGTH = 10_000;
-
-/**
- * The prose a post shows (rendered with mentions and links): a text post's
- * content, or an attachment's caption (issue #765) — never an attachment's
- * `content`, which is its filename. Null when there's none, e.g. an image
- * link or an attachment posted without a caption.
- */
-export function postText(
-  post: Pick<Post, "contentType" | "content" | "caption">,
-): string | null {
-  if (post.contentType === "text") return post.content;
-  if (post.contentType === "attachment") return post.caption ?? null;
-  return null;
-}
+export const MAX_POST_BODY_LENGTH = 10_000;
 
 // Feed batch sizes for the infinite-scroll feed and profile post lists. The
 // first page fills a tall (1440×900) viewport with headroom; later pages are

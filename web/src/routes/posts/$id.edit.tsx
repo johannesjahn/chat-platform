@@ -111,21 +111,19 @@ function EditPostPage() {
       title="Edit post"
       description="Update your post's content."
       submitLabel="Save changes"
-      initialContentType={post.contentType}
-      initialContent={post.content}
+      initialBody={post.body}
       initialAttachment={post.attachment}
-      initialCaption={post.caption}
       backFallback={
         <Link to="/posts/$id" params={{ id }}>
           <ArrowLeft className="size-4" />
           Back to post
         </Link>
       }
-      onSubmit={async ({ contentType, content, attachmentId, caption }) => {
+      onSubmit={async ({ body, attachmentId }) => {
         const { location } = router.state;
         await updatePost.mutateAsync({
           params: { path: { id } },
-          body: { contentType, content, attachmentId, caption },
+          body: { body, attachmentId },
         });
         await Promise.all(
           [

@@ -141,8 +141,7 @@ test("cleanupOrphanedAttachments leaves an attachment referenced by a message al
         db.insert(messages).values({
           chatId: chat.id,
           senderId: user.id,
-          contentType: "attachment",
-          content: "file.bin",
+          body: "",
           attachmentId: row.id,
         }),
       );
@@ -169,8 +168,7 @@ test("cleanupOrphanedAttachments leaves an attachment referenced by a post alone
       yield* Effect.promise(() =>
         db.insert(posts).values({
           authorId: user.id,
-          contentType: "attachment",
-          content: "file.bin",
+          body: "",
           attachmentId: row.id,
         }),
       );

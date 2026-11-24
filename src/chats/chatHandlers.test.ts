@@ -89,7 +89,7 @@ test("listChats only returns chats the current user participates in, newest acti
       // Bumps chatWithBob's updatedAt so it should sort to the top.
       yield* alice.client.chats.createMessage({
         params: { id: chatWithBob.id },
-        payload: { contentType: "text", content: "hi bob" },
+        payload: { body: "hi bob" },
       });
 
       const aliceChats = yield* alice.client.chats.listChats({
@@ -240,14 +240,14 @@ test("listChats pairs each chat with its own newest message", () =>
       ] as const)
         yield* alice.client.chats.createMessage({
           params: { id: chat.id },
-          payload: { contentType: "text", content },
+          payload: { body: content },
         });
 
       const { chats: listed } = yield* alice.client.chats.listChats({
         query: {},
       });
       const lastContent = new Map(
-        listed.map((c) => [c.id, c.lastMessage?.content]),
+        listed.map((c) => [c.id, c.lastMessage?.body]),
       );
       expect(lastContent.get(withBob.id)).toBe("bob 3");
       expect(lastContent.get(withCarol.id)).toBe("carol 2");
@@ -291,7 +291,7 @@ test("chat version increments on every participant-visible mutation, and only th
 
       const message = yield* alice.client.chats.createMessage({
         params: { id: created.id },
-        payload: { contentType: "text", content: "hi" },
+        payload: { body: "hi" },
       });
       expect(
         (yield* alice.client.chats.getChat({ params: { id: created.id } }))
@@ -316,7 +316,7 @@ test("chat version increments on every participant-visible mutation, and only th
 
       yield* alice.client.chats.updateMessage({
         params: { id: created.id, messageId: message.id },
-        payload: { contentType: "text", content: "hi edited" },
+        payload: { body: "hi edited" },
       });
       expect(
         (yield* alice.client.chats.getChat({ params: { id: created.id } }))
@@ -414,7 +414,7 @@ test("every chats endpoint rejects an unauthenticated request", () =>
           c.chats
             .createMessage({
               params: { id: 1 },
-              payload: { contentType: "text", content: "hi" },
+              payload: { body: "hi" },
             })
             .pipe(Effect.result),
           c.chats.sendTyping({ params: { id: 1 } }).pipe(Effect.result),
@@ -424,7 +424,7 @@ test("every chats endpoint rejects an unauthenticated request", () =>
           c.chats
             .updateMessage({
               params: { id: 1, messageId: 1 },
-              payload: { contentType: "text", content: "hi" },
+              payload: { body: "hi" },
             })
             .pipe(Effect.result),
           c.chats
@@ -490,7 +490,7 @@ test("listChats with unread=true pages with the same cursor as the full list", (
         });
         const message = yield* bob.client.chats.createMessage({
           params: { id: group.id },
-          payload: { contentType: "text", content: `hello ${i}` },
+          payload: { body: `hello ${i}` },
         });
         // Every other chat is read, so the unread ones are interleaved.
         if (i % 2 === 0) unreadIds.unshift(group.id);

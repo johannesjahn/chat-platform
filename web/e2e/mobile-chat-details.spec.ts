@@ -35,7 +35,7 @@ async function seedChat(
     request,
     `${apiUrl}/chats/${chatId}/messages`,
     me,
-    { contentType: "text", content: "Remember the meeting room code 4821" },
+    { body: "Remember the meeting room code 4821" },
   );
   await api(
     request,
@@ -55,13 +55,11 @@ async function seedChat(
   expect(upload.ok()).toBe(true);
   const attachment = (await upload.json()) as { id: number };
   await api(request, `${apiUrl}/chats/${chatId}/messages`, me, {
-    contentType: "attachment",
-    content: "photo.png",
+    body: "",
     attachmentId: attachment.id,
   });
   await api(request, `${apiUrl}/chats/${chatId}/messages`, me, {
-    contentType: "text",
-    content: "The newest message",
+    body: "The newest message",
   });
 }
 
@@ -156,8 +154,7 @@ test("new post, edit post and new chat each have a way back", async ({
 }) => {
   const me = await signUp(page);
   const { id: postId } = await api(request, `${apiUrl}/posts`, me, {
-    contentType: "text",
-    content: "A post to edit",
+    body: "A post to edit",
   });
 
   // A direct load has no history to step back through, so each falls back

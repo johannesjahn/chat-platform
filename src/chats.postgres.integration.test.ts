@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sql";
 import { migrate } from "drizzle-orm/bun-sql/migrator";
 import { HttpClient, HttpClientRequest } from "effect/http";
@@ -19,8 +19,8 @@ import { Jwt, JwtLive } from "./Jwt.ts";
 import { makeTestRun } from "./testApi.ts";
 import { resetTestDb } from "./testDb.ts";
 
-// createDirectChat, addParticipants and joinChatViaInvite close their
-// check-then-write races with `serializable` transactions, which Postgres
+// addParticipants and joinChatViaInvite close their check-then-write races
+// (createDirectChat relies on a unique index instead) with `serializable` transactions, which Postgres
 // enforces by aborting the loser (40001) for `serializableTransaction` to
 // retry (issue #654). Every other test runs on PGlite, a single connection
 // whose transactions never overlap — so none of that is exercised there.
@@ -123,6 +123,133 @@ describeIfPostgres("chat transactions on real Postgres", () => {
       }),
     ));
 
+  // Not a race either: the wire driver must read back the instant it wrote,
+  // and the one the database writes itself, whatever the session's time zone
+  // (issue #939).
+  test("timestamps are the same instants in any session time zone", async () => {
+    const written = new Date("2026-03-29T00:30:00.123Z");
+    await db.transaction(async (tx) => {
+      await tx.execute("set local time zone 'Pacific/Kiritimati'");
+      const before = Date.now();
+      const [user] = await tx
+        .insert(users)
+        .values({
+          username: "kiri",
+          passwordHash: "unused",
+          lastActiveAt: written,
+        })
+        .returning();
+      expect(user!.lastActiveAt).toEqual(written);
+      const age = user!.createdAt!.getTime() - before;
+      expect(Math.abs(age)).toBeLessThan(60_000);
+      expect(await tx.$count(users, eq(users.lastActiveAt, written))).toBe(1);
+    });
+    const [read] = await db.select().from(users);
+    expect(read!.lastActiveAt).toEqual(written);
+  });
+
+  // Nor is this: only the wire driver reads a bigint as a string where
+  // Drizzle doesn't map the column, as in raw SQL (issue #940).
+  test("message, reaction and notification ids above 2^31 stay numbers", () =>
+    run(
+      Effect.gen(function* () {
+        const start = 3_000_000_000;
+        for (const table of ["messages", "likes", "notifications"])
+          yield* query(() =>
+            db.execute(sql.raw(`select setval('${table}_id_seq', ${start})`)),
+          );
+        const alice = yield* createUser("alice");
+        const bob = yield* createUser("bob");
+        const chat = yield* alice.client.chats.createGroupChat({
+          payload: { title: "Group", participantIds: [bob.user.id] },
+        });
+        yield* bob.client.chats.acceptChatRequest({ params: { id: chat.id } });
+        const params = { id: chat.id };
+        const send = (content: string, parentMessageId?: number) =>
+          alice.client.chats.createMessage({
+            params,
+            payload: {
+              body: content,
+              ...(parentMessageId === undefined ? {} : { parentMessageId }),
+            },
+          });
+        const first = yield* send("walrus one");
+        expect(first.id).toBeGreaterThan(start);
+        const reply = yield* send("walrus two", first.id);
+        expect(reply.parentMessage?.id).toBe(first.id);
+
+        const listed = yield* bob.client.chats.listChats({ query: {} });
+        expect(listed.chats[0]?.lastMessage?.id).toBe(reply.id);
+        expect(listed.chats[0]?.unreadCount).toBe(2);
+        const read = yield* bob.client.chats.markRead({
+          params,
+          payload: { messageId: first.id },
+        });
+        expect(read.unreadCount).toBe(1);
+
+        const at = { params: { id: chat.id, messageId: first.id } };
+        yield* bob.client.chats.addMessageReaction({
+          ...at,
+          payload: { emoji: "❤️" },
+        });
+        yield* alice.client.chats.pinMessage({
+          params,
+          payload: { messageId: first.id },
+        });
+        yield* alice.client.chats.starMessage(at);
+        const forward = yield* alice.client.chats.forwardMessage({
+          ...at,
+          payload: { targetChatIds: [chat.id] },
+        });
+        expect(forward.results[0]?.message?.id).toBeGreaterThan(reply.id);
+
+        const newest = yield* bob.client.chats.listMessages({
+          params,
+          query: { limit: 2 },
+        });
+        const older = yield* bob.client.chats.listMessages({
+          params,
+          query: { before: newest.earliestCursor! },
+        });
+        expect(older.messages.map((m) => m.id)).toEqual([first.id]);
+        expect(older.messages[0]).toMatchObject({ pinned: true });
+        expect(older.messages[0]?.readByUserIds).toEqual([bob.user.id]);
+
+        const found = yield* bob.client.search.searchMessages({
+          query: { q: "walrus", limit: 1 },
+        });
+        expect(found.results[0]?.id).toBeGreaterThan(reply.id);
+
+        // A joiner's watermark and the activity row's place are raw SQL too.
+        const carol = yield* createUser("carol");
+        yield* alice.client.chats.addParticipants({
+          params,
+          payload: { participantIds: [carol.user.id] },
+        });
+        const events = yield* alice.client.chats.listChatEvents({ params });
+        expect(events.at(-1)?.afterMessageId).toBeGreaterThan(reply.id);
+        const rows = yield* query(() =>
+          db
+            .select({ at: chatParticipants.lastReadMessageId })
+            .from(chatParticipants)
+            .where(eq(chatParticipants.userId, carol.user.id)),
+        );
+        expect(rows[0]?.at).toBeGreaterThan(reply.id);
+
+        const post = yield* alice.client.posts.createPost({
+          payload: { body: "hello" },
+        });
+        yield* bob.client.comments.addPostReaction({
+          params: { id: post.id },
+          payload: { emoji: "❤️" },
+        });
+        const inbox = yield* alice.client.notifications.listNotifications({
+          query: {},
+        });
+        expect(inbox.notifications[0]?.id).toBeGreaterThan(start);
+      }),
+    ));
+
   // Claims of one attachment take turns on its row lock, across posts and
   // messages (issue #896).
   test("concurrent posts and messages with one attachment store it once", () =>
@@ -149,8 +276,7 @@ describeIfPostgres("chat transactions on real Postgres", () => {
         const send = (
           i: number,
           payload: {
-            contentType: "attachment";
-            content: string;
+            body: string;
             attachmentId: number;
             clientId?: string;
           },
@@ -164,8 +290,7 @@ describeIfPostgres("chat transactions on real Postgres", () => {
                 });
           });
         const body = (attachmentId: number) => ({
-          contentType: "attachment" as const,
-          content: "a.png",
+          body: "",
           attachmentId,
         });
 
@@ -214,14 +339,23 @@ describeIfPostgres("chat transactions on real Postgres", () => {
           db.select({ n: count() }).from(chats).where(eq(chats.type, "direct")),
         );
         expect(direct?.n).toBe(1);
+
+        // The index itself refuses a second one, not just the handler.
+        const pair = [alice.user.id, bob.user.id];
+        const second = yield* Effect.tryPromise(() =>
+          db.insert(chats).values({
+            type: "direct",
+            directUserLow: Math.min(...pair),
+            directUserHigh: Math.max(...pair),
+          }),
+        ).pipe(Effect.result);
+        expect(second._tag).toBe("Failure");
       }),
     ));
 
   test("concurrent createDirectChat for different pairs all succeed", () =>
     run(
       Effect.gen(function* () {
-        // Serializable isolation tracks reads by index page, so even
-        // requests for unrelated pairs abort each other.
         const left = yield* createUsers("left", 12);
         const right = yield* createUsers("right", 12);
 

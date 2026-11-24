@@ -20,19 +20,11 @@ import {
   type DbMessage,
 } from "../db/schema.ts";
 
-// Turning `messages` rows into the API's `Message`: captions, parent
+// Turning `messages` rows into the API's `Message`: parent
 // previews, reactions, pins/stars and read receipts, one row or a page at a
 // time.
 
 export const NO_REACTIONS: ReactionSummary[] = [];
-
-// A message's caption (issue #765) only counts on an "attachment" message —
-// an edit by a replica that predates captions can change the type without
-// clearing the column, and that leftover never shows.
-export const messageCaption = (row: {
-  readonly contentType: string;
-  readonly caption: string | null;
-}): string | null => (row.contentType === "attachment" ? row.caption : null);
 
 export const toApiMessage = (
   row: DbMessage,
@@ -52,10 +44,8 @@ export const toApiMessage = (
   id: row.id,
   chatId: row.chatId,
   senderId: row.senderId,
-  contentType: row.contentType,
-  content: row.content,
+  body: row.body,
   attachment,
-  caption: messageCaption(row),
   parentMessage,
   createdAt: row.createdAt.getTime(),
   updatedAt: row.updatedAt.getTime(),
@@ -99,9 +89,8 @@ export const resolveParentPreviews = (
         .select({
           id: messages.id,
           senderId: messages.senderId,
-          contentType: messages.contentType,
-          content: messages.content,
-          caption: messages.caption,
+          body: messages.body,
+          attachmentId: messages.attachmentId,
           forwardedFromSenderName: messages.forwardedFromSenderName,
           displayName: users.displayName,
           username: users.username,
@@ -119,12 +108,10 @@ export const resolveParentPreviews = (
         // client-side, resolved here so the client needn't have the (possibly
         // since-departed) sender on hand.
         senderName: row.displayName ?? row.username,
-        contentType: row.contentType,
         // Only a one-line snippet is ever shown in a quote — truncate rather
         // than shipping the parent's full body on every reply.
-        content: row.content.slice(0, PARENT_MESSAGE_PREVIEW_LENGTH),
-        caption:
-          messageCaption(row)?.slice(0, PARENT_MESSAGE_PREVIEW_LENGTH) ?? null,
+        body: row.body.slice(0, PARENT_MESSAGE_PREVIEW_LENGTH),
+        hasAttachment: row.attachmentId !== null,
         forwarded: row.forwardedFromSenderName !== null,
       });
     }
@@ -349,12 +336,12 @@ export const getLastMessagesForChats = (
           // Spelled out with an alias: in a single-table select Drizzle
           // renders `${messages.chatId}` unqualified, which inside this
           // subquery would bind to `messages`, not the outer `chats`.
-          lastId: sql<number | null>`(
+          lastId: sql`(
             SELECT latest.id FROM ${messages} AS latest
             WHERE latest.chat_id = ${chats}.id
             ORDER BY latest.id DESC
             LIMIT 1
-          )`,
+          )`.mapWith((id): number | null => Number(id)),
         })
         .from(chats)
         .where(inArray(chats.id, chatIds)),

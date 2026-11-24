@@ -28,10 +28,8 @@ import type { Message } from "./api/chats.ts";
 //
 // `change`, when present, says what happened (issue #749), so a client can
 // act on just that instead of refetching the chat list, the chat and its
-// message window on every event — see `ChatChange`. It's optional and
-// additive on purpose: a client that predates it ignores the extra fields
-// and refetches everything, as it always did, and an event without it (any
-// change not listed in `ChatChange`) still means "refetch everything".
+// message window on every event — see `ChatChange`. An event without it
+// (any change not listed in `ChatChange`) means "refetch everything".
 export type ChatEvent = {
   readonly type: "chat_updated";
   readonly chatId: number;
@@ -45,8 +43,7 @@ export type ChatEvent = {
 //   `clientId`), so a client with the chat off screen can make it the
 //   listed chat's preview and move it to the top instead of refetching the
 //   chat list on every message. That refetch was what was left of a
-//   message's fan-out cost under load (issue #834). Optional, like
-//   `change`: without it a client refetches the list as before.
+//   message's fan-out cost under load (issue #834).
 // - "read": `userId` moved their read watermark from `fromMessageId`
 //   (exclusive) to `lastReadMessageId`. That's everything a read receipt
 //   changes — every message from someone else in that range gains `userId`
@@ -61,7 +58,7 @@ export type ChatChange =
       readonly change: "message_created";
       readonly messageId: number;
       readonly senderId: number;
-      readonly message?: Message;
+      readonly message: Message;
     }
   | {
       readonly change: "read";
@@ -89,11 +86,7 @@ export type ChatPreferencesEvent = {
   readonly chatId: number;
 };
 
-// Pushed to every connected user whenever a post is created, edited, or
-// deleted — the feed has no notion of "participants", so unlike chat events
-// this goes out to everyone, not a filtered subset.
-//
-// `change` says which of the three happened, so a client can act on just the
+// Pushed when a post is edited or deleted. `change` says which, so a client can act on just the
 // one post instead of refetching every feed page it has loaded (issue #662):
 // patch a post it has cached, drop a deleted one without a request.
 //
@@ -101,12 +94,11 @@ export type ChatPreferencesEvent = {
 // that `watch_post` it, plus its open comment sections), never broadcast
 // (issue #828): sent to everyone, each post was one frame per online user,
 // O(online²) cluster-wide. A new post isn't sent this way at all: it reaches
-// feed viewers as a coalesced `feed_head` instead. "created" stays in the
-// type for clients that predate that.
+// feed viewers as a coalesced `feed_head` instead.
 export type PostEvent = {
   readonly type: "post_changed";
   readonly postId: number;
-  readonly change: "created" | "updated" | "deleted";
+  readonly change: "updated" | "deleted";
 };
 
 // Tells sockets in the feed room (`FEED_ROOM`) that posts newer than what they
@@ -153,18 +145,13 @@ export type CommentEvent = {
   readonly commentId: number;
 };
 
-// Pushed when a reaction on a post, a comment/reply, or a chat message is
-// added or removed (issue #216 extended this to messages; issue #215 widened
-// it from the original binary "like", issue #67). A reaction on a *post* is
-// no longer sent as this event: it went out feed-wide, O(online²) — every
-// reaction a frame to every user (issue #828) — and is now batched into
-// `post_reactions` instead. A reaction on a *comment* is scoped to that
+// Pushed when a reaction on a comment/reply or a chat message is added or
+// removed. A post's are batched into `post_reactions` instead. A reaction on a *comment* is scoped to that
 // post's comment room (`notifyPostRoom`), and carries that `postId` so the
 // client patches only that post's cached comments (issue #810). A reaction on a
 // *message* is scoped to the message's chat participants (`notifyUsers`,
 // like `chat_updated`) — chat messages are private to their participants,
-// unlike posts/comments. `chatId` is only ever set for a message reaction; it
-// carries the chat the client needs to know which cached message list to
+// unlike posts/comments. Its `chatId` is the chat the client needs to know which cached message list to
 // patch (see patchCachedMessage in web/src/lib/chats.ts), since `targetId`
 // alone (the message id) isn't enough to locate it client-side. Unlike the
 // id-only events, this carries the fresh per-emoji counts so a viewer's
@@ -175,15 +162,15 @@ export type CommentEvent = {
 // EngagementHandler.ts/chats/messageHandlers.ts).
 export type ReactionEvent = {
   readonly type: "reaction_changed";
-  readonly targetType: "post" | "comment" | "message";
   readonly targetId: number;
-  readonly chatId?: number;
-  readonly postId?: number;
   readonly reactions: ReadonlyArray<{
     readonly emoji: string;
     readonly count: number;
   }>;
-};
+} & (
+  | { readonly targetType: "comment"; readonly postId: number }
+  | { readonly targetType: "message"; readonly chatId: number }
+);
 
 // Pushed whenever a user's live-connection count transitions between zero and
 // non-zero (see `register` below) — i.e. on their *first* connection (a tab
@@ -589,13 +576,6 @@ export const RoomChannelLinger = Context.Reference<Duration.Duration>(
 // users it holds (issue #832; see `routeToUsers`).
 const INSTANCE_CHANNEL_PREFIX = "chat-platform:realtime:instance:";
 
-// A routed user, post or room event's copy on the shared channel, which
-// 0.41.5–0.41.9 published for instances that predated routing. Nothing
-// publishes one any more, but an instance mid-rollout from those versions
-// still does, so it's skipped unparsed — delivering it would deliver the
-// event twice (it also went to the instance or post channel).
-const ROUTED_COPY_PREFIX = '{"routed":true,';
-
 type Envelope =
   | {
       readonly scope: "users";
@@ -727,7 +707,7 @@ export const RealtimeConnectionsLive = Layer.effect(
 
     const countUserEnvelope = (
       channel: "instance" | "shared",
-      outcome: "delivered" | "no_local_recipients" | "skipped_routed_copy",
+      outcome: "delivered" | "no_local_recipients",
     ) =>
       Metric.update(
         Metric.withAttributes(realtimeUserEnvelopesTotal, { channel, outcome }),
@@ -833,9 +813,7 @@ export const RealtimeConnectionsLive = Layer.effect(
       });
 
     yield* pubsub.subscribe(CHANNEL, (message) =>
-      message.startsWith(ROUTED_COPY_PREFIX)
-        ? countUserEnvelope("shared", "skipped_routed_copy")
-        : deliverLocally(message, "shared"),
+      deliverLocally(message, "shared"),
     );
     yield* pubsub.subscribe(instanceChannel, (message) =>
       deliverLocally(message, "instance"),

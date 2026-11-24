@@ -19,10 +19,8 @@ export function PendingMessageList({
     <PendingMessageBubble
       key={item.clientId}
       status={item.status}
-      contentType={item.contentType}
-      content={item.content}
+      body={item.body}
       attachment={item.source === "outbox" ? item.attachment : undefined}
-      caption={item.source === "outbox" ? item.caption : undefined}
       replyPreview={item.source === "outbox" ? item.replyPreview : undefined}
       createdAt={item.createdAt}
       error={item.error}

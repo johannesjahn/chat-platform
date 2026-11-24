@@ -134,13 +134,13 @@ test("listPosts hides posts from blocked and muted authors, restored on removeBl
       const carol = yield* registerAndLogin("carol", PW);
 
       yield* bob.client.posts.createPost({
-        payload: { contentType: "text", content: "bob post" },
+        payload: { body: "bob post" },
       });
       yield* carol.client.posts.createPost({
-        payload: { contentType: "text", content: "carol post" },
+        payload: { body: "carol post" },
       });
       yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "alice post" },
+        payload: { body: "alice post" },
       });
 
       // Alice blocks bob and mutes carol — both authors drop out of her feed.
@@ -180,7 +180,7 @@ test("comments and replies from blocked and muted authors are hidden, restored o
       const dave = yield* registerAndLogin("dave", PW);
 
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "alice post" },
+        payload: { body: "alice post" },
       });
       const aliceComment = yield* alice.client.comments.createComment({
         params: { id: post.id },
@@ -311,7 +311,7 @@ test("createMessage is rejected in a direct chat when either party has blocked t
       const aliceSend = yield* alice.client.chats
         .createMessage({
           params: { id: chat.id },
-          payload: { contentType: "text", content: "hi bob" },
+          payload: { body: "hi bob" },
         })
         .pipe(Effect.flip);
       expect(aliceSend._tag).toBe("Forbidden");
@@ -319,7 +319,7 @@ test("createMessage is rejected in a direct chat when either party has blocked t
       yield* bob.client.chats
         .createMessage({
           params: { id: chat.id },
-          payload: { contentType: "text", content: "hi alice" },
+          payload: { body: "hi alice" },
         })
         .pipe(Effect.flip);
 
@@ -327,9 +327,9 @@ test("createMessage is rejected in a direct chat when either party has blocked t
       yield* bob.client.users.removeBlock({ params: { id: alice.user.id } });
       const ok = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi again" },
+        payload: { body: "hi again" },
       });
-      expect(ok.content).toBe("hi again");
+      expect(ok.body).toBe("hi again");
     }),
   ));
 
@@ -350,9 +350,9 @@ test("a mute does not block direct messaging", () =>
       // Muting only suppresses notifications — alice can still send.
       const sent = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "still delivered" },
+        payload: { body: "still delivered" },
       });
-      expect(sent.content).toBe("still delivered");
+      expect(sent.body).toBe("still delivered");
     }),
   ));
 
@@ -379,9 +379,9 @@ test("createMessage succeeds in a group chat where a participant muted the sende
 
       const sent = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hello group" },
+        payload: { body: "hello group" },
       });
-      expect(sent.content).toBe("hello group");
+      expect(sent.body).toBe("hello group");
     }),
   ));
 
@@ -532,10 +532,10 @@ test("createComment is rejected on a post when either party has blocked the othe
       const bob = yield* registerAndLogin("bob", PW);
 
       const alicePost = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "alice post" },
+        payload: { body: "alice post" },
       });
       const bobPost = yield* bob.client.posts.createPost({
-        payload: { contentType: "text", content: "bob post" },
+        payload: { body: "bob post" },
       });
       const before = yield* bob.client.comments.createComment({
         params: { id: alicePost.id },
@@ -596,7 +596,7 @@ test("createReply is rejected on a block with either the comment's or the post's
 
       // Alice's post, with a comment by alice and one by carol.
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "alice post" },
+        payload: { body: "alice post" },
       });
       const aliceComment = yield* alice.client.comments.createComment({
         params: { id: post.id },
@@ -608,7 +608,7 @@ test("createReply is rejected on a block with either the comment's or the post's
       });
       // Carol's post, with a comment by alice.
       const carolPost = yield* carol.client.posts.createPost({
-        payload: { contentType: "text", content: "carol post" },
+        payload: { body: "carol post" },
       });
       const aliceOnCarol = yield* alice.client.comments.createComment({
         params: { id: carolPost.id },
@@ -652,10 +652,10 @@ test("addPostReaction is rejected when either party has blocked the other", () =
       const bob = yield* registerAndLogin("bob", PW);
 
       const alicePost = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "alice post" },
+        payload: { body: "alice post" },
       });
       const bobPost = yield* bob.client.posts.createPost({
-        payload: { contentType: "text", content: "bob post" },
+        payload: { body: "bob post" },
       });
       yield* bob.client.comments.addPostReaction({
         params: { id: alicePost.id },
@@ -703,7 +703,7 @@ test("addCommentReaction is rejected when either party has blocked the other", (
       const carol = yield* registerAndLogin("carol", PW);
 
       const carolPost = yield* carol.client.posts.createPost({
-        payload: { contentType: "text", content: "carol post" },
+        payload: { body: "carol post" },
       });
       const aliceComment = yield* alice.client.comments.createComment({
         params: { id: carolPost.id },
@@ -754,7 +754,7 @@ test("a mute does not stop commenting, replying or reacting", () =>
       const bob = yield* registerAndLogin("bob", PW);
 
       const post = yield* alice.client.posts.createPost({
-        payload: { contentType: "text", content: "alice post" },
+        payload: { body: "alice post" },
       });
       const aliceComment = yield* alice.client.comments.createComment({
         params: { id: post.id },

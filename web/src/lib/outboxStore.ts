@@ -1,5 +1,5 @@
 import type { Attachment } from "./attachments";
-import type { ChatMessage, MessageContentType } from "./chats";
+import type { ChatMessage } from "./chats";
 import { errorMessage } from "./errors";
 
 // The state machine behind optimistic message sends (wired up to the API,
@@ -12,10 +12,8 @@ export type OutboxStatus = "sending" | "failed";
 // What a reply's bubble quotes, as the composer's reply banner had it.
 export type OutboxReplyPreview = {
   senderName: string;
-  contentType: MessageContentType;
-  content: string;
-  // The quoted attachment's caption (issue #765), if it has one.
-  caption?: string | null;
+  body: string;
+  hasAttachment: boolean;
 };
 
 export type OutboxMessage = {
@@ -24,13 +22,10 @@ export type OutboxMessage = {
   // Same rule as the offline queue's `Owned`: never shown under another
   // account that logs in on this browser while a send is still out.
   ownerId: number | null;
-  contentType: MessageContentType;
-  content: string;
+  body: string;
   attachmentId?: number;
   // The uploaded file, kept so the bubble can preview it while sending.
   attachment?: Attachment;
-  // Text sent alongside the attachment (issue #765).
-  caption?: string;
   parentMessageId?: number;
   replyPreview?: OutboxReplyPreview;
   createdAt: number;

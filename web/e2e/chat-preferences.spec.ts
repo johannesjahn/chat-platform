@@ -23,7 +23,7 @@ test("pin, archive and mute a chat from its details", async ({
     const send = async (content: string) => {
       const sent = await request.post(`${apiUrl}/chats/${id}/messages`, {
         headers: { Authorization: `Bearer ${user.session.accessToken}` },
-        data: { contentType: "text", content },
+        data: { body: content },
       });
       expect(sent.ok()).toBe(true);
     };

@@ -27,7 +27,7 @@ test("searching a chat from its details jumps to an old message", async ({
   const chatId = await chatWith();
   const otherId = await chatWith();
   const say = (id: number, content: string) =>
-    post(`/chats/${id}/messages`, { contentType: "text", content });
+    post(`/chats/${id}/messages`, { body: content });
   await say(chatId, "the lighthouse code is 4821");
   await say(otherId, "a lighthouse elsewhere");
   for (let i = 0; i < 45; i++) await say(chatId, `filler ${i}`);

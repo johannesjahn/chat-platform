@@ -28,10 +28,10 @@ test("createMessage sends a message, bumps chat activity, and is forbidden for n
 
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hello bob" },
+        payload: { body: "hello bob" },
       });
       expect(message.senderId).toBe(alice.user.id);
-      expect(message.content).toBe("hello bob");
+      expect(message.body).toBe("hello bob");
       expect(message.readByUserIds).toEqual([]);
       expect((yield* Metric.value(messagesCreated)).count).toBe(
         beforeMessagesCreated.count + 1,
@@ -51,7 +51,7 @@ test("createMessage sends a message, bumps chat activity, and is forbidden for n
       const forbidden = yield* eve.client.chats
         .createMessage({
           params: { id: chat.id },
-          payload: { contentType: "text", content: "intruding" },
+          payload: { body: "intruding" },
         })
         .pipe(Effect.flip);
       expect(forbidden._tag).toBe("Forbidden");
@@ -69,7 +69,7 @@ test("createMessage is idempotent per clientId (issue #567)", () =>
       const send = (clientId?: string) =>
         alice.client.chats.createMessage({
           params: { id: chat.id },
-          payload: { contentType: "text", content: "once", clientId },
+          payload: { body: "once", clientId },
         });
 
       const first = yield* send("key-1");
@@ -99,12 +99,12 @@ test("a message's clientId is echoed back to its sender only", () =>
       });
       const sent = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi", clientId: "key-1" },
+        payload: { body: "hi", clientId: "key-1" },
       });
       expect(sent.clientId).toBe("key-1");
       const keyless = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "no key" },
+        payload: { body: "no key" },
       });
       expect(keyless.clientId).toBeUndefined();
 
@@ -134,67 +134,7 @@ test("createMessage rejects content over the max length", () =>
       yield* alice.client.chats
         .createMessage({
           params: { id: chat.id },
-          payload: { contentType: "text", content: "x".repeat(4001) },
-        })
-        .pipe(Effect.flip);
-    }),
-  ));
-
-test("createMessage creates an image_url message from an allowlisted host", () =>
-  run(
-    Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const chat = yield* alice.client.chats.createDirectChat({
-        payload: { userId: bob.user.id },
-      });
-      const message = yield* alice.client.chats.createMessage({
-        params: { id: chat.id },
-        payload: {
-          contentType: "image_url",
-          content: "https://picsum.photos/200",
-        },
-      });
-      expect(message.contentType).toBe("image_url");
-      expect(message.content).toBe("https://picsum.photos/200");
-    }),
-  ));
-
-test("createMessage rejects an image_url from a non-allowlisted host", () =>
-  run(
-    Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const chat = yield* alice.client.chats.createDirectChat({
-        payload: { userId: bob.user.id },
-      });
-      yield* alice.client.chats
-        .createMessage({
-          params: { id: chat.id },
-          payload: {
-            contentType: "image_url",
-            content: "https://evil.example.com/cat.png",
-          },
-        })
-        .pipe(Effect.flip);
-    }),
-  ));
-
-test("createMessage rejects a data: image_url", () =>
-  run(
-    Effect.gen(function* () {
-      const alice = yield* registerAndLogin("alice", "pw-testpass");
-      const bob = yield* registerAndLogin("bob", "pw-testpass");
-      const chat = yield* alice.client.chats.createDirectChat({
-        payload: { userId: bob.user.id },
-      });
-      yield* alice.client.chats
-        .createMessage({
-          params: { id: chat.id },
-          payload: {
-            contentType: "image_url",
-            content: "data:image/png;base64,iVBORw0KGgo=",
-          },
+          payload: { body: "x".repeat(4001) },
         })
         .pipe(Effect.flip);
     }),
@@ -211,15 +151,14 @@ test("createMessage supports replying to a message, exposing a parent preview", 
 
       const parent = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "what's for lunch?" },
+        payload: { body: "what's for lunch?" },
       });
       expect(parent.parentMessage).toBeNull();
 
       const reply = yield* bob.client.chats.createMessage({
         params: { id: chat.id },
         payload: {
-          contentType: "text",
-          content: "tacos",
+          body: "tacos",
           parentMessageId: parent.id,
         },
       });
@@ -227,8 +166,8 @@ test("createMessage supports replying to a message, exposing a parent preview", 
       expect(reply.parentMessage?.id).toBe(parent.id);
       expect(reply.parentMessage?.senderId).toBe(alice.user.id);
       expect(reply.parentMessage?.senderName).toBe("alice");
-      expect(reply.parentMessage?.contentType).toBe("text");
-      expect(reply.parentMessage?.content).toBe("what's for lunch?");
+      expect(reply.parentMessage?.hasAttachment).toBe(false);
+      expect(reply.parentMessage?.body).toBe("what's for lunch?");
 
       // The preview round-trips through listMessages too, not just the
       // create response.
@@ -238,7 +177,7 @@ test("createMessage supports replying to a message, exposing a parent preview", 
       });
       const listedReply = page.messages.find((m) => m.id === reply.id);
       expect(listedReply?.parentMessage?.id).toBe(parent.id);
-      expect(listedReply?.parentMessage?.content).toBe("what's for lunch?");
+      expect(listedReply?.parentMessage?.body).toBe("what's for lunch?");
     }),
   ));
 
@@ -257,19 +196,18 @@ test("createMessage truncates a long parent preview and uses the sender's displa
       const longContent = "x".repeat(400);
       const parent = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: longContent },
+        payload: { body: longContent },
       });
       const reply = yield* bob.client.chats.createMessage({
         params: { id: chat.id },
         payload: {
-          contentType: "text",
-          content: "long one",
+          body: "long one",
           parentMessageId: parent.id,
         },
       });
       // Only a preview-length snippet rides along, not the full body.
-      expect(reply.parentMessage?.content.length).toBe(120);
-      expect(reply.parentMessage?.content).toBe("x".repeat(120));
+      expect(reply.parentMessage?.body.length).toBe(120);
+      expect(reply.parentMessage?.body).toBe("x".repeat(120));
       // displayName wins over username.
       expect(reply.parentMessage?.senderName).toBe("Alice A.");
     }),
@@ -291,15 +229,14 @@ test("createMessage 404s when replying to a message from another chat", () =>
       // A message that lives in the alice↔carol chat…
       const otherChatMessage = yield* alice.client.chats.createMessage({
         params: { id: chatAC.id },
-        payload: { contentType: "text", content: "hi carol" },
+        payload: { body: "hi carol" },
       });
       // …can't be quoted from the alice↔bob chat.
       const result = yield* alice.client.chats
         .createMessage({
           params: { id: chatAB.id },
           payload: {
-            contentType: "text",
-            content: "cross-chat reply",
+            body: "cross-chat reply",
             parentMessageId: otherChatMessage.id,
           },
         })
@@ -311,8 +248,7 @@ test("createMessage 404s when replying to a message from another chat", () =>
         .createMessage({
           params: { id: chatAB.id },
           payload: {
-            contentType: "text",
-            content: "reply to nothing",
+            body: "reply to nothing",
             parentMessageId: 999999,
           },
         })
@@ -332,13 +268,12 @@ test("deleting a quoted message leaves the reply, with its parent preview nulled
 
       const parent = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "delete me" },
+        payload: { body: "delete me" },
       });
       const reply = yield* bob.client.chats.createMessage({
         params: { id: chat.id },
         payload: {
-          contentType: "text",
-          content: "still here",
+          body: "still here",
           parentMessageId: parent.id,
         },
       });
@@ -369,24 +304,23 @@ test("editing a reply preserves its parent preview", () =>
 
       const parent = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "original question" },
+        payload: { body: "original question" },
       });
       const reply = yield* bob.client.chats.createMessage({
         params: { id: chat.id },
         payload: {
-          contentType: "text",
-          content: "first answer",
+          body: "first answer",
           parentMessageId: parent.id,
         },
       });
 
       const edited = yield* bob.client.chats.updateMessage({
         params: { id: chat.id, messageId: reply.id },
-        payload: { contentType: "text", content: "revised answer" },
+        payload: { body: "revised answer" },
       });
-      expect(edited.content).toBe("revised answer");
+      expect(edited.body).toBe("revised answer");
       expect(edited.parentMessage?.id).toBe(parent.id);
-      expect(edited.parentMessage?.content).toBe("original question");
+      expect(edited.parentMessage?.body).toBe("original question");
     }),
   ));
 
@@ -405,7 +339,7 @@ test("listMessages returns the newest window by default, oldest-first, and is fo
         sent.push(
           yield* alice.client.chats.createMessage({
             params: { id: chat.id },
-            payload: { contentType: "text", content: `msg ${i}` },
+            payload: { body: `msg ${i}` },
           }),
         );
       }
@@ -457,7 +391,7 @@ test("listMessages rejects a malformed cursor and setting both before and after"
       });
       yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi" },
+        payload: { body: "hi" },
       });
       const validCursor = (yield* alice.client.chats.listMessages({
         params: { id: chat.id },
@@ -492,21 +426,21 @@ test("updateMessage lets the sender edit their message and bumps updatedAt past 
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "original" },
+        payload: { body: "original" },
       });
       expect(message.updatedAt).toBe(message.createdAt);
 
       const edited = yield* alice.client.chats.updateMessage({
         params: { id: chat.id, messageId: message.id },
-        payload: { contentType: "text", content: "edited" },
+        payload: { body: "edited" },
       });
-      expect(edited.content).toBe("edited");
+      expect(edited.body).toBe("edited");
       expect(edited.updatedAt).toBeGreaterThanOrEqual(message.updatedAt);
 
       const forbidden = yield* bob.client.chats
         .updateMessage({
           params: { id: chat.id, messageId: message.id },
-          payload: { contentType: "text", content: "hijacked" },
+          payload: { body: "hijacked" },
         })
         .pipe(Effect.flip);
       expect(forbidden._tag).toBe("Forbidden");
@@ -527,13 +461,13 @@ test("updateMessage 404s for a message that doesn't belong to the given chat", (
       });
       const messageInAB = yield* alice.client.chats.createMessage({
         params: { id: chatAB.id },
-        payload: { contentType: "text", content: "hi bob" },
+        payload: { body: "hi bob" },
       });
 
       const result = yield* alice.client.chats
         .updateMessage({
           params: { id: chatAE.id, messageId: messageInAB.id },
-          payload: { contentType: "text", content: "wrong chat" },
+          payload: { body: "wrong chat" },
         })
         .pipe(Effect.flip);
       expect(result._tag).toBe("NotFound");
@@ -550,7 +484,7 @@ test("deleteMessage removes the message and its read receipts, and is forbidden 
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "delete me" },
+        payload: { body: "delete me" },
       });
       yield* bob.client.chats.markRead({
         params: { id: chat.id },
@@ -587,7 +521,7 @@ test("a new message starts with no reactions", () =>
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi bob" },
+        payload: { body: "hi bob" },
       });
       expect(message.reactions).toEqual([]);
     }),
@@ -603,7 +537,7 @@ test("addMessageReaction/removeMessageReaction toggle reaction state, visible to
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi bob" },
+        payload: { body: "hi bob" },
       });
 
       // Any participant may react, not just the sender.
@@ -648,7 +582,7 @@ test("addMessageReaction is idempotent, and a user can react with more than one 
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi bob" },
+        payload: { body: "hi bob" },
       });
 
       yield* bob.client.chats.addMessageReaction({
@@ -689,7 +623,7 @@ test("addMessageReaction is forbidden for non-participants and 404s for a missin
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi bob" },
+        payload: { body: "hi bob" },
       });
 
       const forbidden = yield* eve.client.chats
@@ -720,7 +654,7 @@ test("addMessageReaction rejects an emoji outside the standard set", () =>
       });
       const message = yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi bob" },
+        payload: { body: "hi bob" },
       });
 
       yield* alice.client.chats

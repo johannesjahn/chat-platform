@@ -439,7 +439,7 @@ test("previewChatInvite shows the group's name, picture, size and inviter — an
       });
       yield* alice.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "secret-plans-for-friday" },
+        payload: { body: "secret-plans-for-friday" },
       });
       const invite = yield* alice.client.chats.createChatInvite({
         params: { id: chat.id },

@@ -15,15 +15,15 @@ keep it.
   preview and moves it up, with no request (#834). A conversation that closes
   before it got to a message left to it refetches the lists. The conversation's
   mark-read response (`applyMarkedRead`) updates list, detail and unread
-  total. No `change`, an unknown one, or a version gap refetches all three.
+  total. No `change` or a version gap refetches all three.
   Query keys live in import-free `chatQueryKeys.ts` so this stays testable
   without the API client.
-- **Own posts/comments: `ownWrites.ts`** (issue #753). A create writes its
-  response into the cache; its realtime echo (published _before_ the
-  response, with no actor) is dropped: events in the create's scope
-  (`OWN_POST_SCOPE`, `ownCommentScope(postId)`) are held while it's in
-  flight, the one naming the created id dropped, the rest applied; a failed
-  create applies what it held. `comment_changed` invalidates only its post
+- **Own posts/comments** (issue #753). A create writes its response into the
+  cache. A comment's realtime echo (published _before_ the response,
+  with no actor) is dropped (`ownWrites.ts`): events in the create's scope
+  (`ownCommentScope(postId)`) are held while it's in flight, the one
+  naming the created id dropped, the rest applied; a failed create applies
+  what it held. `comment_changed` invalidates only its post
   (`invalidatePostComments`); a comment's `reaction_changed` names its
   `postId` and is patched into that post's comments only
   (`patchCachedComment`, #810).

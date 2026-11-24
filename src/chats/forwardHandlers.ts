@@ -5,7 +5,6 @@ import {
   NotFound,
   type ForwardFailureReason,
   type ForwardTargetResult,
-  isAllowedImageUrl,
   type Message,
 } from "../Api.ts";
 import { toApiAttachment, enforceUploadQuota } from "../attachments.ts";
@@ -32,7 +31,6 @@ import {
 import {
   NO_REACTIONS,
   buildMessageResponse,
-  messageCaption,
   toApiMessage,
 } from "./messageViews.ts";
 import {
@@ -120,31 +118,26 @@ export const forwardHandlers = ({
         }
 
         // Content that can't be posted anywhere fails every target, not
-        // the request: an image URL whose host has since left the
-        // allowlist (the copy must still pass the check a fresh send
-        // would), or an attachment that's no longer stored.
+        // the request: an attachment that's no longer stored, or a message
+        // left empty by losing one.
         let sourceAttachment: DbAttachment | null = null;
         let contentProblem: string | null = null;
-        if (
-          source.contentType === "image_url" &&
-          !isAllowedImageUrl(source.content)
-        ) {
-          contentProblem = "This image's host is no longer allowed";
-        } else if (source.contentType === "attachment") {
-          const rows =
-            source.attachmentId === null
-              ? []
-              : yield* dbQuery(() =>
-                  db
-                    .select()
-                    .from(attachments)
-                    .where(eq(attachments.id, source.attachmentId!))
-                    .limit(1),
-                );
+        if (source.attachmentId !== null) {
+          const attachmentId = source.attachmentId;
+          const rows = yield* dbQuery(() =>
+            db
+              .select()
+              .from(attachments)
+              .where(eq(attachments.id, attachmentId))
+              .limit(1),
+          );
           sourceAttachment = rows[0] ?? null;
-          if (!sourceAttachment)
-            contentProblem = "The attachment is no longer available";
         }
+        if (
+          sourceAttachment === null &&
+          (source.attachmentId !== null || source.body === "")
+        )
+          contentProblem = "The attachment is no longer available";
 
         // Copies a replayed forward already made (issue #567): each
         // target's copy is keyed `${clientId}:${targetId}`, so a retry
@@ -250,10 +243,7 @@ export const forwardHandlers = ({
             const values = {
               chatId: targetId,
               senderId: currentUser.id,
-              contentType: source.contentType,
-              content: source.content,
-              // The caption travels with its attachment (issue #765).
-              caption: messageCaption(source),
+              body: source.body,
               parentMessageId: null,
               clientId,
               ...forwardedFrom,

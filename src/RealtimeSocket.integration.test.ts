@@ -186,7 +186,7 @@ test("a chat event reaches only the chat's participants, and a new post reaches 
       "Content-Type": "application/json",
       Authorization: `Bearer ${bob.accessToken}`,
     },
-    body: JSON.stringify({ contentType: "text", content: "hi alice" }),
+    body: JSON.stringify({ body: "hi alice" }),
   });
 
   // Alice (a participant) gets notified — once for the chat being created,
@@ -227,7 +227,7 @@ test("a chat event reaches only the chat's participants, and a new post reaches 
       "Content-Type": "application/json",
       Authorization: `Bearer ${alice.accessToken}`,
     },
-    body: JSON.stringify({ contentType: "text", content: "hello feed" }),
+    body: JSON.stringify({ body: "hello feed" }),
   });
   const post = (await postResponse.json()) as { id: number };
 
@@ -270,7 +270,7 @@ test("a comment event reaches only sockets subscribed to that post's room", asyn
       "Content-Type": "application/json",
       Authorization: `Bearer ${author.accessToken}`,
     },
-    body: JSON.stringify({ contentType: "text", content: "come discuss" }),
+    body: JSON.stringify({ body: "come discuss" }),
   });
   const post = (await postResponse.json()) as { id: number };
 

@@ -732,7 +732,7 @@ test("admins (not just the owner) can rename, add/remove participants, and delet
       yield* carol.client.chats.acceptChatRequest({ params: { id: chat.id } });
       const message = yield* carol.client.chats.createMessage({
         params: { id: chat.id },
-        payload: { contentType: "text", content: "hi all" },
+        payload: { body: "hi all" },
       });
       // A plain member can't delete someone else's message...
       const memberDelete = yield* dave.client.chats

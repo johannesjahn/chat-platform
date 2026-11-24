@@ -14,10 +14,8 @@ function serverMessage(entry: OutboxMessage, id: number): ChatMessage {
     id,
     chatId: entry.chatId,
     senderId: 1,
-    contentType: entry.contentType,
-    content: entry.content,
+    body: entry.body,
     attachment: null,
-    caption: null,
     parentMessage: null,
     createdAt: entry.createdAt,
     updatedAt: entry.createdAt,
@@ -78,8 +76,7 @@ function send(content: string): string {
     clientId,
     chatId: CHAT,
     ownerId: 1,
-    contentType: "text",
-    content,
+    body: content,
     createdAt: 0,
   });
   return clientId;
@@ -91,7 +88,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 test("a send shows as 'sending' at once and becomes the real message", async () => {
   send("hi");
   expect(outbox.getEntries()).toMatchObject([
-    { content: "hi", status: "sending" },
+    { body: "hi", status: "sending" },
   ]);
 
   await flush();
@@ -124,21 +121,18 @@ test("sends to one chat go out one at a time, in order", async () => {
   send("first");
   send("second");
   // Both are on screen straight away.
-  expect(outbox.getEntries().map((e) => e.content)).toEqual([
-    "first",
-    "second",
-  ]);
+  expect(outbox.getEntries().map((e) => e.body)).toEqual(["first", "second"]);
 
   await flush();
   // Only the first request is out until it settles.
-  expect(requests.map((r) => r.entry.content)).toEqual(["first"]);
+  expect(requests.map((r) => r.entry.body)).toEqual(["first"]);
   requests[0]!.resolve(1);
   await flush();
-  expect(requests.map((r) => r.entry.content)).toEqual(["first", "second"]);
+  expect(requests.map((r) => r.entry.body)).toEqual(["first", "second"]);
   requests[1]!.resolve(2);
   await flush();
 
-  expect(confirmed.map((m) => m.content)).toEqual(["first", "second"]);
+  expect(confirmed.map((m) => m.body)).toEqual(["first", "second"]);
   expect(outbox.getEntries()).toEqual([]);
 });
 
@@ -148,12 +142,11 @@ test("a send to another chat doesn't wait for this one's", async () => {
     clientId: "elsewhere",
     chatId: CHAT + 1,
     ownerId: 1,
-    contentType: "text",
-    content: "there",
+    body: "there",
     createdAt: 0,
   });
   await flush();
-  expect(requests.map((r) => r.entry.content)).toEqual(["here", "there"]);
+  expect(requests.map((r) => r.entry.body)).toEqual(["here", "there"]);
 });
 
 test("a rejected send is marked failed, and a retry reuses its clientId", async () => {
@@ -186,7 +179,7 @@ test("a later send still goes out after an earlier one is rejected", async () =>
   await flush();
   requests[0]!.reject("nope");
   await flush();
-  expect(requests.map((r) => r.entry.content)).toEqual(["bad", "good"]);
+  expect(requests.map((r) => r.entry.body)).toEqual(["bad", "good"]);
 });
 
 test("a send with no response is handed off when the hand-off takes it", async () => {
@@ -220,7 +213,7 @@ test("a message dismissed while waiting its turn is never sent", async () => {
   requests[0]!.resolve(1);
   await flush();
 
-  expect(requests.map((r) => r.entry.content)).toEqual(["first"]);
+  expect(requests.map((r) => r.entry.body)).toEqual(["first"]);
   expect(outbox.getEntries()).toEqual([]);
 });
 

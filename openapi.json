@@ -10919,26 +10919,13 @@
           "senderId": {
             "type": "number"
           },
-          "contentType": {
-            "$ref": "#/components/schemas/MessageContentType"
-          },
-          "content": {
+          "body": {
             "type": "string"
           },
           "attachment": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Attachment"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "caption": {
-            "anyOf": [
-              {
-                "type": "string"
               },
               {
                 "type": "null"
@@ -11004,10 +10991,8 @@
           "id",
           "chatId",
           "senderId",
-          "contentType",
-          "content",
+          "body",
           "attachment",
-          "caption",
           "parentMessage",
           "createdAt",
           "updatedAt",
@@ -11074,21 +11059,11 @@
           "senderName": {
             "type": "string"
           },
-          "contentType": {
-            "$ref": "#/components/schemas/MessageContentType"
-          },
-          "content": {
+          "body": {
             "type": "string"
           },
-          "caption": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "hasAttachment": {
+            "type": "boolean"
           },
           "forwarded": {
             "type": "boolean"
@@ -11098,20 +11073,11 @@
           "id",
           "senderId",
           "senderName",
-          "contentType",
-          "content",
-          "caption",
+          "body",
+          "hasAttachment",
           "forwarded"
         ],
         "additionalProperties": false
-      },
-      "MessageContentType": {
-        "type": "string",
-        "enum": [
-          "text",
-          "image_url",
-          "attachment"
-        ]
       },
       "ChatInvitePreview": {
         "type": "object",
@@ -11470,13 +11436,9 @@
       "UpdateMessageBody": {
         "type": "object",
         "properties": {
-          "contentType": {
-            "$ref": "#/components/schemas/MessageContentType"
-          },
-          "content": {
+          "body": {
             "type": "string",
             "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "minLength": 1,
             "maxLength": 4000
           },
           "attachmentId": {
@@ -11488,27 +11450,10 @@
                 "type": "null"
               }
             ]
-          },
-          "caption": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-                "minLength": 1,
-                "maxLength": 4000
-              },
-              {
-                "type": "null"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
-          "contentType",
-          "content"
+          "body"
         ],
         "additionalProperties": false
       },
@@ -11628,32 +11573,15 @@
       "CreateMessageBody": {
         "type": "object",
         "properties": {
-          "contentType": {
-            "$ref": "#/components/schemas/MessageContentType"
-          },
-          "content": {
+          "body": {
             "type": "string",
             "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "minLength": 1,
             "maxLength": 4000
           },
           "attachmentId": {
             "anyOf": [
               {
                 "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "caption": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-                "minLength": 1,
-                "maxLength": 4000
               },
               {
                 "type": "null"
@@ -11683,8 +11611,7 @@
           }
         },
         "required": [
-          "contentType",
-          "content"
+          "body"
         ],
         "additionalProperties": false
       },
@@ -12131,26 +12058,13 @@
           "author": {
             "$ref": "#/components/schemas/AuthorSummary"
           },
-          "contentType": {
-            "$ref": "#/components/schemas/PostContentType"
-          },
-          "content": {
+          "body": {
             "type": "string"
           },
           "attachment": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Attachment"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "caption": {
-            "anyOf": [
-              {
-                "type": "string"
               },
               {
                 "type": "null"
@@ -12177,10 +12091,8 @@
           "id",
           "authorId",
           "author",
-          "contentType",
-          "content",
+          "body",
           "attachment",
-          "caption",
           "createdAt",
           "updatedAt",
           "reactions",
@@ -12188,46 +12100,18 @@
         ],
         "additionalProperties": false
       },
-      "PostContentType": {
-        "type": "string",
-        "enum": [
-          "text",
-          "image_url",
-          "attachment"
-        ]
-      },
       "UpdatePostBody": {
         "type": "object",
         "properties": {
-          "contentType": {
-            "$ref": "#/components/schemas/PostContentType"
-          },
-          "content": {
+          "body": {
             "type": "string",
             "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "minLength": 1,
             "maxLength": 10000
           },
           "attachmentId": {
             "anyOf": [
               {
                 "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "caption": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-                "minLength": 1,
-                "maxLength": 10000
-              },
-              {
-                "type": "null"
               },
               {
                 "type": "null"
@@ -12236,40 +12120,22 @@
           }
         },
         "required": [
-          "contentType",
-          "content"
+          "body"
         ],
         "additionalProperties": false
       },
       "CreatePostBody": {
         "type": "object",
         "properties": {
-          "contentType": {
-            "$ref": "#/components/schemas/PostContentType"
-          },
-          "content": {
+          "body": {
             "type": "string",
             "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-            "minLength": 1,
             "maxLength": 10000
           },
           "attachmentId": {
             "anyOf": [
               {
                 "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "caption": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^\\S[\\s\\S]*\\S$|^\\S$|^$",
-                "minLength": 1,
-                "maxLength": 10000
               },
               {
                 "type": "null"
@@ -12289,8 +12155,7 @@
           }
         },
         "required": [
-          "contentType",
-          "content"
+          "body"
         ],
         "additionalProperties": false
       },

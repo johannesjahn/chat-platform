@@ -17,7 +17,7 @@ test("a profile page shows the user's recent posts and post count, and Message s
   );
   const seeded = await request.post(`${apiUrl}/posts`, {
     headers: { Authorization: `Bearer ${sessionA.accessToken}` },
-    data: { contentType: "text", content: "Hello from A's profile" },
+    data: { body: "Hello from A's profile" },
   });
   expect(seeded.ok()).toBe(true);
   const { authorId } = await seeded.json();
@@ -62,7 +62,7 @@ test("a user's own profile shows 'Your posts' with no Message button", async ({
 
   const seeded = await request.post(`${apiUrl}/posts`, {
     headers: { Authorization: `Bearer ${session.accessToken}` },
-    data: { contentType: "text", content: "My own post" },
+    data: { body: "My own post" },
   });
   expect(seeded.ok()).toBe(true);
 

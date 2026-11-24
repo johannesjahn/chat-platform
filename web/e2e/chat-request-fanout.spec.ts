@@ -32,7 +32,7 @@ async function sendMessage(
 ) {
   const sent = await request.post(`${apiUrl}/chats/${chatId}/messages`, {
     headers: auth(from),
-    data: { contentType: "text", content },
+    data: { body: content },
   });
   expect(sent.ok()).toBe(true);
 }

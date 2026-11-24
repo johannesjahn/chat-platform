@@ -20,7 +20,7 @@ async function seedPosts(
   for (const content of contents) {
     const response = await request.post(`${apiUrl}/posts`, {
       headers: { Authorization: `Bearer ${session.accessToken}` },
-      data: { contentType: "text", content },
+      data: { body: content },
     });
     expect(response.ok()).toBe(true);
     const post = await response.json();

@@ -41,7 +41,7 @@ test("an own comment's actions stay on one row", async ({
 
   const post = await request.post(`${apiUrl}/posts`, {
     headers,
-    data: { contentType: "text", content: "A post to comment on" },
+    data: { body: "A post to comment on" },
   });
   const { id: postId } = await post.json();
   const comment = await request.post(`${apiUrl}/posts/${postId}/comments`, {

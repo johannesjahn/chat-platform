@@ -21,8 +21,7 @@ import { User } from "./users.ts";
 // "run" finds "running" and "jum" finds "jumps" mid-type) *or* every token
 // appears as a raw substring anywhere in the text (so "ragmen" finds
 // "fragmentary"). Both branches are index-served — a GIN index over the
-// generated `tsvector` (migration 0017) and GIN trigram indexes (migration
-// 0023) respectively — so neither degrades into a sequential scan as the
+// generated `tsvector` and GIN trigram indexes respectively — so neither degrades into a sequential scan as the
 // tables grow. See src/search.ts for the query analysis and
 // src/SearchHandler.ts for how the two branches are combined (a union of
 // per-branch subqueries, not an `OR` — the difference is what keeps both
