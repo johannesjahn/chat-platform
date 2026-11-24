@@ -6333,6 +6333,7 @@ export interface operations {
                 q: string;
                 cursor?: string;
                 limit?: string;
+                chatId?: string;
             };
             header?: never;
             path?: never;

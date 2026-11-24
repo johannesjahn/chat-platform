@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { MESSAGES_MAX_LIMIT } from "@/lib/chatQueries";
 
 // How close to the bottom of the thread still counts as "at the bottom" —
 // fractional scroll heights (sub-pixel layout, zoom) mean an exact
@@ -94,7 +95,7 @@ export function useThreadScroll({
   chatReady: boolean;
   newestPendingClientId: string | undefined;
   hasEarlier: boolean | undefined;
-  loadEarlier: () => Promise<{ data?: { hasEarlier?: boolean } }>;
+  loadEarlier: (limit?: number) => Promise<{ data?: { hasEarlier?: boolean } }>;
   // Open scrolled to (and highlighting) this message instead of the newest.
   targetMessageId: number | undefined;
   messagesLoading: boolean;
@@ -328,7 +329,8 @@ export function useThreadScroll({
     setLoadingEarlier(true);
     try {
       for (let i = 0; i < JUMP_MAX_EARLIER_PAGES; i++) {
-        const result = await loadEarlier();
+        // Biggest pages: a search hit can be thousands of messages back.
+        const result = await loadEarlier(MESSAGES_MAX_LIMIT);
         // The refetch resolving only means the cache holds the older page —
         // React still has to commit it before the row exists in the DOM.
         await nextPaint();

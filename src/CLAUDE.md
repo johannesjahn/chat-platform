@@ -72,7 +72,7 @@ substring branch (`ILIKE '%token%'`) over `pg_trgm` GIN indexes (`0023`).
 - **Branches are a union of per-branch subqueries, never an `OR`**: under an
   `OR` with `ORDER BY id DESC LIMIT n` Postgres can use neither index. Every
   filter (content type, keyset cursor, blocked authors, chat
-  participation, `request_pending`) lives _inside_ each arm; outside, it
+  participation, `request_pending`, `chatId`) lives _inside_ each arm; outside, it
   would shrink a page instead of pushing it deeper. See `matchingIds`.
 - **Posts and comments arms are recent-first** (`recentFirstArm`, issue
   #829): the newest `SEARCH_RECENT_WINDOW` ids are filtered in id order, and
