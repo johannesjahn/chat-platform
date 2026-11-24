@@ -1,6 +1,10 @@
 /// <reference types="bun" />
 import { expect, test } from "bun:test";
-import { type InfiniteData, QueryClient } from "@tanstack/react-query";
+import {
+  type InfiniteData,
+  InfiniteQueryObserver,
+  QueryClient,
+} from "@tanstack/react-query";
 import type { components } from "./api-types";
 import type { Chat, ChatMessage, ChatMessagesPage } from "./chats";
 import {
@@ -162,12 +166,12 @@ test("a new message in an open conversation fetches only the messages", () => {
     },
     ME,
   );
-  release();
   expect(invalidated(client, chatId)).toEqual({
     list: false,
     detail: false,
     messages: true,
   });
+  release();
 });
 
 test("a new message in a chat that isn't open refetches the list and the chat", () => {
@@ -626,6 +630,44 @@ test("a message brings an archived chat back to the main list", () => {
   );
 });
 
+test("a list fetch in flight when a message un-archives a chat is redone, not left to drop it again", async () => {
+  const chatId = nextChatId++;
+  const archivedId = nextChatId++;
+  const client = seed(chatId);
+  recordChatVersion(archivedId, 1);
+  client.setQueryData<InfiniteData<ChatsPage>>(
+    archivedChatsListQueryKey,
+    listOf([chatOf(archivedId, { archived: true })]),
+  );
+  // The mounted list: each fetch waits to be answered.
+  const answers: ((page: ChatsPage) => void)[] = [];
+  const observer = new InfiniteQueryObserver(client, {
+    queryKey: chatsListQueryKey,
+    queryFn: () => new Promise<ChatsPage>((resolve) => answers.push(resolve)),
+    initialPageParam: undefined,
+    getNextPageParam: () => undefined,
+    staleTime: Infinity,
+  });
+  const stop = observer.subscribe(() => {});
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+  void observer.refetch();
+  await settle();
+
+  applyChatUpdated(client, newMessageWithBody(archivedId, 2), ME);
+  await settle();
+  // Answered from before the message, when the chat was still archived.
+  answers[0]!({ chats: [], limit: 20, nextCursor: null });
+  await settle();
+  answers[1]?.({
+    chats: [chatOf(archivedId)],
+    limit: 20,
+    nextCursor: null,
+  });
+  await settle();
+  expect(listedChat(client, archivedId)).toBeDefined();
+  stop();
+});
+
 test("reading an archived chat leaves it out of the main list", () => {
   const chatId = nextChatId++;
   const archivedId = nextChatId++;
@@ -655,4 +697,53 @@ test("a new message doesn't move a chat above a pinned one", () => {
     .pages.flatMap((page) => page.chats)
     .map((c) => c.id);
   expect(ids.slice(0, 2)).toEqual([pinnedId, chatId]);
+});
+
+test("a message left to a conversation that closes before reading it refetches the lists", () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  const invalidated = () =>
+    client.getQueryState(chatsListQueryKey)?.isInvalidated;
+
+  const release = holdChatInView(chatId);
+  applyChatUpdated(client, newMessageWithBody(chatId, 2), ME);
+  expect(invalidated()).toBe(false);
+  release();
+  expect(invalidated()).toBe(true);
+  expect(client.getQueryState(chatsUnreadCountQueryKey)?.isInvalidated).toBe(
+    true,
+  );
+
+  // Read first, it closes without a request.
+  const other = nextChatId++;
+  const otherClient = seed(other);
+  const releaseOther = holdChatInView(other);
+  const event = newMessageWithBody(other, 2);
+  applyChatUpdated(otherClient, event, ME);
+  applyMarkedRead(
+    otherClient,
+    chatOf(other, {
+      lastMessage: event.message,
+      updatedAt: 12_000,
+      version: 3,
+    }),
+  );
+  releaseOther();
+  expect(otherClient.getQueryState(chatsListQueryKey)?.isInvalidated).toBe(
+    false,
+  );
+});
+
+test("a message counts in its chat even while the total is being fetched", async () => {
+  const chatId = nextChatId++;
+  const client = seed(chatId);
+  void client
+    .fetchQuery({
+      queryKey: chatsUnreadCountQueryKey,
+      queryFn: () => new Promise<never>(() => {}),
+    })
+    .catch(() => {});
+  applyChatUpdated(client, newMessageWithBody(chatId, 2), ME);
+  expect(listedChat(client, chatId)?.unreadCount).toBe(1);
+  await client.cancelQueries();
 });

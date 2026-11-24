@@ -50,8 +50,9 @@ test("pin, archive and mute a chat from its details", async ({
   await expect(rows).toHaveCount(1);
   await list.getByRole("link", { name: /Archived/ }).click();
   await expect(page).toHaveURL("/chats/archived");
+  // The row, not the same text in the conversation being left.
   await expect(
-    page.getByRole("main").getByText("from the older chat"),
+    page.getByRole("main").getByRole("link", { name: /from the older chat/ }),
   ).toBeVisible();
 
   // A new message brings it back.

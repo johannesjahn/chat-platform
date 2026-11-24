@@ -60,6 +60,32 @@ export type ChatUpdatedEvent = {
 // Only these defer to the conversation for the list and the chat.
 const inView = new Map<number, number>();
 
+// The newest message each of them was left to take from here (see
+// `applyChatUpdated`), until its mark-read or preview patch has.
+const leftToView = new Map<
+  number,
+  { queryClient: QueryClient; messageId: number }
+>();
+
+function settleLeftToView(chatId: number, throughId: number): void {
+  const left = leftToView.get(chatId);
+  if (left && left.messageId <= throughId) leftToView.delete(chatId);
+}
+
+// The last view of the chat is gone. If it went before it got to a message
+// left to it, nothing else has told the lists, the chat or the unread total.
+function takeBackFromView(chatId: number): void {
+  const left = leftToView.get(chatId);
+  if (!left) return;
+  leftToView.delete(chatId);
+  // Its mark-read is on the way, and will.
+  if (ownReadsInFlight.has(chatId)) return;
+  void left.queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
+  void left.queryClient.invalidateQueries({
+    queryKey: chatDetailQueryKey(chatId),
+  });
+}
+
 export function holdChatInView(chatId: number): () => void {
   inView.set(chatId, (inView.get(chatId) ?? 0) + 1);
   let released = false;
@@ -68,7 +94,10 @@ export function holdChatInView(chatId: number): () => void {
     released = true;
     const left = (inView.get(chatId) ?? 1) - 1;
     if (left > 0) inView.set(chatId, left);
-    else inView.delete(chatId);
+    else {
+      inView.delete(chatId);
+      takeBackFromView(chatId);
+    }
   };
 }
 
@@ -156,7 +185,11 @@ export function applyChatUpdated(
     // On screen, the conversation takes it from here: it marks the new
     // message read (and that response carries the chat) or, for one of our
     // own, patches the preview from it.
-    if (isChatInView(chatId)) return;
+    if (isChatInView(chatId)) {
+      if (event.messageId !== undefined)
+        leftToView.set(chatId, { queryClient, messageId: event.messageId });
+      return;
+    }
     // Off screen (issue #834). This used to refetch the unread total and
     // the chat list for every recipient on every message — the two most
     // requested endpoints under load. Someone else's message is one more
@@ -208,12 +241,6 @@ function countUnread(queryClient: QueryClient, chatId: number): boolean {
     ?.pages.flatMap((page) => page.chats)
     .find((chat) => chat.id === chatId);
   if (!listed) return false;
-  const total = queryClient.getQueryState<UnreadChatCount>(
-    chatsUnreadCountQueryKey,
-  );
-  if (!total?.data || total.fetchStatus === "fetching") return false;
-  if (hasLapsedMute(listed)) return false;
-
   const bump = (chat: Chat): Chat => ({
     ...chat,
     unreadCount: chat.unreadCount + 1,
@@ -222,8 +249,14 @@ function countUnread(queryClient: QueryClient, chatId: number): boolean {
   queryClient.setQueryData<Chat>(chatDetailQueryKey(chatId), (chat) =>
     chat ? bump(chat) : chat,
   );
-  // A muted chat's count is its own (issue #900).
+  // The chat's own count moves whatever becomes of the total, which a muted
+  // chat isn't part of (issue #900).
+  if (hasLapsedMute(listed)) return false;
   if (!countsTowardUnread(listed)) return true;
+  const total = queryClient.getQueryState<UnreadChatCount>(
+    chatsUnreadCountQueryKey,
+  );
+  if (!total?.data || total.fetchStatus === "fetching") return false;
   queryClient.setQueryData<UnreadChatCount>(chatsUnreadCountQueryKey, {
     count: total.data.count + 1,
     chats: total.data.chats + (listed.unreadCount === 0 ? 1 : 0),
@@ -492,6 +525,7 @@ export function applyMarkedRead(queryClient: QueryClient, chat: Chat): void {
       ?.pages.flatMap((page) => page.chats)
       .find((c) => c.id === chat.id);
 
+  if (chat.lastMessage) settleLeftToView(chat.id, chat.lastMessage.id);
   recordChatVersion(chat.id, chat.version);
   const detailFetching =
     queryClient.getQueryState(detailKey)?.fetchStatus === "fetching";
@@ -499,8 +533,7 @@ export function applyMarkedRead(queryClient: QueryClient, chat: Chat): void {
   if (detailFetching)
     void queryClient.invalidateQueries({ queryKey: detailKey });
 
-  const listFetching =
-    queryClient.isFetching({ queryKey: chatsListQueryKey, exact: true }) > 0;
+  const listFetching = chatListFetching(queryClient);
   upsertListedChat(queryClient, chat);
   if (listFetching)
     void queryClient.invalidateQueries({
@@ -543,6 +576,7 @@ export function applyNewestMessage(
   chatId: number,
   message: ChatMessage,
 ): void {
+  settleLeftToView(chatId, message.id);
   const advance = (chat: Chat) => withNewestMessage(chat, message);
   const detail = queryClient.getQueryData<Chat>(chatDetailQueryKey(chatId));
   if (detail) {
@@ -605,11 +639,23 @@ function placeNewestMessage(
   }
   const base = listedIn(queryClient, chatsListQueryKey, chatId) ?? detail;
   if (!base) return false;
-  // Back from the archive, everything unread in it counts again.
-  if (base.archived)
-    void queryClient.invalidateQueries({ queryKey: chatsUnreadCountQueryKey });
+  // Read first: a list fetch already in flight may have been answered before
+  // this message, and would land on top of the patch — for a chat that was
+  // archived by then, dropping it from the list again.
+  const listFetching = chatListFetching(queryClient);
   upsertListedChat(queryClient, withNewestMessage(base, message, version));
+  if (base.archived) {
+    // Back from the archive: it changes lists, and everything unread in it
+    // counts again.
+    void queryClient.invalidateQueries({ queryKey: chatsListQueryKey });
+  } else if (listFetching) refetchListsSoon(queryClient);
   return true;
+}
+
+function chatListFetching(queryClient: QueryClient): boolean {
+  return (
+    queryClient.isFetching({ queryKey: chatsListQueryKey, exact: true }) > 0
+  );
 }
 
 // `chatId`'s entry in a cached chat list under `queryKey` (a prefix: the
