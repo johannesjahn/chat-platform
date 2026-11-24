@@ -16,6 +16,7 @@ import {
   toMessageRequest,
   publishChatChange,
 } from "./chatState.ts";
+import { listChatEvents, recordChatEvents } from "./chatEvents.ts";
 import { getLastMessagesForChats } from "./messageViews.ts";
 import {
   isArchived,
@@ -177,6 +178,12 @@ export const chatHandlers = ({
           nextCursor,
         };
       }),
+    listChatEvents: ({ params: { id } }) =>
+      Effect.gen(function* () {
+        const currentUser = yield* CurrentUser;
+        yield* loadChatAs(db, id, currentUser, "participant");
+        return yield* listChatEvents(db, id);
+      }),
     getChat: ({ params: { id } }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
@@ -297,7 +304,7 @@ export const chatHandlers = ({
     updateChat: ({ params: { id }, payload }) =>
       Effect.gen(function* () {
         const currentUser = yield* CurrentUser;
-        yield* loadGroupChatAs(
+        const existing = yield* loadGroupChatAs(
           db,
           id,
           currentUser,
@@ -306,11 +313,22 @@ export const chatHandlers = ({
         );
 
         const updated = yield* dbQuery(() =>
-          db
-            .update(chats)
-            .set({ title: payload.title })
-            .where(eq(chats.id, id))
-            .returning(),
+          db.transaction(async (tx) => {
+            const rows = await tx
+              .update(chats)
+              .set({ title: payload.title })
+              .where(eq(chats.id, id))
+              .returning();
+            if (payload.title !== existing.title)
+              await recordChatEvents(tx, id, [
+                {
+                  type: "renamed",
+                  actorId: currentUser.id,
+                  detail: payload.title,
+                },
+              ]);
+            return rows;
+          }),
         );
         const row = updated[0];
         if (!row)
@@ -351,7 +369,17 @@ export const chatHandlers = ({
         );
 
         const updated = yield* dbQuery(() =>
-          db.update(chats).set(keys).where(eq(chats.id, id)).returning(),
+          db.transaction(async (tx) => {
+            const rows = await tx
+              .update(chats)
+              .set(keys)
+              .where(eq(chats.id, id))
+              .returning();
+            await recordChatEvents(tx, id, [
+              { type: "avatar_changed", actorId: currentUser.id },
+            ]);
+            return rows;
+          }),
         );
         const row = updated[0];
         if (!row)
@@ -388,15 +416,22 @@ export const chatHandlers = ({
         );
 
         const updated = yield* dbQuery(() =>
-          db
-            .update(chats)
-            .set({
-              avatarSmallKey: null,
-              avatarMediumKey: null,
-              avatarLargeKey: null,
-            })
-            .where(eq(chats.id, id))
-            .returning(),
+          db.transaction(async (tx) => {
+            const rows = await tx
+              .update(chats)
+              .set({
+                avatarSmallKey: null,
+                avatarMediumKey: null,
+                avatarLargeKey: null,
+              })
+              .where(eq(chats.id, id))
+              .returning();
+            if (existing.avatarSmallKey !== null)
+              await recordChatEvents(tx, id, [
+                { type: "avatar_removed", actorId: currentUser.id },
+              ]);
+            return rows;
+          }),
         );
         const row = updated[0];
         if (!row)

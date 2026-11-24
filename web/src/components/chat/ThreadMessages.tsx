@@ -9,31 +9,63 @@ import {
   localDayKey,
   wasShownBeforeConfirm,
 } from "@/lib/chats";
+import {
+  buildTimeline,
+  chatEventText,
+  type ChatEvent,
+  type TimelineItem,
+} from "@/lib/chatTimeline";
 import { useTypingUsers } from "@/lib/typing";
 import { userAvatarName, userHandle, userLabel } from "@/lib/users";
 
-// Splits oldest-first messages into runs sharing a local calendar day, keeping
-// each message's index in the full list (used for the entry-animation stagger).
-function groupByDay<T extends { createdAt: number }>(messages: T[]) {
-  const groups: { message: T; i: number }[][] = [];
-  let lastKey: string | undefined;
-  messages.forEach((message, i) => {
-    const key = localDayKey(message.createdAt);
-    if (key !== lastKey) groups.push([]);
-    groups[groups.length - 1]!.push({ message, i });
-    lastKey = key;
-  });
+// Splits oldest-first timeline items into runs sharing a local calendar day.
+// Keyed by the day, not by a run's first item: activity arriving, or older
+// messages paged in, at the start of a day mustn't remount the rest of it
+// (which would lose an edit in progress). A day can recur when timestamps are
+// out of order, hence the count.
+function groupByDay<T extends { createdAt: number }>(items: T[]) {
+  const groups: { key: string; items: T[] }[] = [];
+  const runs = new Map<string, number>();
+  let lastDay: string | undefined;
+  for (const item of items) {
+    const day = localDayKey(item.createdAt);
+    if (day !== lastDay) {
+      const run = runs.get(day) ?? 0;
+      runs.set(day, run + 1);
+      groups.push({ key: `${day}#${run}`, items: [] });
+    }
+    groups[groups.length - 1]!.items.push(item);
+    lastDay = day;
+  }
   return groups;
 }
 
+const itemKey = (item: TimelineItem<ChatMessage>) =>
+  item.kind === "message" ? `m${item.message.id}` : `e${item.events[0]!.id}`;
+
+// One row of group activity (issue #900).
+function ChatEventRow({ events, meId }: { events: ChatEvent[]; meId: number }) {
+  return (
+    <p
+      data-testid="chat-event"
+      className="px-6 py-0.5 text-center text-xs wrap-anywhere text-muted-foreground"
+    >
+      {chatEventText(events, meId)}
+    </p>
+  );
+}
+
 /**
- * The thread's confirmed messages, a date separator at the top of each day,
- * one MessageBubble each (split out of ChatConversation in issue #811). The
- * callbacks are per message; what to do with them is the conversation's.
+ * The thread's confirmed messages, one MessageBubble each, and a group's
+ * activity, with a date separator at the top of each day (split out of
+ * ChatConversation in issue #811). The callbacks are per message; what to do
+ * with them is the conversation's.
  */
 export function ThreadMessages({
   chat,
   messages,
+  events,
+  hasEarlier,
   me,
   canManage,
   compact,
@@ -48,6 +80,8 @@ export function ThreadMessages({
 }: {
   chat: Chat;
   messages: ChatMessage[];
+  events: ChatEvent[];
+  hasEarlier: boolean;
   me: { id: number; role: string };
   canManage: boolean;
   compact: boolean;
@@ -60,13 +94,23 @@ export function ThreadMessages({
   onJumpTo: (messageId: number) => void;
   onEditEnd: () => void;
 }) {
-  return groupByDay(messages).map((group) => (
+  const timeline = buildTimeline(messages, events, hasEarlier);
+  return groupByDay(timeline).map((group) => (
     // One wrapper per calendar day: a sticky element only stays
     // pinned while its parent is on screen, so scoping each
     // separator to its own day makes it get pushed out by the
     // next day's separator instead of piling up behind it.
-    <div key={group[0]!.message.id} className="flex flex-col gap-2">
-      {group.map(({ message, i }) => {
+    <div key={group.key} className="flex flex-col gap-2">
+      {group.items.map((item, position) => {
+        const isFirstOfDay = position === 0;
+        if (item.kind === "events")
+          return (
+            <Fragment key={itemKey(item)}>
+              {isFirstOfDay && <DateSeparator ms={item.createdAt} />}
+              <ChatEventRow events={item.events} meId={me.id} />
+            </Fragment>
+          );
+        const { message, index: i } = item;
         const isOwn = message.senderId === me.id;
         const sender = chat.participants.find(
           (p) => p.userId === message.senderId,
@@ -74,9 +118,8 @@ export function ThreadMessages({
         // Null for a normal message, and also once the quoted
         // message has been deleted — nothing to jump to either way.
         const parentId = message.parentMessage?.id;
-        const isFirstOfDay = group[0]!.i === i;
         return (
-          <Fragment key={message.id}>
+          <Fragment key={itemKey(item)}>
             {isFirstOfDay && <DateSeparator ms={message.createdAt} />}
             <MessageBubble
               message={message}

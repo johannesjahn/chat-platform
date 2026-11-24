@@ -42,7 +42,11 @@ test("pin, archive and mute a chat from its details", async ({
   if (!(await details.isVisible()))
     await page.getByRole("button", { name: "Chat details" }).click();
 
-  await details.getByRole("button", { name: "Pin chat" }).click();
+  await details.getByRole("button", { name: "Pin chat" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    details.getByRole("button", { name: "Unpin chat" }),
+  ).toBeFocused();
   await expect(rows.first()).toContainText("from the older chat");
   await expect(rows.first().getByLabel("Pinned chat")).toBeVisible();
 

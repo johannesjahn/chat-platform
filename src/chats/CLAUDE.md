@@ -65,6 +65,22 @@ caller's own `muted_until`/`archived_at`/`pinned_at` on `chat_participants`
   `upsertListedChat`'s order in `chatSync.ts`.
 - Told only to the caller, as `chat_preferences_changed`; never a version bump.
 
+## Group activity
+
+Membership, title, picture, owner and role changes write a `chat_events` row
+(issue #900, `0046`) through `recordChatEvents` (`chatEvents.ts`), in the
+transaction that makes the change; a new handler that changes a group does
+the same.
+
+- **Not messages**: they have no unread, search, forward or archive
+  behaviour, and a replica predating them ignores the table. `after_message_id`
+  places them in the thread.
+- **References, not copies**: names are joined in at read time, so deleting
+  an account takes its name out of every group's history.
+- Live through the change's own `chat_updated` (no `change`), on which the
+  client refetches `GET /chats/:id/events`. Placed and worded by
+  `web/src/lib/chatTimeline.ts`.
+
 ## Forwarding
 
 `POST /chats/:id/messages/:messageId/forward` (issue #601, `forwardMessage`

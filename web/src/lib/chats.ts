@@ -15,6 +15,7 @@ import {
   archivedChatsListQueryKey,
   chatsUnreadCountQueryKey,
   chatDetailQueryKey,
+  chatEventsQueryKey,
   chatMessagesQueryKey,
   chatPinnedQueryKey,
   chatStarredQueryKey,
@@ -292,6 +293,23 @@ export function useChatDetail(chatId: number | undefined, enabled: boolean) {
   });
 }
 
+// A group's activity rows (issue #900), refreshed by any `chat_updated` that
+// isn't a message or a read (see chatSync.ts).
+export function useChatEvents(chatId: number | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: chatEventsQueryKey(chatId ?? -1),
+    enabled: enabled && chatId != null,
+    queryFn: async ({ signal }) => {
+      const { data, error } = await fetchClient.GET("/chats/{id}/events", {
+        params: { path: { id: String(chatId) } },
+        signal,
+      });
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
 // The chat's pinned messages (issue #223), newest pin first — visible to
 // every participant. Kept live by the `message_pin_changed` realtime event,
 // which invalidates this key (see realtimeSocket.ts).
@@ -500,7 +518,8 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
   // further back and leaving `hasEarlier` permanently true — so scrolling to
   // the top kept sending pagination requests to the backend forever, even
   // once the oldest reachable message was loaded.
-  const isLoadEarlierFetchRef = useRef(false);
+  // Holds how many messages the pending `loadEarlier` asked for.
+  const loadEarlierLimitRef = useRef<number | null>(null);
 
   const queryKey =
     chatId != null
@@ -547,8 +566,8 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
     // Aborted, its fetch throws before any cursor is touched.
     queryFn: async ({ signal }): Promise<ChatMessagesPage> => {
       const id = chatId!;
-      const isLoadEarlierFetch = isLoadEarlierFetchRef.current;
-      isLoadEarlierFetchRef.current = false;
+      const loadEarlierLimit = loadEarlierLimitRef.current;
+      loadEarlierLimitRef.current = null;
       const prev = queryClient.getQueryData<ChatMessagesPage>(queryKey);
       // Whether *this hook instance* has already established a window,
       // rather than whether the query cache happens to have data — the
@@ -562,12 +581,12 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
       // instead of the intended `MESSAGES_PAGE_SIZE` first page.
       const hasWindowThisMount = newestCursorRef.current != null;
 
-      if (isLoadEarlierFetch && prev && oldestCursorRef.current) {
+      if (loadEarlierLimit !== null && prev && oldestCursorRef.current) {
         const page = await fetchMessagesPage(
           id,
           {
             before: oldestCursorRef.current,
-            limit: MESSAGES_PAGE_SIZE,
+            limit: loadEarlierLimit,
           },
           signal,
         );
@@ -648,8 +667,8 @@ export function useChatMessages(chatId: number | undefined, enabled: boolean) {
     },
   });
 
-  const loadEarlier = () => {
-    isLoadEarlierFetchRef.current = true;
+  const loadEarlier = (limit: number = MESSAGES_PAGE_SIZE) => {
+    loadEarlierLimitRef.current = limit;
     return query.refetch();
   };
 

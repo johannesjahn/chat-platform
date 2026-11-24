@@ -31,6 +31,9 @@ export const chatsUnreadCountQueryKey = [
 ] as const;
 export const chatDetailQueryKey = (chatId: number) =>
   ["chats", chatId, "detail"] as const;
+// A group's activity rows (issue #900).
+export const chatEventsQueryKey = (chatId: number) =>
+  ["chats", chatId, "events"] as const;
 export const chatMessagesQueryKey = (chatId: number) =>
   ["chats", chatId, "messages"] as const;
 // The chat-wide pinned list and the current user's private starred list

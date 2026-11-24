@@ -640,6 +640,8 @@ const searchMessagesPage = (
   q: string,
   limit: number,
   after: number | null,
+  // Only this chat's messages (issue #900); inside each arm like the rest.
+  chatId?: number,
 ) =>
   Effect.gen(function* () {
     // The join on the caller's own participant row, inside each union arm, is
@@ -675,6 +677,7 @@ const searchMessagesPage = (
               )}
               where ${and(
                 branch,
+                chatId !== undefined ? eq(messages.chatId, chatId) : undefined,
                 after !== null ? lt(messages.id, after) : undefined,
               )} order by ${messages.id} desc limit ${limit + 1}`,
             limit + 1,
@@ -794,6 +797,7 @@ export const SearchHandlerLive = HttpApiBuilder.group(
             urlParams.q,
             urlParams.limit ?? DEFAULT_SEARCH_LIMIT,
             after,
+            urlParams.chatId,
           );
         }),
       );

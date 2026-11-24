@@ -84,6 +84,13 @@ export const SearchQuery = Schema.Struct({
   ),
 });
 
+// Messages can also be narrowed to one chat (issue #900). Not the caller's, or
+// still a request for them: no results, as for any chat they can't search.
+export const MessageSearchQuery = Schema.Struct({
+  ...SearchQuery.fields,
+  chatId: Schema.optional(Schema.Int),
+});
+
 // Same query text, but no cursor: the unified endpoint is always the *first*
 // page of every section (pagination is the per-type endpoints' job), and its
 // `limit` applies per section rather than to a single list.
@@ -253,7 +260,7 @@ export const SearchGroup = HttpApiGroup.make("search")
     // still a message request for them (issue #808) isn't searched until
     // they accept it.
     HttpApiEndpoint.get("searchMessages", "/search/messages", {
-      query: SearchQuery,
+      query: MessageSearchQuery,
       success: MessageSearchPage,
       error: InvalidSearchRequest,
     }).middleware(Authentication),

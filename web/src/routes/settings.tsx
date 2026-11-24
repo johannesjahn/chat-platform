@@ -18,6 +18,7 @@ import { useIsDesktop } from "@/lib/media";
 import { staticTitle } from "@/lib/title";
 import { AppearanceCard } from "@/components/settings/AppearanceCard";
 import { BrowserNotificationsCard } from "@/components/settings/BrowserNotificationsCard";
+import { NotificationTypesCard } from "@/components/settings/NotificationTypesCard";
 import { EditStatusCard } from "@/components/settings/EditStatusCard";
 import { BlockedUsersCard } from "@/components/settings/BlockedUsersCard";
 import { EditProfileCard } from "@/components/settings/EditProfileCard";
@@ -78,7 +79,12 @@ function SectionCard({ section }: { section: Section }) {
     case "privacy":
       return <BlockedUsersCard />;
     case "notifications":
-      return <BrowserNotificationsCard />;
+      return (
+        <div className="flex w-full flex-col gap-6">
+          <NotificationTypesCard />
+          <BrowserNotificationsCard />
+        </div>
+      );
     case "password":
       return <ChangePasswordCard />;
     case "account":
@@ -142,6 +148,7 @@ function SettingsPage() {
             <EditStatusCard />
             <AppearanceCard />
             <BlockedUsersCard />
+            <NotificationTypesCard />
             <BrowserNotificationsCard />
             <ChangePasswordCard />
             <DeleteAccountCard />

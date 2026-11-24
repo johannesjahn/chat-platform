@@ -692,6 +692,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chats/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["chats.listChatEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chats/{id}/pins/{messageId}": {
         parameters: {
             query?: never;
@@ -1268,6 +1284,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notifications/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["notifications.getNotificationPreferences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["notifications.updateNotificationPreferences"];
+        trace?: never;
+    };
     "/notifications/read-all": {
         parameters: {
             query?: never;
@@ -1328,6 +1360,22 @@ export interface components {
         };
         UnreadNotificationCount: {
             count: number;
+        };
+        NotificationPreferences: {
+            comment: boolean;
+            reply: boolean;
+            reaction: boolean;
+            mention: boolean;
+            game_invite: boolean;
+            game_record: boolean;
+        };
+        UpdateNotificationPreferencesBody: {
+            comment?: boolean | null;
+            reply?: boolean | null;
+            reaction?: boolean | null;
+            mention?: boolean | null;
+            game_invite?: boolean | null;
+            game_record?: boolean | null;
         };
         InvalidNotificationRequestEncoded: {
             /** @enum {string} */
@@ -1851,6 +1899,21 @@ export interface components {
         PinMessageBody: {
             messageId: number;
         };
+        ChatEvent: {
+            id: number;
+            type: components["schemas"]["ChatEventType"];
+            afterMessageId: number;
+            actor: components["schemas"]["ChatEventPerson"] | null;
+            target: components["schemas"]["ChatEventPerson"] | null;
+            detail: string | null;
+            createdAt: number;
+        };
+        ChatEventPerson: {
+            userId: number;
+            name: string;
+        };
+        /** @enum {string} */
+        ChatEventType: "member_added" | "member_joined" | "member_left" | "member_removed" | "renamed" | "avatar_changed" | "avatar_removed" | "owner_changed" | "admin_granted" | "admin_revoked";
         ReactionState: {
             reactions: components["schemas"]["ReactionSummary"][];
         };
@@ -5623,6 +5686,64 @@ export interface operations {
             };
         };
     };
+    "chats.listChatEvents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatEvent"][];
+                };
+            };
+            /** @description HttpApiDecodeError */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForbiddenEncoded"];
+                };
+            };
+            /** @description NotFound */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotFoundEncoded"];
+                };
+            };
+        };
+    };
     "chats.unpinMessage": {
         parameters: {
             query?: never;
@@ -6333,6 +6454,7 @@ export interface operations {
                 q: string;
                 cursor?: string;
                 limit?: string;
+                chatId?: string;
             };
             header?: never;
             path?: never;
@@ -7674,6 +7796,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UnreadNotificationCount"];
+                };
+            };
+            /** @description HttpApiDecodeError */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
+                };
+            };
+        };
+    };
+    "notifications.getNotificationPreferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description NotificationPreferences */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferences"];
+                };
+            };
+            /** @description HttpApiDecodeError */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HttpApiDecodeErrorEncoded"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnauthorizedEncoded"];
+                };
+            };
+        };
+    };
+    "notifications.updateNotificationPreferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNotificationPreferencesBody"];
+            };
+        };
+        responses: {
+            /** @description NotificationPreferences */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPreferences"];
                 };
             };
             /** @description HttpApiDecodeError */

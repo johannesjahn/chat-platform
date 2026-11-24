@@ -26,6 +26,11 @@ export const unreadNotificationCountQueryKey = [
   "notifications",
   "unread-count",
 ] as const;
+// Under the root, so `notifications_changed` refreshes it on other devices.
+export const notificationPreferencesQueryKey = [
+  "notifications",
+  "preferences",
+] as const;
 export const notificationsListQueryKey = ["notifications", "list"] as const;
 
 export function useUnreadNotificationCount(enabled: boolean): number {

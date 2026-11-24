@@ -8,6 +8,7 @@ import {
   isNull,
   lt,
   notInArray,
+  sql,
   type SQL,
 } from "drizzle-orm";
 import { Effect } from "effect";
@@ -18,12 +19,19 @@ import {
   NotFound,
   type GameId,
   type Notification,
-  type NotificationType,
+  NotificationType,
+  type NotificationPreferences,
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { blockedOrMutedUserIds } from "./blocks.ts";
 import { Db, type DrizzleDb, dbQuery } from "./Db.ts";
-import { comments, notifications, posts, users } from "./db/schema.ts";
+import {
+  comments,
+  notificationPreferences,
+  notifications,
+  posts,
+  users,
+} from "./db/schema.ts";
 import { notifyInboxChanged } from "./notifications.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 
@@ -72,6 +80,33 @@ const unreadCount = (db: DrizzleDb, userId: number) =>
       .where(and(await visibleTo(db, userId), isNull(notifications.readAt)));
     return Number(row?.total ?? 0);
   });
+
+const preferencesOf = (
+  db: DrizzleDb,
+  userId: number,
+): Effect.Effect<NotificationPreferences> =>
+  dbQuery(() =>
+    db
+      .select({
+        type: notificationPreferences.type,
+        enabled: notificationPreferences.enabled,
+      })
+      .from(notificationPreferences)
+      .where(eq(notificationPreferences.userId, userId)),
+  ).pipe(
+    Effect.map((rows) => {
+      const stored = new Map(rows.map((row) => [row.type, row.enabled]));
+      const on = (type: NotificationType) => stored.get(type) ?? true;
+      return {
+        comment: on("comment"),
+        reply: on("reply"),
+        reaction: on("reaction"),
+        mention: on("mention"),
+        game_invite: on("game_invite"),
+        game_record: on("game_record"),
+      };
+    }),
+  );
 
 const actors = alias(users, "actor");
 
@@ -180,6 +215,40 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           return { count: yield* unreadCount(db, currentUser.id) };
+        }),
+      )
+      .handle("getNotificationPreferences", () =>
+        Effect.gen(function* () {
+          const currentUser = yield* CurrentUser;
+          return yield* preferencesOf(db, currentUser.id);
+        }),
+      )
+      .handle("updateNotificationPreferences", ({ payload }) =>
+        Effect.gen(function* () {
+          const currentUser = yield* CurrentUser;
+          const rows = NotificationType.literals.flatMap((type) => {
+            const enabled = payload[type];
+            return enabled === undefined
+              ? []
+              : [{ userId: currentUser.id, type, enabled }];
+          });
+          if (rows.length > 0) {
+            yield* dbQuery(() =>
+              db
+                .insert(notificationPreferences)
+                .values(rows)
+                .onConflictDoUpdate({
+                  target: [
+                    notificationPreferences.userId,
+                    notificationPreferences.type,
+                  ],
+                  set: { enabled: sql`excluded.enabled` },
+                }),
+            );
+            // The caller's other tabs refetch their settings too.
+            yield* notifyInboxChanged(connections, [currentUser.id]);
+          }
+          return yield* preferencesOf(db, currentUser.id);
         }),
       )
       .handle("markAllNotificationsRead", () =>

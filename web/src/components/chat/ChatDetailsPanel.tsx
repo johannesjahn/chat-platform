@@ -13,6 +13,7 @@ import {
 import { Avatar } from "@/components/Avatar";
 import { BlockUserControls } from "@/components/BlockUserControls";
 import { ChatPreferencesSection } from "@/components/chat/ChatPreferencesSection";
+import { ChatSearchSection } from "@/components/chat/ChatSearchSection";
 import { DetailsSection } from "@/components/chat/DetailsSection";
 import {
   GroupIdentity,
@@ -277,7 +278,12 @@ function ChatDetails({
       ) : (
         other && <DirectChatPerson participant={other} />
       )}
-      {!chat.messageRequest && <ChatPreferencesSection chat={chat} />}
+      {!chat.messageRequest && (
+        <>
+          <ChatPreferencesSection chat={chat} />
+          <ChatSearchSection chatId={chat.id} onJump={onJump} />
+        </>
+      )}
       <PinnedSection chat={chat} onJump={onJump} />
       <StarredSection chat={chat} onJump={onJump} />
       <SharedMediaSection chatId={chat.id} onJump={onJump} />
