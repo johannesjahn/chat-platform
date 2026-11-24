@@ -652,6 +652,50 @@ test("searchMessages only returns messages from the caller's own chats", () =>
     }),
   ));
 
+test("searchMessages with chatId pages through that chat only, and never one the caller isn't in", () =>
+  run(
+    Effect.gen(function* () {
+      const alice = yield* registerAndLogin("alice", "pw-testpass");
+      const bob = yield* registerAndLogin("bob", "pw-testpass");
+      const carol = yield* registerAndLogin("carol", "pw-testpass");
+      const say = (from: typeof alice, id: number, content: string) =>
+        from.client.chats.createMessage({
+          params: { id },
+          payload: { contentType: "text", content },
+        });
+      const withBob = yield* alice.client.chats.createDirectChat({
+        payload: { userId: bob.user.id },
+      });
+      const withCarol = yield* alice.client.chats.createDirectChat({
+        payload: { userId: carol.user.id },
+      });
+      const hits: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        hits.unshift((yield* say(bob, withBob.id, `harbor ${i}`)).id);
+        // Newer matches elsewhere mustn't use up the page.
+        yield* say(carol, withCarol.id, `harbor too ${i}`);
+        yield* say(carol, withCarol.id, `harbor again ${i}`);
+      }
+
+      const search = (who: typeof alice, cursor?: string) =>
+        who.client.search.searchMessages({
+          query: {
+            q: "harbor",
+            chatId: withBob.id,
+            limit: 2,
+            ...(cursor ? { cursor } : {}),
+          },
+        });
+      const first = yield* search(alice);
+      const second = yield* search(alice, first.nextCursor!);
+      expect(first.results.map((r) => r.id)).toEqual(hits.slice(0, 2));
+      expect(second.results.map((r) => r.id)).toEqual(hits.slice(2));
+      expect(second.nextCursor).toBeNull();
+
+      expect((yield* search(carol)).results).toEqual([]);
+    }),
+  ));
+
 test("searchMessages finds a fragment inside a word", () =>
   run(
     Effect.gen(function* () {

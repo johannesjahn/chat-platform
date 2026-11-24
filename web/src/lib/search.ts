@@ -50,8 +50,8 @@ export const searchPostsQueryKey = (q: string) =>
   ["search", "posts", q] as const;
 export const searchCommentsQueryKey = (q: string) =>
   ["search", "comments", q] as const;
-export const searchMessagesQueryKey = (q: string) =>
-  ["search", "messages", q] as const;
+export const searchMessagesQueryKey = (q: string, chatId?: number) =>
+  ["search", "messages", q, chatId ?? null] as const;
 
 // The URL query object a per-section page fetch sends — the query text, a
 // fixed page size, and (past the first page) the opaque keyset cursor.
@@ -141,15 +141,25 @@ export function useSearchComments(q: string, enabled: boolean) {
   });
 }
 
-export function useSearchMessages(q: string, enabled: boolean) {
+// `chatId` searches just that chat (issue #900).
+export function useSearchMessages(
+  q: string,
+  enabled: boolean,
+  chatId?: number,
+) {
   return useInfiniteQuery({
-    queryKey: searchMessagesQueryKey(q),
+    queryKey: searchMessagesQueryKey(q, chatId),
     enabled,
     staleTime: SEARCH_STALE_TIME_MS,
     initialPageParam: null as string | null,
     queryFn: async ({ pageParam, signal }) => {
       const { data, error } = await fetchClient.GET("/search/messages", {
-        params: { query: searchParams(q, pageParam) },
+        params: {
+          query: {
+            ...searchParams(q, pageParam),
+            ...(chatId !== undefined ? { chatId: String(chatId) } : {}),
+          },
+        },
         signal,
       });
       if (error) throw error;
