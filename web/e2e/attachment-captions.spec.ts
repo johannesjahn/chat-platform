@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { makeSolidPng } from "./helpers";
 
@@ -91,4 +92,78 @@ test("a chat message keeps what was typed as the attachment's caption", async ({
     .filter({ hasText: "Fresh out of the oven" });
   await expect(bubble).toHaveCount(1);
   await expect(bubble.getByRole("img", { name: "bread.png" })).toBeVisible();
+});
+
+// Dispatches a paste the way the browser does for a copied image; returns
+// whether the page left it to the browser's default.
+function pasteImage(field: Locator, name: string) {
+  return field.evaluate(
+    (element, { name, bytes }) => {
+      const clipboardData = new DataTransfer();
+      clipboardData.items.add(
+        new File([new Uint8Array(bytes)], name, { type: "image/png" }),
+      );
+      return element.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    },
+    { name, bytes: [...PNG] },
+  );
+}
+
+test("an image pasted into the post form's text becomes the attachment", async ({
+  page,
+  signUp,
+}) => {
+  await signUp(page);
+  await page.goto("/posts/new");
+
+  let uploads = 0;
+  page.on("request", (req) => {
+    if (req.method() === "POST" && req.url().endsWith("/attachments"))
+      uploads++;
+  });
+
+  const main = page.getByRole("main");
+  await main.getByRole("textbox", { name: "Text" }).fill("Pasted bread");
+  expect(
+    await pasteImage(main.getByRole("textbox", { name: "Text" }), "first.png"),
+  ).toBe(false);
+
+  // The form switches to a file post and keeps the text as the caption.
+  const caption = main.getByRole("textbox", { name: "Caption" });
+  await expect(caption).toHaveValue("Pasted bread");
+  await expect(main.getByRole("img", { name: "first.png" })).toBeVisible();
+
+  // Pasting again replaces it.
+  await pasteImage(caption, "second.png");
+  await expect(main.getByRole("img", { name: "second.png" })).toBeVisible();
+  await expect(main.getByRole("img", { name: "first.png" })).toHaveCount(0);
+
+  // Toggling the post type doesn't upload the pasted file again.
+  await main.getByRole("button", { name: "Text", exact: true }).click();
+  const beforeToggle = uploads;
+  await main.getByRole("button", { name: "File", exact: true }).click();
+  await expect(main.getByRole("img", { name: "second.png" })).toBeVisible();
+  expect(uploads).toBe(beforeToggle);
+
+  await main.getByRole("button", { name: "Post", exact: true }).click();
+  const card = page.getByRole("article").filter({ hasText: "Pasted bread" });
+  await expect(card.getByRole("img", { name: "second.png" })).toBeVisible();
+
+  // The edit form takes a paste too.
+  await page.goto("/posts/1/edit");
+  const editCaption = main.getByRole("textbox", { name: "Caption" });
+  await expect(main.getByRole("img", { name: "second.png" })).toBeVisible();
+  await pasteImage(editCaption, "third.png");
+  await expect(main.getByRole("img", { name: "third.png" })).toBeVisible();
+  await main.getByRole("button", { name: "Save changes" }).click();
+  await expect(
+    page.getByRole("main").getByRole("img", { name: "third.png" }).first(),
+  ).toBeVisible();
+  await expect(page).not.toHaveURL(/edit/);
 });
