@@ -90,6 +90,8 @@ await step(`group chats (${groups} x ${GROUP_SIZE})`, () =>
     SELECT setval('chats_id_seq', ${directChats + groups});`),
 );
 
+// Every chat's m-th message shares a timestamp, so the tie-break pins the row
+// order on disk: without it, layout (and cache hit rate) varies by seed.
 await step(`messages (${MESSAGES_PER_CHAT}/chat)`, () =>
   sql.unsafe(`
     INSERT INTO messages (chat_id, sender_id, body, created_at, updated_at)
@@ -104,7 +106,7 @@ await step(`messages (${MESSAGES_PER_CHAT}/chat)`, () =>
       SELECT user_id FROM chat_participants cp WHERE cp.chat_id = c.id
       ORDER BY user_id OFFSET (m % (CASE WHEN c.type = 'group' THEN ${GROUP_SIZE} ELSE 2 END)) LIMIT 1
     ) p
-    ORDER BY 4;`),
+    ORDER BY 4, c.id, m;`),
 );
 
 await step("read watermarks + chat timestamps", () =>
