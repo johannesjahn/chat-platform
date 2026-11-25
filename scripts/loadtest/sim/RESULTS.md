@@ -20,6 +20,43 @@ vCPUs, but the **ratios and growth rates are what matter**: who is called how
 many times per event, and what grows with what. The generator's own
 event-loop lag stayed under 10 ms in every run quoted here.
 
+## 0.42.0 against the release before it (2026-11-25)
+
+`c5ef0e7` (0.42.0) against `5d3a246` (`main` just before #944), alternating
+on the same machine: 10k sockets, 4 backends, Postgres 19 capped at 4 CPUs,
+Redis 8.12, each run on a fresh copy of its seeded database (10k users for
+the 10k row, 100k users otherwise). Medians of 3 runs (2 at 10k) over the
+steady state, except the per-endpoint p50s, which include the ramp. 0 errors,
+0 drops, 0 missing echoes, generator lag at most 3 ms.
+
+| Load                   | Metric                    |         Before |         0.42.0 |
+| ---------------------- | ------------------------- | -------------: | -------------: |
+| 10k, 1× rate           | p50 / p95                 |   3.6 / 7.3 ms |   3.6 / 7.1 ms |
+| 40k-equivalent (`× 4`) | p50 / p95                 | 14.9 / 30.9 ms | 14.1 / 28.7 ms |
+| 40k-equivalent (`× 4`) | Database time per request |       0.312 ms |       0.301 ms |
+| 60k-equivalent (`× 6`) | p50 / p95                 |  50.3 / 102 ms |   43.5 / 88 ms |
+| 60k-equivalent (`× 6`) | Message send p50          |          58 ms |          50 ms |
+| 60k-equivalent (`× 6`) | Mark-as-read p50          |          78 ms |          64 ms |
+| 60k-equivalent (`× 6`) | Postgres CPU              |          359 % |          343 % |
+
+- **Same at normal load, about 14 % faster near saturation.** The likely
+  cause is that 0.42.0 no longer writes `message_reads` (mark-as-read gained
+  most), but the changes weren't measured separately. Near saturation, small
+  savings cut queueing.
+- **The ceiling is about the same**: at 60k-equivalent the backends still use
+  ~1.05 cores each. The 100k-user database is no smaller (2.34 GB, was
+  2.26 GB).
+- **Seed layout is a confounder.** `seed.ts` ordered messages only by a
+  timestamp every chat shares, so the order on disk was arbitrary: neighbouring
+  rows were ~300 chats apart in one seed and ~89,000 in the other, which made
+  the 0.42.0 unread-count query look slower on an identical plan. It now
+  breaks ties, so the numbers below, from the old seed, aren't directly
+  comparable with these.
+- **One unexplained stall.** In a discarded first round on the old seed, one
+  60k-equivalent run on 0.42.0 stalled for about 30 s as the last users connected,
+  then recovered. It didn't recur in the three reruns above, and Postgres
+  logged no errors. A rare problem under overload isn't ruled out.
+
 ## Capacity projection (2026-11-17)
 
 Same machine and setup as below, on `main` at v0.41.5 with #865 (Redis
