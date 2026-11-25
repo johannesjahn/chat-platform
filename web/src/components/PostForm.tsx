@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ClipboardEvent, type ReactNode, useState } from "react";
 import { Loader2, Paperclip, Type } from "lucide-react";
 import { AttachmentUploadField } from "@/components/AttachmentUploadField";
 import { MentionTextarea } from "@/components/MentionTextarea";
@@ -87,6 +87,10 @@ export function PostForm({
   const [attachment, setAttachment] = useState<Attachment | null>(
     initialAttachment,
   );
+  // A file pasted into the text field, until AttachmentUploadField has
+  // uploaded it.
+  const [pastedFile, setPastedFile] = useState<File | null>(null);
+  const [pastedFileKey, setPastedFileKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const isOnline = useOnlineStatus();
@@ -102,6 +106,19 @@ export function PostForm({
     (withFile
       ? attachment !== null && isOnline
       : trimmed.length > 0 && (isOnline || allowOfflineQueue));
+
+  // A pasted image or file becomes the attachment, replacing any current one;
+  // pasted text stays text. Same as InlineComposer and ChatComposer.
+  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const file = event.clipboardData.files[0];
+    if (!file) return;
+    event.preventDefault();
+    if (pending) return;
+    setAttachment(null);
+    setPastedFile(file);
+    setPastedFileKey((key) => key + 1);
+    setWithFile(true);
+  }
 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col gap-6 px-4 py-10">
@@ -147,7 +164,10 @@ export function PostForm({
                   type="button"
                   variant={!withFile ? "default" : "outline"}
                   aria-pressed={!withFile}
-                  onClick={() => setWithFile(false)}
+                  onClick={() => {
+                    setWithFile(false);
+                    setPastedFile(null);
+                  }}
                   className="flex-1"
                 >
                   <Type className="size-4" />
@@ -170,8 +190,15 @@ export function PostForm({
               <div className="flex flex-col gap-2">
                 <Label>File</Label>
                 <AttachmentUploadField
+                  key={pastedFileKey}
                   attachment={attachment}
-                  onUploaded={setAttachment}
+                  pendingFile={pastedFile}
+                  // Forgetting the uploaded file keeps the field from
+                  // uploading it again when it remounts.
+                  onUploaded={(uploaded) => {
+                    setAttachment(uploaded);
+                    setPastedFile(null);
+                  }}
                   onClear={() => setAttachment(null)}
                   disabled={pending}
                 />
@@ -191,6 +218,7 @@ export function PostForm({
                 id="content"
                 value={body}
                 onValueChange={setBody}
+                onPaste={handlePaste}
                 placeholder={
                   withFile ? "Say something about it…" : "What's on your mind?"
                 }
