@@ -24,7 +24,12 @@ import {
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
 import { loadAuthor, loadAuthors } from "./authors.ts";
-import { blockedOrMutedUserIds, blockedPeersAmong } from "./blocks.ts";
+import {
+  blockedPeersAmong,
+  hiddenAuthorIds,
+  isHiddenFrom,
+  type Viewer,
+} from "./blocks.ts";
 import { Db, type DrizzleDb, dbQuery } from "./Db.ts";
 import { contentCreatedTotal, rateLimitRejectionsTotal } from "./Metrics.ts";
 import {
@@ -118,12 +123,12 @@ const toApiComment = (
 // Reply counts for a page of comments, keyed by parent id, in one grouped
 // query served by `comments_parent_comment_id_idx`. Comments with no
 // replies (including every reply itself) are absent; callers default to 0.
-// Replies by `hiddenAuthorIds` (the viewer's blocked/muted users) aren't
+// Replies by `hiddenIds` (the viewer's `hiddenAuthorIds`) aren't
 // counted, matching what `listReplies` shows that viewer (issue #661).
 const commentReplyCounts = async (
   db: DrizzleDb,
   commentIds: ReadonlyArray<number>,
-  hiddenAuthorIds: ReadonlyArray<number>,
+  hiddenIds: ReadonlyArray<number>,
 ): Promise<Map<number, number>> => {
   const result = new Map<number, number>();
   if (commentIds.length === 0) return result;
@@ -133,8 +138,8 @@ const commentReplyCounts = async (
     .where(
       and(
         inArray(comments.parentCommentId, [...commentIds]),
-        hiddenAuthorIds.length > 0
-          ? notInArray(comments.authorId, [...hiddenAuthorIds])
+        hiddenIds.length > 0
+          ? notInArray(comments.authorId, [...hiddenIds])
           : undefined,
       ),
     )
@@ -179,9 +184,11 @@ const decodeCommentsCursor = (cursor: string): number | null => {
 // `actorId` (issue #784): a blocked user can't comment on, reply to or react
 // to the blocker's posts and comments — and the blocker can't do it to them
 // either, the same symmetry as the DM gate. Like the DM 403, the message
-// doesn't say who blocked whom. Mutes don't count (`blockedPeersAmong` only
+// doesn't say who blocked whom. The blocked side normally never gets this far:
+// the target already reads as missing to them (issue #901, `getVisible…`
+// below). Mutes don't count (`blockedPeersAmong` only
 // reads `block` rows), and content from before the block stays — it's only
-// hidden from the blocker (issue #661). Removing your own reaction is never
+// hidden from the pair (issues #661, #901). Removing your own reaction is never
 // gated: it only takes something away.
 const requireNoBlockWith = (
   db: DrizzleDb,
@@ -224,6 +231,50 @@ const getCommentOr404 = (db: DrizzleDb, id: number) =>
         new NotFound({ message: `Comment ${id} not found` }),
       );
     return row;
+  });
+
+// Also 404s on a post whose author blocked `viewer` (issue #901).
+const getVisiblePostOr404 = (db: DrizzleDb, viewer: Viewer, id: number) =>
+  Effect.gen(function* () {
+    const row = yield* getPostOr404(db, id);
+    if (yield* dbQuery(() => isHiddenFrom(db, viewer, [row.authorId])))
+      return yield* Effect.fail(
+        new NotFound({ message: `Post ${id} not found` }),
+      );
+    return row;
+  });
+
+// 404s if `comment` is hidden from `viewer` because its author blocked them —
+// or the author of the post or top-level comment it sits under did, as those
+// are the only way to reach it (issue #901).
+const requireCommentVisible = (
+  db: DrizzleDb,
+  viewer: Viewer,
+  comment: typeof comments.$inferSelect,
+) =>
+  Effect.gen(function* () {
+    const { parentCommentId } = comment;
+    const hidden = yield* dbQuery(async () => {
+      const authors = await db
+        .select({ id: posts.authorId })
+        .from(posts)
+        .where(eq(posts.id, comment.postId));
+      if (parentCommentId !== null)
+        authors.push(
+          ...(await db
+            .select({ id: comments.authorId })
+            .from(comments)
+            .where(eq(comments.id, parentCommentId))),
+        );
+      return isHiddenFrom(db, viewer, [
+        comment.authorId,
+        ...authors.map((author) => author.id),
+      ]);
+    });
+    if (hidden)
+      return yield* Effect.fail(
+        new NotFound({ message: `Comment ${comment.id} not found` }),
+      );
   });
 
 // For anything that acts on a comment (replying, reacting, editing,
@@ -307,7 +358,8 @@ const deleteCommentKeepingReplies = (
 // Shared by `listComments` (top-level, filtered on a null parent) and
 // `listReplies` (a comment's children): a keyset page over `comments` in
 // `id asc` order, decorated with per-row like info for the current user.
-// Comments by users the viewer blocked or muted are left out (issue #661),
+// Comments by users the viewer blocked or muted (issue #661), or who blocked
+// the viewer (issue #901), are left out,
 // the same way `listPosts` hides their posts: a `NOT IN` inside the keyset
 // query, so a page never comes back short. Hiding a top-level comment hides
 // its replies with it — `listReplies` under it is only reachable by id.
@@ -329,9 +381,7 @@ const listThread = (
         );
     }
 
-    const hiddenAuthorIds = yield* dbQuery(() =>
-      blockedOrMutedUserIds(db, currentUser.id),
-    );
+    const hiddenIds = yield* dbQuery(() => hiddenAuthorIds(db, currentUser));
 
     // Fetch one past `limit` to derive `nextCursor` without a separate
     // COUNT(*), same trick as `listPosts`.
@@ -343,8 +393,8 @@ const listThread = (
           and(
             where,
             after !== null ? gt(comments.id, after) : undefined,
-            hiddenAuthorIds.length > 0
-              ? notInArray(comments.authorId, hiddenAuthorIds)
+            hiddenIds.length > 0
+              ? notInArray(comments.authorId, hiddenIds)
               : undefined,
           ),
         )
@@ -379,7 +429,7 @@ const listThread = (
       commentReplyCounts(
         db,
         rows.map((r) => r.id),
-        hiddenAuthorIds,
+        hiddenIds,
       ),
     );
 
@@ -414,7 +464,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
-          const post = yield* getPostOr404(db, id);
+          const post = yield* getVisiblePostOr404(db, currentUser, id);
           yield* requireNoBlockWith(
             db,
             currentUser.id,
@@ -501,7 +551,8 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
       )
       .handle("listComments", ({ params: { id }, query: urlParams }) =>
         Effect.gen(function* () {
-          yield* getPostOr404(db, id);
+          const currentUser = yield* CurrentUser;
+          yield* getVisiblePostOr404(db, currentUser, id);
           return yield* listThread(
             db,
             and(eq(comments.postId, id), isNull(comments.parentCommentId)),
@@ -514,7 +565,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
-          const post = yield* getPostOr404(db, id);
+          const post = yield* getVisiblePostOr404(db, currentUser, id);
           yield* requireNoBlockWith(
             db,
             currentUser.id,
@@ -571,7 +622,9 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
       )
       .handle("listReplies", ({ params: { id }, query: urlParams }) =>
         Effect.gen(function* () {
-          yield* getCommentOr404(db, id);
+          const currentUser = yield* CurrentUser;
+          const parent = yield* getCommentOr404(db, id);
+          yield* requireCommentVisible(db, currentUser, parent);
           return yield* listThread(
             db,
             eq(comments.parentCommentId, id),
@@ -584,6 +637,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           const row = yield* getCommentOr404(db, id);
+          yield* requireCommentVisible(db, currentUser, row);
           const reactions = yield* dbQuery(() =>
             commentReactionInfoOne(db, id, currentUser.id),
           );
@@ -591,7 +645,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             commentReplyCounts(
               db,
               [row.id],
-              await blockedOrMutedUserIds(db, currentUser.id),
+              await hiddenAuthorIds(db, currentUser),
             ),
           );
           return toApiComment(
@@ -607,6 +661,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
           const parent = yield* getLiveCommentOr404(db, id);
+          yield* requireCommentVisible(db, currentUser, parent);
           // Depth-2 cap: the target must itself be a top-level comment. A
           // parent that already has its own parent is a reply, and replies
           // can't be replied to (see the `comments` schema comment).
@@ -675,6 +730,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
           const comment = yield* getLiveCommentOr404(db, id);
+          yield* requireCommentVisible(db, currentUser, comment);
           yield* requireNoBlockWith(
             db,
             currentUser.id,
@@ -766,12 +822,14 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
           const existing = yield* getLiveCommentOr404(db, id);
-          if (!canModify(currentUser, existing))
+          if (!canModify(currentUser, existing)) {
+            yield* requireCommentVisible(db, currentUser, existing);
             return yield* Effect.fail(
               new Forbidden({
                 message: "You can only edit your own comments",
               }),
             );
+          }
           const rows = yield* dbQuery(() =>
             db
               .update(comments)
@@ -807,7 +865,7 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
             commentReplyCounts(
               db,
               [row.id],
-              await blockedOrMutedUserIds(db, currentUser.id),
+              await hiddenAuthorIds(db, currentUser),
             ),
           );
           return toApiComment(
@@ -823,12 +881,14 @@ export const EngagementHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           yield* enforceEngagementLimit(limiter, currentUser.id);
           const existing = yield* getLiveCommentOr404(db, id);
-          if (!canModify(currentUser, existing))
+          if (!canModify(currentUser, existing)) {
+            yield* requireCommentVisible(db, currentUser, existing);
             return yield* Effect.fail(
               new Forbidden({
                 message: "You can only delete your own comments",
               }),
             );
+          }
           // The client refetches the thread on the event, which shows a
           // placeholder, or nothing, wherever this comment was.
           yield* deleteCommentKeepingReplies(db, existing);

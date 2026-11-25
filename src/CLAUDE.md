@@ -42,6 +42,11 @@ to its `*Deps`).
   import handler modules.
 - A block-either-way condition is `notBlockedEitherWay` (blocks.ts), never
   a hand-written `user_blocks` subquery (issue #810).
+- **A block hides the blocker from the blocked user** (issue #901). Lists and
+  counts of posts and comments leave out `hiddenAuthorIds`; anything opened by
+  id 404s as if missing when `isHiddenFrom` (the viewer's _own_ blocks and
+  mutes only filter lists). Mutes never hide the muter. Admins aren't hidden
+  from, or blocking them would dodge moderation.
 - Any query over `chat_participants` that introduces people or counts
   unread filters `request_pending = false` (see `chats/CLAUDE.md`).
 

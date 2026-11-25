@@ -1,8 +1,11 @@
 import { expect, test } from "bun:test";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
+import { eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { ChatApi } from "./Api.ts";
+import { Db } from "./Db.ts";
+import { users } from "./db/schema.ts";
 import { makeTestRun } from "./testApi.ts";
 
 const run = makeTestRun();
@@ -156,9 +159,14 @@ test("listPosts hides posts from blocked and muted authors, restored on removeBl
       const filtered = yield* alice.client.posts.listPosts({ query: {} });
       expect(filtered.posts.map((p) => p.authorId)).toEqual([alice.user.id]);
 
-      // Bob still sees everyone's posts — the filter is per-viewer.
+      // Bob no longer sees alice's post; carol, only muted, sees everything.
       const bobFeed = yield* bob.client.posts.listPosts({ query: {} });
-      expect(bobFeed.posts.length).toBe(3);
+      expect(bobFeed.posts.map((p) => p.authorId)).toEqual([
+        carol.user.id,
+        bob.user.id,
+      ]);
+      const carolFeed = yield* carol.client.posts.listPosts({ query: {} });
+      expect(carolFeed.posts.length).toBe(3);
 
       // Unblocking bob brings his post back into alice's feed.
       yield* alice.client.users.removeBlock({ params: { id: bob.user.id } });
@@ -553,12 +561,8 @@ test("createComment is rejected on a post when either party has blocked the othe
           payload: { content: "after the block" },
         })
         .pipe(Effect.flip);
-      expect(blocked._tag).toBe("Forbidden");
-      if (blocked._tag === "Forbidden") {
-        expect(blocked.message).toMatch(BLOCK_MESSAGE_PATTERN);
-        expect(blocked.message).not.toContain("alice");
-        expect(blocked.message).not.toContain("bob");
-      }
+      // To bob the post reads as missing (issue #901).
+      expect(blocked._tag).toBe("NotFound");
 
       // The blocker can't comment on the blocked user's post either.
       const reverse = yield* alice.client.comments
@@ -568,6 +572,11 @@ test("createComment is rejected on a post when either party has blocked the othe
         })
         .pipe(Effect.flip);
       expect(reverse._tag).toBe("Forbidden");
+      if (reverse._tag === "Forbidden") {
+        expect(reverse.message).toMatch(BLOCK_MESSAGE_PATTERN);
+        expect(reverse.message).not.toContain("alice");
+        expect(reverse.message).not.toContain("bob");
+      }
 
       // The pre-block comment stays (visible to everyone but alice).
       const carol = yield* registerAndLogin("carol", PW);
@@ -626,11 +635,11 @@ test("createReply is rejected on a block with either the comment's or the post's
           .pipe(Effect.flip);
 
       // Both authors are the blocker.
-      expect((yield* reply(aliceComment.id))._tag).toBe("Forbidden");
+      expect((yield* reply(aliceComment.id))._tag).toBe("NotFound");
       // Only the post's author is the blocker.
-      expect((yield* reply(carolComment.id))._tag).toBe("Forbidden");
+      expect((yield* reply(carolComment.id))._tag).toBe("NotFound");
       // Only the comment's author is the blocker.
-      expect((yield* reply(aliceOnCarol.id))._tag).toBe("Forbidden");
+      expect((yield* reply(aliceOnCarol.id))._tag).toBe("NotFound");
 
       // Nothing to do with alice: allowed.
       const carolOwn = yield* carol.client.comments.createComment({
@@ -673,7 +682,7 @@ test("addPostReaction is rejected when either party has blocked the other", () =
           payload: { emoji: "❤️" },
         })
         .pipe(Effect.flip);
-      expect(blocked._tag).toBe("Forbidden");
+      expect(blocked._tag).toBe("NotFound");
       const reverse = yield* alice.client.comments
         .addPostReaction({
           params: { id: bobPost.id },
@@ -725,7 +734,7 @@ test("addCommentReaction is rejected when either party has blocked the other", (
           payload: { emoji: "👍" },
         })
         .pipe(Effect.flip);
-      expect(blocked._tag).toBe("Forbidden");
+      expect(blocked._tag).toBe("NotFound");
       const reverse = yield* alice.client.comments
         .addCommentReaction({
           params: { id: bobComment.id },
@@ -788,5 +797,309 @@ test("a mute does not stop commenting, replying or reacting", () =>
         params: { id: comment.id },
         payload: { emoji: "👍" },
       });
+    }),
+  ));
+
+// Issue #901: a block also hides the blocker from the person they blocked.
+// `alice` blocks (or mutes) `bob`; `carol` is a bystander whose post alice
+// commented on.
+const blockScenario = (type: "block" | "mute") =>
+  Effect.gen(function* () {
+    const alice = yield* registerAndLogin("alice", PW);
+    const bob = yield* registerAndLogin("bob", PW);
+    const carol = yield* registerAndLogin("carol", PW);
+
+    const alicePost = yield* alice.client.posts.createPost({
+      payload: { body: "findable alice post" },
+    });
+    const carolOnAlice = yield* carol.client.comments.createComment({
+      params: { id: alicePost.id },
+      payload: { content: "findable carol on alice" },
+    });
+    const carolPost = yield* carol.client.posts.createPost({
+      payload: { body: "findable carol post" },
+    });
+    const aliceComment = yield* alice.client.comments.createComment({
+      params: { id: carolPost.id },
+      payload: { content: "findable alice comment" },
+    });
+    const carolUnderAlice = yield* carol.client.comments.createReply({
+      params: { id: aliceComment.id },
+      payload: { content: "findable carol under alice" },
+    });
+    const carolComment = yield* carol.client.comments.createComment({
+      params: { id: carolPost.id },
+      payload: { content: "findable carol comment" },
+    });
+    const aliceReply = yield* alice.client.comments.createReply({
+      params: { id: carolComment.id },
+      payload: { content: "findable alice reply" },
+    });
+    yield* alice.client.posts.createPost({ payload: { body: "hey @bob" } });
+
+    yield* alice.client.users.setBlock({
+      params: { id: bob.user.id },
+      payload: { type },
+    });
+    return {
+      alice,
+      bob,
+      carol,
+      alicePost,
+      carolOnAlice,
+      carolPost,
+      aliceComment,
+      carolUnderAlice,
+      carolComment,
+      aliceReply,
+    };
+  });
+
+const tagOf = <A, E extends { readonly _tag: string }, R>(
+  effect: Effect.Effect<A, E, R>,
+) =>
+  effect.pipe(
+    Effect.flip,
+    Effect.map((error) => error._tag),
+  );
+
+test("a blocked user can't see the blocker's profile or posts", () =>
+  run(
+    Effect.gen(function* () {
+      const s = yield* blockScenario("block");
+      const { users, posts, comments } = s.bob.client;
+      const aliceId = { params: { id: s.alice.user.id } };
+
+      const feed = yield* posts.listPosts({ query: {} });
+      expect(feed.posts.map((p) => p.id)).toEqual([s.carolPost.id]);
+
+      // The same error as for an id that doesn't exist.
+      const hidden = yield* users.getUser(aliceId).pipe(Effect.flip);
+      expect(hidden._tag).toBe("NotFound");
+      if (hidden._tag === "NotFound")
+        expect(hidden.message).toBe(`User ${s.alice.user.id} not found`);
+      expect(yield* tagOf(users.listUserPosts({ ...aliceId, query: {} }))).toBe(
+        "NotFound",
+      );
+      const post = { params: { id: s.alicePost.id } };
+      expect(yield* tagOf(posts.getPost(post))).toBe("NotFound");
+      expect(yield* tagOf(posts.deletePost(post))).toBe("NotFound");
+      expect(
+        yield* tagOf(posts.updatePost({ ...post, payload: { body: "x" } })),
+      ).toBe("NotFound");
+      expect(yield* tagOf(comments.listComments({ ...post, query: {} }))).toBe(
+        "NotFound",
+      );
+
+      // The blocker can still open the blocked user's profile (to unblock).
+      const profile = yield* s.alice.client.users.getUser({
+        params: { id: s.bob.user.id },
+      });
+      expect(profile.username).toBe("bob");
+    }),
+  ));
+
+test("a blocked user can't see the blocker's comments, and counts match", () =>
+  run(
+    Effect.gen(function* () {
+      const s = yield* blockScenario("block");
+      const { posts, comments } = s.bob.client;
+
+      const thread = yield* comments.listComments({
+        params: { id: s.carolPost.id },
+        query: {},
+      });
+      expect(thread.comments.map((c) => [c.id, c.replyCount])).toEqual([
+        [s.carolComment.id, 0],
+      ]);
+      const replies = yield* comments.listReplies({
+        params: { id: s.carolComment.id },
+        query: {},
+      });
+      expect(replies.comments).toEqual([]);
+      const one = yield* comments.getComment({
+        params: { id: s.carolComment.id },
+      });
+      expect(one.replyCount).toBe(0);
+      const post = yield* posts.getPost({ params: { id: s.carolPost.id } });
+      expect(post.commentCount).toBe(1);
+      const feed = yield* posts.listPosts({ query: {} });
+      expect(feed.posts[0]?.commentCount).toBe(1);
+      const carolPosts = yield* s.bob.client.users.listUserPosts({
+        params: { id: s.carol.user.id },
+        query: {},
+      });
+      expect(carolPosts.posts[0]?.commentCount).toBe(1);
+
+      // Nor by id: alice's own, and what sits under her comment or post.
+      for (const { id } of [
+        s.aliceComment,
+        s.aliceReply,
+        s.carolUnderAlice,
+        s.carolOnAlice,
+      ]) {
+        const target = { params: { id } };
+        expect(yield* tagOf(comments.getComment(target))).toBe("NotFound");
+        expect(
+          yield* tagOf(comments.listReplies({ ...target, query: {} })),
+        ).toBe("NotFound");
+        expect(yield* tagOf(comments.deleteComment(target))).toBe("NotFound");
+        expect(
+          yield* tagOf(
+            comments.addCommentReaction({
+              ...target,
+              payload: { emoji: "👍" },
+            }),
+          ),
+        ).toBe("NotFound");
+      }
+    }),
+  ));
+
+test("a blocked user doesn't find the blocker in any search", () =>
+  run(
+    Effect.gen(function* () {
+      const s = yield* blockScenario("block");
+      const { users, search } = s.bob.client;
+
+      expect(yield* users.searchUsers({ query: { q: "alice" } })).toEqual([]);
+      expect(
+        yield* users.lookupUsersByUsername({ query: { usernames: "alice" } }),
+      ).toEqual([]);
+      const people = yield* search.searchUsers({ query: { q: "alice" } });
+      expect(people.results).toEqual([]);
+      const foundPosts = yield* search.searchPosts({
+        query: { q: "findable" },
+      });
+      expect(foundPosts.results.map((r) => r.id)).toEqual([s.carolPost.id]);
+      const foundComments = yield* search.searchComments({
+        query: { q: "findable" },
+      });
+      expect(foundComments.results.map((r) => r.id)).toEqual([
+        s.carolComment.id,
+      ]);
+      const all = yield* search.searchAll({ query: { q: "alice" } });
+      expect(all.users.results).toEqual([]);
+      expect(all.posts.results).toEqual([]);
+      expect(all.comments.results).toEqual([]);
+
+      // Both ways for people.
+      const reverse = yield* s.alice.client.search.searchUsers({
+        query: { q: "bob" },
+      });
+      expect(reverse.results).toEqual([]);
+    }),
+  ));
+
+test("a block hides the blocker's notifications from the blocked user", () =>
+  run(
+    Effect.gen(function* () {
+      const s = yield* blockScenario("block");
+      const inbox = () =>
+        s.bob.client.notifications.listNotifications({ query: {} });
+
+      // The mention from before the block is hidden, and a new one isn't
+      // recorded: it doesn't turn up after the block is lifted.
+      yield* s.alice.client.posts.createPost({ payload: { body: "@bob 2" } });
+      const during = yield* inbox();
+      expect(during.notifications).toEqual([]);
+      expect(during.unreadCount).toBe(0);
+      yield* s.alice.client.users.removeBlock({
+        params: { id: s.bob.user.id },
+      });
+      expect((yield* inbox()).notifications.map((n) => n.excerpt)).toEqual([
+        "hey @bob",
+      ]);
+    }),
+  ));
+
+test("lifting a block makes the blocker visible again", () =>
+  run(
+    Effect.gen(function* () {
+      const s = yield* blockScenario("block");
+      yield* s.alice.client.users.removeBlock({
+        params: { id: s.bob.user.id },
+      });
+      const { users, posts } = s.bob.client;
+      yield* users.getUser({ params: { id: s.alice.user.id } });
+      yield* posts.getPost({ params: { id: s.alicePost.id } });
+      const feed = yield* posts.listPosts({ query: {} });
+      expect(feed.posts.length).toBe(3);
+    }),
+  ));
+
+test("a muted user sees everything as before", () =>
+  run(
+    Effect.gen(function* () {
+      const s = yield* blockScenario("mute");
+      const { users, posts, comments, search, notifications } = s.bob.client;
+
+      expect((yield* posts.listPosts({ query: {} })).posts.length).toBe(3);
+      yield* users.getUser({ params: { id: s.alice.user.id } });
+      const profile = yield* users.listUserPosts({
+        params: { id: s.alice.user.id },
+        query: {},
+      });
+      expect(profile.posts.length).toBe(2);
+      yield* posts.getPost({ params: { id: s.alicePost.id } });
+      const post = yield* posts.getPost({ params: { id: s.carolPost.id } });
+      expect(post.commentCount).toBe(4);
+      const thread = yield* comments.listComments({
+        params: { id: s.carolPost.id },
+        query: {},
+      });
+      expect(thread.comments.length).toBe(2);
+      yield* comments.getComment({ params: { id: s.aliceReply.id } });
+      expect((yield* users.searchUsers({ query: { q: "alice" } })).length).toBe(
+        1,
+      );
+      expect(
+        (yield* search.searchUsers({ query: { q: "alice" } })).results.length,
+      ).toBe(1);
+      expect(
+        (yield* search.searchPosts({ query: { q: "findable" } })).results
+          .length,
+      ).toBe(2);
+      expect(
+        (yield* search.searchComments({ query: { q: "findable" } })).results
+          .length,
+      ).toBe(5);
+      const inbox = yield* notifications.listNotifications({ query: {} });
+      expect(inbox.notifications.length).toBe(1);
+      // The muter still finds them, too.
+      expect(
+        (yield* s.alice.client.users.searchUsers({ query: { q: "bob" } }))
+          .length,
+      ).toBe(1);
+    }),
+  ));
+
+test("an admin still sees someone who blocked them", () =>
+  run(
+    Effect.gen(function* () {
+      const s = yield* blockScenario("block");
+      const db = yield* Db;
+      yield* Effect.promise(() =>
+        db
+          .update(users)
+          .set({ role: "admin" })
+          .where(eq(users.id, s.bob.user.id)),
+      );
+      // The role is in the token, so log in again.
+      const c = yield* makeClient;
+      const { accessToken } = yield* c.users.login({
+        payload: { username: "bob", password: PW },
+      });
+      const admin = yield* makeAuthedClient(accessToken);
+
+      yield* admin.users.getUser({ params: { id: s.alice.user.id } });
+      yield* admin.posts.getPost({ params: { id: s.alicePost.id } });
+      yield* admin.comments.getComment({ params: { id: s.aliceComment.id } });
+      expect((yield* admin.posts.listPosts({ query: {} })).posts.length).toBe(
+        3,
+      );
+      expect(
+        (yield* admin.users.searchUsers({ query: { q: "alice" } })).length,
+      ).toBe(1);
     }),
   ));

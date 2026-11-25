@@ -23,7 +23,7 @@ import {
   type NotificationPreferences,
 } from "./Api.ts";
 import { CurrentUser } from "./Auth.ts";
-import { blockedOrMutedUserIds } from "./blocks.ts";
+import { hiddenAuthorIds, type Viewer } from "./blocks.ts";
 import { Db, type DrizzleDb, dbQuery } from "./Db.ts";
 import {
   comments,
@@ -62,22 +62,22 @@ const decodeCursor = (cursor: string): number | null => {
 };
 
 // Everything the caller should see: their own rows, minus any from someone
-// they've since blocked or muted — a block made *after* a notification
+// they've since blocked or muted, or who blocked them — a block made *after* a notification
 // landed hides it too, rather than leaving that person's name in the inbox.
-const visibleTo = async (db: DrizzleDb, userId: number): Promise<SQL> => {
-  const hidden = await blockedOrMutedUserIds(db, userId);
-  const own = eq(notifications.userId, userId);
+const visibleTo = async (db: DrizzleDb, viewer: Viewer): Promise<SQL> => {
+  const hidden = await hiddenAuthorIds(db, viewer);
+  const own = eq(notifications.userId, viewer.id);
   return hidden.length > 0
     ? and(own, notInArray(notifications.actorId, hidden))!
     : own;
 };
 
-const unreadCount = (db: DrizzleDb, userId: number) =>
+const unreadCount = (db: DrizzleDb, viewer: Viewer) =>
   dbQuery(async () => {
     const [row] = await db
       .select({ total: count() })
       .from(notifications)
-      .where(and(await visibleTo(db, userId), isNull(notifications.readAt)));
+      .where(and(await visibleTo(db, viewer), isNull(notifications.readAt)));
     return Number(row?.total ?? 0);
   });
 
@@ -134,7 +134,7 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
           // One past `limit` to derive `nextCursor` without a COUNT, same
           // trick as the other keyset-paginated lists.
           const fetched = yield* dbQuery(async () => {
-            const visible = await visibleTo(db, currentUser.id);
+            const visible = await visibleTo(db, currentUser);
             return db
               .select({
                 id: notifications.id,
@@ -197,14 +197,14 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
             })),
             limit,
             nextCursor: hasMore && lastRow ? encodeCursor(lastRow.id) : null,
-            unreadCount: yield* unreadCount(db, currentUser.id),
+            unreadCount: yield* unreadCount(db, currentUser),
           };
         }),
       )
       .handle("getUnreadNotificationCount", () =>
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
-          return { count: yield* unreadCount(db, currentUser.id) };
+          return { count: yield* unreadCount(db, currentUser) };
         }),
       )
       .handle("getNotificationPreferences", () =>
@@ -259,7 +259,7 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
           // The caller's other tabs clear their badge too.
           if (updated.length > 0)
             yield* notifyInboxChanged(connections, [currentUser.id]);
-          return { count: yield* unreadCount(db, currentUser.id) };
+          return { count: yield* unreadCount(db, currentUser) };
         }),
       )
       .handle("markNotificationRead", ({ params: { id } }) =>
@@ -290,7 +290,7 @@ export const NotificationsHandlerLive = HttpApiBuilder.group(
             );
             yield* notifyInboxChanged(connections, [currentUser.id]);
           }
-          return { count: yield* unreadCount(db, currentUser.id) };
+          return { count: yield* unreadCount(db, currentUser) };
         }),
       );
   }),

@@ -5,7 +5,7 @@ import {
   MAX_USERNAME_LOOKUP_COUNT,
   type NotificationType,
 } from "./Api.ts";
-import { recipientsMutingSender } from "./blocks.ts";
+import { recipientsBlockedBy, recipientsMutingSender } from "./blocks.ts";
 import { type DrizzleDb, timedDbCall } from "./Db.ts";
 import { RealtimeConnections } from "./Realtime.ts";
 import { notificationPreferences, notifications, users } from "./db/schema.ts";
@@ -18,6 +18,7 @@ import { notificationPreferences, notifications, users } from "./db/schema.ts";
 //  - a recipient who has blocked *or* muted the actor hears nothing from
 //    them — the same rule chat notifications already follow (see
 //    `recipientsMutingSender` in blocks.ts);
+//  - nor does a recipient the actor has blocked (issue #901; not muted);
 //  - a recipient who turned the type off (issue #900) gets none of it;
 //  - one action notifies a given recipient at most once.
 // See the `notifications` table in db/schema.ts for what a row holds.
@@ -75,12 +76,14 @@ const filterRecipients = async (
   }
   const kept: NotificationInput[] = [];
   for (const [actorId, list] of byActor) {
-    const muting = await recipientsMutingSender(
-      db,
-      actorId,
-      list.map((input) => input.userId),
+    const recipientIds = list.map((input) => input.userId);
+    const muting = await recipientsMutingSender(db, actorId, recipientIds);
+    const blocked = await recipientsBlockedBy(db, actorId, recipientIds);
+    kept.push(
+      ...list.filter(
+        (input) => !muting.has(input.userId) && !blocked.has(input.userId),
+      ),
     );
-    kept.push(...list.filter((input) => !muting.has(input.userId)));
   }
   if (kept.length === 0) return kept;
 

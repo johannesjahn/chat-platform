@@ -16,7 +16,7 @@ import {
 import { AttachmentStorage } from "./AttachmentStorage.ts";
 import { CurrentUser } from "./Auth.ts";
 import { loadAuthor } from "./authors.ts";
-import { blockedOrMutedUserIds } from "./blocks.ts";
+import { hiddenAuthorIds, isHiddenFrom, type Viewer } from "./blocks.ts";
 import { Db, type DrizzleDb, dbQuery } from "./Db.ts";
 import { contentCreatedTotal } from "./Metrics.ts";
 import { notifyMentions } from "./notifications.ts";
@@ -51,6 +51,17 @@ const getPostOr404 = (db: DrizzleDb, id: number) =>
     return row;
   });
 
+// Also 404s on a post whose author blocked `viewer` (issue #901).
+const getVisiblePostOr404 = (db: DrizzleDb, viewer: Viewer, id: number) =>
+  Effect.gen(function* () {
+    const row = yield* getPostOr404(db, id);
+    if (yield* dbQuery(() => isHiddenFrom(db, viewer, [row.authorId])))
+      return yield* Effect.fail(
+        new NotFound({ message: `Post ${id} not found` }),
+      );
+    return row;
+  });
+
 // A post whose author vanished mid-request is being cascade-deleted with
 // them, so it reads as gone (see authors.ts).
 const loadPostAuthor = (db: DrizzleDb, row: DbPost) =>
@@ -60,25 +71,21 @@ const loadPostAuthor = (db: DrizzleDb, row: DbPost) =>
     () => new NotFound({ message: `Post ${row.id} not found` }),
   );
 
-// The full API view of a stored post as `viewerId` sees it — its reactions,
-// comment count (hiding authors the viewer blocked/muted) and attachment.
+// The full API view of a stored post as `viewer` sees it — its reactions,
+// comment count (see `hiddenAuthorIds`) and attachment.
 const buildPostResponse = (
   db: DrizzleDb,
   storage: AttachmentStorage["Service"],
   row: DbPost,
-  viewerId: number,
+  viewer: Viewer,
 ) =>
   Effect.gen(function* () {
     const author = yield* loadPostAuthor(db, row);
     const reactions = yield* dbQuery(() =>
-      postReactionInfo(db, [row.id], viewerId),
+      postReactionInfo(db, [row.id], viewer.id),
     );
     const commentCounts = yield* dbQuery(async () =>
-      postCommentCounts(
-        db,
-        [row.id],
-        await blockedOrMutedUserIds(db, viewerId),
-      ),
+      postCommentCounts(db, [row.id], await hiddenAuthorIds(db, viewer)),
     );
     const attachments = yield* resolveAttachments(db, storage, [
       row.attachmentId,
@@ -120,8 +127,8 @@ export const PostsHandlerLive = HttpApiBuilder.group(
       .handle("getPost", ({ params: { id } }) =>
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
-          const row = yield* getPostOr404(db, id);
-          return yield* buildPostResponse(db, storage, row, currentUser.id);
+          const row = yield* getVisiblePostOr404(db, currentUser, id);
+          return yield* buildPostResponse(db, storage, row, currentUser);
         }),
       )
       .handle("listPosts", ({ query: urlParams }) =>
@@ -138,13 +145,12 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               );
           }
 
-          // Posts by users the viewer has blocked or muted are hidden from
-          // the feed (issue #219) — both actions hide posts, so this doesn't
-          // distinguish them. Kept as a `NOT IN` filter alongside the keyset
+          // Posts by users the viewer has blocked or muted (issue #219), or
+          // who blocked the viewer (issue #901), are hidden. Kept as a `NOT IN` filter alongside the keyset
           // cursor rather than post-filtering the page, so a page never comes
           // back short after excluding a blocked author's posts.
-          const hiddenAuthorIds = yield* dbQuery(() =>
-            blockedOrMutedUserIds(db, currentUser.id),
+          const hiddenIds = yield* dbQuery(() =>
+            hiddenAuthorIds(db, currentUser),
           );
 
           // Fetch one row past `limit` instead of firing a separate
@@ -158,8 +164,8 @@ export const PostsHandlerLive = HttpApiBuilder.group(
               .where(
                 and(
                   after !== null ? lt(posts.id, after) : undefined,
-                  hiddenAuthorIds.length > 0
-                    ? notInArray(posts.authorId, hiddenAuthorIds)
+                  hiddenIds.length > 0
+                    ? notInArray(posts.authorId, hiddenIds)
                     : undefined,
                 ),
               )
@@ -184,7 +190,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             postCommentCounts(
               db,
               rows.map((r) => r.id),
-              hiddenAuthorIds,
+              hiddenIds,
             ),
           );
           const attachments = yield* resolveAttachments(
@@ -228,7 +234,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 db,
                 storage,
                 existing,
-                currentUser.id,
+                currentUser,
               );
           }
 
@@ -284,7 +290,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
                 db,
                 storage,
                 existing,
-                currentUser.id,
+                currentUser,
               );
           }
           if (!row)
@@ -317,7 +323,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
       .handle("updatePost", ({ params: { id }, payload }) =>
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
-          const existing = yield* getPostOr404(db, id);
+          const existing = yield* getVisiblePostOr404(db, currentUser, id);
           if (!canModify(currentUser, existing))
             return yield* Effect.fail(
               new Forbidden({ message: "You can only edit your own posts" }),
@@ -368,7 +374,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
             postCommentCounts(
               db,
               [row.id],
-              await blockedOrMutedUserIds(db, currentUser.id),
+              await hiddenAuthorIds(db, currentUser),
             ),
           );
           // Only to the sockets showing the post (issue #828).
@@ -400,7 +406,7 @@ export const PostsHandlerLive = HttpApiBuilder.group(
       .handle("deletePost", ({ params: { id } }) =>
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
-          const existing = yield* getPostOr404(db, id);
+          const existing = yield* getVisiblePostOr404(db, currentUser, id);
           if (!canModify(currentUser, existing))
             return yield* Effect.fail(
               new Forbidden({

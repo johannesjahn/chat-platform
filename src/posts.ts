@@ -43,7 +43,7 @@ export const toApiPost = (
 // `comments_post_id_idx` (postId, id) index. Ids with no comments are simply
 // absent from the map; callers default them to 0.
 //
-// `hiddenAuthorIds` (the viewer's `blockedOrMutedUserIds`, issue #661) makes
+// `hiddenAuthorIds` (the viewer's `hiddenAuthorIds` from blocks.ts, issues #661, #901) makes
 // the count match what the thread endpoints show that viewer: a hidden
 // author's comments and replies aren't counted, nor are other people's replies
 // under a hidden author's top-level comment, since that comment — the only way

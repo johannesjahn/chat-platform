@@ -7,6 +7,7 @@ import {
   inArray,
   lt,
   max,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
@@ -24,7 +25,12 @@ import {
 } from "../Api.ts";
 import { resolveAttachments } from "../attachments.ts";
 import { CurrentUser } from "../Auth.ts";
-import { blockedOrMutedUserIds } from "../blocks.ts";
+import {
+  hiddenAuthorIds,
+  isHiddenFrom,
+  notBlockedEitherWay,
+  blockerIdsOf,
+} from "../blocks.ts";
 import { contactOf } from "../contacts.ts";
 import { type DrizzleDb, dbQuery } from "../Db.ts";
 
@@ -115,9 +121,16 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
             // this stays an index lookup rather than the sequential scan an
             // unanchored ILIKE used to force.
             .where(
-              or(
-                ilike(users.username, pattern),
-                ilike(users.displayName, pattern),
+              and(
+                or(
+                  ilike(users.username, pattern),
+                  ilike(users.displayName, pattern),
+                ),
+                // Nobody finds someone across a block (issue #901); admins
+                // keep the whole directory.
+                currentUser.role === "admin"
+                  ? undefined
+                  : notBlockedEitherWay(currentUser.id, users.id),
               ),
             )
             .orderBy(users.username)
@@ -135,6 +148,7 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
       }),
     lookupUsersByUsername: ({ query: { usernames } }) =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUser;
         // The parameter is one comma-separated batch (see
         // `UsernameLookupQuery`); blanks and duplicates are dropped
         // before the cap is applied, so a sloppily-joined list ("a,,a")
@@ -155,6 +169,8 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
           );
         if (names.length === 0) return [];
 
+        // Someone who blocked the caller reads as no account (issue #901).
+        const blockers = yield* dbQuery(() => blockerIdsOf(db, currentUser));
         const rows = yield* dbQuery(() =>
           db
             .select(publicUserColumns)
@@ -162,7 +178,14 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
             // `lower(username)` is exactly the expression the unique
             // index is built on (see db/schema.ts), so this stays an
             // index lookup rather than a scan.
-            .where(inArray(sql`lower(${users.username})`, names))
+            .where(
+              and(
+                inArray(sql`lower(${users.username})`, names),
+                blockers.length > 0
+                  ? notInArray(users.id, blockers)
+                  : undefined,
+              ),
+            )
             .orderBy(users.username),
         );
         // Names with no account are simply missing from the result — the
@@ -171,6 +194,7 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
       }),
     getUser: ({ params: { id } }) =>
       Effect.gen(function* () {
+        const currentUser = yield* CurrentUser;
         const rows = yield* dbQuery(() =>
           db
             .select({
@@ -191,7 +215,11 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
             .where(eq(users.id, id))
             .limit(1),
         );
-        if (!rows[0])
+        // Someone who blocked the caller reads as missing (issue #901).
+        if (
+          !rows[0] ||
+          (yield* dbQuery(() => isHiddenFrom(db, currentUser, [id])))
+        )
           return yield* Effect.fail(
             new NotFound({ message: `User ${id} not found` }),
           );
@@ -209,7 +237,10 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
             .where(eq(users.id, id))
             .limit(1),
         );
-        if (!targetRows[0])
+        if (
+          !targetRows[0] ||
+          (yield* dbQuery(() => isHiddenFrom(db, currentUser, [id])))
+        )
           return yield* Effect.fail(
             new NotFound({ message: `User ${id} not found` }),
           );
@@ -262,7 +293,7 @@ export const directoryHandlers = ({ db, storage }: UsersDeps) =>
           postCommentCounts(
             db,
             rows.map((r) => r.id),
-            await blockedOrMutedUserIds(db, currentUser.id),
+            await hiddenAuthorIds(db, currentUser),
           ),
         );
         const attachments = yield* resolveAttachments(

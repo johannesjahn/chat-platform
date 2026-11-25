@@ -810,7 +810,9 @@ export type NewDbChatInvite = typeof chatInvites.$inferInsert;
 //     blocker's feed, suppresses their chat notifications, *and* prevents
 //     either party from sending a message in a direct chat between them (the
 //     block is symmetric for messaging — see `directBlockExists` in
-//     src/blocks.ts and `directChatClosed` in chats/sendPath.ts).
+//     src/blocks.ts and `directChatClosed` in chats/sendPath.ts). It also
+//     hides the blocker's profile, posts and comments from the target (issue
+//     #901; see `hiddenAuthorIds`).
 //   - "mute" is the softer action: it likewise hides the target's posts and
 //     suppresses their chat notifications for the muter, but never blocks
 //     messaging — a muted user can still DM you, you just aren't pinged.
