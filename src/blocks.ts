@@ -11,8 +11,8 @@ import { userBlocks } from "./db/schema.ts";
 // semantics.
 
 // The ids of every user `userId` has blocked *or* muted. Both actions hide the
-// target's posts from the blocker's feed (see `listPosts` in PostsHandler.ts),
-// so feed filtering doesn't distinguish them. Uses the composite
+// target from the blocker, so filtering doesn't distinguish them. Posts and
+// comments use `hiddenAuthorIds`, which adds the other direction. Uses the composite
 // (blockerId, blockedId) index's leading column.
 export const blockedOrMutedUserIds = async (
   db: DrizzleDb,
@@ -23,6 +23,73 @@ export const blockedOrMutedUserIds = async (
     .from(userBlocks)
     .where(eq(userBlocks.blockerId, userId));
   return rows.map((r) => r.blockedId);
+};
+
+// Who is reading. Admins still see people who blocked them (see
+// `blockedByCondition`).
+export type Viewer = { readonly id: number; readonly role: string };
+
+// SQL condition: the `user_blocks` row is a *block* (never a mute, which must
+// stay invisible to the muted person) that hides its blocker from `viewer`
+// (issue #901). Matches nothing for an admin: otherwise anyone could put their
+// content out of moderators' reach by blocking them.
+const blockedByCondition = (viewer: Viewer): SQL =>
+  viewer.role === "admin"
+    ? sql`false`
+    : and(eq(userBlocks.blockedId, viewer.id), eq(userBlocks.type, "block"))!;
+
+// The ids of everyone `viewer` is hidden from: users who blocked them, whose
+// profile, posts and comments read as missing to them.
+export const blockerIdsOf = async (
+  db: DrizzleDb,
+  viewer: Viewer,
+): Promise<number[]> => {
+  const rows = await db
+    .select({ blockerId: userBlocks.blockerId })
+    .from(userBlocks)
+    .where(blockedByCondition(viewer));
+  return rows.map((r) => r.blockerId);
+};
+
+// Every author whose content is left out of lists and counts for `viewer`:
+// the people they blocked or muted, and the people who blocked them.
+export const hiddenAuthorIds = async (
+  db: DrizzleDb,
+  viewer: Viewer,
+): Promise<number[]> => {
+  const rows = await db
+    .select({
+      blockerId: userBlocks.blockerId,
+      blockedId: userBlocks.blockedId,
+    })
+    .from(userBlocks)
+    .where(or(eq(userBlocks.blockerId, viewer.id), blockedByCondition(viewer)));
+  return [
+    ...new Set(
+      rows.map((r) => (r.blockerId === viewer.id ? r.blockedId : r.blockerId)),
+    ),
+  ];
+};
+
+// Whether any of `authorIds` blocked `viewer` — the gate on opening something
+// directly, which then 404s like a missing one. The viewer's own blocks and
+// mutes don't count: they only filter lists.
+export const isHiddenFrom = async (
+  db: DrizzleDb,
+  viewer: Viewer,
+  authorIds: ReadonlyArray<number>,
+): Promise<boolean> => {
+  const rows = await db
+    .select({ id: userBlocks.id })
+    .from(userBlocks)
+    .where(
+      and(
+        blockedByCondition(viewer),
+        inArray(userBlocks.blockerId, [...authorIds]),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 };
 
 // Whether a *block* (not a mere mute) exists in either direction between two
@@ -100,6 +167,27 @@ export const blockedPeersAmong = async (
   return new Set(
     rows.map((r) => (r.blockerId === userId ? r.blockedId : r.blockerId)),
   );
+};
+
+// Of `recipientIds`, the subset `actorId` has *blocked* — who must not hear of
+// anything they do (issue #901).
+export const recipientsBlockedBy = async (
+  db: DrizzleDb,
+  actorId: number,
+  recipientIds: ReadonlyArray<number>,
+): Promise<Set<number>> => {
+  if (recipientIds.length === 0) return new Set();
+  const rows = await db
+    .select({ blockedId: userBlocks.blockedId })
+    .from(userBlocks)
+    .where(
+      and(
+        eq(userBlocks.blockerId, actorId),
+        eq(userBlocks.type, "block"),
+        inArray(userBlocks.blockedId, [...recipientIds]),
+      ),
+    );
+  return new Set(rows.map((r) => r.blockedId));
 };
 
 // Of `recipientIds`, the subset that has blocked or muted `senderId` — i.e.

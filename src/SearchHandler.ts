@@ -6,12 +6,13 @@ import {
   ilike,
   inArray,
   lt,
+  notExists,
   notInArray,
   or,
   sql,
   type SQL,
 } from "drizzle-orm";
-import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
+import { alias, type PgColumn, type PgTable } from "drizzle-orm/pg-core";
 import { Effect } from "effect";
 import {
   ChatApi,
@@ -23,7 +24,12 @@ import {
   type SearchSnippetSegment,
   type User,
 } from "./Api.ts";
-import { blockedOrMutedUserIds } from "./blocks.ts";
+import {
+  blockerIdsOf,
+  hiddenAuthorIds,
+  notBlockedEitherWay,
+  type Viewer,
+} from "./blocks.ts";
 import { CurrentUser } from "./Auth.ts";
 import { Db, dbQuery, type DrizzleDb } from "./Db.ts";
 import {
@@ -257,11 +263,20 @@ const splitPage = <A>(rows: A[], limit: number) => ({
   hasMore: rows.length > limit,
 });
 
-// Authors the viewer has blocked or muted — their posts and comments are
-// hidden from search exactly as they're hidden from the feed (issue #219).
-// Resolved once per request and shared by both sections.
-const hiddenAuthorIds = (db: DrizzleDb, viewerId: number) =>
-  dbQuery(() => blockedOrMutedUserIds(db, viewerId));
+// Whose posts and comments search leaves out: `authors` (hidden exactly as in
+// the feed, issues #219, #901), and the subset of them who blocked the viewer,
+// whose posts and threads the viewer can't open at all. Resolved once per
+// request and shared by both sections.
+type Hidden = {
+  readonly authors: ReadonlyArray<number>;
+  readonly blockers: ReadonlyArray<number>;
+};
+
+const loadHidden = (db: DrizzleDb, viewer: Viewer): Effect.Effect<Hidden> =>
+  dbQuery(async () => ({
+    authors: await hiddenAuthorIds(db, viewer),
+    blockers: await blockerIdsOf(db, viewer),
+  }));
 
 const excludeAuthors = (column: PgColumn, ids: ReadonlyArray<number>) =>
   ids.length > 0 ? notInArray(column, [...ids]) : undefined;
@@ -322,13 +337,13 @@ const userSnippet = (
 
 const searchUsersPage = (
   db: DrizzleDb,
-  viewerRole: "user" | "admin",
+  viewer: { readonly id: number; readonly role: "user" | "admin" },
   q: string,
   limit: number,
   cursor: string | undefined,
 ) =>
   Effect.gen(function* () {
-    if (!peopleSearchAllowed(q, viewerRole))
+    if (!peopleSearchAllowed(q, viewer.role))
       return { results: [], limit, nextCursor: null };
 
     // People are ordered by (rank, name, id) rather than by id, so their
@@ -351,6 +366,11 @@ const searchUsersPage = (
         .where(
           and(
             matchesUser(q),
+            // Nobody finds someone across a block (issue #901); admins keep
+            // the whole directory.
+            viewer.role === "admin"
+              ? undefined
+              : notBlockedEitherWay(viewer.id, users.id),
             // Keyset resume over the composite sort, as a row comparison so
             // it stays a single predicate (and matches the ORDER BY exactly).
             after !== null
@@ -390,7 +410,7 @@ const searchPostsPage = (
   q: string,
   limit: number,
   after: number | null,
-  hidden: ReadonlyArray<number>,
+  hidden: Hidden,
 ) =>
   dbQuery(() =>
     db
@@ -410,7 +430,7 @@ const searchPostsPage = (
             recentFirstArm(
               posts,
               posts.id,
-              and(branch, excludeAuthors(posts.authorId, hidden)),
+              and(branch, excludeAuthors(posts.authorId, hidden.authors)),
               after,
               limit + 1,
             ),
@@ -440,12 +460,43 @@ const searchPostsPage = (
 // Comments and replies
 // ---------------------------------------------------------------------------
 
+// Leaves out other people's comments that sit under a blocker's post or
+// top-level comment: the viewer can't open those (issue #901).
+const reachableComment = (db: DrizzleDb, blockers: ReadonlyArray<number>) => {
+  if (blockers.length === 0) return undefined;
+  const parent = alias(comments, "parent");
+  return and(
+    notExists(
+      db
+        .select({ id: posts.id })
+        .from(posts)
+        .where(
+          and(
+            eq(posts.id, comments.postId),
+            inArray(posts.authorId, [...blockers]),
+          ),
+        ),
+    ),
+    notExists(
+      db
+        .select({ id: parent.id })
+        .from(parent)
+        .where(
+          and(
+            eq(parent.id, comments.parentCommentId),
+            inArray(parent.authorId, [...blockers]),
+          ),
+        ),
+    ),
+  );
+};
+
 const searchCommentsPage = (
   db: DrizzleDb,
   q: string,
   limit: number,
   after: number | null,
-  hidden: ReadonlyArray<number>,
+  hidden: Hidden,
 ) =>
   dbQuery(() =>
     db
@@ -467,7 +518,11 @@ const searchCommentsPage = (
             recentFirstArm(
               comments,
               comments.id,
-              and(branch, excludeAuthors(comments.authorId, hidden)),
+              and(
+                branch,
+                excludeAuthors(comments.authorId, hidden.authors),
+                reachableComment(db, hidden.blockers),
+              ),
               after,
               limit + 1,
             ),
@@ -661,7 +716,7 @@ export const SearchHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           const limit = urlParams.limit ?? DEFAULT_SEARCH_ALL_LIMIT;
           const q = urlParams.q;
-          const hidden = yield* hiddenAuthorIds(db, currentUser.id);
+          const hidden = yield* loadHidden(db, currentUser);
 
           // The four sections are independent, so they're issued together
           // rather than in sequence: against a real Postgres (a connection
@@ -670,7 +725,7 @@ export const SearchHandlerLive = HttpApiBuilder.group(
           const [usersPage, postsPage, commentsPage, messagesPage] =
             yield* Effect.all(
               [
-                searchUsersPage(db, currentUser.role, q, limit, undefined),
+                searchUsersPage(db, currentUser, q, limit, undefined),
                 searchPostsPage(db, q, limit, null, hidden),
                 searchCommentsPage(db, q, limit, null, hidden),
                 searchMessagesPage(db, currentUser.id, q, limit, null),
@@ -691,7 +746,7 @@ export const SearchHandlerLive = HttpApiBuilder.group(
           const currentUser = yield* CurrentUser;
           return yield* searchUsersPage(
             db,
-            currentUser.role,
+            currentUser,
             urlParams.q,
             urlParams.limit ?? DEFAULT_SEARCH_LIMIT,
             urlParams.cursor,
@@ -702,7 +757,7 @@ export const SearchHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           const after = yield* resolveCursor(urlParams.cursor);
-          const hidden = yield* hiddenAuthorIds(db, currentUser.id);
+          const hidden = yield* loadHidden(db, currentUser);
           return yield* searchPostsPage(
             db,
             urlParams.q,
@@ -716,7 +771,7 @@ export const SearchHandlerLive = HttpApiBuilder.group(
         Effect.gen(function* () {
           const currentUser = yield* CurrentUser;
           const after = yield* resolveCursor(urlParams.cursor);
-          const hidden = yield* hiddenAuthorIds(db, currentUser.id);
+          const hidden = yield* loadHidden(db, currentUser);
           return yield* searchCommentsPage(
             db,
             urlParams.q,
