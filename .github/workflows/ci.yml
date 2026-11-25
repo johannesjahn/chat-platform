@@ -348,21 +348,39 @@ jobs:
       - name: Install helmfile
         env:
           HELMFILE_VERSION: v1.8.5
+          # `helmfile version` otherwise asks GitHub for the latest release,
+          # and fails when that request times out.
+          HELMFILE_UPGRADE_NOTICE_DISABLED: "true"
         run: |
-          curl -sSL "https://github.com/helmfile/helmfile/releases/download/${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION#v}_linux_amd64.tar.gz" \
-            | tar -xz helmfile
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/helmfile.tar.gz" \
+            "https://github.com/helmfile/helmfile/releases/download/${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION#v}_linux_amd64.tar.gz"
+          tar -xzf "$RUNNER_TEMP/helmfile.tar.gz" helmfile
           sudo install helmfile /usr/local/bin/helmfile
           helmfile version
 
       # k8s/observability's charts (victoria-metrics-k8s-stack, loki, alloy)
       # aren't vendored — helmfile fetches them from the upstream repos
       # declared in helmfile.yaml, same as a real `helmfile apply` would.
+      # Helm doesn't retry a failed download (a 502 from GitHub releases, say),
+      # so each command gets three attempts.
       - name: Helmfile lint
-        run: helmfile lint
+        run: |
+          for attempt in 1 2 3; do
+            helmfile lint && exit 0
+            echo "Attempt $attempt failed"
+            if [ "$attempt" -lt 3 ]; then sleep 15; fi
+          done
+          exit 1
         working-directory: k8s/observability
 
       - name: Helmfile template (default values)
-        run: helmfile template --include-crds > /dev/null
+        run: |
+          for attempt in 1 2 3; do
+            helmfile template --include-crds > /dev/null && exit 0
+            echo "Attempt $attempt failed"
+            if [ "$attempt" -lt 3 ]; then sleep 15; fi
+          done
+          exit 1
         working-directory: k8s/observability
 
   unit:
