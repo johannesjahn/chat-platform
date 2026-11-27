@@ -5,11 +5,11 @@
     "": {
       "name": "chat-platform",
       "dependencies": {
-        "@effect/platform-bun": "4.1.6",
+        "@effect/platform-bun": "4.1.7",
         "@electric-sql/pglite": "0.6.1",
         "blurhash": "2.0.5",
         "drizzle-orm": "0.45.4",
-        "effect": "4.1.6",
+        "effect": "4.1.7",
         "sharp": "0.35.5",
       },
       "devDependencies": {
@@ -71,9 +71,9 @@
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 
-    "@effect/platform-bun": ["@effect/platform-bun@4.1.6", "", { "dependencies": { "@effect/platform-node-shared": "4.1.6" }, "peerDependencies": { "effect": "^4.1.6" } }, "sha512-5CINIx/JuIO/VTXbfFtKV+eCzEwXGPcUJD1nnuTQDxx7oYHPcc+g3gJylBt1oKxXrAqhwR3Gxq4oTs4n21OCRQ=="],
+    "@effect/platform-bun": ["@effect/platform-bun@4.1.7", "", { "dependencies": { "@effect/platform-node-shared": "4.1.7" }, "peerDependencies": { "effect": "^4.1.7" } }, "sha512-UWWFcWhpjtV/A1EUBaIGqCghCIAZmKaJndjV2pHdv4M7Rz/mP+jGwaX5zApX6QYc1dz0CXLO0bkhovQGJI5Zhg=="],
 
-    "@effect/platform-node-shared": ["@effect/platform-node-shared@4.1.6", "", { "dependencies": { "@types/ws": "^8.18.2", "ws": "^8.23.0" }, "peerDependencies": { "effect": "^4.1.6" } }, "sha512-RWKHX5TEZet2KC/NlBu5prBkZT30m6h8YTSWfJM0wIw0BNMkfEzCuH6N5HOw8mUudclWp5z1XTzsZ7xg0h+6Qw=="],
+    "@effect/platform-node-shared": ["@effect/platform-node-shared@4.1.7", "", { "dependencies": { "@types/ws": "^8.18.2", "ws": "^8.23.0" }, "peerDependencies": { "effect": "^4.1.7" } }, "sha512-EDnlB5zL6EW0ahVAeQAUtpuMHc/0yruMLKBsX3nC4Zn3PuG4McWv2A6Rvdk2OUSFM/OFTCclt3sKWNCvk3pEUw=="],
 
     "@electric-sql/pglite": ["@electric-sql/pglite@0.6.1", "", {}, "sha512-vdKk6mgzw8uqouCyPa20eNhPafF1OI5LXTvdWBj2plJhDHT2j5ohDdVdZUClJrWwU5MZZB018z68qZec/JmjRw=="],
 
@@ -383,7 +383,7 @@
 
     "dunder-proto": ["dunder-proto@1.0.1", "", { "dependencies": { "call-bind-apply-helpers": "^1.0.1", "es-errors": "^1.3.0", "gopd": "^1.2.0" } }, "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A=="],
 
-    "effect": ["effect@4.1.6", "", {}, "sha512-P3CxMsdcSCle/7/FnPILd9GJkNqGtduKam2LX9Xsb8LoOjmeQ9Kmsuh16JwtIthaxLyiTCOzUUt+PZsXIohl+A=="],
+    "effect": ["effect@4.1.7", "", {}, "sha512-8QUe2XO3auHF5r7+bfIDWxyXlLA0sso4Sia1QYP+vrYA7qb3sq1u2eJmhyXGmKc8yZ+TY2SNxPozeMdyKmWing=="],
 
     "electron-to-chromium": ["electron-to-chromium@1.5.395", "", {}, "sha512-7zt9Aw+SrmxLWLN0zhaTWZQiCdryLVrYTq5R7iZakLvi2UQPYMMsROYV/2qVCzMeCiSXHwKOU+sZ4zOVVlrtKA=="],
 
