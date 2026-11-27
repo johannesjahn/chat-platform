@@ -8,7 +8,7 @@ services:
   # then exits; a no-op if the volume's already on the current major version.
   # `db` only starts once this exits successfully.
   db-upgrade:
-    image: pgautoupgrade/pgautoupgrade:18-alpine
+    image: pgautoupgrade/pgautoupgrade:19-alpine
     environment:
       # On a brand new volume (nothing to upgrade — e.g. first-ever `docker
       # compose up`, or CI, which always starts from an empty volume),
