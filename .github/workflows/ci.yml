@@ -347,7 +347,7 @@ jobs:
       # the v1.7.1 release) and makes `tar -xz` fail on the HTML error page.
       - name: Install helmfile
         env:
-          HELMFILE_VERSION: v1.8.5
+          HELMFILE_VERSION: v1.8.6
           # `helmfile version` otherwise asks GitHub for the latest release,
           # and fails when that request times out.
           HELMFILE_UPGRADE_NOTICE_DISABLED: "true"
